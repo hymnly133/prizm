@@ -8,6 +8,8 @@ pub struct ServerConfig {
     pub host: String,
     #[serde(default = "4127")]
     pub port: String,
+    #[serde(default = "true")]
+    pub is_dev: String,
 }
 
 impl Default for ServerConfig {
@@ -15,6 +17,7 @@ impl Default for ServerConfig {
         Self {
             host: "127.0.0.1".to_string(),
             port: "4127".to_string(),
+            is_dev: "true".to_string(),
         }
     }
 }

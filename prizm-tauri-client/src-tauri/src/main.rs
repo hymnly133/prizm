@@ -109,6 +109,7 @@ async fn register_client(
 
     config.server.host = host;
     config.server.port = port;
+    config.server.is_dev = "true".to_string();
     config.client.name = register.client_id.clone();
     config.api_key = register.api_key.clone();
     config.save()?;

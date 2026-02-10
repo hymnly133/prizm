@@ -239,6 +239,19 @@ function showConfigPanel(): void {
   if (panel) {
     panel.classList.remove('hidden')
   }
+
+  // 如果没有配置，预填充开发环境默认值
+  if (!currentConfig) {
+    const hostInput = document.getElementById('host-input') as HTMLInputElement
+    const portInput = document.getElementById('port-input') as HTMLInputElement
+    const nameInput = document.getElementById('client-name-input') as HTMLInputElement
+    const scopesInput = document.getElementById('scopes-input') as HTMLInputElement
+
+    if (hostInput) hostInput.value = '127.0.0.1'
+    if (portInput) portInput.value = '4127'
+    if (nameInput) nameInput.value = 'Prizm Dev Client'
+    if (scopesInput) scopesInput.value = 'default'
+  }
 }
 
 /**
