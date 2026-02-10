@@ -13,7 +13,7 @@
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
       min-height: 100vh;
       display: flex;
       align-items: center;
@@ -22,46 +22,87 @@
 
     .container {
       width: 90%;
-      max-width: 600px;
+      max-width: 500px;
       background: white;
       border-radius: 16px;
-      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
-      padding: 24px;
+      box-shadow: 0 25px 50px rgba(0, 0, 0, 0.3);
+      overflow: hidden;
     }
 
     .header {
+      background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+      padding: 20px;
       text-align: center;
-      margin-bottom: 24px;
     }
 
     .header h1 {
-      font-size: 24px;
+      font-size: 20px;
       font-weight: 700;
-      color: #1a1a1a;
-      margin-bottom: 8px;
+      color: white;
+      margin-bottom: 4px;
     }
 
     .header p {
-      font-size: 14px;
-      color: #666;
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.8);
     }
 
     .status {
-      text-align: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
       padding: 16px;
       border-radius: 8px;
-      margin-bottom: 24px;
-      background: #f5f5f5;
+      margin-bottom: 20px;
+      background: #f8fafc;
+    }
+
+    .status-text {
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .main-content {
+      padding: 20px;
+    }
+
+    .info-grid {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      background: #f1f5f9;
+      border-radius: 8px;
+    }
+
+    .info-label {
+      font-size: 13px;
+      color: #64748b;
+      font-weight: 500;
+    }
+
+    .info-value {
+      font-size: 13px;
+      color: #1f2937;
+      font-weight: 600;
+      font-family: 'Consolas', 'Monaco', monospace;
     }
 
     .buttons {
-      display: flex;
-      gap: 12px;
-      margin-bottom: 24px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 20px;
     }
 
     button {
-      flex: 1;
       padding: 12px;
       border: none;
       border-radius: 8px;
@@ -69,55 +110,262 @@
       font-weight: 600;
       cursor: pointer;
       transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
     }
 
-    #config-btn {
-      background: #667eea;
-      color: white;
-    }
-
-    #config-btn:hover {
-      background: #5568d3;
-    }
-
-    #reconnect-btn {
-      background: #e5e7eb;
-      color: #374151;
-    }
-
-    #reconnect-btn:hover {
-      background: #d1d5db;
-    }
-
-    #reconnect-btn:disabled {
+    button:disabled {
       opacity: 0.5;
       cursor: not-allowed;
     }
 
+    #config-btn {
+      background: #6366f1;
+      color: white;
+    }
+
+    #config-btn:hover:not(:disabled) {
+      background: #4f46e5;
+      transform: translateY(-1px);
+    }
+
+    #reconnect-btn {
+      background: #3b82f6;
+      color: white;
+    }
+
+    #reconnect-btn:hover:not(:disabled) {
+      background: #2563eb;
+      transform: translateY(-1px);
+    }
+
+    #open-dashboard-btn {
+      background: #8b5cf6;
+      color: white;
+    }
+
+    #open-dashboard-btn:hover:not(:disabled) {
+      background: #7c3aed;
+      transform: translateY(-1px);
+    }
+
     .logs {
-      background: #1a1a1a;
+      background: #1e293b;
       border-radius: 8px;
       padding: 12px;
       max-height: 200px;
       overflow-y: auto;
+      margin-bottom: 16px;
     }
 
-    #logs {
-      font-family: 'Consolas', 'Monaco', monospace;
-      font-size: 12px;
-      line-height: 1.6;
+    #logs::-webkit-scrollbar {
+      width: 6px;
     }
 
-    #logs div {
-      margin-bottom: 4px;
-      word-break: break-all;
+    #logs::-webkit-scrollbar-track {
+      background: #0f172a;
+      border-radius: 3px;
+    }
+
+    #logs::-webkit-scrollbar-thumb {
+      background: #475569;
+      border-radius: 3px;
+    }
+
+    #logs::-webkit-scrollbar-thumb:hover {
+      background: #64748b;
     }
 
     .footer {
       text-align: center;
-      margin-top: 16px;
       font-size: 12px;
-      color: #999;
+      color: #64748b;
+      padding-top: 12px;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .footer a {
+      color: #6366f1;
+      text-decoration: none;
+    }
+
+    .footer a:hover {
+      text-decoration: underline;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-left: 8px;
+    }
+
+    .badge-green {
+      background: #d1fae5;
+      color: #166534;
+    }
+
+    .badge-blue {
+      background: #dbeafe;
+      color: #1e40af;
+    }
+
+    /* 配置面板 */
+    #config-panel {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      backdrop-filter: blur(4px);
+    }
+
+    #config-panel.hidden {
+      display: none;
+    }
+
+    .config-card {
+      background: white;
+      border-radius: 16px;
+      padding: 24px;
+      width: 90%;
+      max-width: 400px;
+      box-shadow: 0 25px 50px rgba(0, 0, 0, 0.4);
+      animation: slideUp 0.3s ease-out;
+    }
+
+    @keyframes slideUp {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .config-card h2 {
+      font-size: 20px;
+      font-weight: 700;
+      color: #1f2937;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      color: #374151;
+      margin-bottom: 6px;
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+
+    .form-group input:focus {
+      outline: none;
+      border-color: #6366f1;
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+    }
+
+    .form-group input::placeholder {
+      color: #9ca3af;
+    }
+
+    .form-hint {
+      font-size: 11px;
+      color: #6b7280;
+      margin-top: 4px;
+    }
+
+    .config-buttons {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      margin-top: 20px;
+    }
+
+    .config-buttons button {
+      font-size: 13px;
+    }
+
+    .btn-secondary {
+      background: #6b7280;
+      color: white;
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+      background: #4b5563;
+    }
+
+    .btn-primary {
+      background: #6366f1;
+      color: white;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: #4f46e5;
+    }
+
+    #close-panel-btn {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      background: transparent;
+      color: #6b7280;
+      border: none;
+      cursor: pointer;
+      padding: 8px;
+      border-radius: 50%;
+      font-size: 20px;
+      line-height: 1;
+      transition: all 0.2s;
+    }
+
+    #close-panel-btn:hover {
+      background: #f1f5f9;
+      color: #1f2937;
+    }
+
+    .api-key-display {
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 13px;
+      color: #166534;
+      word-break: break-all;
+      margin-bottom: 16px;
+    }
+
+    .api-key-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      color: #059669;
+      margin-bottom: 6px;
     }
   </style>
 </head>
@@ -125,26 +373,106 @@
   <div class="container">
     <div class="header">
       <h1>Prizm 通知客户端</h1>
-      <p>连接到 Prizm Server 接收系统通知</p>
+      <p>连接到 Prizm Server 接收实时通知</p>
     </div>
 
     <div id="status" class="status">
-      等待配置...
+      <span id="status-icon"></span>
+      <span id="status-text" class="status-text text-gray-600">等待配置...</span>
     </div>
 
-    <div class="buttons">
-      <button id="config-btn">配置</button>
-      <button id="reconnect-btn">重新连接</button>
-    </div>
+    <div class="main-content">
+      <div class="info-grid">
+        <div class="info-row">
+          <span class="info-label">服务器:</span>
+          <span id="server-display" class="info-value">-</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">客户端 ID:</span>
+          <span id="client-id-display" class="info-value">-</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Scopes:</span>
+          <span id="scopes-display" class="info-value">-</span>
+        </div>
+      </div>
 
-    <div class="logs">
-      <div id="logs">
-        <!-- 日志将动态添加到这里 -->
+      <div id="api-key-section" class="hidden">
+        <span class="api-key-label">API Key:</span>
+        <div id="api-key-display" class="api-key-display">-</div>
+      </div>
+
+      <div class="buttons">
+        <button id="config-btn">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.601 1.236-2.367 1.793-3.169 2.412-2.397c.51-1.184 1.07-2.618 1.356-3.86.135-3.86 4.689 2.568 6.632 2.634 6.632 4.678 1.07 9.35 1.176 9.35 4.678 2.634 9.35 4.689 2.634" />
+          </svg>
+          配置
+        </button>
+        <button id="reconnect-btn">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 008-8v5h.582m0 0a8.001 8.001 0 008 8v5h.582m0 0a8.001 8.001 0 00-8 8v5h.582" />
+          </svg>
+          重新连接
+        </button>
+        <button id="open-dashboard-btn">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7V5a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2v-6" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 3l7.07 16.97M16.5 9.79A6 6 0 0112.85 6.14L16.5 6.14a6 6 0 00-8.49-2.31l-1.35-.96a6 6 0 00-9.64-10.68L12 5.5l1.85 5.5a6 6 0 008.49-6.14l.96-1.7a6 6 0 009.64 10.68L14.5 18.5a6 6 0 00-8.49 2.31z" />
+          </svg>
+          仪表板
+        </button>
+      </div>
+
+      <div class="logs" id="logs">
+        <div class="text-gray-500 text-sm text-center py-4">等待连接...</div>
       </div>
     </div>
 
     <div class="footer">
-      Prizm Server WebSocket Client v0.1.0
+      <span id="app-version">v0.1.0</span>
+    </div>
+  </div>
+
+  <!-- 配置面板 -->
+  <div id="config-panel" class="hidden">
+    <div class="config-card">
+      <button id="close-panel-btn">&times;</button>
+      <h2>服务器配置</h2>
+
+      <div class="form-group">
+        <label>服务器地址</label>
+        <input type="text" id="host-input" placeholder="127.0.0.1" />
+      </div>
+
+      <div class="form-group">
+        <label>端口</label>
+        <input type="number" id="port-input" placeholder="4127" />
+        <p class="form-hint">默认端口: 4127</p>
+      </div>
+
+      <div class="form-group">
+        <label>客户端名称</label>
+        <input type="text" id="client-name-input" placeholder="Prizm Tauri Client" />
+      </div>
+
+      <div class="form-group">
+        <label>请求的 Scopes (逗号分隔)</label>
+        <input type="text" id="scopes-input" placeholder="default" />
+        <p class="form-hint">例如: default, admin, user</p>
+      </div>
+
+      <div class="config-buttons">
+        <button id="test-connection-btn" class="btn-secondary">
+          测试连接
+        </button>
+        <button id="save-config-btn" class="btn-secondary">
+          保存配置
+        </button>
+        <button id="register-client-btn" class="btn-primary">
+          注册客户端
+        </button>
+      </div>
     </div>
   </div>
 

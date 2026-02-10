@@ -1,0 +1,17 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 4127
+  },
+  "client": {
+    "name": "Prizm Tauri Client",
+    "autoRegister": true,
+    "requestedScopes": ["default"]
+  },
+  "apiKey": "",
+  "tray": {
+    "enabled": true,
+    "minimizeToTray": true,
+    "showNotification": true
+  }
+}

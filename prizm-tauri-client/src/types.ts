@@ -2,6 +2,32 @@
  * Prizm Tauri 客户端类型定义
  */
 
+// ============ 配置结构 ============
+
+export interface ServerConfig {
+  host: string
+  port: string
+}
+
+export interface ClientConfig {
+  name: string
+  auto_register: string
+  requested_scopes: string[]
+}
+
+export interface TrayConfig {
+  enabled: string
+  minimize_to_tray: string
+  show_notification: string
+}
+
+export interface PrizmConfig {
+  server: ServerConfig
+  client: ClientConfig
+  api_key: string
+  tray: TrayConfig
+}
+
 // ============ WebSocket 配置 ============
 
 export interface WebSocketConfig {
