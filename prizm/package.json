@@ -1,0 +1,42 @@
+{
+  "name": "@prizm/server",
+  "version": "0.1.0",
+  "description": "Prizm efficiency server - HTTP API for sticky notes and notifications",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "prizm-server": "./cli.js"
+  },
+  "scripts": {
+    "kill-port": "powershell -ExecutionPolicy Bypass -File scripts/kill-port.ps1",
+    "build": "tsc && yarn build:panel",
+    "build:panel": "yarn --cwd panel build",
+    "dev": "tsc --watch",
+    "dev:panel": "yarn --cwd panel dev",
+    "clean": "rm -rf dist",
+    "start": "node cli.js",
+    "test": "node example.js"
+  },
+  "keywords": [
+    "prizm",
+    "efficiency",
+    "server",
+    "notes",
+    "notifications"
+  ],
+  "author": "Prizm Team",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "uuid": "^11.0.3",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.9.3"
+  }
+}
