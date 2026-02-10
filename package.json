@@ -1,0 +1,34 @@
+{
+  "name": "prizm-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prizm monorepo - HTTP API server and Tauri desktop client",
+  "workspaces": [
+    "prizm",
+    "prizm-tauri-client"
+  ],
+  "scripts": {
+    "install:all": "yarn install",
+    "build": "yarn workspace @prizm/server build && yarn workspace @prizm/tauri-client build",
+    "build:server": "yarn workspace @prizm/server build",
+    "build:client": "yarn workspace @prizm/tauri-client build",
+    "dev:server": "yarn workspace @prizm/server dev",
+    "dev:client": "yarn workspace @prizm/tauri-client dev",
+    "tauri:dev": "yarn workspace @prizm/tauri-client tauri:dev",
+    "tauri:build": "yarn workspace @prizm/tauri-client tauri:build",
+    "clean": "yarn workspace @prizm/server clean",
+    "start": "yarn workspace @prizm/server start",
+    "test": "yarn workspace @prizm/server test"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "packageManager": "yarn@4.5.0",
+  "keywords": [
+    "prizm",
+    "monorepo",
+    "workspace"
+  ],
+  "author": "Prizm Team",
+  "license": "MIT"
+}
