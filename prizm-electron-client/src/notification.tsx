@@ -1,8 +1,8 @@
 /**
- * 通知窗口 - Vue 入口
+ * 通知窗口 - React 入口
  */
-import { createApp } from "vue";
-import NotificationApp from "./NotificationApp.vue";
+import { createRoot } from "react-dom/client";
+import NotificationApp from "./NotificationApp";
 
 declare global {
 	interface Window {
@@ -16,4 +16,5 @@ declare global {
 	}
 }
 
-createApp(NotificationApp).mount("#notification-app");
+const root = createRoot(document.getElementById("notification-app")!);
+root.render(<NotificationApp />);

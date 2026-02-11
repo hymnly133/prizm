@@ -14,17 +14,19 @@
 		"dompurify": "^3.3.1",
 		"electron": "^33.2.0",
 		"marked": "^17.0.1",
-		"md-editor-v3": "^6.3.1",
-		"vue": "^3.5.28"
+		"react": "^18.3.1",
+		"react-dom": "^18.3.1",
+		"react-markdown": "^9.0.1"
 	},
 	"devDependencies": {
 		"@prizm/client-core": "workspace:*",
 		"@types/dompurify": "^3.2.0",
 		"@types/node": "^22.0.0",
-		"@vitejs/plugin-vue": "^6.0.4",
+		"@types/react": "^18.3.12",
+		"@types/react-dom": "^18.3.1",
+		"@vitejs/plugin-react": "^4.3.4",
 		"concurrently": "^9.0.0",
 		"typescript": "^5.9.3",
-		"vite": "^5.4.0",
-		"vue-tsc": "^3.2.4"
+		"vite": "^5.4.0"
 	}
 }
