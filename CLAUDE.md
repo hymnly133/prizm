@@ -95,10 +95,10 @@ yarn typecheck
 - `PRIZM_AUTH_DISABLED=1` - Disable authentication for local development
 - `PRIZM_LOG_LEVEL` - Log level: info / warn / error
 
-**LLM (Agent)：** 选择优先级 ZHIPU > XIAOMIMIMO > OPENAI
+**LLM (Agent)：** 默认优先 MiMo，选择优先级 XIAOMIMIMO > ZHIPU > OPENAI
 
+- `XIAOMIMIMO_API_KEY` - 小米 MiMo（默认优先），可选 `XIAOMIMIMO_MODEL`（默认 mimo-v2-flash）
 - `ZHIPU_API_KEY` - 智谱 AI，可选 `ZHIPU_MODEL`（默认 glm-4-flash）
-- `XIAOMIMIMO_API_KEY` - 小米 MiMo，可选 `XIAOMIMIMO_MODEL`（默认 mimo-v2-flash）
 - `OPENAI_API_KEY` - OpenAI 兼容，可选 `OPENAI_API_URL`、`OPENAI_MODEL`（默认 gpt-4o-mini）
 
 ## Architecture Overview

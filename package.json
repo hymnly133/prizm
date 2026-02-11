@@ -6,6 +6,7 @@
 	"workspaces": [
 		"prizm",
 		"prizm/panel",
+		"prizm-shared",
 		"prizm-client-core",
 		"prizm-electron-client"
 	],
