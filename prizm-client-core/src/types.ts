@@ -1,12 +1,33 @@
 /**
- * Prizm Client Core - 类型定义
- * 从原 Tauri 客户端抽取，供 Electron / 其他前端复用
+ * Prizm Client Core - 客户端专用类型
+ * 领域类型、Auth 类型从 @prizm/shared 导入
  */
 
-/** 语义 scope：用户实时上下文，用于常驻显示的 TODO 和便签 */
-export const ONLINE_SCOPE = "online";
+// 从 shared 重导出，供依赖 client-core 的包使用
+export type {
+	StickyNote,
+	StickyNoteGroup,
+	StickyNoteFileRef,
+	CreateNotePayload,
+	UpdateNotePayload,
+	Task,
+	TaskStatus,
+	TaskPriority,
+	PomodoroSession,
+	ClipboardItem,
+	ClipboardItemType,
+	Document,
+	AgentSession,
+	AgentMessage,
+	NotificationPayload,
+	ClientInfo,
+	ScopeDescription,
+} from "@prizm/shared";
 
-// ============ 配置结构 ============
+export { ONLINE_SCOPE, EVENT_TYPES, ALL_EVENTS } from "@prizm/shared";
+export type { EventType } from "@prizm/shared";
+
+// ============ 客户端配置（仅 client-core） ============
 
 export interface ServerConfig {
 	host: string;
@@ -25,43 +46,16 @@ export interface TrayConfig {
 	show_notification: string;
 }
 
-/** 服务端支持的事件类型（与 server EVENT_TYPES 对应） */
-export const EVENT_TYPES = [
-	"notification",
-	"smtc:change",
-	"note:created",
-	"note:updated",
-	"note:deleted",
-	"group:created",
-	"group:updated",
-	"group:deleted",
-	"task:created",
-	"task:updated",
-	"task:deleted",
-	"pomodoro:started",
-	"pomodoro:stopped",
-	"clipboard:itemAdded",
-	"clipboard:itemDeleted",
-	"document:created",
-	"document:updated",
-	"document:deleted",
-] as const;
-
-export type EventType = (typeof EVENT_TYPES)[number];
-
-/** 服务端全部事件类型（用于 subscribeEvents: "all"） */
-export const ALL_EVENTS: readonly string[] = [...EVENT_TYPES];
-
 export interface PrizmConfig {
 	server: ServerConfig;
 	client: ClientConfig;
 	api_key: string;
 	tray: TrayConfig;
 	/** 需要弹出通知的事件类型 */
-	notify_events?: EventType[];
+	notify_events?: import("@prizm/shared").EventType[];
 }
 
-// ============ WebSocket 配置 ============
+// ============ WebSocket 配置与消息（仅 client-core） ============
 
 export interface WebSocketConfig {
 	host: string;
@@ -70,8 +64,6 @@ export interface WebSocketConfig {
 	/** 订阅的事件类型，"all" 表示订阅全部已知事件，默认 ["notification"] */
 	subscribeEvents?: string[] | "all";
 }
-
-// ============ WebSocket 消息类型 ============
 
 export interface ConnectedMessage {
 	type: "connected";
@@ -144,14 +136,10 @@ export type ClientMessage =
 	| UnregisterEventMessage
 	| PingMessage;
 
-// ============ 事件载荷类型 ============
-
-export interface NotificationPayload {
-	title: string;
-	body?: string;
+export interface EventPushPayload {
+	eventType: string;
+	payload: unknown;
 }
-
-// ============ WebSocket 客户端事件 ============
 
 export type WebSocketEventType =
 	| "connected"
@@ -160,16 +148,11 @@ export type WebSocketEventType =
 	| "notification"
 	| "event";
 
-export interface EventPushPayload {
-	eventType: string;
-	payload: unknown;
-}
-
 export interface WebSocketClientEventMap {
 	connected: ConnectedMessage;
 	disconnected: void;
 	error: Error;
-	notification: NotificationPayload;
+	notification: import("@prizm/shared").NotificationPayload;
 	event: EventPushPayload;
 }
 
@@ -177,90 +160,7 @@ export type WebSocketEventHandler<T extends WebSocketEventType> = (
 	data: WebSocketClientEventMap[T]
 ) => void;
 
-// ============ 领域数据类型（与服务器结构对齐的客户端视图） ============
-
-export interface StickyNoteFileRef {
-	path: string;
-}
-
-export interface StickyNote {
-	id: string;
-	content: string;
-	imageUrls?: string[];
-	createdAt: number;
-	updatedAt: number;
-	groupId?: string;
-	fileRefs?: StickyNoteFileRef[];
-}
-
-export interface StickyNoteGroup {
-	id: string;
-	name: string;
-}
-
-export type TaskStatus = "todo" | "doing" | "done";
-export type TaskPriority = "low" | "medium" | "high";
-
-export interface Task {
-	id: string;
-	title: string;
-	description?: string;
-	status: TaskStatus;
-	priority: TaskPriority;
-	dueAt?: number;
-	noteId?: string;
-	createdAt: number;
-	updatedAt: number;
-}
-
-export interface PomodoroSession {
-	id: string;
-	taskId?: string;
-	startedAt: number;
-	endedAt: number;
-	durationMinutes: number;
-	tag?: string;
-}
-
-export type ClipboardItemType = "text" | "image" | "file" | "other";
-
-export interface ClipboardItem {
-	id: string;
-	type: ClipboardItemType;
-	content: string;
-	sourceApp?: string;
-	createdAt: number;
-}
-
-// ============ 文档类型（正式信息文档） ============
-
-export interface Document {
-	id: string;
-	title: string;
-	content?: string;
-	createdAt: number;
-	updatedAt: number;
-}
-
-// ============ Agent 会话类型 ============
-
-export interface AgentMessage {
-	id: string;
-	role: "user" | "assistant" | "system";
-	content: string;
-	createdAt: number;
-	model?: string;
-	toolCalls?: unknown[];
-}
-
-export interface AgentSession {
-	id: string;
-	title?: string;
-	scope: string;
-	messages: AgentMessage[];
-	createdAt: number;
-	updatedAt: number;
-}
+// ============ Agent 流式对话（仅 client-core） ============
 
 export interface StreamChatOptions {
 	model?: string;
