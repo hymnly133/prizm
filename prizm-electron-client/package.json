@@ -1,0 +1,30 @@
+{
+	"name": "@prizm/electron-client",
+	"version": "0.1.0",
+	"description": "Prizm WebSocket notification client built with Electron",
+	"private": true,
+	"main": "dist-electron/main.js",
+	"scripts": {
+		"build:electron": "tsc -p tsconfig.electron.json",
+		"dev": "yarn workspace @prizm/client-core build && yarn build:electron && concurrently \"vite\" \"electron .\"",
+		"build": "yarn workspace @prizm/client-core build && yarn build:electron && vite build",
+		"typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit"
+	},
+	"dependencies": {
+		"dompurify": "^3.3.1",
+		"electron": "^33.2.0",
+		"marked": "^17.0.1",
+		"md-editor-v3": "^6.3.1",
+		"vue": "^3.5.28"
+	},
+	"devDependencies": {
+		"@prizm/client-core": "workspace:*",
+		"@types/dompurify": "^3.2.0",
+		"@types/node": "^22.0.0",
+		"@vitejs/plugin-vue": "^6.0.4",
+		"concurrently": "^9.0.0",
+		"typescript": "^5.9.3",
+		"vite": "^5.4.0",
+		"vue-tsc": "^3.2.4"
+	}
+}

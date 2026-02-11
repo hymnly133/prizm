@@ -1,0 +1,53 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const electron_1 = require("electron");
+/**
+ * 向渲染进程暴露一个与 Tauri invoke 语义接近的 API
+ */
+electron_1.contextBridge.exposeInMainWorld("prizm", {
+    loadConfig() {
+        return electron_1.ipcRenderer.invoke("load_config");
+    },
+    saveConfig(config) {
+        return electron_1.ipcRenderer.invoke("save_config", config);
+    },
+    testConnection(serverUrl) {
+        return electron_1.ipcRenderer.invoke("test_connection", { serverUrl });
+    },
+    registerClient(serverUrl, name, scopes) {
+        return electron_1.ipcRenderer.invoke("register_client", {
+            serverUrl,
+            name,
+            requestedScopes: scopes,
+        });
+    },
+    getAppVersion() {
+        return electron_1.ipcRenderer.invoke("get_app_version");
+    },
+    openDashboard(serverUrl) {
+        return electron_1.ipcRenderer.invoke("open_dashboard", { serverUrl });
+    },
+    readClipboard() {
+        return electron_1.ipcRenderer.invoke("clipboard_read");
+    },
+    writeClipboard(text) {
+        return electron_1.ipcRenderer.invoke("clipboard_write", { text });
+    },
+    startClipboardSync(config) {
+        return electron_1.ipcRenderer.invoke("clipboard_start_sync", config);
+    },
+    stopClipboardSync() {
+        return electron_1.ipcRenderer.invoke("clipboard_stop_sync");
+    },
+    onClipboardItemAdded(callback) {
+        const handler = () => callback();
+        electron_1.ipcRenderer.on("clipboard-item-added", handler);
+        return () => {
+            electron_1.ipcRenderer.removeListener("clipboard-item-added", handler);
+        };
+    },
+    showNotification(payload) {
+        return electron_1.ipcRenderer.invoke("show_notification", payload);
+    },
+});
+//# sourceMappingURL=preload.js.map
