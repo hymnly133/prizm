@@ -229,6 +229,22 @@ function createMainWindow(): BrowserWindow {
 		mainWindow = null;
 	});
 
+	// 点击 Markdown 预览中的链接时，在外部浏览器打开，避免应用内导航导致程序失效
+	mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+		shell.openExternal(url);
+		return { action: "deny" };
+	});
+	mainWindow.webContents.on("will-navigate", (event, url) => {
+		const isAppUrl =
+			url.startsWith("http://localhost:5183") ||
+			url.startsWith("file://") ||
+			url === "about:blank";
+		if (!isAppUrl) {
+			event.preventDefault();
+			shell.openExternal(url);
+		}
+	});
+
 	return mainWindow;
 }
 
@@ -311,6 +327,22 @@ function createNotificationWindow(): BrowserWindow {
 
 	// 常驻显示、不接收鼠标事件（点击穿透）
 	notificationWindow.setIgnoreMouseEvents(true, { forward: false });
+
+	// 通知窗口中的 Markdown 链接也应在外部浏览器打开
+	notificationWindow.webContents.setWindowOpenHandler(({ url }) => {
+		shell.openExternal(url);
+		return { action: "deny" };
+	});
+	notificationWindow.webContents.on("will-navigate", (event, url) => {
+		const isAppUrl =
+			url.startsWith("http://localhost:5183") ||
+			url.startsWith("file://") ||
+			url === "about:blank";
+		if (!isAppUrl) {
+			event.preventDefault();
+			shell.openExternal(url);
+		}
+	});
 
 	notificationWindow.on("closed", () => {
 		notificationWindow = null;

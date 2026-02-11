@@ -18,19 +18,13 @@
 			</div>
 			<!-- 文档 -->
 			<div v-else-if="file.kind === 'document'" class="document-detail">
-				<input
-					v-model="docTitle"
-					class="document-title-input"
-					placeholder="文档标题"
-					@blur="onDocumentTitleBlur"
-				/>
-				<div class="document-editor-wrap">
-					<MdEditor
-						v-model="docContent"
+				<h2 class="document-title">
+					{{ (file.raw as Document).title || "无标题" }}
+				</h2>
+				<div class="md-preview-wrap">
+					<MdPreview
+						:model-value="(file.raw as Document).content ?? '(空)'"
 						:editor-id="'detail-doc-' + file.id"
-						placeholder="输入文档内容，支持 Markdown..."
-						@onBlur="saveDocumentContent"
-						@onChange="debouncedSaveContent"
 					/>
 				</div>
 			</div>
@@ -66,17 +60,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from "vue";
-import { MdPreview, MdEditor } from "md-editor-v3";
+import { MdPreview } from "md-editor-v3";
 import "md-editor-v3/lib/preview.css";
-import "md-editor-v3/lib/style.css";
 import Btn from "./ui/Btn.vue";
 import type { FileItem } from "../composables/useFileList";
 import type { StickyNote, Task, Document } from "@prizm/client-core";
-import { manager } from "../composables/usePrizm";
-import { currentScope } from "../composables/useScope";
-import { refreshFileList } from "../composables/useFileList";
-
 const props = defineProps<{
 	file: FileItem | null;
 }>();
@@ -85,60 +73,6 @@ defineEmits<{
 	delete: [];
 	done: [];
 }>();
-
-const docTitle = ref("");
-const docContent = ref("");
-
-watch(
-	() => props.file,
-	(f) => {
-		if (f?.kind === "document") {
-			const d = f.raw as Document;
-			docTitle.value = d.title || "";
-			docContent.value = d.content ?? "";
-		}
-	},
-	{ immediate: true }
-);
-
-async function onDocumentTitleBlur() {
-	const f = props.file;
-	if (!f || f.kind !== "document" || !manager.value) return;
-	const raw = f.raw as Document;
-	if (docTitle.value === raw.title) return;
-	try {
-		await manager.value
-			.getHttpClient()
-			.updateDocument(f.id, { title: docTitle.value }, currentScope.value);
-		await refreshFileList(currentScope.value);
-	} catch {
-		docTitle.value = raw.title;
-	}
-}
-
-let contentSaveTimer: ReturnType<typeof setTimeout> | null = null;
-function debouncedSaveContent() {
-	if (contentSaveTimer) clearTimeout(contentSaveTimer);
-	contentSaveTimer = setTimeout(() => {
-		contentSaveTimer = null;
-		void saveDocumentContent();
-	}, 800);
-}
-
-async function saveDocumentContent() {
-	const f = props.file;
-	if (!f || f.kind !== "document" || !manager.value) return;
-	const raw = f.raw as Document;
-	if (docContent.value === (raw.content ?? "")) return;
-	try {
-		await manager.value
-			.getHttpClient()
-			.updateDocument(f.id, { content: docContent.value }, currentScope.value);
-		await refreshFileList(currentScope.value);
-	} catch {
-		docContent.value = raw.content ?? "";
-	}
-}
 </script>
 
 <style scoped>
@@ -191,30 +125,27 @@ async function saveDocumentContent() {
 	max-width: 720px;
 }
 
-.document-title-input {
-	width: 100%;
-	padding: 12px 0;
-	margin-bottom: 12px;
-	border: none;
-	border-bottom: 1px solid var(--border);
-	background: transparent;
+.document-title {
 	font-size: 20px;
 	font-weight: 600;
-	font-family: inherit;
+	margin-bottom: 12px;
 	color: var(--text);
 }
 
-.document-title-input:focus {
-	outline: none;
-	border-bottom-color: var(--accent);
+.document-detail :deep(.md-editor-preview-wrapper) {
+	padding: 0;
+	font-size: 14px;
+	line-height: 1.6;
 }
 
-.document-editor-wrap {
-	margin-top: 12px;
+.document-detail :deep(.md-editor-preview-wrapper h1) {
+	font-size: 1.5em;
 }
-
-.document-editor-wrap :deep(.md-editor) {
-	min-height: 200px;
+.document-detail :deep(.md-editor-preview-wrapper h2) {
+	font-size: 1.25em;
+}
+.document-detail :deep(.md-editor-preview-wrapper h3) {
+	font-size: 1.1em;
 }
 
 .task-detail {
