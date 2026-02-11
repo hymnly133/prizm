@@ -95,6 +95,12 @@ yarn typecheck
 - `PRIZM_AUTH_DISABLED=1` - Disable authentication for local development
 - `PRIZM_LOG_LEVEL` - Log level: info / warn / error
 
+**LLM (Agent)：** 选择优先级 ZHIPU > XIAOMIMIMO > OPENAI
+
+- `ZHIPU_API_KEY` - 智谱 AI，可选 `ZHIPU_MODEL`（默认 glm-4-flash）
+- `XIAOMIMIMO_API_KEY` - 小米 MiMo，可选 `XIAOMIMIMO_MODEL`（默认 mimo-v2-flash）
+- `OPENAI_API_KEY` - OpenAI 兼容，可选 `OPENAI_API_URL`、`OPENAI_MODEL`（默认 gpt-4o-mini）
+
 ## Architecture Overview
 
 ### Server Package (`@prizm/server`)
@@ -113,10 +119,12 @@ yarn typecheck
 ```
 prizm/src/
 ├── adapters/          # Adapter pattern implementations
-│   ├── interfaces.ts  # IStickyNotesAdapter, INotificationAdapter
+│   ├── interfaces.ts  # IStickyNotesAdapter, INotificationAdapter, IAgentAdapter
 │   └── default.ts     # In-memory/Console implementations
+├── llm/               # LLM providers (Zhipu, XiaomiMiMo, OpenAILike)
 ├── routes/            # Express route handlers
 │   ├── auth.ts        # Client registration, listing, revocation
+│   ├── agent.ts       # Agent sessions, stream chat
 │   ├── notes.ts       # Sticky notes CRUD with groups
 │   └── notify.ts      # Notification sending
 ├── auth/
@@ -247,6 +255,7 @@ Server created via `createPrizmServer(adapters, options)` with options for `port
 - `/auth/*` - Register, list clients, revoke clients, list scopes (no auth)
 - `/notes` - CRUD for notes and groups (auth + scope)
 - `/notify` - Send notifications (auth, scope not applicable)
+- `/agent/*` - Agent sessions and stream chat (auth + scope)
 - `/dashboard/*` - Vue 3 SPA (no auth with `X-Prizm-Panel: true`)
 
 ## TypeScript Configuration
