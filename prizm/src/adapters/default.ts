@@ -491,7 +491,7 @@ export class DefaultAgentAdapter implements IAgentAdapter {
 		messages: Array<{ role: string; content: string }>,
 		options?: { model?: string }
 	): AsyncIterable<LLMStreamChunk> {
-		// 根据环境变量选择：ZHIPU > XIAOMIMIMO > OPENAI
+		// 根据环境变量选择：XIAOMIMIMO > ZHIPU > OPENAI（默认优先 MiMo）
 		const provider = getLLMProvider();
 		yield* provider.chat(messages, {
 			model: options?.model,

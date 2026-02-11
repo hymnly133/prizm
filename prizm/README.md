@@ -81,16 +81,37 @@ await server.start()
 
 ## LLM 提供商配置
 
-Agent 对话功能根据环境变量自动选择 LLM 提供商，优先级：**智谱 > 小米 MiMo > OpenAI 兼容**。
+Agent 对话功能根据环境变量自动选择 LLM 提供商，**默认优先小米 MiMo**，优先级：**小米 MiMo > 智谱 > OpenAI 兼容**。
 
 | 提供商 | 环境变量 | 可选模型变量 | 默认模型 |
 |--------|----------|-------------|----------|
+| 小米 MiMo（默认优先） | `XIAOMIMIMO_API_KEY` | `XIAOMIMIMO_MODEL` | mimo-v2-flash |
 | 智谱 AI (GLM) | `ZHIPU_API_KEY` | `ZHIPU_MODEL` | glm-4-flash |
-| 小米 MiMo | `XIAOMIMIMO_API_KEY` | `XIAOMIMIMO_MODEL` | mimo-v2-flash |
 | OpenAI 兼容 | `OPENAI_API_KEY` | `OPENAI_MODEL` | gpt-4o-mini |
 | OpenAI 兼容 | `OPENAI_API_URL` | - | <https://api.openai.com/v1> |
 
 配置任一提供商的 API Key 后，Agent 将自动使用对应服务。未配置时返回提示消息。
+
+### 小米 MiMo 配置步骤
+
+1. **注册并申请 API**：打开 [MiMo Studio](https://aistudio.xiaomimimo.com/)，使用小米账号登录，在页面底部进入「API Platform」提交 API 申请。
+2. **获取 API Key**：申请通过后，在平台中创建 API Key 并复制。
+3. **设置环境变量**：
+
+   ```bash
+   # Windows PowerShell
+   $env:XIAOMIMIMO_API_KEY = "你的API-Key"
+
+   # 方式一：项目根目录 .env 文件（推荐）
+   XIAOMIMIMO_API_KEY=你的API-Key
+
+   # 方式二：Linux/macOS 当前会话
+   export XIAOMIMIMO_API_KEY=你的API-Key
+   ```
+
+   服务器启动时会自动加载 `.env`（项目根 `d:\prizm\.env` 或 `prizm/.env` 均可）。
+
+4. **可选**：指定模型 `XIAOMIMIMO_MODEL`（默认 `mimo-v2-flash`）。
 
 ## API 文档
 

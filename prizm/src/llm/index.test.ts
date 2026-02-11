@@ -22,13 +22,22 @@ describe("getLLMProvider", () => {
 		else delete process.env.XIAOMIMIMO_API_KEY;
 	});
 
-	it("ZHIPU_API_KEY 优先返回 ZhipuLLMProvider", () => {
+	it("仅 ZHIPU_API_KEY 时返回 ZhipuLLMProvider", () => {
 		process.env.ZHIPU_API_KEY = "zhipu-key";
 		delete process.env.XIAOMIMIMO_API_KEY;
 		delete process.env.OPENAI_API_KEY;
 
 		const provider = getLLMProvider();
 		expect(provider).toBeInstanceOf(ZhipuLLMProvider);
+	});
+
+	it("XIAOMIMIMO 优先于 ZHIPU（多个 key 时）", () => {
+		process.env.XIAOMIMIMO_API_KEY = "mimo-key";
+		process.env.ZHIPU_API_KEY = "zhipu-key";
+		delete process.env.OPENAI_API_KEY;
+
+		const provider = getLLMProvider();
+		expect(provider).toBeInstanceOf(XiaomiMiMoLLMProvider);
 	});
 
 	it("仅 XIAOMIMIMO_API_KEY 时返回 XiaomiMiMoLLMProvider", () => {

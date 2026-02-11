@@ -8,6 +8,7 @@
  *
  * Env:
  *   PRIZM_PORT, PRIZM_HOST, PRIZM_DATA_DIR, PRIZM_AUTH_DISABLED
+ *   从 .env 加载（支持项目根目录或 prizm 目录）
  *
  * Example:
  *   node cli.js
@@ -15,6 +16,13 @@
  *   node cli.js --host 0.0.0.0
  *   PRIZM_AUTH_DISABLED=1 yarn start
  */
+
+import path from "path";
+import { config as loadDotenv } from "dotenv";
+
+// 加载 .env：1) 当前工作目录 2) 项目根目录（monorepo 场景，根目录 .env 优先）
+loadDotenv();
+loadDotenv({ path: path.resolve(process.cwd(), "..", ".env"), override: true });
 
 import { createPrizmServer, createDefaultAdapters } from "./index";
 import { getConfig } from "./config";
