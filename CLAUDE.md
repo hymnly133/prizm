@@ -89,13 +89,18 @@ yarn typecheck
 
 ### Environment Variables
 
-- `PRIZM_AUTH_DISABLED=1` - Disable authentication for local development (server)
+- `PRIZM_PORT` - Server port (default 4127)
+- `PRIZM_HOST` - Listen address (default 127.0.0.1)
+- `PRIZM_DATA_DIR` - Data directory (default .prizm-data)
+- `PRIZM_AUTH_DISABLED=1` - Disable authentication for local development
+- `PRIZM_LOG_LEVEL` - Log level: info / warn / error
 
 ## Architecture Overview
 
 ### Server Package (`@prizm/server`)
 
 **Core Technologies:**
+
 - Node.js with TypeScript (compiled to CommonJS)
 - Express 4.x HTTP server
 - Vue 3 + Vite for built-in management dashboard
@@ -140,6 +145,7 @@ The server decouples from underlying services via adapters. When integrating int
 - **INotificationAdapter**: System notifications - single `notify(title, body)` method
 
 **Default adapters** (`src/adapters/default.ts`):
+
 - `DefaultStickyNotesAdapter` - In-memory storage
 - `DefaultNotificationAdapter` - Console logging
 
@@ -162,6 +168,7 @@ Scope is specified via `X-Prizm-Scope` header or `?scope=` query parameter. Clie
 **Client registration:** `POST /auth/register` returns `clientId` and `apiKey` (hash-stored in `.prizm-data/clients.json`)
 
 **Three auth methods:**
+
 - `Authorization: Bearer <key>` header
 - `X-Prizm-Api-Key` header
 - `?apiKey=` query parameter
@@ -169,6 +176,7 @@ Scope is specified via `X-Prizm-Scope` header or `?scope=` query parameter. Clie
 **Scope validation:** Request scope must be in client's `allowedScopes`
 
 **Bypasses:**
+
 - Dashboard requests: `X-Prizm-Panel: true` header
 - Development: `PRIZM_AUTH_DISABLED=1` environment variable
 
@@ -179,6 +187,7 @@ Scope is specified via `X-Prizm-Scope` header or `?scope=` query parameter. Clie
 **Connection:** `ws://{host}:{port}/ws?apiKey={apiKey}`
 
 **Message flow:**
+
 1. Client connects with API key
 2. Client registers for event types via `register` message
 3. Server pushes events via `event` messages to subscribed clients
@@ -186,6 +195,7 @@ Scope is specified via `X-Prizm-Scope` header or `?scope=` query parameter. Clie
 5. Heartbeat via `ping`/`pong`
 
 **Server API:** Available via `PrizmServer.websocket`:
+
 - `broadcast(eventType, payload, scope?)` - Send to all subscribers
 - `broadcastToClient(clientId, eventType, payload, scope?)` - Send to specific client
 - `getConnectedClients()` - Get connection info
@@ -212,6 +222,7 @@ Auth routes mounted separately at `/auth/*` to avoid path conflicts with the mai
 ### Server Lifecycle
 
 `PrizmServer` interface provides:
+
 - `start(): Promise<void>` - Start listening on configured host/port
 - `stop(): Promise<void>` - Close HTTP and WebSocket servers
 - `isRunning(): boolean` - Check status
@@ -224,6 +235,7 @@ Server created via `createPrizmServer(adapters, options)` with options for `port
 **Purpose:** Desktop application that connects to Prizm Server via WebSocket for real-time notifications
 
 **Key components:**
+
 - `src/websocket/connection.ts` - `PrizmWebSocketClient` class for WS connection management
 - `src/notification/handler.ts` - Tauri notification integration
 - Auto-reconnect on disconnect (5s delay)
@@ -240,12 +252,14 @@ Server created via `createPrizmServer(adapters, options)` with options for `port
 ## TypeScript Configuration
 
 **Server:**
+
 - Target: ES2022
 - Module: CommonJS
 - Strict mode enabled
 - Output: `dist/` directory with `.js` and `.d.ts` files
 
 **Tauri Client:**
+
 - ES modules
 - Vite + TypeScript for frontend
 - Tauri 2.x for native desktop
