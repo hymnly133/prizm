@@ -10,6 +10,7 @@ Prizm Server 是一个 HTTP API 服务器，为桌面效率工具提供：
 - **SMTC**：系统媒体传输控制（播放、暂停、切换等）
 - **通知**：发送系统通知
 - **Dashboard**：Web 可视化管理界面
+- **MCP**：供 Cursor、LobeChat 等 Agent 连接的本机统一上下文（便签、任务、剪贴板）→ 详见 [MCP-CONFIG.md](./MCP-CONFIG.md)
 
 默认监听 `http://127.0.0.1:4127`，支持鉴权与 scope 数据隔离。
 
@@ -32,6 +33,16 @@ node cli.js 5000
 yarn start -- --host 0.0.0.0
 node cli.js --host 0.0.0.0
 ```
+
+### 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `PRIZM_PORT` | 4127 | 服务端口 |
+| `PRIZM_HOST` | 127.0.0.1 | 监听地址 |
+| `PRIZM_DATA_DIR` | .prizm-data | 数据目录（便签、客户端等） |
+| `PRIZM_AUTH_DISABLED` | 0 | 设为 1 关闭鉴权 |
+| `PRIZM_LOG_LEVEL` | info | 日志级别：info / warn / error |
 
 ### 关闭鉴权（本地开发）
 
