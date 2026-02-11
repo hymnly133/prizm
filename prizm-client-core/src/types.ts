@@ -241,3 +241,28 @@ export interface Document {
 	createdAt: number;
 	updatedAt: number;
 }
+
+// ============ Agent 会话类型 ============
+
+export interface AgentMessage {
+	id: string;
+	role: "user" | "assistant" | "system";
+	content: string;
+	createdAt: number;
+	model?: string;
+	toolCalls?: unknown[];
+}
+
+export interface AgentSession {
+	id: string;
+	title?: string;
+	scope: string;
+	messages: AgentMessage[];
+	createdAt: number;
+	updatedAt: number;
+}
+
+export interface StreamChatOptions {
+	model?: string;
+	onChunk?: (chunk: { type: string; value?: string }) => void;
+}

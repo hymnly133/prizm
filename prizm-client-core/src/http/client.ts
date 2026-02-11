@@ -11,6 +11,9 @@ import type {
 	PomodoroSession,
 	ClipboardItem,
 	Document,
+	AgentSession,
+	AgentMessage,
+	StreamChatOptions,
 } from "../types";
 
 export interface PrizmClientOptions {
@@ -521,5 +524,181 @@ export class PrizmClient {
 			method: "DELETE",
 			scope,
 		});
+	}
+
+	// ============ Agent 会话 ============
+
+	async listAgentSessions(scope?: string): Promise<AgentSession[]> {
+		const s = scope ?? this.defaultScope;
+		const url = this.buildUrl("/agent/sessions", { scope: s });
+		const response = await fetch(url, {
+			method: "GET",
+			headers: this.buildHeaders(),
+		});
+		if (!response.ok) {
+			const text = await response.text().catch(() => "");
+			throw new Error(
+				`HTTP ${response.status} ${response.statusText}: ${
+					text || "Request failed"
+				}`
+			);
+		}
+		const data = (await response.json()) as { sessions: AgentSession[] };
+		return data.sessions ?? [];
+	}
+
+	async createAgentSession(scope?: string): Promise<AgentSession> {
+		const data = await this.request<{ session: AgentSession }>(
+			"/agent/sessions",
+			{
+				method: "POST",
+				scope: scope ?? this.defaultScope,
+				body: JSON.stringify({}),
+			}
+		);
+		return data.session;
+	}
+
+	async getAgentSession(id: string, scope?: string): Promise<AgentSession> {
+		const s = scope ?? this.defaultScope;
+		const url = this.buildUrl(`/agent/sessions/${encodeURIComponent(id)}`, {
+			scope: s,
+		});
+		const response = await fetch(url, {
+			method: "GET",
+			headers: this.buildHeaders(),
+		});
+		if (!response.ok) {
+			const text = await response.text().catch(() => "");
+			throw new Error(
+				`HTTP ${response.status} ${response.statusText}: ${
+					text || "Request failed"
+				}`
+			);
+		}
+		const data = (await response.json()) as { session: AgentSession };
+		return data.session;
+	}
+
+	async deleteAgentSession(id: string, scope?: string): Promise<void> {
+		const s = scope ?? this.defaultScope;
+		const url = this.buildUrl(`/agent/sessions/${encodeURIComponent(id)}`, {
+			scope: s,
+		});
+		const response = await fetch(url, {
+			method: "DELETE",
+			headers: this.buildHeaders(),
+		});
+		if (!response.ok && response.status !== 204) {
+			const text = await response.text().catch(() => "");
+			throw new Error(
+				`HTTP ${response.status} ${response.statusText}: ${
+					text || "Request failed"
+				}`
+			);
+		}
+	}
+
+	/**
+	 * 流式对话，消费 SSE 并逐块回调
+	 */
+	async streamChat(
+		sessionId: string,
+		content: string,
+		options?: StreamChatOptions & { scope?: string }
+	): Promise<string> {
+		const scope = options?.scope ?? this.defaultScope;
+		const url = this.buildUrl(
+			`/agent/sessions/${encodeURIComponent(sessionId)}/chat`,
+			{
+				scope,
+			}
+		);
+
+		const response = await fetch(url, {
+			method: "POST",
+			headers: this.buildHeaders(),
+			body: JSON.stringify({
+				content,
+				model: options?.model,
+			}),
+		});
+
+		if (!response.ok) {
+			const text = await response.text().catch(() => "");
+			throw new Error(
+				`HTTP ${response.status} ${response.statusText}: ${
+					text || "Request failed"
+				}`
+			);
+		}
+
+		const reader = response.body?.getReader();
+		if (!reader) {
+			throw new Error("No response body");
+		}
+
+		const decoder = new TextDecoder();
+		let buffer = "";
+		let fullContent = "";
+
+		try {
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+
+				buffer += decoder.decode(value, { stream: true });
+				const lines = buffer.split("\n");
+				buffer = lines.pop() ?? "";
+
+				for (const line of lines) {
+					if (line.startsWith("data: ")) {
+						const data = line.slice(6);
+						try {
+							const parsed = JSON.parse(data) as {
+								type: string;
+								value?: string;
+							};
+							options?.onChunk?.(parsed);
+							if (parsed.type === "text" && parsed.value) {
+								fullContent += parsed.value;
+							}
+						} catch {
+							// 忽略解析错误
+						}
+					}
+				}
+			}
+		} finally {
+			reader.releaseLock();
+		}
+
+		return fullContent;
+	}
+
+	async stopAgentChat(
+		sessionId: string,
+		scope?: string
+	): Promise<{ stopped: boolean }> {
+		const s = scope ?? this.defaultScope;
+		const url = this.buildUrl(
+			`/agent/sessions/${encodeURIComponent(sessionId)}/stop`,
+			{
+				scope: s,
+			}
+		);
+		const response = await fetch(url, {
+			method: "POST",
+			headers: this.buildHeaders(),
+		});
+		if (!response.ok) {
+			const text = await response.text().catch(() => "");
+			throw new Error(
+				`HTTP ${response.status} ${response.statusText}: ${
+					text || "Request failed"
+				}`
+			);
+		}
+		return (await response.json()) as { stopped: boolean };
 	}
 }
