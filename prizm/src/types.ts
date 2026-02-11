@@ -120,6 +120,26 @@ export interface ClipboardItem {
 	createdAt: number;
 }
 
+// ============ Agent 会话类型 ============
+
+export interface AgentMessage {
+	id: string;
+	role: "user" | "assistant" | "system";
+	content: string;
+	createdAt: number;
+	model?: string;
+	toolCalls?: unknown[];
+}
+
+export interface AgentSession {
+	id: string;
+	title?: string;
+	scope: string;
+	messages: AgentMessage[];
+	createdAt: number;
+	updatedAt: number;
+}
+
 // ============ Scope 与 Auth 类型 ============
 
 export type Scope = string;

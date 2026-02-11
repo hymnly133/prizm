@@ -15,6 +15,7 @@ import type {
 	PomodoroSession,
 	ClipboardItem,
 	Document,
+	AgentSession,
 } from "../types";
 
 export const DEFAULT_SCOPE = "default";
@@ -37,6 +38,8 @@ export interface ScopeData {
 	clipboard: ClipboardItem[];
 	/** 文档（正式信息文档） */
 	documents: Document[];
+	/** Agent 会话列表 */
+	agentSessions: AgentSession[];
 }
 
 const SCOPES_DIR = "scopes";
@@ -57,6 +60,7 @@ function createEmptyScopeData(): ScopeData {
 		pomodoroSessions: [],
 		clipboard: [],
 		documents: [],
+		agentSessions: [],
 	};
 }
 
@@ -96,6 +100,9 @@ export class ScopeStore {
 					: [],
 				clipboard: Array.isArray(raw.clipboard) ? raw.clipboard : [],
 				documents: Array.isArray(raw.documents) ? raw.documents : [],
+				agentSessions: Array.isArray(raw.agentSessions)
+					? raw.agentSessions
+					: [],
 			};
 
 			this.store.set(scope, data);
@@ -147,6 +154,7 @@ export class ScopeStore {
 						pomodoroSessions: data.pomodoroSessions,
 						clipboard: data.clipboard,
 						documents: data.documents,
+						agentSessions: data.agentSessions,
 					},
 					null,
 					2
@@ -177,6 +185,7 @@ export class ScopeStore {
 		if (!Array.isArray(data.pomodoroSessions)) data.pomodoroSessions = [];
 		if (!Array.isArray(data.clipboard)) data.clipboard = [];
 		if (!Array.isArray(data.documents)) data.documents = [];
+		if (!Array.isArray(data.agentSessions)) data.agentSessions = [];
 
 		return data;
 	}

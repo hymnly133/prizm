@@ -22,6 +22,7 @@ import { createTasksRoutes } from "./routes/tasks";
 import { createPomodoroRoutes } from "./routes/pomodoro";
 import { createClipboardRoutes } from "./routes/clipboard";
 import { createDocumentsRoutes } from "./routes/documents";
+import { createAgentRoutes } from "./routes/agent";
 import { mountMcpRoutes } from "./mcp";
 import { WebSocketServer } from "./websocket/WebSocketServer";
 
@@ -112,6 +113,7 @@ export function createPrizmServer(
 	createPomodoroRoutes(router, adapters.pomodoro);
 	createClipboardRoutes(router, adapters.clipboard);
 	createDocumentsRoutes(router, adapters.documents);
+	createAgentRoutes(router, adapters.agent);
 	app.use("/", router);
 
 	// MCP 端点：供 Cursor、LobeChat 等 Agent 连接（wsServer 在 start 后注入）

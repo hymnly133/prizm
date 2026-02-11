@@ -27,6 +27,8 @@ describe("ScopeStore", () => {
 		expect(data.tasks).toEqual([]);
 		expect(data.pomodoroSessions).toEqual([]);
 		expect(data.clipboard).toEqual([]);
+		expect(data.documents).toEqual([]);
+		expect(data.agentSessions).toEqual([]);
 	});
 
 	it("getScopeData 新建 scope 并持久化", () => {
@@ -64,5 +66,31 @@ describe("ScopeStore", () => {
 		expect(files.some((f) => f.includes("foo") && f.includes("bar"))).toBe(
 			true
 		);
+	});
+
+	it("agentSessions 持久化与加载", () => {
+		const data = store.getScopeData("agent-scope");
+		data.agentSessions.push({
+			id: "s1",
+			title: "测试会话",
+			scope: "agent-scope",
+			messages: [
+				{
+					id: "m1",
+					role: "user",
+					content: "hello",
+					createdAt: Date.now(),
+				},
+			],
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+		});
+		store.saveScope("agent-scope");
+
+		const store2 = new ScopeStore(tempDir);
+		const loaded = store2.getScopeData("agent-scope");
+		expect(loaded.agentSessions).toHaveLength(1);
+		expect(loaded.agentSessions[0].id).toBe("s1");
+		expect(loaded.agentSessions[0].messages).toHaveLength(1);
 	});
 });

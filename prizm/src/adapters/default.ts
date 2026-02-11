@@ -11,7 +11,9 @@ import type {
 	IPomodoroAdapter,
 	IClipboardAdapter,
 	IDocumentsAdapter,
+	IAgentAdapter,
 	PrizmAdapters,
+	LLMStreamChunk,
 } from "./interfaces";
 import type {
 	StickyNote,
@@ -26,8 +28,11 @@ import type {
 	Document,
 	CreateDocumentPayload,
 	UpdateDocumentPayload,
+	AgentSession,
+	AgentMessage,
 } from "../types";
 import { scopeStore } from "../core/ScopeStore";
+import { getLLMProvider } from "../llm";
 
 const log = createLogger("Adapter");
 
@@ -413,6 +418,88 @@ export class DefaultDocumentsAdapter implements IDocumentsAdapter {
 	}
 }
 
+// ============ 默认 Agent 适配器 ============
+
+export class DefaultAgentAdapter implements IAgentAdapter {
+	async listSessions(scope: string): Promise<AgentSession[]> {
+		const data = scopeStore.getScopeData(scope);
+		return [...data.agentSessions].sort((a, b) => b.updatedAt - a.updatedAt);
+	}
+
+	async getSession(scope: string, id: string): Promise<AgentSession | null> {
+		const data = scopeStore.getScopeData(scope);
+		return data.agentSessions.find((s) => s.id === id) ?? null;
+	}
+
+	async createSession(scope: string): Promise<AgentSession> {
+		const data = scopeStore.getScopeData(scope);
+		const now = Date.now();
+		const session: AgentSession = {
+			id: Math.random().toString(36).substring(2, 15),
+			title: "新会话",
+			scope,
+			messages: [],
+			createdAt: now,
+			updatedAt: now,
+		};
+		data.agentSessions.push(session);
+		scopeStore.saveScope(scope);
+		log.info("Agent session created:", session.id, "scope:", scope);
+		return session;
+	}
+
+	async deleteSession(scope: string, id: string): Promise<void> {
+		const data = scopeStore.getScopeData(scope);
+		const idx = data.agentSessions.findIndex((s) => s.id === id);
+		if (idx >= 0) {
+			data.agentSessions.splice(idx, 1);
+			scopeStore.saveScope(scope);
+			log.info("Agent session deleted:", id, "scope:", scope);
+		}
+	}
+
+	async appendMessage(
+		scope: string,
+		sessionId: string,
+		message: Omit<AgentMessage, "id" | "createdAt">
+	): Promise<AgentMessage> {
+		const data = scopeStore.getScopeData(scope);
+		const session = data.agentSessions.find((s) => s.id === sessionId);
+		if (!session) throw new Error(`Session not found: ${sessionId}`);
+
+		const now = Date.now();
+		const msg: AgentMessage = {
+			id: Math.random().toString(36).substring(2, 15),
+			...message,
+			createdAt: now,
+		};
+		session.messages.push(msg);
+		session.updatedAt = now;
+		scopeStore.saveScope(scope);
+		log.info("Agent message appended:", msg.id, "session:", sessionId);
+		return msg;
+	}
+
+	async getMessages(scope: string, sessionId: string): Promise<AgentMessage[]> {
+		const session = await this.getSession(scope, sessionId);
+		return session ? [...session.messages] : [];
+	}
+
+	async *chat(
+		scope: string,
+		sessionId: string,
+		messages: Array<{ role: string; content: string }>,
+		options?: { model?: string }
+	): AsyncIterable<LLMStreamChunk> {
+		// 根据环境变量选择：ZHIPU > XIAOMIMIMO > OPENAI
+		const provider = getLLMProvider();
+		yield* provider.chat(messages, {
+			model: options?.model,
+			temperature: 0.7,
+		});
+	}
+}
+
 // ============ 创建默认适配器集合 ============
 
 export function createDefaultAdapters(): PrizmAdapters {
@@ -423,5 +510,6 @@ export function createDefaultAdapters(): PrizmAdapters {
 		pomodoro: new DefaultPomodoroAdapter(),
 		clipboard: new DefaultClipboardAdapter(),
 		documents: new DefaultDocumentsAdapter(),
+		agent: new DefaultAgentAdapter(),
 	};
 }

@@ -17,6 +17,7 @@ Prizm 效率服务器 - 为桌面效率工具提供 HTTP API 访问接口。
 
 - **便签管理**：便签和分组的 CRUD 操作
 - **通知信号**：发送通知事件（下游实现具体展示）
+- **Agent 对话**：LLM 驱动的会话与流式对话（支持智谱、小米 MiMo、OpenAI 兼容接口）
 
 ## 安装
 
@@ -77,6 +78,19 @@ const server = createPrizmServer({
 
 await server.start()
 ```
+
+## LLM 提供商配置
+
+Agent 对话功能根据环境变量自动选择 LLM 提供商，优先级：**智谱 > 小米 MiMo > OpenAI 兼容**。
+
+| 提供商 | 环境变量 | 可选模型变量 | 默认模型 |
+|--------|----------|-------------|----------|
+| 智谱 AI (GLM) | `ZHIPU_API_KEY` | `ZHIPU_MODEL` | glm-4-flash |
+| 小米 MiMo | `XIAOMIMIMO_API_KEY` | `XIAOMIMIMO_MODEL` | mimo-v2-flash |
+| OpenAI 兼容 | `OPENAI_API_KEY` | `OPENAI_MODEL` | gpt-4o-mini |
+| OpenAI 兼容 | `OPENAI_API_URL` | - | <https://api.openai.com/v1> |
+
+配置任一提供商的 API Key 后，Agent 将自动使用对应服务。未配置时返回提示消息。
 
 ## API 文档
 
@@ -139,6 +153,29 @@ Content-Type: application/json
 }
 ```
 
+### Agent 对话
+
+```bash
+# 创建会话
+POST /agent/sessions
+# 需 scope，见 X-Prizm-Scope 或 ?scope=
+
+# 列出会话
+GET /agent/sessions?scope=default
+
+# 获取会话及消息
+GET /agent/sessions/:id?scope=default
+
+# 删除会话
+DELETE /agent/sessions/:id?scope=default
+
+# 流式对话（SSE）
+POST /agent/sessions/:id/messages
+Content-Type: application/json
+{ "content": "用户消息" }
+# 响应为 text/event-stream
+```
+
 ## 测试示例
 
 ```bash
@@ -157,6 +194,11 @@ curl http://127.0.0.1:4127/notes
 curl -X POST http://127.0.0.1:4127/notify \
   -H "Content-Type: application/json" \
   -d '{"title":"测试通知","body":"Hello from Prizm"}'
+
+# Agent 对话（需先注册获取 API Key，并配置 LLM 环境变量）
+curl -X POST "http://127.0.0.1:4127/agent/sessions" \
+  -H "Authorization: Bearer <apiKey>" \
+  -H "X-Prizm-Scope: default"
 ```
 
 ## 适配器接口
@@ -165,11 +207,13 @@ Prizm 通过适配器模式与底层服务解耦，你需要实现以下接口�
 
 - `IStickyNotesAdapter` - 便签管理
 - `INotificationAdapter` - 通知发送
+- `IAgentAdapter` - Agent 会话与 LLM 对话（可选）
 
 默认提供的适配器：
 
 - `DefaultStickyNotesAdapter` - 内存存储
 - `DefaultNotificationAdapter` - 控制台输出
+- `DefaultAgentAdapter` - 基于 ScopeStore 的会话管理，LLM 由环境变量选型（智谱 / 小米 MiMo / OpenAI 兼容）
 
 ## 许可证
 

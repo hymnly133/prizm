@@ -14,6 +14,8 @@ import type {
 	Document,
 	CreateDocumentPayload,
 	UpdateDocumentPayload,
+	AgentSession,
+	AgentMessage,
 } from "../types";
 
 // ============ Sticky Notes 适配器 ============
@@ -188,6 +190,51 @@ export interface IDocumentsAdapter {
 	deleteDocument?(scope: string, id: string): Promise<void>;
 }
 
+// ============ Agent  LLM 提供商 ============
+
+/** 流式 LLM 响应块 */
+export interface LLMStreamChunk {
+	text?: string;
+	reasoning?: string;
+	done?: boolean;
+}
+
+/** LLM 提供商接口（可插拔 OpenAI、Ollama 等） */
+export interface ILLMProvider {
+	chat(
+		messages: Array<{ role: string; content: string }>,
+		options?: { model?: string; temperature?: number }
+	): AsyncIterable<LLMStreamChunk>;
+}
+
+// ============ Agent 适配器 ============
+
+export interface IAgentAdapter {
+	listSessions?(scope: string): Promise<AgentSession[]>;
+
+	getSession?(scope: string, id: string): Promise<AgentSession | null>;
+
+	createSession?(scope: string): Promise<AgentSession>;
+
+	deleteSession?(scope: string, id: string): Promise<void>;
+
+	appendMessage?(
+		scope: string,
+		sessionId: string,
+		message: Omit<AgentMessage, "id" | "createdAt">
+	): Promise<AgentMessage>;
+
+	getMessages?(scope: string, sessionId: string): Promise<AgentMessage[]>;
+
+	/** 流式对话，返回 SSE 流 */
+	chat?(
+		scope: string,
+		sessionId: string,
+		messages: Array<{ role: string; content: string }>,
+		options?: { model?: string }
+	): AsyncIterable<LLMStreamChunk>;
+}
+
 // ============ 适配器集合 ============
 
 export interface PrizmAdapters {
@@ -197,4 +244,5 @@ export interface PrizmAdapters {
 	pomodoro?: IPomodoroAdapter;
 	clipboard?: IClipboardAdapter;
 	documents?: IDocumentsAdapter;
+	agent?: IAgentAdapter;
 }
