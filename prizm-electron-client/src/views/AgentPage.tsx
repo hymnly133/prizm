@@ -1,11 +1,18 @@
 /**
  * Agent 页面 - 会话列表 + 消息区 + 输入框
  */
+import {
+	ActionIcon,
+	Button,
+	Empty,
+	List,
+	Markdown,
+	TextArea,
+} from "@lobehub/ui";
+import { Plus, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
-import { useScope } from "../hooks/useScope";
 import { useAgent } from "../hooks/useAgent";
-import MdPreview from "../components/MdPreview";
-import Btn from "../components/ui/Btn";
+import { useScope } from "../hooks/useScope";
 
 export default function AgentPage() {
 	const { currentScope } = useScope();
@@ -65,54 +72,46 @@ export default function AgentPage() {
 		  ]
 		: [];
 
+	const sessionListItems = sessions.map((s) => ({
+		key: s.id,
+		title: s.title || "新会话",
+		active: currentSession?.id === s.id,
+		actions: (
+			<ActionIcon
+				icon={Trash2}
+				size="small"
+				title="删除"
+				danger
+				onClick={(e) => {
+					e.stopPropagation();
+					deleteSession(s.id);
+				}}
+			/>
+		),
+		showAction: currentSession?.id === s.id,
+		onClick: () => loadSession(s.id),
+	}));
+
 	return (
 		<section className="agent-page">
 			<aside className="agent-sidebar">
 				<div className="agent-sidebar-header">
 					<span className="agent-sidebar-title">会话</span>
-					<button
-						type="button"
-						className="agent-add-btn"
+					<ActionIcon
+						icon={Plus}
+						size="small"
 						title="新建会话"
 						onClick={createSession}
 						disabled={loading}
-					>
-						+
-					</button>
+					/>
 				</div>
 				<div className="agent-sessions-list">
 					{loading && sessions.length === 0 ? (
 						<div className="agent-sessions-loading">加载中...</div>
 					) : sessions.length === 0 ? (
-						<div className="agent-sessions-empty">暂无会话</div>
+						<Empty title="暂无会话" description="点击 + 新建会话" />
 					) : (
-						sessions.map((s) => (
-							<div
-								key={s.id}
-								className={`agent-session-item ${
-									currentSession?.id === s.id ? "active" : ""
-								}`}
-							>
-								<button
-									type="button"
-									className="agent-session-btn"
-									onClick={() => loadSession(s.id)}
-								>
-									{s.title || "新会话"}
-								</button>
-								<button
-									type="button"
-									className="agent-session-delete"
-									title="删除"
-									onClick={(e) => {
-										e.stopPropagation();
-										deleteSession(s.id);
-									}}
-								>
-									×
-								</button>
-							</div>
-						))
+						<List activeKey={currentSession?.id} items={sessionListItems} />
 					)}
 				</div>
 			</aside>
@@ -130,7 +129,7 @@ export default function AgentPage() {
 										{m.role === "user" ? "你" : "AI"}
 									</span>
 									<div className="agent-message-content">
-										<MdPreview>{m.content}</MdPreview>
+										<Markdown>{m.content}</Markdown>
 									</div>
 								</div>
 							))}
@@ -138,8 +137,7 @@ export default function AgentPage() {
 						</div>
 
 						<div className="agent-input-wrap">
-							<textarea
-								className="agent-input"
+							<TextArea
 								value={input}
 								onChange={(e) => setInput(e.target.value)}
 								onKeyDown={(e) => {
@@ -151,27 +149,32 @@ export default function AgentPage() {
 								placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
 								rows={2}
 								disabled={sending}
+								style={{ flex: 1, minHeight: 44 }}
 							/>
-							<Btn
-								variant="primary"
+							<Button
+								type="primary"
 								onClick={handleSend}
 								disabled={sending || !input.trim()}
 							>
 								{sending ? "发送中..." : "发送"}
-							</Btn>
+							</Button>
 						</div>
 					</>
 				) : (
 					<div className="agent-empty">
-						<p className="agent-empty-title">选择或创建会话</p>
-						<p className="agent-empty-desc">
-							{loading ? "加载中..." : "点击左侧 + 新建会话开始对话"}
-						</p>
-						{!loading && sessions.length === 0 && (
-							<Btn variant="primary" onClick={createSession}>
-								新建会话
-							</Btn>
-						)}
+						<Empty
+							title="选择或创建会话"
+							description={
+								loading ? "加载中..." : "点击左侧 + 新建会话开始对话"
+							}
+							action={
+								!loading && sessions.length === 0 ? (
+									<Button type="primary" onClick={createSession}>
+										新建会话
+									</Button>
+								) : undefined
+							}
+						/>
 					</div>
 				)}
 			</div>

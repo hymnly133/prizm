@@ -1,5 +1,4 @@
-import Btn from "./ui/Btn";
-import MdPreview from "./MdPreview";
+import { Button, Empty, Markdown, Tag } from "@lobehub/ui";
 import type { FileItem } from "../hooks/useFileList";
 import type { StickyNote, Task, Document } from "@prizm/client-core";
 
@@ -17,8 +16,10 @@ export default function FileDetailView({
 	if (!file) {
 		return (
 			<div className="file-detail-empty">
-				<p className="empty-title">选择文件</p>
-				<p className="empty-desc">在左侧列表中点击一个文件查看详情</p>
+				<Empty
+					title="选择文件"
+					description="在左侧列表中点击一个文件查看详情"
+				/>
 			</div>
 		);
 	}
@@ -26,24 +27,22 @@ export default function FileDetailView({
 	return (
 		<div className="file-detail">
 			<div className="file-detail-header">
-				<span className="file-detail-kind">
+				<Tag>
 					{file.kind === "note"
 						? "便签"
 						: file.kind === "task"
 						? "任务"
 						: "文档"}
-				</span>
-				<Btn variant="danger" size="sm" onClick={onDelete}>
+				</Tag>
+				<Button size="small" type="primary" danger onClick={onDelete}>
 					删除
-				</Btn>
+				</Button>
 			</div>
 			<div className="file-detail-body">
 				{file.kind === "note" && (
 					<div className="note-detail">
 						<div className="md-preview-wrap">
-							<MdPreview>
-								{(file.raw as StickyNote).content || "(空)"}
-							</MdPreview>
+							<Markdown>{(file.raw as StickyNote).content || "(空)"}</Markdown>
 						</div>
 					</div>
 				)}
@@ -53,7 +52,7 @@ export default function FileDetailView({
 							{(file.raw as Document).title || "无标题"}
 						</h2>
 						<div className="md-preview-wrap">
-							<MdPreview>{(file.raw as Document).content ?? "(空)"}</MdPreview>
+							<Markdown>{(file.raw as Document).content ?? "(空)"}</Markdown>
 						</div>
 					</div>
 				)}
@@ -71,9 +70,9 @@ export default function FileDetailView({
 						)}
 						<div className="task-actions">
 							{(file.raw as Task).status !== "done" && (
-								<Btn variant="primary" size="sm" onClick={onDone}>
+								<Button size="small" type="primary" onClick={onDone}>
 									标记完成
-								</Btn>
+								</Button>
 							)}
 						</div>
 					</div>

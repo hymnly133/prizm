@@ -11,6 +11,7 @@
 		"allowImportingTsExtensions": true,
 		"resolveJsonModule": true,
 		"noEmit": true,
+		"skipLibCheck": true,
 		"types": ["vite/client"]
 	},
 	"include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts"]

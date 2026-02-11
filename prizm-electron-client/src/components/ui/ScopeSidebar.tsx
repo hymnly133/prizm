@@ -1,4 +1,6 @@
+import { ActionIcon, Empty, Icon, List, Select, Skeleton } from "@lobehub/ui";
 import type { FileKind, FileItem } from "../../hooks/useFileList";
+import { FileText, Plus, StickyNote } from "lucide-react";
 
 interface ScopeSidebarProps {
 	scopes: string[];
@@ -16,6 +18,19 @@ interface ScopeSidebarProps {
 	onAddDocument: () => void;
 }
 
+function getFileIcon(kind: FileKind) {
+	switch (kind) {
+		case "note":
+			return StickyNote;
+		case "task":
+			return "✓";
+		case "document":
+			return FileText;
+		default:
+			return FileText;
+	}
+}
+
 export default function ScopeSidebar({
 	scopes,
 	scopeDescriptions = {},
@@ -31,74 +46,81 @@ export default function ScopeSidebar({
 	onAddNote,
 	onAddDocument,
 }: ScopeSidebarProps) {
+	const selectOptions = scopes.map((s) => ({
+		value: s,
+		label: `${getScopeLabel(s)} (${s})`,
+	}));
+
+	const listItems = files.map((f) => {
+		const isActive =
+			selectedId != null && f.kind === selectedKind && f.id === selectedId;
+		const icon = getFileIcon(f.kind);
+		return {
+			key: `${f.kind}-${f.id}`,
+			title: f.title,
+			active: isActive,
+			avatar:
+				typeof icon === "string" ? (
+					<span style={{ fontSize: 14 }}>{icon}</span>
+				) : (
+					<Icon icon={icon} size="small" />
+				),
+			onClick: () => onSelectFile({ kind: f.kind, id: f.id }),
+		};
+	});
+
 	return (
 		<aside className="scope-sidebar" aria-label="工作区与文件">
 			<div className="sidebar-workspace-row">
-				<select
-					className="workspace-select"
+				<Select
 					value={currentScope}
 					disabled={scopesLoading}
-					title={scopeDescriptions[currentScope]?.description}
-					onChange={(e) => onSelect((e.target as HTMLSelectElement).value)}
-				>
-					{scopes.map((s) => (
-						<option key={s} value={s} title={scopeDescriptions[s]?.description}>
-							{getScopeLabel(s)} ({s})
-						</option>
-					))}
-				</select>
+					options={selectOptions}
+					onChange={(v) => onSelect(v as string)}
+					style={{ width: "100%" }}
+					size="small"
+				/>
 			</div>
 
 			<div className="sidebar-files">
 				<div className="files-header">
 					<span className="files-title">文件</span>
 					<div className="files-add-btns">
-						<button
-							type="button"
-							className="files-add-btn"
-							aria-label="新建便签"
+						<ActionIcon
+							icon={Plus}
+							size="small"
 							title="新建便签"
 							onClick={onAddNote}
-						>
-							+
-						</button>
-						<button
-							type="button"
-							className="files-add-btn"
-							aria-label="新建文档"
+						/>
+						<ActionIcon
+							icon={FileText}
+							size="small"
 							title="新建文档"
 							onClick={onAddDocument}
-						>
-							📄
-						</button>
+						/>
 					</div>
 				</div>
-				{!filesLoading ? (
+				{filesLoading ? (
 					<div className="files-list">
-						{files.length === 0 ? (
-							<div className="files-empty">暂无文件</div>
-						) : (
-							files.map((f) => (
-								<button
-									key={`${f.kind}-${f.id}`}
-									type="button"
-									className={`file-item ${
-										selectedId && f.kind === selectedKind && f.id === selectedId
-											? "active"
-											: ""
-									}`}
-									onClick={() => onSelectFile({ kind: f.kind, id: f.id })}
-								>
-									<span className="file-icon">
-										{f.kind === "note" ? "📝" : f.kind === "task" ? "✓" : "📄"}
-									</span>
-									<span className="file-title">{f.title}</span>
-								</button>
-							))
-						)}
+						<Skeleton active paragraph={{ rows: 4 }} />
 					</div>
+				) : files.length === 0 ? (
+					<Empty
+						title="暂无文件"
+						description="点击上方 + 新建便签或文档"
+						imageSize={32}
+					/>
 				) : (
-					<div className="files-loading">加载中...</div>
+					<div className="files-list">
+						<List
+							activeKey={
+								selectedId && selectedKind
+									? `${selectedKind}-${selectedId}`
+									: undefined
+							}
+							items={listItems}
+						/>
+					</div>
 				)}
 			</div>
 		</aside>

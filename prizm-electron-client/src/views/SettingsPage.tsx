@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
-import { EVENT_TYPES, getEventLabel, buildServerUrl } from "@prizm/client-core";
-import { usePrizmContext } from "../context/PrizmContext";
+import { Button, Checkbox, Form, Input } from "@lobehub/ui";
+import { EVENT_TYPES, buildServerUrl, getEventLabel } from "@prizm/client-core";
+import type { EventType, PrizmConfig } from "@prizm/client-core";
+import { useEffect, useState } from "react";
 import { useLogsContext } from "../context/LogsContext";
-import type { PrizmConfig, EventType } from "@prizm/client-core";
+import { usePrizmContext } from "../context/PrizmContext";
 
 export default function SettingsPage() {
 	const {
@@ -173,113 +174,82 @@ export default function SettingsPage() {
 		<section className="page settings-page">
 			<div className="settings-section">
 				<h2>服务器配置</h2>
-				<div className="form-group">
-					<label>服务器地址</label>
-					<input
-						value={form.host}
-						onChange={(e) => setForm((f) => ({ ...f, host: e.target.value }))}
-						type="text"
-						placeholder="127.0.0.1"
-					/>
-				</div>
-				<div className="form-group">
-					<label>端口</label>
-					<input
-						value={form.port}
-						onChange={(e) => setForm((f) => ({ ...f, port: e.target.value }))}
-						type="number"
-						placeholder="4127"
-					/>
-					<p className="form-hint">默认端口: 4127</p>
-				</div>
-				<div className="form-group">
-					<label>客户端名称</label>
-					<input
-						value={form.clientName}
-						onChange={(e) =>
-							setForm((f) => ({ ...f, clientName: e.target.value }))
-						}
-						type="text"
-						placeholder="Prizm Electron Client"
-					/>
-				</div>
-				<div className="form-group">
-					<label>请求的 Scopes (逗号分隔)</label>
-					<input
-						value={form.scopesText}
-						onChange={(e) =>
-							setForm((f) => ({ ...f, scopesText: e.target.value }))
-						}
-						type="text"
-						placeholder="default, online"
-					/>
-					<p className="form-hint">
-						例如: default, online（online 为实时上下文）
-					</p>
-				</div>
-				<div className="form-group">
-					<label>接收通知的事件</label>
-					<p className="form-hint">勾选后，对应事件发生时将弹出应用内通知</p>
-					<div className="notify-events-grid">
-						{EVENT_TYPES.map((ev) => (
-							<label key={ev}>
-								<input
-									type="checkbox"
-									value={ev}
-									checked={form.notifyEvents.includes(ev)}
-									onChange={(e) => {
-										if (e.target.checked) {
-											setForm((f) => ({
-												...f,
-												notifyEvents: [...f.notifyEvents, ev],
-											}));
-										} else {
-											setForm((f) => ({
-												...f,
-												notifyEvents: f.notifyEvents.filter((x) => x !== ev),
-											}));
-										}
-									}}
-								/>
-								{getEventLabel(ev)}
-							</label>
-						))}
-					</div>
-				</div>
-				<div className="config-actions">
-					<button
-						className="btn-secondary"
-						onClick={testConnection}
-						disabled={testing}
+				<Form layout="vertical">
+					<Form.Item label="服务器地址">
+						<Input
+							value={form.host}
+							onChange={(e) => setForm((f) => ({ ...f, host: e.target.value }))}
+							placeholder="127.0.0.1"
+						/>
+					</Form.Item>
+					<Form.Item label="端口" extra="默认端口: 4127">
+						<Input
+							value={form.port}
+							onChange={(e) => setForm((f) => ({ ...f, port: e.target.value }))}
+							placeholder="4127"
+						/>
+					</Form.Item>
+					<Form.Item label="客户端名称">
+						<Input
+							value={form.clientName}
+							onChange={(e) =>
+								setForm((f) => ({ ...f, clientName: e.target.value }))
+							}
+							placeholder="Prizm Electron Client"
+						/>
+					</Form.Item>
+					<Form.Item
+						label="请求的 Scopes (逗号分隔)"
+						extra="例如: default, online（online 为实时上下文）"
 					>
-						{testing ? "测试中..." : "测试连接"}
-					</button>
-					<button className="btn-secondary" onClick={saveConfig}>
-						保存配置
-					</button>
-					<button
-						className="btn-primary"
-						onClick={registerClient}
-						disabled={registering}
+						<Input
+							value={form.scopesText}
+							onChange={(e) =>
+								setForm((f) => ({ ...f, scopesText: e.target.value }))
+							}
+							placeholder="default, online"
+						/>
+					</Form.Item>
+					<Form.Item
+						label="接收通知的事件"
+						extra="勾选后，对应事件发生时将弹出应用内通知"
 					>
-						{registering ? "注册中..." : "注册客户端"}
-					</button>
-				</div>
+						<Checkbox.Group
+							value={form.notifyEvents}
+							onChange={(vals) =>
+								setForm((f) => ({ ...f, notifyEvents: vals as string[] }))
+							}
+							options={EVENT_TYPES.map((ev) => ({
+								label: getEventLabel(ev),
+								value: ev,
+							}))}
+						/>
+					</Form.Item>
+					<Form.Item>
+						<div className="config-actions">
+							<Button onClick={testConnection} disabled={testing}>
+								{testing ? "测试中..." : "测试连接"}
+							</Button>
+							<Button onClick={saveConfig}>保存配置</Button>
+							<Button
+								type="primary"
+								onClick={registerClient}
+								disabled={registering}
+							>
+								{registering ? "注册中..." : "注册客户端"}
+							</Button>
+						</div>
+					</Form.Item>
+				</Form>
 			</div>
 
 			<div className="settings-section">
 				<h2>快捷操作</h2>
 				<div className="config-actions">
-					<button
-						className="btn-secondary"
-						onClick={reconnect}
-						disabled={reconnecting}
-					>
+					<Button onClick={reconnect} disabled={reconnecting}>
 						{reconnecting ? "重新连接中..." : "重新连接"}
-					</button>
-					<button className="btn-secondary" onClick={openDashboard}>
-						打开仪表板
-					</button>
+					</Button>
+					<Button onClick={openDashboard}>打开仪表板</Button>
 				</div>
 			</div>
 

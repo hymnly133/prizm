@@ -7,23 +7,28 @@
 	"scripts": {
 		"build:electron": "tsc -p tsconfig.electron.json",
 		"dev": "yarn workspace @prizm/client-core build && yarn build:electron && concurrently \"vite\" \"electron .\"",
-		"build": "yarn workspace @prizm/client-core build && yarn build:electron && vite build",
+		"build": "yarn workspace @prizm/shared build && yarn workspace @prizm/client-core build && yarn build:electron && vite build",
 		"typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit"
 	},
 	"dependencies": {
+		"@lobehub/fluent-emoji": "^4.1.0",
+		"@lobehub/icons": "^4.4.3",
+		"@lobehub/ui": "^4.36.2",
+		"antd": "^6.3.0",
 		"dompurify": "^3.3.1",
 		"electron": "^33.2.0",
 		"marked": "^17.0.1",
-		"react": "^18.3.1",
-		"react-dom": "^18.3.1",
+		"motion": "^12.34.0",
+		"react": "^19.0.0",
+		"react-dom": "^19.0.0",
 		"react-markdown": "^9.0.1"
 	},
 	"devDependencies": {
 		"@prizm/client-core": "workspace:*",
 		"@types/dompurify": "^3.2.0",
 		"@types/node": "^22.0.0",
-		"@types/react": "^18.3.12",
-		"@types/react-dom": "^18.3.1",
+		"@types/react": "^19.0.0",
+		"@types/react-dom": "^19.0.0",
 		"@vitejs/plugin-react": "^4.3.4",
 		"concurrently": "^9.0.0",
 		"typescript": "^5.9.3",

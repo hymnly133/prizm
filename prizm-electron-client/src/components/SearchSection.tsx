@@ -1,13 +1,14 @@
-import { useRef, useState, useEffect } from "react";
-import { useDebounce } from "../hooks/useDebounce";
-import { usePrizmContext } from "../context/PrizmContext";
-import { useLogsContext } from "../context/LogsContext";
+import { Input, List, Tag } from "@lobehub/ui";
 import type {
-	StickyNote,
-	Task,
 	ClipboardItem,
 	Document,
+	StickyNote,
+	Task,
 } from "@prizm/client-core";
+import { useRef, useState, useEffect } from "react";
+import { useDebounce } from "../hooks/useDebounce";
+import { useLogsContext } from "../context/LogsContext";
+import { usePrizmContext } from "../context/PrizmContext";
 
 type SearchResultKind = "note" | "task" | "clipboard" | "document";
 
@@ -236,19 +237,32 @@ export default function SearchSection({
 		};
 	}, []);
 
+	const kindLabel = (k: SearchResultKind) =>
+		k === "note"
+			? "便签"
+			: k === "task"
+			? "任务"
+			: k === "document"
+			? "文档"
+			: "剪贴板";
+
+	const listItems = results.map((r, i) => ({
+		key: `${r.id}-${r.kind}`,
+		title: r.preview || "(空)",
+		active: focusedIndex === i,
+		addon: <Tag>{kindLabel(r.kind)}</Tag>,
+		onClick: () => handleClick(r),
+		onMouseEnter: () => setFocusedIndex(i),
+	}));
+
 	return (
 		<div className="search-section" ref={sectionRef}>
 			<div className="search-input-wrap">
-				<span className="search-icon" aria-hidden="true">
-					⌘
-				</span>
-				<input
+				<Input
 					ref={inputRef}
 					value={query}
 					onChange={(e) => setQuery(e.target.value)}
-					type="text"
 					placeholder="搜索便签、任务、剪贴板... (Ctrl+K)"
-					className="search-input"
 					aria-label="全局搜索"
 					aria-expanded={showResults}
 					aria-controls="search-results"
@@ -264,54 +278,33 @@ export default function SearchSection({
 							focusPrev();
 						}
 					}}
+					size="small"
+					style={{ width: "100%" }}
 				/>
 			</div>
-			<div
-				id="search-results"
-				className={`search-results ${!showResults ? "hidden" : ""}`}
-				role="listbox"
-				aria-label="搜索结果"
-			>
-				{results.length === 0 && query.trim() ? (
-					<div
-						className="search-result-item search-result-empty"
-						role="option"
-						aria-selected={false}
-					>
-						无匹配结果
-					</div>
-				) : (
-					results.map((r, i) => (
-						<div
-							key={`${r.id}-${r.kind}`}
-							className={`search-result-item ${
-								focusedIndex === i ? "focused" : ""
-							}`}
-							ref={(el) => {
-								itemRefs.current[i] = el;
-							}}
-							role="option"
-							aria-selected={focusedIndex === i}
-							tabIndex={-1}
-							onClick={() => handleClick(r)}
-							onMouseEnter={() => setFocusedIndex(i)}
-						>
-							<span className={`search-result-badge ${r.kind}`}>
-								{r.kind === "note"
-									? "便签"
-									: r.kind === "task"
-									? "任务"
-									: r.kind === "document"
-									? "文档"
-									: "剪贴板"}
-							</span>
-							<span className="search-result-preview">
-								{r.preview || "(空)"}
-							</span>
+			{showResults && (
+				<div
+					id="search-results"
+					className="search-results"
+					role="listbox"
+					aria-label="搜索结果"
+				>
+					{results.length === 0 && query.trim() ? (
+						<div className="search-result-item search-result-empty">
+							无匹配结果
 						</div>
-					))
-				)}
-			</div>
+					) : (
+						<List
+							activeKey={
+								results[focusedIndex]
+									? `${results[focusedIndex].id}-${results[focusedIndex].kind}`
+									: undefined
+							}
+							items={listItems}
+						/>
+					)}
+				</div>
+			)}
 		</div>
 	);
 }

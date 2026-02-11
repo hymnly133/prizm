@@ -1,6 +1,7 @@
+import { Button, Input } from "@lobehub/ui";
 import { useState } from "react";
-import { usePrizmContext } from "../context/PrizmContext";
 import { useLogsContext } from "../context/LogsContext";
+import { usePrizmContext } from "../context/PrizmContext";
 
 export default function TestPage() {
 	const { manager, lastSyncEvent, setLastSyncEvent } = usePrizmContext();
@@ -132,31 +133,29 @@ export default function TestPage() {
 				<h2>本地通知测试</h2>
 				<p className="form-hint">直接弹出应用内通知窗口，无需服务器</p>
 				<div className="test-row">
-					<input
+					<Input
 						value={localNotif.title}
 						onChange={(e) =>
 							setLocalNotif((f) => ({ ...f, title: e.target.value }))
 						}
-						type="text"
 						placeholder="标题"
 						className="test-input"
 					/>
-					<input
+					<Input
 						value={localNotif.body}
 						onChange={(e) =>
 							setLocalNotif((f) => ({ ...f, body: e.target.value }))
 						}
-						type="text"
 						placeholder="内容（可选）"
 						className="test-input"
 					/>
-					<button
-						className="btn-primary"
+					<Button
+						type="primary"
 						onClick={sendLocalNotif}
 						disabled={!localNotif.title.trim()}
 					>
 						发送本地通知
-					</button>
+					</Button>
 				</div>
 			</div>
 
@@ -166,31 +165,29 @@ export default function TestPage() {
 					通过 POST /notify 发送，会经 WebSocket 推送给已连接的客户端
 				</p>
 				<div className="test-row">
-					<input
+					<Input
 						value={serverNotif.title}
 						onChange={(e) =>
 							setServerNotif((f) => ({ ...f, title: e.target.value }))
 						}
-						type="text"
 						placeholder="标题"
 						className="test-input"
 					/>
-					<input
+					<Input
 						value={serverNotif.body}
 						onChange={(e) =>
 							setServerNotif((f) => ({ ...f, body: e.target.value }))
 						}
-						type="text"
 						placeholder="内容（可选）"
 						className="test-input"
 					/>
-					<button
-						className="btn-primary"
+					<Button
+						type="primary"
 						onClick={sendServerNotif}
 						disabled={!serverNotif.title.trim() || !manager}
 					>
 						发送服务器通知
-					</button>
+					</Button>
 				</div>
 				{serverNotifResult && (
 					<p
@@ -210,52 +207,46 @@ export default function TestPage() {
 				</p>
 				<div className="test-actions">
 					<div className="test-action">
-						<input
+						<Input
 							value={mockNote}
 							onChange={(e) => setMockNote(e.target.value)}
-							type="text"
 							placeholder="便签内容"
 							className="test-input"
 						/>
-						<button
-							className="btn-secondary"
+						<Button
 							onClick={mockCreateNote}
 							disabled={!mockNote.trim() || !manager}
 						>
 							创建便签
-						</button>
+						</Button>
 					</div>
 					<div className="test-action">
-						<input
+						<Input
 							value={mockTask}
 							onChange={(e) => setMockTask(e.target.value)}
-							type="text"
 							placeholder="任务标题"
 							className="test-input"
 						/>
-						<button
-							className="btn-secondary"
+						<Button
 							onClick={mockCreateTask}
 							disabled={!mockTask.trim() || !manager}
 						>
 							创建任务
-						</button>
+						</Button>
 					</div>
 					<div className="test-action">
-						<input
+						<Input
 							value={mockClipboard}
 							onChange={(e) => setMockClipboard(e.target.value)}
-							type="text"
 							placeholder="剪贴板内容"
 							className="test-input"
 						/>
-						<button
-							className="btn-secondary"
+						<Button
 							onClick={mockAddClipboard}
 							disabled={!mockClipboard.trim() || !manager}
 						>
 							添加剪贴板
-						</button>
+						</Button>
 					</div>
 				</div>
 				{mockResult && (
@@ -273,24 +264,15 @@ export default function TestPage() {
 				<h2>手动刷新</h2>
 				<p className="form-hint">强制触发各 Tab 列表刷新（用于测试数据同步）</p>
 				<div className="config-actions">
-					<button
-						className="btn-secondary"
-						onClick={() => triggerRefresh("note:created")}
-					>
+					<Button onClick={() => triggerRefresh("note:created")}>
 						刷新便签
-					</button>
-					<button
-						className="btn-secondary"
-						onClick={() => triggerRefresh("task:created")}
-					>
+					</Button>
+					<Button onClick={() => triggerRefresh("task:created")}>
 						刷新任务
-					</button>
-					<button
-						className="btn-secondary"
-						onClick={() => triggerRefresh("clipboard:itemAdded")}
-					>
+					</Button>
+					<Button onClick={() => triggerRefresh("clipboard:itemAdded")}>
 						刷新剪贴板
-					</button>
+					</Button>
 				</div>
 			</div>
 		</section>
