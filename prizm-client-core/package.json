@@ -1,0 +1,16 @@
+{
+	"name": "@prizm/client-core",
+	"version": "0.1.0",
+	"description": "Prizm client core SDK (types and WebSocket client) for desktop/web integrations",
+	"type": "module",
+	"main": "dist/index.js",
+	"module": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"scripts": {
+		"build": "tsc -p tsconfig.json",
+		"typecheck": "tsc -p tsconfig.json --noEmit"
+	},
+	"devDependencies": {
+		"typescript": "^5.9.3"
+	}
+}
