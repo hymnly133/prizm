@@ -22,8 +22,10 @@ import { useAgentScopeData } from '../hooks/useAgentScopeData'
 import { useScope } from '../hooks/useScope'
 import { MessageUsage } from '../components/MessageUsage'
 import { AgentRightSidebar } from '../components/AgentRightSidebar'
+import { ResizableSidebar } from '../components/layout'
 import { ChatInputProvider, DesktopChatInput, type ActionKeys } from '../features/ChatInput'
-import type { AgentMessage, MessagePart } from '@prizm/client-core'
+import type { AgentMessage, MessagePart, MessagePartTool } from '@prizm/client-core'
+import { ToolCallCard } from '../components/agent'
 
 /** 从消息得到按顺序的段落：有 parts 用 parts，否则用 content + toolCalls 推导（一段文本 + 工具在末尾） */
 function getMessageParts(m: AgentMessage): MessagePart[] {
@@ -33,13 +35,22 @@ function getMessageParts(m: AgentMessage): MessagePart[] {
   if (m.content?.trim()) list.push({ type: 'text', content: m.content })
   for (const tc of toolCalls) {
     if (tc && typeof tc === 'object' && 'id' in tc && 'name' in tc) {
+      const t = tc as {
+        id: string
+        name: string
+        arguments?: string
+        result?: string
+        isError?: boolean
+        status?: 'preparing' | 'running' | 'done'
+      }
       list.push({
         type: 'tool',
-        id: (tc as { id: string }).id,
-        name: (tc as { name: string }).name,
-        arguments: (tc as { arguments?: string }).arguments ?? '',
-        result: (tc as { result?: string }).result ?? '',
-        ...((tc as { isError?: boolean }).isError && { isError: true })
+        id: t.id,
+        name: t.name,
+        arguments: t.arguments ?? '',
+        result: t.result ?? '',
+        ...(t.isError && { isError: true }),
+        ...(t.status && { status: t.status })
       })
     }
   }
@@ -72,29 +83,6 @@ function toChatMessage(m: AgentMessage & { streaming?: boolean }): ChatMessage {
   }
 }
 
-/** 工具调用记录类型（与 ToolCallRecord 一致） */
-interface ToolCallDisplay {
-  id: string
-  name: string
-  arguments: string
-  result: string
-  isError?: boolean
-}
-
-/** 单条工具调用内联卡片（用于按 parts 顺序展示） */
-function ToolCallInlineCard({ tc }: { tc: ToolCallDisplay }) {
-  return (
-    <details className="tool-call-inline">
-      <summary className="tool-call-inline-summary">
-        <span className="tool-call-name">{tc.name}</span>
-        {tc.isError && <span className="tool-call-inline-error">失败</span>}
-      </summary>
-      <pre className="tool-call-args">{tc.arguments || '{}'}</pre>
-      <pre className="tool-call-result">{tc.result}</pre>
-    </details>
-  )
-}
-
 /** 助手消息额外信息：思考过程 + MessageUsage；工具已内联时不再底部汇总 */
 function AssistantMessageExtra(props: ChatMessage) {
   const extra = props.extra as
@@ -106,7 +94,7 @@ function AssistantMessageExtra(props: ChatMessage) {
           totalOutputTokens?: number
         }
         reasoning?: string
-        toolCalls?: ToolCallDisplay[]
+        toolCalls?: Array<MessagePartTool & { id: string }>
         parts?: MessagePart[]
       }
     | undefined
@@ -129,9 +117,7 @@ function AssistantMessageExtra(props: ChatMessage) {
           <ul className="tool-calls-list">
             {toolCalls.map((tc) => (
               <li key={tc.id} className={`tool-call-item ${tc.isError ? 'error' : ''}`}>
-                <span className="tool-call-name">{tc.name}</span>
-                <pre className="tool-call-args">{tc.arguments || '{}'}</pre>
-                <pre className="tool-call-result">{tc.result}</pre>
+                <ToolCallCard tc={tc} />
               </li>
             ))}
           </ul>
@@ -144,7 +130,7 @@ function AssistantMessageExtra(props: ChatMessage) {
 
 export default function AgentPage() {
   const { currentScope } = useScope()
-  const { scopeItems, scopeSlashCommands } = useAgentScopeData(currentScope)
+  const { scopeItems, slashCommands } = useAgentScopeData(currentScope)
   const {
     sessions,
     currentSession,
@@ -279,21 +265,23 @@ export default function AgentPage() {
 
   return (
     <section className="agent-page">
-      <aside className="agent-sidebar">
-        <div className="agent-sidebar-header">
-          <span className="agent-sidebar-title">会话</span>
-          <ActionIcon icon={Plus} title="新建会话" onClick={createSession} disabled={loading} />
+      <ResizableSidebar side="left" storageKey="agent-sessions" defaultWidth={220}>
+        <div className="agent-sidebar">
+          <div className="agent-sidebar-header">
+            <span className="agent-sidebar-title">会话</span>
+            <ActionIcon icon={Plus} title="新建会话" onClick={createSession} disabled={loading} />
+          </div>
+          <div className="agent-sessions-list">
+            {loading && sessions.length === 0 ? (
+              <div className="agent-sessions-loading">加载中...</div>
+            ) : sessions.length === 0 ? (
+              <Empty title="暂无会话" description="点击 + 新建会话" />
+            ) : (
+              <List activeKey={currentSession?.id} items={sessionListItems} />
+            )}
+          </div>
         </div>
-        <div className="agent-sessions-list">
-          {loading && sessions.length === 0 ? (
-            <div className="agent-sessions-loading">加载中...</div>
-          ) : sessions.length === 0 ? (
-            <Empty title="暂无会话" description="点击 + 新建会话" />
-          ) : (
-            <List activeKey={currentSession?.id} items={sessionListItems} />
-          )}
-        </div>
-      </aside>
+      </ResizableSidebar>
 
       <div className="agent-content">
         <div className="agent-main">
@@ -323,14 +311,15 @@ export default function AgentPage() {
                                   <Markdown>{p.content}</Markdown>
                                 </div>
                               ) : (
-                                <ToolCallInlineCard
+                                <ToolCallCard
                                   key={p.id}
                                   tc={{
                                     id: p.id,
                                     name: p.name,
                                     arguments: p.arguments,
                                     result: p.result,
-                                    isError: p.isError
+                                    isError: p.isError,
+                                    status: (p as MessagePartTool).status
                                   }}
                                 />
                               )
@@ -361,7 +350,7 @@ export default function AgentPage() {
                   leftActions={leftActions}
                   rightActions={[]}
                   scopeItems={scopeItems}
-                  scopeSlashCommands={scopeSlashCommands}
+                  scopeSlashCommands={slashCommands}
                   sendButtonProps={{
                     disabled: sending,
                     generating: sending,
@@ -404,14 +393,16 @@ export default function AgentPage() {
         </div>
       </div>
 
-      <AgentRightSidebar
-        sending={sending}
-        error={error}
-        currentSession={currentSession}
-        optimisticMessages={optimisticMessages}
-        selectedModel={selectedModel}
-        onModelChange={setSelectedModel}
-      />
+      <ResizableSidebar side="right" storageKey="agent-right" defaultWidth={280}>
+        <AgentRightSidebar
+          sending={sending}
+          error={error}
+          currentSession={currentSession}
+          optimisticMessages={optimisticMessages}
+          selectedModel={selectedModel}
+          onModelChange={setSelectedModel}
+        />
+      </ResizableSidebar>
     </section>
   )
 }

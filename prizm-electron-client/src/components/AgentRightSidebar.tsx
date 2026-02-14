@@ -13,6 +13,17 @@ import type {
   ToolCallRecord,
   AvailableModel
 } from '@prizm/client-core'
+import { getToolDisplayName } from '@prizm/client-core'
+
+/** Scope 交互记录（与 API 返回一致） */
+interface ScopeInteractionItem {
+  toolName: string
+  action: string
+  itemKind?: string
+  itemId?: string
+  title?: string
+  timestamp?: number
+}
 import {
   FileText,
   Loader2,
@@ -21,7 +32,13 @@ import {
   Clock,
   Wrench,
   History,
-  ListChecks
+  ListChecks,
+  MessageSquare,
+  BookOpen,
+  PlusCircle,
+  Pencil,
+  Trash2,
+  Search
 } from 'lucide-react'
 
 interface AgentRightSidebarProps {
@@ -55,8 +72,25 @@ export function AgentRightSidebar({
   const [sessionContext, setSessionContext] = useState<{
     provisions: { itemId: string; kind: string; mode: string; charCount: number; stale: boolean }[]
     modifications: { itemId: string; type: string; action: string; timestamp: number }[]
+    scopeInteractions: ScopeInteractionItem[]
   } | null>(null)
   const [sessionContextLoading, setSessionContextLoading] = useState(false)
+  const [systemPrompt, setSystemPrompt] = useState<string>('')
+  const [systemPromptLoading, setSystemPromptLoading] = useState(false)
+  const [systemPromptModalOpen, setSystemPromptModalOpen] = useState(false)
+
+  const loadSystemPrompt = useCallback(async () => {
+    if (!http || !currentScope) return
+    setSystemPromptLoading(true)
+    try {
+      const res = await http.getAgentSystemPrompt(currentScope, currentSession?.id)
+      setSystemPrompt(res.systemPrompt || '')
+    } catch {
+      setSystemPrompt('')
+    } finally {
+      setSystemPromptLoading(false)
+    }
+  }, [http, currentScope, currentSession?.id])
 
   const loadScopeContext = useCallback(async () => {
     if (!http || !currentScope) return
@@ -100,37 +134,12 @@ export function AgentRightSidebar({
     if (!http || !currentScope || !currentSession?.id) return
     setSessionContextLoading(true)
     try {
-      const ctx = await (
-        http as {
-          getAgentSessionContext: (
-            id: string,
-            scope: string
-          ) => Promise<{
-            provisions: {
-              itemId: string
-              kind: string
-              mode: string
-              charCount: number
-              stale: boolean
-            }[]
-            modifications: { itemId: string; type: string; action: string; timestamp: number }[]
-          }>
-        }
-      ).getAgentSessionContext(currentSession.id, currentScope)
+      const ctx = await http.getAgentSessionContext(currentSession.id, currentScope)
       setSessionContext({
-        provisions: (ctx.provisions ?? []) as {
-          itemId: string
-          kind: string
-          mode: string
-          charCount: number
-          stale: boolean
-        }[],
-        modifications: (ctx.modifications ?? []) as {
-          itemId: string
-          type: string
-          action: string
-          timestamp: number
-        }[]
+        provisions: ctx.provisions ?? [],
+        modifications: ctx.modifications ?? [],
+        scopeInteractions:
+          (ctx as { scopeInteractions?: ScopeInteractionItem[] }).scopeInteractions ?? []
       })
     } catch {
       setSessionContext(null)
@@ -142,7 +151,8 @@ export function AgentRightSidebar({
   useEffect(() => {
     void loadScopeContext()
     void loadDocuments()
-  }, [loadScopeContext, loadDocuments])
+    void loadSystemPrompt()
+  }, [loadScopeContext, loadDocuments, loadSystemPrompt])
 
   useEffect(() => {
     if (currentSession?.id && currentScope) void loadSessionContext()
@@ -215,6 +225,58 @@ export function AgentRightSidebar({
               </>
             )}
           </div>
+        </section>
+
+        {/* 系统提示词（用户发送消息前注入的完整前置提示词） */}
+        <section className="agent-right-section">
+          <h3 className="agent-right-section-title">
+            <MessageSquare size={14} className="agent-right-section-icon" />
+            系统提示词
+          </h3>
+          <div
+            className="agent-context-preview agent-context-clickable"
+            role="button"
+            tabIndex={0}
+            onClick={() => systemPrompt && setSystemPromptModalOpen(true)}
+            onKeyDown={(e) =>
+              systemPrompt && (e.key === 'Enter' || e.key === ' ') && setSystemPromptModalOpen(true)
+            }
+            aria-label="点击查看完整系统提示词"
+          >
+            {systemPromptLoading ? (
+              <div className="agent-right-loading">
+                <Loader2 size={14} className="spinning" />
+                <span>加载中</span>
+              </div>
+            ) : systemPrompt ? (
+              <>
+                <pre className="agent-context-text agent-system-prompt-preview">
+                  {systemPrompt.length > 200 ? `${systemPrompt.slice(0, 200)}…` : systemPrompt}
+                </pre>
+                <span className="agent-context-click-hint">点击查看完整内容</span>
+              </>
+            ) : (
+              <p className="agent-right-empty">暂无</p>
+            )}
+          </div>
+          <button
+            type="button"
+            className="agent-right-refresh"
+            onClick={loadSystemPrompt}
+            disabled={systemPromptLoading}
+          >
+            刷新
+          </button>
+          <Modal
+            open={systemPromptModalOpen}
+            onCancel={() => setSystemPromptModalOpen(false)}
+            title="系统提示词（发送前注入的完整前置提示词）"
+            footer={null}
+            width={640}
+            styles={{ body: { maxHeight: '70vh', overflow: 'auto' } }}
+          >
+            <pre className="agent-context-modal-text">{systemPrompt}</pre>
+          </Modal>
         </section>
 
         {/* 工作区上下文 */}
@@ -380,6 +442,95 @@ export function AgentRightSidebar({
                 </li>
               ))}
             </ul>
+          )}
+        </section>
+
+        {/* Scope 交互：从工具调用解析的读/写/删等 */}
+        <section className="agent-right-section agent-scope-interactions-section">
+          <h3 className="agent-right-section-title">Scope 交互</h3>
+          {!currentSession ? (
+            <p className="agent-right-empty">选择会话后显示</p>
+          ) : sessionContextLoading ? (
+            <div className="agent-right-loading">
+              <Loader2 size={14} className="spinning" />
+              <span>加载中</span>
+            </div>
+          ) : !sessionContext?.scopeInteractions?.length ? (
+            <p className="agent-right-empty">本会话暂无 scope 交互</p>
+          ) : (
+            <div className="agent-scope-interactions">
+              {(['read', 'list', 'search', 'create', 'update', 'delete'] as const).map((action) => {
+                const items = (sessionContext.scopeInteractions ?? []).filter(
+                  (s) => s.action === action
+                )
+                if (items.length === 0) return null
+                const Icon =
+                  action === 'read' || action === 'list'
+                    ? BookOpen
+                    : action === 'search'
+                    ? Search
+                    : action === 'create'
+                    ? PlusCircle
+                    : action === 'update'
+                    ? Pencil
+                    : Trash2
+                const label =
+                  action === 'read'
+                    ? '已读取'
+                    : action === 'list'
+                    ? '已列出'
+                    : action === 'search'
+                    ? '已搜索'
+                    : action === 'create'
+                    ? '已创建'
+                    : action === 'update'
+                    ? '已更新'
+                    : '已删除'
+                return (
+                  <div key={action} className="agent-scope-interaction-group">
+                    <span className="agent-scope-interaction-label">
+                      <Icon size={12} />
+                      {label}
+                    </span>
+                    <ul className="agent-scope-interaction-list">
+                      {items.map((si, i) => (
+                        <li
+                          key={`${si.toolName}-${si.itemId ?? i}`}
+                          className="agent-scope-interaction-item"
+                        >
+                          <span className="agent-scope-interaction-tool">
+                            {getToolDisplayName(si.toolName)}
+                          </span>
+                          {si.itemKind && (
+                            <span className="agent-scope-interaction-kind">[{si.itemKind}]</span>
+                          )}
+                          {si.itemId && (
+                            <span className="agent-scope-interaction-id" title={si.itemId}>
+                              {si.itemId.slice(0, 8)}
+                            </span>
+                          )}
+                          {si.title && (
+                            <span className="agent-scope-interaction-title" title={si.title}>
+                              {si.title.length > 12 ? `${si.title.slice(0, 12)}…` : si.title}
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          {currentSession && (
+            <button
+              type="button"
+              className="agent-right-refresh"
+              onClick={loadSessionContext}
+              disabled={sessionContextLoading}
+            >
+              刷新
+            </button>
           )}
         </section>
 

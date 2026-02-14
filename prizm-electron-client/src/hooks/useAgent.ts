@@ -1,10 +1,9 @@
 /**
  * useAgent - Agent 会话管理、发消息、流式消费、停止生成
  * 仿照 LobeHub：乐观更新 + 流式原地更新，不依赖 loadSession 获取消息
- * 使用 flushSync 强制每块立即渲染，避免 React 18 自动批处理导致流式输出失效
+ * 流式更新使用普通 setState，避免 flushSync 阻塞主线程导致卡顿、无法交互
  */
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { flushSync } from 'react-dom'
 import { usePrizmContext, useSyncEventContext } from '../context/PrizmContext'
 import type {
   AgentSession,
@@ -162,6 +161,8 @@ export function useAgent(scope: string) {
 
       setOptimisticMessages([userMsg, assistantMsg])
       const sessionId = session.id
+      let lastUsage: AgentMessage['usage'] | undefined
+      let lastModel: string | undefined
 
       try {
         let fullContent = ''
@@ -169,8 +170,6 @@ export function useAgent(scope: string) {
         let fullReasoning = ''
         const fullToolCalls: ToolCallRecord[] = []
         const parts: MessagePart[] = []
-        let lastUsage: AgentMessage['usage']
-        let lastModel: string | undefined
         let wasStopped = false
         let commandResultContent: string | null = null
         await http.streamChat(session.id, content.trim(), {
@@ -180,50 +179,44 @@ export function useAgent(scope: string) {
           onChunk: (chunk) => {
             if (chunk.type === 'command_result' && typeof chunk.value === 'string') {
               commandResultContent = chunk.value
-              flushSync(() => {
-                setOptimisticMessages((prev) => {
-                  if (prev.length < 1) return prev
-                  return [
-                    prev[0],
-                    {
-                      id: tmpId('cmd'),
-                      role: 'system',
-                      content: chunk.value as string,
-                      createdAt: Date.now()
-                    }
-                  ]
-                })
+              setOptimisticMessages((prev) => {
+                if (prev.length < 1) return prev
+                return [
+                  prev[0],
+                  {
+                    id: tmpId('cmd'),
+                    role: 'system',
+                    content: chunk.value as string,
+                    createdAt: Date.now()
+                  }
+                ]
               })
             }
             if (chunk.type === 'text' && chunk.value) {
               fullContent += chunk.value
               segmentContent += chunk.value
-              flushSync(() => {
-                setOptimisticMessages((prev) => {
-                  if (prev.length < 2) return prev
-                  const assistant = {
-                    ...prev[1],
-                    content: fullContent,
-                    ...(parts.length > 0
-                      ? { parts: [...parts, { type: 'text' as const, content: segmentContent }] }
-                      : {})
-                  }
-                  return [prev[0], assistant]
-                })
+              setOptimisticMessages((prev) => {
+                if (prev.length < 2) return prev
+                const assistant = {
+                  ...prev[1],
+                  content: fullContent,
+                  ...(parts.length > 0
+                    ? { parts: [...parts, { type: 'text' as const, content: segmentContent }] }
+                    : {})
+                }
+                return [prev[0], assistant]
               })
             }
             if (chunk.type === 'reasoning' && chunk.value) {
               fullReasoning += chunk.value
-              flushSync(() => {
-                setOptimisticMessages((prev) => {
-                  if (prev.length < 2) return prev
-                  const assistant = {
-                    ...prev[1],
-                    content: prev[1].content,
-                    reasoning: fullReasoning
-                  }
-                  return [prev[0], assistant]
-                })
+              setOptimisticMessages((prev) => {
+                if (prev.length < 2) return prev
+                const assistant = {
+                  ...prev[1],
+                  content: prev[1].content,
+                  reasoning: fullReasoning
+                }
+                return [prev[0], assistant]
               })
             }
             if (
@@ -234,6 +227,11 @@ export function useAgent(scope: string) {
               'chunk' in chunk.value
             ) {
               const { id, chunk: chunkText } = chunk.value as { id: string; chunk: string }
+              // 服务端在首轮有 tool_calls 时不会先发 done，会先发 tool_result_chunk，必须先刷入当前文本段再插入 tool，否则顺序会变成 B A D C
+              if (segmentContent) {
+                parts.push({ type: 'text', content: segmentContent })
+                segmentContent = ''
+              }
               const existing = parts.find(
                 (p): p is MessagePartTool => p.type === 'tool' && p.id === id
               )
@@ -247,19 +245,17 @@ export function useAgent(scope: string) {
                   ]
               parts.length = 0
               parts.push(...newParts)
-              flushSync(() => {
-                setOptimisticMessages((prev) => {
-                  if (prev.length < 2) return prev
-                  return [
-                    prev[0],
-                    {
-                      ...prev[1],
-                      content: fullContent,
-                      toolCalls: [...fullToolCalls],
-                      parts: [...newParts]
-                    }
-                  ]
-                })
+              setOptimisticMessages((prev) => {
+                if (prev.length < 2) return prev
+                return [
+                  prev[0],
+                  {
+                    ...prev[1],
+                    content: fullContent,
+                    toolCalls: [...fullToolCalls],
+                    parts: [...newParts]
+                  }
+                ]
               })
             }
             if (
@@ -269,7 +265,9 @@ export function useAgent(scope: string) {
               'id' in chunk.value
             ) {
               const tc = chunk.value as ToolCallRecord
-              fullToolCalls.push(tc)
+              const existingIdx = fullToolCalls.findIndex((t) => t.id === tc.id)
+              if (existingIdx >= 0) fullToolCalls[existingIdx] = tc
+              else fullToolCalls.push(tc)
               if (segmentContent) {
                 parts.push({ type: 'text', content: segmentContent })
                 segmentContent = ''
@@ -283,7 +281,8 @@ export function useAgent(scope: string) {
                 name: tc.name,
                 arguments: tc.arguments ?? '',
                 result: tc.result ?? existingTool?.result ?? '',
-                ...(tc.isError && { isError: true })
+                ...(tc.isError && { isError: true }),
+                ...(tc.status && { status: tc.status })
               }
               if (existingTool) {
                 const idx = parts.indexOf(existingTool)
@@ -291,19 +290,17 @@ export function useAgent(scope: string) {
               } else {
                 parts.push(toolPart)
               }
-              flushSync(() => {
-                setOptimisticMessages((prev) => {
-                  if (prev.length < 2) return prev
-                  return [
-                    prev[0],
-                    {
-                      ...prev[1],
-                      content: fullContent,
-                      toolCalls: [...fullToolCalls],
-                      parts: [...parts]
-                    }
-                  ]
-                })
+              setOptimisticMessages((prev) => {
+                if (prev.length < 2) return prev
+                return [
+                  prev[0],
+                  {
+                    ...prev[1],
+                    content: fullContent,
+                    toolCalls: [...fullToolCalls],
+                    parts: [...parts]
+                  }
+                ]
               })
             }
             if (chunk.type === 'done') {
@@ -315,22 +312,20 @@ export function useAgent(scope: string) {
                 segmentContent = ''
               }
               if (!commandResultContent) {
-                flushSync(() => {
-                  setOptimisticMessages((prev) => {
-                    if (prev.length < 2) return prev
-                    return [
-                      prev[0],
-                      {
-                        ...prev[1],
-                        content: prev[1].content,
-                        model: lastModel ?? prev[1].model,
-                        usage: lastUsage ?? prev[1].usage,
-                        toolCalls: fullToolCalls.length > 0 ? fullToolCalls : prev[1].toolCalls,
-                        ...(parts.length > 0 && { parts: [...parts] }),
-                        ...(fullReasoning && { reasoning: fullReasoning })
-                      }
-                    ]
-                  })
+                setOptimisticMessages((prev) => {
+                  if (prev.length < 2) return prev
+                  return [
+                    prev[0],
+                    {
+                      ...prev[1],
+                      content: prev[1].content,
+                      model: lastModel ?? prev[1].model,
+                      usage: lastUsage ?? prev[1].usage,
+                      toolCalls: fullToolCalls.length > 0 ? fullToolCalls : prev[1].toolCalls,
+                      ...(parts.length > 0 && { parts: [...parts] }),
+                      ...(fullReasoning && { reasoning: fullReasoning })
+                    }
+                  ]
                 })
               }
             }

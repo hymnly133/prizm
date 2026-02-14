@@ -991,10 +991,9 @@
   overflow: hidden;
 }
 .agent-sidebar {
-  width: 220px;
-  flex-shrink: 0;
-  background: var(--ant-color-bg-layout);
-  border-right: 1px solid var(--ant-color-border);
+  width: 100%;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1016,12 +1015,11 @@
   overflow: hidden;
 }
 
-/* Agent 右侧边栏 - 状态、上下文、文档、工具调用 */
+/* Agent 右侧边栏 - 状态、上下文、文档、工具调用（宽度由 ResizableSidebar 控制） */
 .agent-right-sidebar {
-  width: 280px;
-  flex-shrink: 0;
-  background: var(--ant-color-bg-layout);
-  border-left: 1px solid var(--ant-color-border);
+  width: 100%;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1056,6 +1054,13 @@
   letter-spacing: 0.05em;
   color: var(--ant-color-text-secondary);
   margin: 0 0 8px 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.agent-right-section-icon {
+  flex-shrink: 0;
+  opacity: 0.85;
 }
 .agent-status-row {
   display: flex;
@@ -1257,6 +1262,78 @@
   max-height: 60px;
   overflow-y: auto;
 }
+/* Scope 交互区块 */
+.agent-scope-interactions-section {
+  /* 复用 agent-right-section 样式 */
+}
+.agent-scope-interactions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.agent-scope-interaction-group {
+  font-size: 11px;
+}
+.agent-scope-interaction-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  color: var(--ant-color-text-secondary);
+  margin-bottom: 4px;
+}
+.agent-scope-interaction-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.agent-scope-interaction-item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  border-radius: var(--ant-border-radius);
+  background: var(--ant-color-fill-quaternary);
+  border: 1px solid var(--ant-color-border-secondary);
+  font-size: 10px;
+}
+.agent-scope-interaction-item:last-child {
+  margin-bottom: 0;
+}
+.agent-scope-interaction-tool {
+  font-weight: 500;
+  color: var(--ant-color-primary);
+}
+.agent-scope-interaction-kind {
+  font-size: 9px;
+  color: var(--ant-color-text-tertiary);
+}
+.agent-scope-interaction-id {
+  font-family: monospace;
+  color: var(--ant-color-text-tertiary);
+}
+.agent-scope-interaction-title {
+  color: var(--ant-color-text-secondary);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 可拉伸侧栏拖拽手柄 */
+.resizable-sidebar-handle {
+  user-select: none;
+  touch-action: none;
+}
+.resizable-sidebar-handle:hover {
+  background: var(--ant-color-primary-border);
+}
+.resizable-sidebar-handle:active {
+  background: var(--ant-color-primary);
+}
+
 .agent-sidebar-title {
   font-size: 11px;
   font-weight: 600;
@@ -1364,6 +1441,34 @@
   border-radius: 4px;
   background: var(--ant-color-fill-quaternary);
   font-size: 11px;
+}
+
+/* 输入框占位提示（@ / 命令等） */
+.chat-input-placeholder {
+  font-size: 13px;
+  color: var(--ant-color-text-tertiary);
+}
+.chat-input-placeholder code {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--ant-color-fill-quaternary);
+  font-size: 12px;
+  font-weight: 500;
+}
+.chat-input-placeholder-sep {
+  color: var(--ant-color-text-quaternary);
+  user-select: none;
+}
+
+/* @ / 提示候选框（LobeUI List） */
+.mention-slash-overlay .lobe-list-item {
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+.mention-slash-desc {
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
+  font-weight: normal;
 }
 
 .agent-input-wrap {

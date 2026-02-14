@@ -1,8 +1,9 @@
 /**
- * @ 引用与 / slash 命令下拉叠加层
- * 检测输入中的 @ 或 /，展示候选并支持选择插入
+ * @ 引用与 / slash 命令提示候选框
+ * 使用 @lobehub/ui List 组件，检测 @ 或 / 触发后展示候选并支持选择插入
  */
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { List, Tag } from '@lobehub/ui'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useChatInputStore } from './store'
 import type { ScopeRefItem, SlashCommandItem } from './store/initialState'
 
@@ -62,6 +63,7 @@ const MentionSlashOverlay = memo(() => {
   )
 
   const [selectedIndex, setSelectedIndex] = useState(0)
+  const overlayRef = useRef<HTMLDivElement>(null)
 
   const parsed = useMemo(() => {
     const at = parseAtTrigger(markdownContent)
@@ -159,72 +161,93 @@ const MentionSlashOverlay = memo(() => {
     return () => window.removeEventListener('keydown', handleKeyDownGlobal, true)
   }, [visible, handleKeyDownGlobal])
 
+  // 键盘切换候选项时，将当前选中项滚动到可视区域
+  useEffect(() => {
+    if (!visible || candidates.length === 0) return
+    const container = overlayRef.current
+    if (!container) return
+    const listRoot = container.firstElementChild
+    let item: HTMLElement | undefined = listRoot?.children[selectedIndex] as HTMLElement | undefined
+    if (!item && listRoot) {
+      const byRole = listRoot.querySelectorAll('[role="option"], [role="menuitem"]')
+      item = byRole[selectedIndex] as HTMLElement | undefined
+    }
+    if (!item && listRoot) {
+      const byClass = listRoot.querySelectorAll('[class*="list-item"], [class*="ListItem"]')
+      item = byClass[selectedIndex] as HTMLElement | undefined
+    }
+    if (item) {
+      requestAnimationFrame(() => {
+        item!.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      })
+    }
+  }, [selectedIndex, visible, candidates.length])
+
+  const listItems = useMemo(() => {
+    return candidates.map((c, i) => {
+      if (isAt) {
+        const item = c as ScopeRefItem
+        const key = `${item.kind}:${item.id}`
+        const refKey = kindToKey(item.kind)
+        const title = item.title.length > 40 ? item.title.slice(0, 40) + '…' : item.title
+        return {
+          key,
+          title: `@${refKey}:${item.id.slice(0, 8)} ${title}`,
+          addon: <Tag>{refKey}</Tag>,
+          active: selectedIndex === i,
+          onClick: () => selectItem(i),
+          onMouseEnter: () => setSelectedIndex(i)
+        }
+      }
+      const cmd = c as SlashCommandItem
+      return {
+        key: cmd.name,
+        title: `/${cmd.name}`,
+        addon: cmd.description ? (
+          <span className="mention-slash-desc">{cmd.description}</span>
+        ) : null,
+        active: selectedIndex === i,
+        onClick: () => selectItem(i),
+        onMouseEnter: () => setSelectedIndex(i)
+      }
+    })
+  }, [candidates, isAt, selectedIndex, selectItem])
+
+  const activeKey = useMemo(() => {
+    if (candidates.length === 0 || selectedIndex < 0 || selectedIndex >= candidates.length)
+      return undefined
+    const c = candidates[selectedIndex]
+    return isAt
+      ? `${(c as ScopeRefItem).kind}:${(c as ScopeRefItem).id}`
+      : (c as SlashCommandItem).name
+  }, [candidates, isAt, selectedIndex])
+
   if (!visible) return null
 
   return (
     <div
+      ref={overlayRef}
       className="mention-slash-overlay"
       role="listbox"
       tabIndex={-1}
+      aria-label={isAt ? '引用候选' : '命令候选'}
       style={{
         position: 'absolute',
         left: 0,
         right: 0,
-        top: '100%',
+        bottom: '100%',
         zIndex: 100,
-        marginTop: 4,
-        maxHeight: 240,
+        marginBottom: 4,
+        maxHeight: 280,
         overflow: 'auto',
-        background: 'var(--colorBgContainer, #fff)',
+        background: 'var(--ant-color-bg-elevated, var(--colorBgContainer, #fff))',
         borderRadius: 8,
-        boxShadow: '0 4px 12px rgba(0,0,0,.15)',
-        border: '1px solid var(--colorBorder, #d9d9d9)',
+        boxShadow: '0 4px 12px rgba(0,0,0,.12)',
+        border: '1px solid var(--ant-color-border, var(--colorBorder, #d9d9d9))',
         padding: 4
       }}
     >
-      {candidates.map((c, i) => (
-        <button
-          key={
-            isAt
-              ? `${(c as ScopeRefItem).kind}:${(c as ScopeRefItem).id}`
-              : (c as SlashCommandItem).name
-          }
-          type="button"
-          role="option"
-          aria-selected={i === selectedIndex}
-          className={`mention-slash-item ${i === selectedIndex ? 'selected' : ''}`}
-          style={{
-            display: 'block',
-            width: '100%',
-            textAlign: 'left',
-            padding: '8px 12px',
-            border: 'none',
-            background: i === selectedIndex ? 'var(--colorPrimaryBg, #e6f4ff)' : 'transparent',
-            borderRadius: 6,
-            cursor: 'pointer',
-            fontSize: 13
-          }}
-          onClick={() => selectItem(i)}
-          onMouseEnter={() => setSelectedIndex(i)}
-        >
-          {isAt ? (
-            <>
-              <span style={{ color: 'var(--colorTextSecondary, #8c8c8c)' }}>
-                @{kindToKey((c as ScopeRefItem).kind)}:{(c as ScopeRefItem).id.slice(0, 8)}
-              </span>{' '}
-              {(c as ScopeRefItem).title.slice(0, 40)}
-              {(c as ScopeRefItem).title.length > 40 ? '…' : ''}
-            </>
-          ) : (
-            <>
-              <span style={{ fontWeight: 600 }}>{`/${(c as SlashCommandItem).name}`}</span>{' '}
-              <span style={{ color: 'var(--colorTextSecondary, #8c8c8c)' }}>
-                {(c as SlashCommandItem).description}
-              </span>
-            </>
-          )}
-        </button>
-      ))}
+      <List activeKey={activeKey} items={listItems} />
     </div>
   )
 })
