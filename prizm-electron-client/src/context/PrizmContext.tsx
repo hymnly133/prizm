@@ -127,7 +127,7 @@ export function PrizmProvider({ children }: { children: ReactNode }) {
         const m = new PrizmClientManager({
           config: cfg,
           subscribeEvents: 'all',
-          notifyEvents: cfg.notify_events ?? ['notification'],
+          notifyEvents: cfg.notify_events ?? ['notification', 'todo_list:updated'],
           onNotify: (payload: NotificationPayload) => {
             opt.onNotify(payload)
             const isUserInitiated =

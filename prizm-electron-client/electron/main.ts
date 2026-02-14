@@ -105,7 +105,7 @@ async function loadConfigFromDisk(): Promise<PrizmConfig> {
         minimize_to_tray: 'true',
         show_notification: 'true'
       },
-      notify_events: ['notification']
+      notify_events: ['notification', 'todo_list:updated']
     }
   }
 }

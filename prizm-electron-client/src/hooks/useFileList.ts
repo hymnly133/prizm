@@ -91,7 +91,7 @@ export function useFileList(scope: string) {
 
         const items: FileItem[] = [
           ...notes.map(toFileItem),
-          ...(todoList && todoList.items.length > 0 ? [todoToFileItem(todoList)] : []),
+          ...(todoList ? [todoToFileItem(todoList)] : []),
           ...documents.map(docToFileItem)
         ]
 
@@ -158,16 +158,8 @@ export function useFileList(scope: string) {
             .catch(() => null)
         )
       }
-      let todoListFetched = false
-      let todoListResult: TodoList | null = null
       if (fetchTodoList) {
-        todoListFetched = true
-        fetches.push(
-          http.getTodoList(s).then((tl) => {
-            todoListResult = tl
-            return tl ? todoToFileItem(tl) : null
-          })
-        )
+        fetches.push(http.getTodoList(s).then((tl) => (tl ? todoToFileItem(tl) : null)))
       }
 
       if (fetches.length === 0) return
@@ -175,13 +167,10 @@ export function useFileList(scope: string) {
       const results = await Promise.all(fetches)
       const newItems = results.filter((x): x is FileItem => x !== null)
 
+      if (newItems.length === 0) return
+
       setFileList((prev) => {
         const prevMap = new Map(prev.map((p) => [`${p.kind}:${p.id}`, p]))
-        if (todoListFetched && todoListResult === null) {
-          for (const k of prevMap.keys()) {
-            if (k.startsWith('todoList:')) prevMap.delete(k)
-          }
-        }
         for (const item of newItems) {
           prevMap.set(`${item.kind}:${item.id}`, item)
         }

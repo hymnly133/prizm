@@ -27,7 +27,7 @@ export default function SettingsPage() {
     port: '4127',
     clientName: 'Prizm Electron Client',
     scopesText: 'default, online',
-    notifyEvents: ['notification'] as string[]
+    notifyEvents: ['notification', 'todo_list:updated'] as string[]
   })
 
   useEffect(() => {
@@ -37,7 +37,7 @@ export default function SettingsPage() {
         port: config.server.port,
         clientName: config.client.name,
         scopesText: config.client.requested_scopes.join(', '),
-        notifyEvents: [...(config.notify_events ?? ['notification'])]
+        notifyEvents: [...(config.notify_events ?? ['notification', 'todo_list:updated'])]
       })
     }
   }, [config])
@@ -62,7 +62,7 @@ export default function SettingsPage() {
         minimize_to_tray: 'true',
         show_notification: 'true'
       },
-      notify_events: ['notification']
+      notify_events: ['notification', 'todo_list:updated']
     }
     const cfg: PrizmConfig = { ...base }
     cfg.server = { ...cfg.server, host: form.host, port: form.port }
@@ -158,7 +158,7 @@ export default function SettingsPage() {
         port: '4127',
         clientName: 'Prizm Electron Client',
         scopesText: 'default, online',
-        notifyEvents: ['notification']
+        notifyEvents: ['notification', 'todo_list:updated']
       })
     }
   }, [])
@@ -208,7 +208,10 @@ export default function SettingsPage() {
               placeholder="default, online"
             />
           </Form.Item>
-          <Form.Item label="接收通知的事件" extra="勾选后，对应事件发生时将弹出应用内通知">
+          <Form.Item
+            label="接收通知的事件"
+            extra="勾选后，对应事件发生时将弹出应用内通知。含 TODO 列表更新、便签、文档、剪贴板等。"
+          >
             <Checkbox.Group
               value={form.notifyEvents}
               onChange={(vals) => setForm((f) => ({ ...f, notifyEvents: vals as string[] }))}
