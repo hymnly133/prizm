@@ -17,65 +17,62 @@
  *   PRIZM_AUTH_DISABLED=1 yarn start
  */
 
-import path from "path";
-import { config as loadDotenv } from "dotenv";
+import path from 'path'
+import { config as loadDotenv } from 'dotenv'
 
 // 加载 .env：1) 当前工作目录 2) 项目根目录（monorepo 场景，根目录 .env 优先）
-loadDotenv();
-loadDotenv({ path: path.resolve(process.cwd(), "..", ".env"), override: true });
+loadDotenv()
+loadDotenv({ path: path.resolve(process.cwd(), '..', '.env'), override: true })
 
-import { createPrizmServer, createDefaultAdapters } from "./index";
-import { getConfig } from "./config";
+import { createPrizmServer, createDefaultAdapters } from './index'
+import { getConfig } from './config'
 
-const args = process.argv.slice(2);
-const cfg = getConfig();
-let port = cfg.port;
-let host = cfg.host;
+const args = process.argv.slice(2)
+const cfg = getConfig()
+let port = cfg.port
+let host = cfg.host
 
 for (let i = 0; i < args.length; i++) {
-	if (args[i] === "--host" || args[i] === "-H") {
-		host = args[++i] || cfg.host;
-	} else if (args[i] === "--port" || args[i] === "-p") {
-		port = parseInt(args[++i]) || cfg.port;
-	} else if (/^\d+$/.test(args[i])) {
-		port = parseInt(args[i]);
-	}
+  if (args[i] === '--host' || args[i] === '-H') {
+    host = args[++i] || cfg.host
+  } else if (args[i] === '--port' || args[i] === '-p') {
+    port = parseInt(args[++i]) || cfg.port
+  } else if (/^\d+$/.test(args[i])) {
+    port = parseInt(args[i])
+  }
 }
 
 async function main(): Promise<void> {
-	console.log("🎯 Prizm Server CLI\n");
+  console.log('🎯 Prizm Server CLI\n')
 
-	const adapters = createDefaultAdapters();
-	const server = createPrizmServer(adapters, {
-		port,
-		host,
-		authEnabled: cfg.authEnabled,
-	});
+  const adapters = createDefaultAdapters()
+  const server = createPrizmServer(adapters, {
+    port,
+    host,
+    authEnabled: cfg.authEnabled
+  })
 
-	try {
-		await server.start();
-		const addr = server.getAddress();
-		console.log(`✅ Server running at ${addr}`);
-		console.log(`   Dashboard: ${addr}/dashboard/\n`);
-	} catch (error) {
-		console.error(
-			"❌ Failed to start:",
-			error instanceof Error ? error.message : String(error)
-		);
-		process.exit(1);
-	}
+  try {
+    await server.start()
+    const addr = server.getAddress()
+    console.log(`✅ Server running at ${addr}`)
+    console.log(`   Dashboard: ${addr}/dashboard/\n`)
+  } catch (error) {
+    console.error('❌ Failed to start:', error instanceof Error ? error.message : String(error))
+    process.exit(1)
+  }
 
-	const shutdown = async (): Promise<void> => {
-		console.log("\n\n👋 Shutting down...");
-		await server.stop();
-		process.exit(0);
-	};
+  const shutdown = async (): Promise<void> => {
+    console.log('\n\n👋 Shutting down...')
+    await server.stop()
+    process.exit(0)
+  }
 
-	process.on("SIGINT", () => void shutdown());
-	process.on("SIGTERM", () => void shutdown());
+  process.on('SIGINT', () => void shutdown())
+  process.on('SIGTERM', () => void shutdown())
 }
 
 main().catch((error) => {
-	console.error("💥 Fatal error:", error);
-	process.exit(1);
-});
+  console.error('💥 Fatal error:', error)
+  process.exit(1)
+})

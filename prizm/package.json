@@ -1,53 +1,56 @@
 {
-	"name": "@prizm/server",
-	"version": "0.1.0",
-	"description": "Prizm efficiency server - HTTP API for sticky notes and notifications",
-	"main": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"bin": {
-		"prizm-server": "./dist/cli.js"
-	},
-	"scripts": {
-		"kill-port": "powershell -ExecutionPolicy Bypass -File scripts/kill-port.ps1",
-		"build": "yarn workspace @prizm/shared build && tsc && yarn build:panel",
-		"build:panel": "yarn --cwd panel build",
-		"dev": "tsc && concurrently \"tsc -w\" \"node dist/cli.js\"",
-		"dev:panel": "yarn --cwd panel dev",
-		"clean": "rm -rf dist",
-		"start": "node dist/cli.js",
-		"test": "vitest run",
-		"test:watch": "vitest",
-		"test:example": "node dist/example.js",
-		"test:scope": "node scripts/scope-test.mjs",
-		"test:scope:client": "node scripts/scope-test-client.mjs",
-		"mcp:stdio": "node dist/mcp/stdio-bridge.js"
-	},
-	"keywords": [
-		"prizm",
-		"efficiency",
-		"server",
-		"notes",
-		"notifications"
-	],
-	"author": "Prizm Team",
-	"license": "MIT",
-	"dependencies": {
-		"@modelcontextprotocol/sdk": "^1.26.0",
-		"cors": "^2.8.5",
-		"dotenv": "^17.2.4",
-		"express": "^4.18.2",
-		"uuid": "^11.0.3",
-		"ws": "^8.18.0",
-		"zod": "^4.3.6"
-	},
-	"devDependencies": {
-		"@prizm/shared": "workspace:*",
-		"@types/cors": "^2.8.17",
-		"@types/express": "^4.17.21",
-		"@types/node": "^22.0.0",
-		"@types/ws": "^8.5.13",
-		"concurrently": "^9.1.0",
-		"typescript": "^5.9.3",
-		"vitest": "^4.0.18"
-	}
+  "name": "@prizm/server",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Prizm efficiency server - HTTP API for sticky notes and notifications",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "prizm-server": "./dist/cli.js"
+  },
+  "scripts": {
+    "kill-port": "powershell -ExecutionPolicy Bypass -File scripts/kill-port.ps1",
+    "build": "yarn workspace @prizm/shared build && tsup && yarn build:panel",
+    "build:panel": "yarn --cwd panel build",
+    "dev": "concurrently \"tsup --watch\" \"wait-on dist/cli.js && node dist/cli.js\"",
+    "dev:panel": "yarn --cwd panel dev",
+    "clean": "rm -rf dist",
+    "start": "node dist/cli.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:example": "node dist/example.js",
+    "test:scope": "node scripts/scope-test.mjs",
+    "test:scope:client": "node scripts/scope-test-client.mjs",
+    "mcp:stdio": "node dist/mcp/stdio-bridge.js"
+  },
+  "keywords": [
+    "prizm",
+    "efficiency",
+    "server",
+    "notes",
+    "notifications"
+  ],
+  "author": "Prizm Team",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "uuid": "^13.0.0",
+    "ws": "^8.19.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@prizm/shared": "workspace:*",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.2.3",
+    "@types/ws": "^8.18.1",
+    "concurrently": "^9.2.1",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18",
+    "wait-on": "^9.0.4"
+  }
 }
