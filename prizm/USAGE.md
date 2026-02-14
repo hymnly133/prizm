@@ -43,6 +43,9 @@ node cli.js --host 0.0.0.0
 | `PRIZM_DATA_DIR` | .prizm-data | 数据目录（便签、客户端等） |
 | `PRIZM_AUTH_DISABLED` | 0 | 设为 1 关闭鉴权 |
 | `PRIZM_LOG_LEVEL` | info | 日志级别：info / warn / error |
+| `PRIZM_AGENT_SCOPE_CONTEXT_MAX_CHARS` | 4000 | Agent scope 上下文最大字符数（约 2000 tokens） |
+| `PRIZM_DOC_SUMMARY_MIN_LEN` | 500 | 文档 content 超过此长度才生成 LLM 摘要 |
+| `PRIZM_DOC_SUMMARY_ENABLED` | 1 | 设为 0 禁用文档摘要生成 |
 
 ### 关闭鉴权（本地开发）
 

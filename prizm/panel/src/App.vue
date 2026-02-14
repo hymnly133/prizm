@@ -62,6 +62,7 @@ const navItems = [
   { path: '/clipboard', label: '剪贴板' },
   { path: '/pomodoro', label: '番茄钟' },
   { path: '/agent', label: 'Agent' },
+  { path: '/settings', label: '设置' },
   { path: '/notify', label: '通知' }
 ]
 

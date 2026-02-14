@@ -273,6 +273,58 @@ export const deleteDocument = (id: string, scope?: string) =>
 // Agent（支持 scope）
 export const listAgentSessions = (scope: string) =>
   request<{ sessions: AgentSession[] }>('/agent/sessions', { scope })
+/** 调试用：获取 scope 上下文摘要预览 */
+export const getAgentScopeContext = (scope: string) =>
+  request<{ summary: string; scope: string }>('/agent/debug/scope-context', {
+    scope
+  })
+
+/** 可引用项（用于 @ 自动补全） */
+export interface ScopeRefItem {
+  id: string
+  kind: 'note' | 'todo' | 'document'
+  title: string
+  charCount: number
+  isShort: boolean
+  updatedAt: number
+  groupOrStatus?: string
+}
+
+export const getAgentScopeItems = (scope: string) =>
+  request<{ refTypes: { key: string; label: string; aliases: string[] }[]; items: ScopeRefItem[] }>(
+    '/agent/scope-items',
+    { scope }
+  )
+
+/** slash 命令列表（用于 / 下拉菜单） */
+export interface SlashCommandItem {
+  name: string
+  aliases: string[]
+  description: string
+}
+
+export const getAgentSlashCommands = (scope: string) =>
+  request<{ commands: SlashCommandItem[] }>('/agent/slash-commands', { scope })
+
+/** 会话上下文追踪状态 */
+export interface SessionContextState {
+  sessionId: string
+  scope: string
+  provisions: {
+    itemId: string
+    kind: string
+    mode: string
+    providedAt: number
+    charCount: number
+    version: number
+    stale: boolean
+  }[]
+  totalProvidedChars: number
+  modifications: { itemId: string; type: string; action: string; timestamp: number }[]
+}
+
+export const getAgentSessionContext = (sessionId: string, scope: string) =>
+  request<SessionContextState>(`/agent/sessions/${sessionId}/context`, { scope })
 export const createAgentSession = (scope?: string) =>
   request<{ session: AgentSession }>('/agent/sessions', {
     method: 'POST',
@@ -283,12 +335,101 @@ export const getAgentSession = (id: string, scope?: string) =>
 export const deleteAgentSession = (id: string, scope?: string) =>
   request<void>(`/agent/sessions/${id}`, { method: 'DELETE', scope })
 
+// Agent 工具设置（内置 + MCP 统一）
+export interface TavilySettings {
+  apiKey?: string
+  enabled?: boolean
+  maxResults?: number
+  searchDepth?: 'basic' | 'advanced' | 'fast' | 'ultra-fast'
+  configured?: boolean
+}
+
+export interface DocumentSummarySettings {
+  enabled?: boolean
+  minLen?: number
+  model?: string
+}
+
+export interface ConversationSummarySettings {
+  enabled?: boolean
+  interval?: number
+  model?: string
+}
+
+export interface AgentLLMSettings {
+  documentSummary?: DocumentSummarySettings
+  conversationSummary?: ConversationSummarySettings
+  defaultModel?: string
+}
+
+export interface AgentToolsSettings {
+  builtin?: { tavily?: TavilySettings }
+  agent?: AgentLLMSettings
+  mcpServers?: Array<{
+    id: string
+    name: string
+    transport: string
+    stdio?: { command: string; args?: string[]; env?: Record<string, string> }
+    url?: string
+    headers?: Record<string, string>
+    enabled: boolean
+  }>
+  updatedAt?: number
+}
+
+export const getAgentTools = () => request<AgentToolsSettings>('/settings/agent-tools')
+
+export const getAgentModels = () =>
+  request<{ provider: string; models: Array<{ id: string; label: string; provider: string }> }>(
+    '/settings/agent-models'
+  )
+
+export const updateAgentTools = (patch: Partial<AgentToolsSettings>) =>
+  request<AgentToolsSettings>('/settings/agent-tools', {
+    method: 'PATCH',
+    body: JSON.stringify(patch)
+  })
+
+export const updateTavilySettings = (update: Partial<TavilySettings>) =>
+  request<{ tavily: TavilySettings | null }>('/settings/agent-tools/builtin/tavily', {
+    method: 'PUT',
+    body: JSON.stringify(update)
+  })
+
+// MCP 服务器（与 settings 统一存储）
+export const listMcpServers = () =>
+  request<{ mcpServers: AgentToolsSettings['mcpServers'] }>('/mcp/servers').then(
+    (r) => r.mcpServers ?? []
+  )
+export const addMcpServer = (config: NonNullable<AgentToolsSettings['mcpServers']>[0]) =>
+  request<NonNullable<AgentToolsSettings['mcpServers']>[0]>('/mcp/servers', {
+    method: 'POST',
+    body: JSON.stringify(config)
+  })
+export const updateMcpServer = (
+  id: string,
+  update: Partial<Omit<NonNullable<AgentToolsSettings['mcpServers']>[0], 'id'>>
+) =>
+  request<NonNullable<AgentToolsSettings['mcpServers']>[0]>(
+    `/mcp/servers/${encodeURIComponent(id)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(update)
+    }
+  )
+export const deleteMcpServer = (id: string) =>
+  request<void>(`/mcp/servers/${encodeURIComponent(id)}`, { method: 'DELETE' })
+export const getMcpServerTools = (id: string) =>
+  request<{
+    tools: Array<{ serverId: string; name: string; fullName: string; description?: string }>
+  }>(`/mcp/servers/${encodeURIComponent(id)}/tools`)
+
 /** 流式对话，返回 ReadableStream，解析 SSE 事件 */
 export async function sendAgentChat(
   id: string,
   content: string,
   scope?: string,
-  model?: string
+  options?: { model?: string; includeScopeContext?: boolean }
 ): Promise<ReadableStream<{ type: string; value?: string }>> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -296,10 +437,13 @@ export async function sendAgentChat(
   }
   let url = `${getBaseUrl()}/agent/sessions/${id}/chat`
   if (scope) url += `?scope=${encodeURIComponent(scope)}`
+  const body: Record<string, unknown> = { content }
+  if (options?.model) body.model = options.model
+  if (options?.includeScopeContext === false) body.includeScopeContext = false
   const res = await fetch(url, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ content, model })
+    body: JSON.stringify(body)
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))

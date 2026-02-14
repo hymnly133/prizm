@@ -10,6 +10,7 @@ import Pomodoro from './views/Pomodoro.vue'
 import Clipboard from './views/Clipboard.vue'
 import Documents from './views/Documents.vue'
 import Agent from './views/Agent.vue'
+import Settings from './views/Settings.vue'
 
 const router = createRouter({
   history: createWebHistory('/dashboard/'),
@@ -22,7 +23,8 @@ const router = createRouter({
     { path: '/pomodoro', name: 'Pomodoro', component: Pomodoro },
     { path: '/clipboard', name: 'Clipboard', component: Clipboard },
     { path: '/documents', name: 'Documents', component: Documents },
-    { path: '/agent', name: 'Agent', component: Agent }
+    { path: '/agent', name: 'Agent', component: Agent },
+    { path: '/settings', name: 'Settings', component: Settings }
   ]
 })
 

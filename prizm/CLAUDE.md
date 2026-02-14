@@ -49,6 +49,7 @@ yarn build:panel
 ### Environment Variables
 
 - `PRIZM_AUTH_DISABLED=1` - Disable authentication for local development
+- `PRIZM_AGENT_SCOPE_CONTEXT_MAX_CHARS` - Agent scope context max chars (default 4000)
 
 ## Architecture
 
