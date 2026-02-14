@@ -148,12 +148,14 @@ Scope 用于隔离不同工作场景的数据（便签、任务、剪贴板等�
 
 ### 任务 (TODO 列表)
 
-每个 scope 一个 TODO 列表，含若干 item。item 有 `id`、`status`(todo|doing|done)、`title`、`description`(可选)。
+每个 scope 可有多个 TODO 列表，每列表含 id、title、items。item 有 `id`、`status`(todo|doing|done)、`title`、`description`(可选)。调用时需明确指定 listId，无隐式默认。
 
 | 工具名 | 说明 | 参数 |
 |-------|------|------|
-| `prizm_list_todo_list` | 列出 TODO 列表，返回 `{ title, items }`，每个 item 含 id、status、title、description | 无 |
-| `prizm_update_todo_list` | 更新 TODO 列表 | `title` (string, 可选)：列表标题；`items` (array, 可选)：全量替换；`updateItem` (object, 可选)：单条更新 `{ id, status?, title?, description? }`，id 来自 list；`updateItems` (array, 可选)：批量更新。仅改状态时推荐用 updateItem |
+| `prizm_list_todo_lists` | 列出所有 TODO 列表，返回 `[{ id, title, items }]`。用于获取 listId | 无 |
+| `prizm_list_todo_list` | 获取指定列表详情 | `listId` (string, **必填**)：来自 prizm_list_todo_lists |
+| `prizm_create_todo` | 创建待办项 | `title` (string, 必填)；`listId` 或 `listTitle` **二选一必填**：listId=追加到已有列表，listTitle=新建列表并添加；`description`、`status` 可选 |
+| `prizm_update_todo_list` | 更新 TODO 列表 | `listId` (string, **必填**)；`title`、`items`、`updateItem`、`updateItems` 至少一个。仅改状态时用 updateItem |
 
 ### 文档 (Documents)
 
@@ -192,8 +194,10 @@ Scope 用于隔离不同工作场景的数据（便签、任务、剪贴板等�
 | prizm_get_note | GET | /notes/:id |
 | prizm_update_note | PATCH | /notes/:id |
 | prizm_delete_note | DELETE | /notes/:id |
-| prizm_list_todo_list | GET | /todo?scope=xxx |
-| prizm_update_todo_list | PATCH/PUT/POST | /todo、/todo/items（body 含 updateItem/updateItems/items） |
+| prizm_list_todo_lists | GET | /todo/lists?scope=xxx |
+| prizm_list_todo_list | GET | /todo/lists/:listId?scope=xxx |
+| prizm_create_todo | POST | /todo/items（body 含 title、listId 或 listTitle） |
+| prizm_update_todo_list | PATCH/PUT/POST | /todo/lists/:listId、/todo/items（需 listId） |
 | prizm_list_documents | GET | /documents?scope=xxx |
 | prizm_create_document | POST | /documents |
 | prizm_get_document | GET | /documents/:id |

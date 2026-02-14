@@ -74,9 +74,9 @@ async function runSearch(
     }
   }
 
-  if (searchTypes.includes('todoList') && adapters.todoList?.getTodoList) {
-    const todo = await adapters.todoList.getTodoList(scope)
-    if (todo) {
+  if (searchTypes.includes('todoList') && adapters.todoList?.getTodoLists) {
+    const todoLists = await adapters.todoList.getTodoLists(scope)
+    for (const todo of todoLists) {
       const parts: string[] = [todo.title ?? '']
       for (const it of todo.items) {
         parts.push(it.title ?? '')

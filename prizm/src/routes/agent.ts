@@ -22,11 +22,8 @@ import { listRefItems } from '../llm/scopeItemRegistry'
 import { listAtReferences } from '../llm/atReferenceRegistry'
 import { registerBuiltinAtReferences } from '../llm/atReferenceRegistry'
 import { getSessionContext } from '../llm/contextTracker'
-import type { ScopeInteraction } from '../llm/scopeInteractionParser'
-import {
-  deriveScopeInteractions,
-  collectToolCallsFromMessages
-} from '../llm/scopeInteractionParser'
+import type { ScopeActivityRecord } from '../llm/scopeInteractionParser'
+import { deriveScopeActivities, collectToolCallsFromMessages } from '../llm/scopeInteractionParser'
 import { registerBuiltinSlashCommands, tryRunSlashCommand } from '../llm/slashCommands'
 import { listSlashCommands } from '../llm/slashCommandRegistry'
 import { getAllToolMetadata } from '../llm/toolMetadata'
@@ -154,26 +151,33 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         return res.status(403).json({ error: 'scope access denied' })
       }
       const state = getSessionContext(scope, id)
-      let scopeInteractions: ScopeInteraction[] = []
+      let parsedActivities: ScopeActivityRecord[] = []
       if (adapter?.getSession) {
         const session = await adapter.getSession(scope, id)
         if (session?.messages?.length) {
           const collected = collectToolCallsFromMessages(session.messages)
-          const all: ScopeInteraction[] = []
+          const all: ScopeActivityRecord[] = []
           for (const { tc, createdAt } of collected) {
-            all.push(...deriveScopeInteractions([tc], createdAt))
+            all.push(...deriveScopeActivities([tc], createdAt))
           }
-          scopeInteractions = all
+          parsedActivities = all
         }
       }
+      // 合并 contextTracker 中的 activities 与 parser 中的 parsedActivities，按 timestamp 排序去重
+      const trackerActivities = state?.activities ?? []
+      const mergedMap = new Map<string, ScopeActivityRecord>()
+      for (const a of [...trackerActivities, ...parsedActivities]) {
+        const key = `${a.toolName}:${a.action}:${a.itemKind ?? ''}:${a.itemId ?? ''}:${a.timestamp}`
+        if (!mergedMap.has(key)) mergedMap.set(key, a)
+      }
+      const activities = [...mergedMap.values()].sort((a, b) => a.timestamp - b.timestamp)
       if (!state) {
         return res.json({
           sessionId: id,
           scope,
           provisions: [],
           totalProvidedChars: 0,
-          modifications: [],
-          scopeInteractions
+          activities
         })
       }
       res.json({
@@ -181,8 +185,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         scope: state.scope,
         provisions: state.provisions,
         totalProvidedChars: state.totalProvidedChars,
-        modifications: state.modifications,
-        scopeInteractions
+        activities
       })
     } catch (error) {
       log.error('get session context error:', error)
