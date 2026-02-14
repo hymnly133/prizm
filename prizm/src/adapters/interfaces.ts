@@ -97,7 +97,7 @@ export interface ITodoListAdapter {
 
   getTodoItem?(scope: string, itemId: string): Promise<TodoItem | null>
 
-  updateTodoList?(scope: string, payload: UpdateTodoListPayload): Promise<TodoList | null>
+  updateTodoList?(scope: string, payload: UpdateTodoListPayload): Promise<TodoList>
 }
 
 // ============ 番茄钟适配器 ============

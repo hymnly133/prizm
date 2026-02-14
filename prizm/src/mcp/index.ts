@@ -329,9 +329,7 @@ function createMcpServerWithTools(
         content: [
           {
             type: 'text' as const,
-            text: todoList
-              ? `Updated todo list: ${todoList.title} (${todoList.items.length} items)`
-              : 'Todo list cleared'
+            text: `Updated todo list: ${todoList.title} (${todoList.items.length} items)`
           }
         ]
       }

@@ -109,17 +109,19 @@ export function createTodoListRoutes(router: Router, adapter?: ITodoListAdapter)
 
       const wsServer = req.prizmServer
       if (wsServer) {
-        const payload_ws = todoList
-          ? {
-              id: todoList.id,
-              scope,
-              title: todoList.title,
-              itemCount: todoList.items.length,
-              doneCount: todoList.items.filter((it) => it.status === 'done').length,
-              sourceClientId: req.prizmClient?.clientId
-            }
-          : { id: '', scope, cleared: true, sourceClientId: req.prizmClient?.clientId }
-        wsServer.broadcast(EVENT_TYPES.TODO_LIST_UPDATED, payload_ws, scope)
+        const doneCount = todoList.items.filter((it) => it.status === 'done').length
+        wsServer.broadcast(
+          EVENT_TYPES.TODO_LIST_UPDATED,
+          {
+            id: todoList.id,
+            scope,
+            title: todoList.title,
+            itemCount: todoList.items.length,
+            doneCount,
+            sourceClientId: req.prizmClient?.clientId
+          },
+          scope
+        )
       }
 
       res.json({ todoList })

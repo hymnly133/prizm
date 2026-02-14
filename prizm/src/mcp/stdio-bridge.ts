@@ -293,14 +293,12 @@ function createStdioServer(): McpServer {
       const data = (await fetchPrizm('/tasks', {
         method: 'PATCH',
         body: JSON.stringify(payload)
-      })) as { todoList: { title: string; items: unknown[] } | null }
+      })) as { todoList: { title: string; items: unknown[] } }
       return {
         content: [
           {
             type: 'text' as const,
-            text: data.todoList
-              ? `Updated todo list: ${data.todoList.title} (${data.todoList.items.length} items)`
-              : 'Todo list cleared'
+            text: `Updated todo list: ${data.todoList.title} (${data.todoList.items.length} items)`
           }
         ]
       }

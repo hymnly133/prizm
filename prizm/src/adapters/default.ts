@@ -178,7 +178,7 @@ export class DefaultTodoListAdapter implements ITodoListAdapter {
     return data.todoList?.items.find((it) => it.id === itemId) ?? null
   }
 
-  async updateTodoList(scope: string, payload: UpdateTodoListPayload): Promise<TodoList | null> {
+  async updateTodoList(scope: string, payload: UpdateTodoListPayload): Promise<TodoList> {
     const data = scopeStore.getScopeData(scope)
     const now = Date.now()
 
@@ -233,13 +233,6 @@ export class DefaultTodoListAdapter implements ITodoListAdapter {
     }
     if (payload.items !== undefined && !payload.updateItem && !payload.updateItems?.length) {
       items = payload.items.map((it) => ensureTodoItem(it as Partial<TodoItem> & { title: string }))
-    }
-
-    if (items.length === 0) {
-      data.todoList = null
-      scopeStore.saveScope(scope)
-      log.info('TodoList cleared (items empty), scope:', scope)
-      return null
     }
 
     const updated: TodoList = {
