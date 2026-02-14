@@ -167,6 +167,8 @@ export interface AgentMessage {
   usage?: MessageUsage
   /** 思考链 / reasoning，支持 thinking 的模型流式输出 */
   reasoning?: string
+  /** 本轮对话的记忆增长（done 事件带回或懒加载） */
+  memoryGrowth?: RoundMemoryGrowth | null
 }
 
 export interface AgentSession {
@@ -260,6 +262,69 @@ export interface SessionContextState {
   totalProvidedChars: number
   /** 统一活动时间线 */
   activities: ScopeActivityRecord[]
+}
+
+// ============ 记忆模块 ============
+
+/** 记忆模块设置（EverMemOS） */
+export interface MemorySettings {
+  /** 是否启用记忆模块 */
+  enabled?: boolean
+  /** 用于记忆处理的模型 ID，空则用默认 */
+  model?: string
+}
+
+/** 单轮对话记忆增长（对话结束时返回，用于在消息旁展示标签） */
+export interface RoundMemoryGrowth {
+  /** 关联的 assistant 消息 ID */
+  messageId: string
+  /** 新增记忆总数 */
+  count: number
+  /** 按类型统计，如 { episodic_memory: 1, event_log: 3 } */
+  byType: Record<string, number>
+  /** 具体记忆列表（用于详情展示） */
+  memories: MemoryItem[]
+}
+
+/** 单条记忆项（API 返回结构） */
+export interface MemoryItem {
+  id: string
+  /** 记忆正文 */
+  memory: string
+  /** 用户标识 */
+  user_id?: string
+  /** 创建时间 ISO */
+  created_at?: string
+  /** 更新时间 ISO */
+  updated_at?: string
+  /** 元数据 */
+  metadata?: Record<string, unknown>
+  /** 搜索时的相似度/得分，仅搜索接口返回 */
+  score?: number
+  /** 分区：null/undefined=User 层；scope=Scope 层；scope:docs=文档记忆；scope:session:id=Session 层（列表接口返回用于 UI 分区） */
+  group_id?: string | null
+  /** 记忆类型（列表接口返回） */
+  memory_type?: string
+}
+
+// ============ Token Usage ============
+
+/** 功能 scope：区分不同功能消耗的 token（与数据 scope 无关） */
+export type TokenUsageScope =
+  | 'chat' // 对话
+  | 'document_summary' // 文档摘要
+  | 'conversation_summary' // 对话摘要
+  | 'memory' // 记忆
+
+export interface TokenUsageRecord {
+  id: string
+  /** 功能维度，用于按功能统计 */
+  usageScope: TokenUsageScope
+  timestamp: number
+  model: string
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
 }
 
 // ============ 通知 ============
