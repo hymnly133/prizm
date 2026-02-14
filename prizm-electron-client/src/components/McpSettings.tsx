@@ -17,24 +17,9 @@ import {
   toast
 } from '@lobehub/ui'
 import { Select } from './ui/Select'
-import type {
-  McpServerConfig,
-  TavilySettings,
-  AgentLLMSettings,
-  AvailableModel
-} from '@prizm/client-core'
+import type { McpServerConfig, TavilySettings } from '@prizm/client-core'
 import { createStaticStyles } from 'antd-style'
-import {
-  ClipboardPaste,
-  Edit,
-  FileText,
-  Globe,
-  Link,
-  MessageSquare,
-  Plus,
-  Terminal,
-  Trash2
-} from 'lucide-react'
+import { ClipboardPaste, Edit, FileText, Globe, Link, Plus, Terminal, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import type { PrizmClient } from '@prizm/client-core'
 import { parseMcpJson, ParseMcpErrorCode, type ParseMcpSuccessResult } from '../utils/parseMcpJson'
@@ -232,170 +217,6 @@ function BuiltinToolsSection({
         <Form.Item>
           <Button onClick={() => void handleSave()} type="primary" loading={saving}>
             保存 Tavily 配置
-          </Button>
-        </Form.Item>
-      </Form>
-    </div>
-  )
-}
-
-function AgentLLMSection({
-  http,
-  onLog
-}: {
-  http: PrizmClient | null
-  onLog?: (msg: string, type: 'info' | 'success' | 'error' | 'warning') => void
-}) {
-  const [agent, setAgent] = useState<Partial<AgentLLMSettings>>({})
-  const [models, setModels] = useState<AvailableModel[]>([])
-  const [loading, setLoading] = useState(false)
-  const [saving, setSaving] = useState(false)
-
-  const load = useCallback(async () => {
-    if (!http) return
-    setLoading(true)
-    try {
-      const [tools, modelsRes] = await Promise.all([http.getAgentTools(), http.getAgentModels()])
-      setAgent(tools.agent ?? {})
-      setModels(modelsRes.models ?? [])
-    } catch (e) {
-      onLog?.(`加载 Agent LLM 配置失败: ${e}`, 'error')
-    } finally {
-      setLoading(false)
-    }
-  }, [http, onLog])
-
-  useEffect(() => {
-    void load()
-  }, [load])
-
-  async function handleSave() {
-    if (!http) return
-    setSaving(true)
-    try {
-      await http.updateAgentTools({ agent })
-      toast.success('Agent LLM 配置已保存')
-      void load()
-    } catch (e) {
-      toast.error(String(e))
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const modelOptions = [
-    { label: '默认（跟随 Provider）', value: '' },
-    ...models.map((m) => ({ label: m.label, value: m.id }))
-  ]
-
-  if (loading) return <Text type="secondary">加载中...</Text>
-
-  return (
-    <div className={styles.serverCard} style={{ marginTop: 12 }}>
-      <div className={styles.sectionTitle}>
-        <MessageSquare size={16} />
-        Agent LLM 设置
-      </div>
-      <p className="form-hint" style={{ marginTop: 6, marginBottom: 10 }}>
-        文档摘要、对话摘要及默认模型，可在客户端选择覆盖
-      </p>
-      <Form className="compact-form" gap={8} layout="vertical">
-        <Form.Item label="默认对话模型" extra="客户端发消息时可覆盖">
-          <Select
-            options={modelOptions}
-            value={agent.defaultModel ?? ''}
-            onChange={(v) => setAgent((a) => ({ ...a, defaultModel: v || undefined }))}
-          />
-        </Form.Item>
-        <Form.Item label="文档摘要">
-          <Checkbox
-            checked={agent.documentSummary?.enabled !== false}
-            onChange={(checked: boolean) =>
-              setAgent((a) => ({
-                ...a,
-                documentSummary: { ...a.documentSummary, enabled: checked }
-              }))
-            }
-          />
-          <span style={{ marginLeft: 8 }}>启用</span>
-        </Form.Item>
-        <Form.Item label="文档摘要模型" extra="超长文档异步生成摘要">
-          <Select
-            options={modelOptions}
-            value={agent.documentSummary?.model ?? ''}
-            onChange={(v) =>
-              setAgent((a) => ({
-                ...a,
-                documentSummary: {
-                  ...a.documentSummary,
-                  model: v || undefined
-                }
-              }))
-            }
-          />
-        </Form.Item>
-        <Form.Item label="文档摘要最小长度" extra="字符数超过此值才触发，默认 500">
-          <Input
-            type="number"
-            min={100}
-            value={agent.documentSummary?.minLen ?? 500}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-              setAgent((a) => ({
-                ...a,
-                documentSummary: {
-                  ...a.documentSummary,
-                  minLen: parseInt(e.target.value, 10) || 500
-                }
-              }))
-            }
-          />
-        </Form.Item>
-        <Form.Item label="对话摘要">
-          <Checkbox
-            checked={agent.conversationSummary?.enabled !== false}
-            onChange={(checked: boolean) =>
-              setAgent((a) => ({
-                ...a,
-                conversationSummary: { ...a.conversationSummary, enabled: checked }
-              }))
-            }
-          />
-          <span style={{ marginLeft: 8 }}>启用</span>
-        </Form.Item>
-        <Form.Item label="对话摘要间隔" extra="每 N 轮 user+assistant 后生成摘要，默认 10">
-          <Input
-            type="number"
-            min={2}
-            value={agent.conversationSummary?.interval ?? 10}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-              setAgent((a) => ({
-                ...a,
-                conversationSummary: {
-                  ...a.conversationSummary,
-                  interval: parseInt(e.target.value, 10) || 10
-                }
-              }))
-            }
-          />
-        </Form.Item>
-        <Form.Item label="对话摘要模型">
-          <Select
-            options={modelOptions}
-            value={agent.conversationSummary?.model ?? ''}
-            onChange={(v) =>
-              setAgent((a) => ({
-                ...a,
-                conversationSummary: {
-                  ...a.conversationSummary,
-                  model: v || undefined
-                }
-              }))
-            }
-          />
-        </Form.Item>
-        <Form.Item>
-          <Button onClick={() => void handleSave()} type="primary" loading={saving}>
-            保存 Agent LLM 配置
           </Button>
         </Form.Item>
       </Form>
@@ -615,8 +436,6 @@ export function McpSettings({ http, onLog }: McpSettingsProps) {
 
       <BuiltinToolsSection http={http} onLog={onLog} />
 
-      <AgentLLMSection http={http} onLog={onLog} />
-
       <Flexbox gap={12} style={{ marginTop: 16 }}>
         <div className={styles.sectionTitle}>
           <Link size={16} />
@@ -729,8 +548,8 @@ export function McpSettings({ http, onLog }: McpSettingsProps) {
                           {r.transport === 'stdio'
                             ? 'STDIO'
                             : r.transport === 'streamable-http'
-                            ? 'Streamable HTTP'
-                            : 'SSE'}
+                              ? 'Streamable HTTP'
+                              : 'SSE'}
                         </Text>
                       </Flexbox>
                     </div>

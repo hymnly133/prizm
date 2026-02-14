@@ -1,5 +1,6 @@
 import { Button, Checkbox, Form, Input } from '@lobehub/ui'
 import { McpSettings } from '../components/McpSettings'
+import { AgentGeneralSettings } from '../components/AgentGeneralSettings'
 import { EVENT_TYPES, buildServerUrl, getEventLabel } from '@prizm/client-core'
 import type { EventType, PrizmConfig } from '@prizm/client-core'
 import { useEffect, useState } from 'react'
@@ -234,6 +235,10 @@ export default function SettingsPage() {
           </Form.Item>
         </Form>
       </div>
+
+      {config?.api_key && (
+        <AgentGeneralSettings http={manager?.getHttpClient() ?? null} onLog={addLog} />
+      )}
 
       {config?.api_key && <McpSettings http={manager?.getHttpClient() ?? null} onLog={addLog} />}
 
