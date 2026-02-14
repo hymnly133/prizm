@@ -1,10 +1,13 @@
 /**
  * 会话级上下文追踪
- * 记录各 scope 数据项在会话中的提供状态（摘要/全量）、stale 检测、Agent 修改记录
+ * 记录各 scope 数据项在会话中的提供状态（摘要/全量）、stale 检测、统一活动记录
  */
 
 import type { ScopeRefKind } from './scopeItemRegistry'
 import { getScopeRefItem } from './scopeItemRegistry'
+import type { ScopeActivityRecord, ScopeActivityAction, ScopeActivityItemKind } from '@prizm/shared'
+
+export type { ScopeActivityRecord, ScopeActivityAction, ScopeActivityItemKind }
 
 export interface ItemProvision {
   itemId: string
@@ -16,19 +19,13 @@ export interface ItemProvision {
   stale: boolean
 }
 
-export interface ModificationRecord {
-  itemId: string
-  type: ScopeRefKind
-  action: 'create' | 'update' | 'delete'
-  timestamp: number
-}
-
 export interface SessionContextState {
   sessionId: string
   scope: string
   provisions: ItemProvision[]
   totalProvidedChars: number
-  modifications: ModificationRecord[]
+  /** 统一活动时间线 */
+  activities: ScopeActivityRecord[]
 }
 
 const sessionMap = new Map<string, SessionContextState>()
@@ -46,7 +43,7 @@ function getOrCreate(scope: string, sessionId: string): SessionContextState {
       scope,
       provisions: [],
       totalProvidedChars: 0,
-      modifications: []
+      activities: []
     }
     sessionMap.set(k, state)
   }
@@ -90,20 +87,15 @@ export function recordProvision(
 }
 
 /**
- * 记录 Agent 通过工具对 scope 数据的修改
+ * 记录统一活动，供 builtinTools 和未来扩展使用
  */
-export function recordModification(
+export function recordActivity(
   scope: string,
   sessionId: string,
-  opts: { itemId: string; type: ScopeRefKind; action: 'create' | 'update' | 'delete' }
+  record: ScopeActivityRecord
 ): void {
   const state = getOrCreate(scope, sessionId)
-  state.modifications.push({
-    itemId: opts.itemId,
-    type: opts.type,
-    action: opts.action,
-    timestamp: Date.now()
-  })
+  state.activities.push(record)
 }
 
 /**
@@ -144,11 +136,14 @@ export function buildProvisionSummary(scope: string, sessionId: string): string 
     const staleTag = p.stale ? ' [已过期]' : ''
     lines.push(`- ${p.kind}:${p.itemId} (${tag}, ${p.charCount} 字)${staleTag}`)
   }
-  if (state.modifications.length) {
+  const writeActivities = state.activities.filter(
+    (a) => a.action === 'create' || a.action === 'update' || a.action === 'delete'
+  )
+  if (writeActivities.length) {
     lines.push('')
     lines.push(
       '本会话内修改: ' +
-        state.modifications.map((m) => `${m.action} ${m.type}:${m.itemId}`).join('; ')
+        writeActivities.map((a) => `${a.action} ${a.itemKind ?? ''}:${a.itemId ?? '?'}`).join('; ')
     )
   }
   return lines.join('\n')

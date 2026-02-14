@@ -80,7 +80,7 @@ function buildNotesSection(
 }
 
 /**
- * 构建待办区块：全量
+ * 构建待办区块：遍历所有 list，全量
  */
 function buildTodoSection(
   scope: string,
@@ -88,20 +88,30 @@ function buildTodoSection(
   maxItems: number,
   sessionId?: string
 ): string {
-  const { todoList } = data
-  if (!todoList?.items?.length) return ''
+  const lists = data.todoLists ?? []
+  const allItems: Array<{
+    item: { id: string; title: string; status: string; updatedAt?: number; description?: string }
+    listTitle: string
+  }> = []
+  for (const list of lists) {
+    for (const it of list.items ?? []) {
+      allItems.push({ item: it, listTitle: list.title ?? '待办' })
+    }
+  }
+  if (!allItems.length) return ''
 
-  const items = [...todoList.items].sort((a, b) => {
+  const sorted = [...allItems].sort((a, b) => {
     const order = { todo: 0, doing: 1, done: 2 }
-    return (order[a.status] ?? 0) - (order[b.status] ?? 0)
+    return (order[a.item.status] ?? 0) - (order[b.item.status] ?? 0)
   })
   const lines: string[] = []
-  for (const it of items.slice(0, maxItems)) {
+  for (const { item: it, listTitle } of sorted.slice(0, maxItems)) {
     const status = it.status === 'done' ? '✓' : it.status === 'doing' ? '◐' : '○'
     const desc = (it as { description?: string }).description
       ? `: ${truncate((it as { description: string }).description, 60)}`
       : ''
-    lines.push(`- ${status} [id:${it.id}] ${it.title}${desc}`)
+    const prefix = lists.length > 1 ? `[${listTitle}] ` : ''
+    lines.push(`- ${status} ${prefix}[id:${it.id}] ${it.title}${desc}`)
     if (sessionId) {
       const charCount =
         (it.title?.length ?? 0) + ((it as { description?: string }).description?.length ?? 0)
@@ -114,8 +124,8 @@ function buildTodoSection(
       })
     }
   }
-  if (items.length > maxItems) {
-    lines.push(`  …共 ${items.length} 项`)
+  if (sorted.length > maxItems) {
+    lines.push(`  …共 ${sorted.length} 项`)
   }
   return `## 待办\n${lines.join('\n')}`
 }

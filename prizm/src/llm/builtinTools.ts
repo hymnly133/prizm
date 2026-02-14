@@ -6,10 +6,11 @@
 import type { LLMTool } from '../adapters/interfaces'
 import { scopeStore } from '../core/ScopeStore'
 import { genUniqueId } from '../id'
-import type { TodoItemStatus } from '../types'
+import type { TodoItemStatus, TodoList } from '../types'
 import { scheduleDocumentSummary } from './documentSummaryService'
 import { listRefItems, getScopeRefItem, getScopeStats, searchScopeItems } from './scopeItemRegistry'
-import { recordModification } from './contextTracker'
+import { recordActivity } from './contextTracker'
+import type { ScopeActivityItemKind, ScopeActivityAction } from '@prizm/shared'
 
 function tool(
   name: string,
@@ -65,26 +66,46 @@ export function getBuiltinTools(): LLMTool[] {
       properties: { noteId: { type: 'string', description: '便签 ID' } },
       required: ['noteId']
     }),
-    tool('prizm_list_todos', '列出当前工作区的待办项，含状态与标题。', {
+    tool('prizm_list_todos', '列出当前工作区的待办项，含状态与标题。多列表时按 list 分组展示。', {
       properties: {},
       required: []
     }),
+    tool(
+      'prizm_list_todo_lists',
+      '列出所有 TODO 列表的 id 与标题，供 prizm_create_todo 选择 listId 或决定用 listTitle 新建。',
+      {
+        properties: {},
+        required: []
+      }
+    ),
     tool('prizm_read_todo', '根据待办项 ID 读取详情。', {
       properties: { todoId: { type: 'string', description: '待办项 ID' } },
       required: ['todoId']
     }),
-    tool('prizm_create_todo', '创建一条待办项。', {
-      properties: {
-        title: { type: 'string', description: '标题' },
-        description: { type: 'string', description: '可选描述' },
-        status: {
-          type: 'string',
-          description: 'todo | doing | done',
-          enum: ['todo', 'doing', 'done']
-        }
-      },
-      required: ['title']
-    }),
+    tool(
+      'prizm_create_todo',
+      '创建一条待办项。必须指定 listId（追加到已有列表）或 listTitle（新建列表并添加），二者必填其一。',
+      {
+        properties: {
+          title: { type: 'string', description: '标题' },
+          description: { type: 'string', description: '可选描述' },
+          listId: {
+            type: 'string',
+            description: '目标列表 id，追加到该列表（与 listTitle 二选一）'
+          },
+          listTitle: {
+            type: 'string',
+            description: '新建列表并添加，listTitle 作为新列表标题（与 listId 二选一）'
+          },
+          status: {
+            type: 'string',
+            description: 'todo | doing | done',
+            enum: ['todo', 'doing', 'done']
+          }
+        },
+        required: ['title']
+      }
+    ),
     tool('prizm_update_todo', '更新待办项状态、标题或描述。', {
       properties: {
         todoId: { type: 'string', description: '待办项 ID' },
@@ -149,12 +170,15 @@ export async function executeBuiltinTool(
 ): Promise<BuiltinToolResult> {
   const data = scopeStore.getScopeData(scope)
 
-  const record = (
-    itemId: string,
-    type: 'note' | 'todo' | 'document',
-    action: 'create' | 'update' | 'delete'
-  ) => {
-    if (sessionId) recordModification(scope, sessionId, { itemId, type, action })
+  const record = (itemId: string, itemKind: ScopeActivityItemKind, action: ScopeActivityAction) => {
+    if (sessionId)
+      recordActivity(scope, sessionId, {
+        toolName,
+        action,
+        itemKind,
+        itemId,
+        timestamp: Date.now()
+      })
   }
 
   try {
@@ -217,11 +241,26 @@ export async function executeBuiltinTool(
       }
 
       case 'prizm_list_todos': {
-        const items = listRefItems(scope, 'todo')
-        if (!items.length) return { text: '当前无待办项。' }
-        const lines = items.map(
-          (r) => `- ${r.id}: [${r.groupOrStatus}] ${r.title} (${r.charCount} 字)`
-        )
+        const lists = data.todoLists ?? []
+        if (!lists.length) return { text: '当前无待办列表。' }
+        const lines: string[] = []
+        for (const list of lists) {
+          if (list.items?.length) {
+            lines.push(`[${list.title}] (listId: ${list.id})`)
+            for (const it of list.items) {
+              lines.push(`  - ${it.id}: [${it.status}] ${it.title}`)
+            }
+          } else {
+            lines.push(`[${list.title}] (listId: ${list.id}) 空`)
+          }
+        }
+        return { text: lines.length ? lines.join('\n') : '当前无待办项。' }
+      }
+
+      case 'prizm_list_todo_lists': {
+        const lists = data.todoLists ?? []
+        if (!lists.length) return { text: '当前无待办列表。' }
+        const lines = lists.map((l) => `- ${l.id}: ${l.title} (${l.items?.length ?? 0} 项)`)
         return { text: lines.join('\n') }
       }
 
@@ -233,17 +272,30 @@ export async function executeBuiltinTool(
       }
 
       case 'prizm_create_todo': {
-        let list = data.todoList
-        if (!list) {
+        if (!data.todoLists) data.todoLists = []
+        const listTitle = typeof args.listTitle === 'string' ? args.listTitle.trim() : undefined
+        const listId = typeof args.listId === 'string' ? args.listId : undefined
+        if (!listId && !listTitle) {
+          return {
+            text: '必须指定 listId（追加到已有列表）或 listTitle（新建列表并添加）',
+            isError: true
+          }
+        }
+        let list: TodoList
+        if (listTitle) {
           const now = Date.now()
           list = {
             id: genUniqueId(),
-            title: '待办',
+            title: listTitle,
             items: [],
             createdAt: now,
             updatedAt: now
           }
-          data.todoList = list
+          data.todoLists.push(list)
+        } else {
+          const found = data.todoLists.find((l) => l.id === listId)
+          if (!found) return { text: `待办列表不存在: ${listId}`, isError: true }
+          list = found
         }
         const title = typeof args.title === 'string' ? args.title : '(无标题)'
         const description = typeof args.description === 'string' ? args.description : undefined
@@ -263,13 +315,16 @@ export async function executeBuiltinTool(
         list.updatedAt = now
         scopeStore.saveScope(scope)
         record(item.id, 'todo', 'create')
-        return { text: `已创建待办项 ${item.id}` }
+        return {
+          text: `已创建待办项 ${item.id}` + (listTitle ? `（新建列表「${listTitle}」）` : '')
+        }
       }
 
       case 'prizm_update_todo': {
-        const list = data.todoList
-        if (!list) return { text: '当前无待办列表。', isError: true }
+        const lists = data.todoLists ?? []
         const todoId = typeof args.todoId === 'string' ? args.todoId : ''
+        const list = lists.find((l) => l.items.some((it) => it.id === todoId))
+        if (!list) return { text: `待办项不存在: ${todoId}`, isError: true }
         const idx = list.items.findIndex((it) => it.id === todoId)
         if (idx < 0) return { text: `待办项不存在: ${todoId}`, isError: true }
         const cur = list.items[idx]
@@ -287,9 +342,10 @@ export async function executeBuiltinTool(
       }
 
       case 'prizm_delete_todo': {
-        const list = data.todoList
-        if (!list) return { text: '当前无待办列表。', isError: true }
+        const lists = data.todoLists ?? []
         const todoId = typeof args.todoId === 'string' ? args.todoId : ''
+        const list = lists.find((l) => l.items.some((it) => it.id === todoId))
+        if (!list) return { text: `待办项不存在: ${todoId}`, isError: true }
         const idx = list.items.findIndex((it) => it.id === todoId)
         if (idx < 0) return { text: `待办项不存在: ${todoId}`, isError: true }
         list.items.splice(idx, 1)
@@ -386,6 +442,7 @@ export const BUILTIN_TOOL_NAMES = new Set([
   'prizm_update_note',
   'prizm_delete_note',
   'prizm_list_todos',
+  'prizm_list_todo_lists',
   'prizm_read_todo',
   'prizm_create_todo',
   'prizm_update_todo',

@@ -1,21 +1,11 @@
 /**
- * 从工具调用解析 Scope 交互记录
+ * 从工具调用解析 Scope 活动记录
  * 用于 AgentRightSidebar 展示「正在读取 / 已读 / 已创建 / 已更新 / 已删除」等
  */
 
-export type ScopeInteractionAction = 'read' | 'create' | 'update' | 'delete' | 'list' | 'search'
+import type { ScopeActivityRecord, ScopeActivityAction, ScopeActivityItemKind } from '@prizm/shared'
 
-export type ScopeInteractionItemKind = 'note' | 'document' | 'todo' | 'clipboard'
-
-export interface ScopeInteraction {
-  toolName: string
-  action: ScopeInteractionAction
-  itemKind?: ScopeInteractionItemKind
-  itemId?: string
-  title?: string
-  /** 消息时间戳，用于排序 */
-  timestamp?: number
-}
+export type { ScopeActivityRecord, ScopeActivityAction, ScopeActivityItemKind }
 
 /** 工具调用记录（与 MessagePartTool / ToolCallRecord 兼容） */
 export interface ToolCallInput {
@@ -46,13 +36,13 @@ function extractIdFromResult(result: string): string | undefined {
 }
 
 /**
- * 从会话中收集的 toolCalls 解析出 scope 交互列表
+ * 从会话中收集的 toolCalls 解析出统一 scope 活动记录列表
  */
-export function deriveScopeInteractions(
+export function deriveScopeActivities(
   toolCalls: ToolCallInput[],
   messageCreatedAt?: number
-): ScopeInteraction[] {
-  const out: ScopeInteraction[] = []
+): ScopeActivityRecord[] {
+  const out: ScopeActivityRecord[] = []
   const ts = messageCreatedAt ?? Date.now()
 
   for (const tc of toolCalls) {
@@ -121,6 +111,7 @@ export function deriveScopeInteractions(
         break
       case 'prizm_list_todos':
       case 'prizm_list_todo_list':
+      case 'prizm_list_todo_lists':
         out.push({ toolName: name, action: 'list', itemKind: 'todo', timestamp: ts })
         break
       case 'prizm_create_todo':
@@ -232,7 +223,6 @@ export function deriveScopeInteractions(
         break
 
       default:
-        // MCP 工具若以 prizm_ 开头可尝试按模式推断，暂跳过
         break
     }
   }

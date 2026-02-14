@@ -132,9 +132,9 @@ export function listTopLevel(scope: string): ScopeTopLevelItem[] {
     dataAvailable: true
   })
 
-  // todoList
-  if (data.todoList) {
-    const items = data.todoList.items ?? []
+  // todoList：每个 list 一个顶层项
+  for (const list of data.todoLists ?? []) {
+    const items = list.items ?? []
     const todoCharCount = items.reduce(
       (sum, it) =>
         sum + (it.title?.length ?? 0) + ((it as { description?: string }).description?.length ?? 0),
@@ -142,11 +142,11 @@ export function listTopLevel(scope: string): ScopeTopLevelItem[] {
     )
     result.push({
       kind: 'todoList',
-      id: data.todoList.id,
-      title: data.todoList.title ?? '待办',
+      id: list.id,
+      title: list.title ?? '待办',
       itemCount: items.length,
       totalCharCount: todoCharCount,
-      updatedAt: data.todoList.updatedAt ?? 0,
+      updatedAt: list.updatedAt ?? 0,
       dataAvailable: true
     })
   }
@@ -196,8 +196,8 @@ export function listRefItems(scope: string, kind?: ScopeRefKind): ScopeRefItem[]
     }
   }
   if (!kind || kind === 'todo') {
-    if (data.todoList?.items) {
-      for (const it of data.todoList.items) {
+    for (const list of data.todoLists ?? []) {
+      for (const it of list.items ?? []) {
         out.push(todoToRefItem(it))
       }
     }
@@ -231,13 +231,16 @@ export function getScopeRefItem(
   }
 
   if (kind === 'todo') {
-    const items = data.todoList?.items ?? []
-    const it = items.find((x) => x.id === id)
-    if (!it) return null
-    const desc = (it as { description?: string }).description ?? ''
-    const content = `${it.title ?? ''}\n${desc}`.trim()
-    const base = todoToRefItem(it)
-    return { ...base, content, summary: undefined }
+    for (const list of data.todoLists ?? []) {
+      const it = (list.items ?? []).find((x) => x.id === id)
+      if (it) {
+        const desc = (it as { description?: string }).description ?? ''
+        const content = `${it.title ?? ''}\n${desc}`.trim()
+        const base = todoToRefItem(it)
+        return { ...base, content, summary: undefined }
+      }
+    }
+    return null
   }
 
   if (kind === 'document') {
@@ -262,10 +265,17 @@ export function getScopeStats(scope: string): ScopeStats {
       chars: data.notes.reduce((s, n) => s + (n.content ?? '').length, 0)
     },
     todoList: {
-      count: data.todoList?.items?.length ?? 0,
-      chars: (data.todoList?.items ?? []).reduce(
-        (s, it) =>
-          s + (it.title?.length ?? 0) + ((it as { description?: string }).description?.length ?? 0),
+      count: (data.todoLists ?? []).reduce((n, l) => n + (l.items?.length ?? 0), 0),
+      chars: (data.todoLists ?? []).reduce(
+        (s, l) =>
+          s +
+          (l.items ?? []).reduce(
+            (a, it) =>
+              a +
+              (it.title?.length ?? 0) +
+              ((it as { description?: string }).description?.length ?? 0),
+            0
+          ),
         0
       )
     },
