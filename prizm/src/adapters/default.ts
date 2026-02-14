@@ -8,6 +8,7 @@ import type {
   IStickyNotesAdapter,
   INotificationAdapter,
   ITodoListAdapter,
+  CreateTodoItemPayloadExt,
   IPomodoroAdapter,
   IClipboardAdapter,
   IDocumentsAdapter,
@@ -181,24 +182,40 @@ function ensureTodoItem(
 }
 
 // ============ 默认 TODO 列表适配器 ============
-// item 为顶层元素，list 为包装。list 仅含元数据，items 独立 CRUD。
+// list 为包装层，item 独立 CRUD。支持多 list 每 scope。
+
+function findListByItemId(lists: TodoList[], itemId: string): TodoList | null {
+  return lists.find((l) => l.items.some((it) => it.id === itemId)) ?? null
+}
 
 export class DefaultTodoListAdapter implements ITodoListAdapter {
-  async getTodoList(scope: string, options?: { itemId?: string }): Promise<TodoList | null> {
+  async getTodoLists(scope: string): Promise<TodoList[]> {
     const data = scopeStore.getScopeData(scope)
-    const list = data.todoList
-    if (!list) return null
+    return [...(data.todoLists ?? [])]
+  }
+
+  async getTodoList(
+    scope: string,
+    listId?: string,
+    options?: { itemId?: string }
+  ): Promise<TodoList | null> {
+    const data = scopeStore.getScopeData(scope)
+    const lists = data.todoLists ?? []
     if (options?.itemId) {
+      const list = findListByItemId(lists, options.itemId)
+      if (!list) return null
       const item = list.items.find((it) => it.id === options.itemId)
       return item ? { ...list, items: [item] } : list
     }
-    return list
+    if (listId) {
+      return lists.find((l) => l.id === listId) ?? null
+    }
+    return lists[0] ?? null
   }
 
   async createTodoList(scope: string, payload?: { title?: string }): Promise<TodoList> {
     const data = scopeStore.getScopeData(scope)
     const now = Date.now()
-    if (data.todoList) return data.todoList
     const list: TodoList = {
       id: genUniqueId(),
       title: payload?.title ?? '待办',
@@ -206,28 +223,54 @@ export class DefaultTodoListAdapter implements ITodoListAdapter {
       createdAt: now,
       updatedAt: now
     }
-    data.todoList = list
+    if (!data.todoLists) data.todoLists = []
+    data.todoLists.push(list)
     scopeStore.saveScope(scope)
     log.info('TodoList created:', list.id, 'scope:', scope)
     return list
   }
 
-  async updateTodoListTitle(scope: string, title: string): Promise<TodoList> {
+  async updateTodoListTitle(scope: string, listId: string, title: string): Promise<TodoList> {
     const data = scopeStore.getScopeData(scope)
-    const list = data.todoList
-    if (!list) {
-      return this.createTodoList(scope, { title })
-    }
-    const updated: TodoList = { ...list, title, updatedAt: Date.now() }
-    data.todoList = updated
+    const lists = data.todoLists ?? []
+    const idx = lists.findIndex((l) => l.id === listId)
+    if (idx < 0) throw new Error(`TodoList not found: ${listId}`)
+    const updated: TodoList = { ...lists[idx], title, updatedAt: Date.now() }
+    data.todoLists[idx] = updated
     scopeStore.saveScope(scope)
     return updated
   }
 
-  async createTodoItem(scope: string, payload: CreateTodoItemPayload): Promise<TodoList> {
+  async deleteTodoList(scope: string, listId: string): Promise<void> {
     const data = scopeStore.getScopeData(scope)
-    let list = data.todoList
-    if (!list) list = await this.createTodoList(scope, { title: '待办' })
+    const lists = data.todoLists ?? []
+    data.todoLists = lists.filter((l) => l.id !== listId)
+    scopeStore.saveScope(scope)
+    log.info('TodoList deleted:', listId, 'scope:', scope)
+  }
+
+  async createTodoItem(
+    scope: string,
+    payload: CreateTodoItemPayloadExt
+  ): Promise<{ list: TodoList; item: TodoItem }> {
+    const data = scopeStore.getScopeData(scope)
+    if (!data.todoLists) data.todoLists = []
+
+    const hasListTarget =
+      (typeof payload.listTitle === 'string' && payload.listTitle.trim()) ||
+      (typeof payload.listId === 'string' && payload.listId)
+    if (!hasListTarget) {
+      throw new Error('必须指定 listId（追加到已有列表）或 listTitle（新建列表并添加）')
+    }
+    let list: TodoList
+    if (typeof payload.listTitle === 'string' && payload.listTitle.trim()) {
+      list = await this.createTodoList(scope, { title: payload.listTitle.trim() })
+    } else {
+      const found = data.todoLists.find((l) => l.id === payload.listId)
+      if (!found) throw new Error(`TodoList not found: ${payload.listId}`)
+      list = found
+    }
+
     const now = Date.now()
     const item: TodoItem = {
       id: genUniqueId(),
@@ -237,22 +280,22 @@ export class DefaultTodoListAdapter implements ITodoListAdapter {
       createdAt: now,
       updatedAt: now
     }
+    const listIdx = data.todoLists.findIndex((l) => l.id === list.id)
     const items = [...list.items, item]
     const updated: TodoList = { ...list, items, updatedAt: now }
-    data.todoList = updated
+    data.todoLists[listIdx] = updated
     scopeStore.saveScope(scope)
-    return updated
+    return { list: updated, item }
   }
 
   async updateTodoItem(
     scope: string,
     itemId: string,
     payload: UpdateTodoItemPayload
-  ): Promise<TodoList> {
+  ): Promise<TodoList | null> {
     const data = scopeStore.getScopeData(scope)
-    const list = data.todoList
-    if (!list) throw new Error('TodoList not found')
-    const now = Date.now()
+    const list = findListByItemId(data.todoLists ?? [], itemId)
+    if (!list) return null
     const idx = list.items.findIndex((it) => it.id === itemId)
     if (idx < 0) return list
     const cur = list.items[idx]
@@ -262,44 +305,40 @@ export class DefaultTodoListAdapter implements ITodoListAdapter {
       ...(payload.status !== undefined && { status: payload.status as TodoItemStatus }),
       ...(payload.title !== undefined && { title: payload.title }),
       ...(payload.description !== undefined && { description: payload.description }),
-      updatedAt: now
+      updatedAt: Date.now()
     }
-    const updated: TodoList = { ...list, items, updatedAt: now }
-    data.todoList = updated
+    const updated: TodoList = { ...list, items, updatedAt: Date.now() }
+    const listIdx = data.todoLists.findIndex((l) => l.id === list.id)
+    data.todoLists[listIdx] = updated
     scopeStore.saveScope(scope)
     return updated
   }
 
-  async deleteTodoItem(scope: string, itemId: string): Promise<TodoList> {
+  async deleteTodoItem(scope: string, itemId: string): Promise<TodoList | null> {
     const data = scopeStore.getScopeData(scope)
-    const list = data.todoList
-    if (!list) return this.createTodoList(scope)
+    const list = findListByItemId(data.todoLists ?? [], itemId)
+    if (!list) return null
     const items = list.items.filter((it) => it.id !== itemId)
     const updated: TodoList = { ...list, items, updatedAt: Date.now() }
-    data.todoList = updated
+    const listIdx = data.todoLists.findIndex((l) => l.id === list.id)
+    data.todoLists[listIdx] = updated
     scopeStore.saveScope(scope)
     return updated
   }
 
-  async replaceTodoItems(scope: string, items: TodoItem[]): Promise<TodoList> {
+  async replaceTodoItems(scope: string, listId: string, items: TodoItem[]): Promise<TodoList> {
     const data = scopeStore.getScopeData(scope)
-    let list = data.todoList
-    if (!list) list = await this.createTodoList(scope, { title: '待办' })
+    const listIdx = (data.todoLists ?? []).findIndex((l) => l.id === listId)
+    if (listIdx < 0) throw new Error(`TodoList not found: ${listId}`)
+    const list = data.todoLists[listIdx]
     const usedIds = new Set<string>()
     const normalized = items.map((it) =>
       ensureTodoItem(it as Partial<TodoItem> & { title: string }, usedIds)
     )
     const updated: TodoList = { ...list, items: normalized, updatedAt: Date.now() }
-    data.todoList = updated
+    data.todoLists[listIdx] = updated
     scopeStore.saveScope(scope)
     return updated
-  }
-
-  async deleteTodoList(scope: string): Promise<void> {
-    const data = scopeStore.getScopeData(scope)
-    data.todoList = null
-    scopeStore.saveScope(scope)
-    log.info('TodoList deleted, scope:', scope)
   }
 }
 

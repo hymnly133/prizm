@@ -32,8 +32,8 @@ export interface ScopeData {
   notes: StickyNote[]
   /** 便签分组 */
   groups: StickyNoteGroup[]
-  /** TODO 列表（每个 scope 一个） */
-  todoList: TodoList | null
+  /** TODO 列表（每个 scope 可有多个） */
+  todoLists: TodoList[]
   /** 番茄钟会话记录 */
   pomodoroSessions: PomodoroSession[]
   /** 剪贴板历史记录 */
@@ -103,7 +103,7 @@ function createEmptyScopeData(): ScopeData {
   return {
     notes: [],
     groups: [],
-    todoList: null,
+    todoLists: [],
     pomodoroSessions: [],
     clipboard: [],
     documents: [],
@@ -139,21 +139,28 @@ export class ScopeStore {
 
   /** 从 JSON 解析 ScopeData */
   private parseScopeData(raw: Partial<ScopeData>): ScopeData {
+    const todoLists: TodoList[] = (() => {
+      if (Array.isArray((raw as { todoLists?: TodoList[] }).todoLists)) {
+        return ((raw as { todoLists: TodoList[] }).todoLists as TodoList[]).map(
+          migrateTodoListItems
+        )
+      }
+      const list = (raw as { todoList?: TodoList | null }).todoList
+      if (list && typeof list === 'object') {
+        return [migrateTodoListItems(list as TodoList)]
+      }
+      if (
+        Array.isArray((raw as { tasks?: unknown[] }).tasks) &&
+        (raw as { tasks: unknown[] }).tasks.length > 0
+      ) {
+        return [migrateTodoListItems(migrateTasksToTodoList((raw as { tasks: unknown[] }).tasks))]
+      }
+      return []
+    })()
     return {
       notes: Array.isArray(raw.notes) ? raw.notes : [],
       groups: Array.isArray(raw.groups) ? raw.groups : [],
-      todoList: (() => {
-        let list: TodoList | null = null
-        if (raw.todoList && typeof raw.todoList === 'object') {
-          list = raw.todoList as TodoList
-        } else if (
-          Array.isArray((raw as { tasks?: unknown[] }).tasks) &&
-          (raw as { tasks: unknown[] }).tasks.length > 0
-        ) {
-          list = migrateTasksToTodoList((raw as { tasks: unknown[] }).tasks)
-        }
-        return list ? migrateTodoListItems(list) : null
-      })(),
+      todoLists,
       pomodoroSessions: Array.isArray(raw.pomodoroSessions) ? raw.pomodoroSessions : [],
       clipboard: Array.isArray(raw.clipboard) ? raw.clipboard : [],
       documents: Array.isArray(raw.documents) ? raw.documents : [],
@@ -192,6 +199,7 @@ export class ScopeStore {
           'notes',
           'groups',
           'todoList',
+          'todoLists',
           'pomodoroSessions',
           'clipboard',
           'documents',
@@ -228,7 +236,7 @@ export class ScopeStore {
       const data: ScopeData = {
         notes: mdStore.readNotes(dirPath),
         groups: mdStore.readGroups(dirPath),
-        todoList: mdStore.readTodoList(dirPath),
+        todoLists: mdStore.readTodoLists(dirPath),
         pomodoroSessions: mdStore.readPomodoroSessions(dirPath),
         clipboard: mdStore.readClipboard(dirPath),
         documents: mdStore.readDocuments(dirPath),
@@ -279,7 +287,7 @@ export class ScopeStore {
       }
       mdStore.writeNotes(dirPath, data.notes)
       mdStore.writeGroups(dirPath, data.groups)
-      mdStore.writeTodoList(dirPath, data.todoList)
+      mdStore.writeTodoLists(dirPath, data.todoLists)
       mdStore.writePomodoroSessions(dirPath, data.pomodoroSessions)
       mdStore.writeClipboard(dirPath, data.clipboard)
       mdStore.writeDocuments(dirPath, data.documents)
@@ -304,7 +312,10 @@ export class ScopeStore {
     // 容错：老版本数据文件可能缺少新字段或字段被意外修改，这里补齐默认值
     if (!Array.isArray(data.notes)) data.notes = []
     if (!Array.isArray(data.groups)) data.groups = []
-    if (data.todoList === undefined) data.todoList = null
+    if (!Array.isArray(data.todoLists)) {
+      const legacy = (data as { todoList?: TodoList | null }).todoList
+      data.todoLists = legacy ? [legacy] : []
+    }
     if (!Array.isArray(data.pomodoroSessions)) data.pomodoroSessions = []
     if (!Array.isArray(data.clipboard)) data.clipboard = []
     if (!Array.isArray(data.documents)) data.documents = []

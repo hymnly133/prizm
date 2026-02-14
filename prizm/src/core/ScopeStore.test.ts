@@ -24,7 +24,7 @@ describe('ScopeStore', () => {
     const data = store.getScopeData('default')
     expect(data.notes).toEqual([])
     expect(data.groups).toEqual([])
-    expect(data.todoList).toBeNull()
+    expect(data.todoLists).toEqual([])
     expect(data.pomodoroSessions).toEqual([])
     expect(data.clipboard).toEqual([])
     expect(data.documents).toEqual([])

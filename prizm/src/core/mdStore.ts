@@ -153,7 +153,7 @@ export function writeGroups(dir: string, groups: StickyNoteGroup[]): void {
 }
 
 // ============ TodoList ============
-// 存储格式：一个 list 一个文件，items 在 frontmatter 内部
+// 存储格式：todo/ 下每 list 一个 {listId}.md，items 在 frontmatter 内
 
 function parseTodoItem(raw: unknown): TodoItem | null {
   if (!raw || typeof raw !== 'object') return null
@@ -174,10 +174,30 @@ function parseTodoItem(raw: unknown): TodoItem | null {
   }
 }
 
-export function readTodoList(dir: string): TodoList | null {
+/** 读取单个 list 文件 */
+function readSingleTodoListFile(filePath: string): TodoList | null {
+  const parsed = readMd(filePath)
+  if (!parsed) return null
+  const d = parsed.data
+  const id =
+    typeof d.id === 'string' ? d.id : path.basename(filePath, EXT).replace(/^list$/, 'list')
+  const title = typeof d.title === 'string' ? d.title : '待办'
+  const createdAt = (d.createdAt as number) ?? 0
+  const updatedAt = (d.updatedAt as number) ?? 0
+
+  let items: TodoItem[] = []
+  if (Array.isArray(d.items) && d.items.length > 0) {
+    items = d.items.map(parseTodoItem).filter((it): it is TodoItem => it !== null)
+  }
+  items.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
+  return { id, title, items, createdAt, updatedAt }
+}
+
+/** 从旧格式 list.md 迁移为单元素数组 */
+function migrateLegacyListMd(dir: string): TodoList[] {
   const listPath = path.join(dir, 'todo', 'list.md')
   const parsed = readMd(listPath)
-  if (!parsed) return null
+  if (!parsed) return []
   const d = parsed.data
   const id = typeof d.id === 'string' ? d.id : 'list'
   const title = typeof d.title === 'string' ? d.title : '待办'
@@ -185,12 +205,9 @@ export function readTodoList(dir: string): TodoList | null {
   const updatedAt = (d.updatedAt as number) ?? 0
 
   let items: TodoItem[] = []
-
-  // 新格式：items 在 frontmatter 内
   if (Array.isArray(d.items) && d.items.length > 0) {
     items = d.items.map(parseTodoItem).filter((it): it is TodoItem => it !== null)
   } else {
-    // 旧格式迁移：从 items/ 目录读取
     const itemsDir = path.join(dir, 'todo', 'items')
     if (fs.existsSync(itemsDir)) {
       const itemFiles = listMdFiles(itemsDir)
@@ -214,43 +231,85 @@ export function readTodoList(dir: string): TodoList | null {
       }
     }
   }
-
   items.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
-  return { id, title, items, createdAt, updatedAt }
+  return [{ id, title, items, createdAt, updatedAt }]
 }
 
-export function writeTodoList(dir: string, list: TodoList | null): void {
+/** 读取所有 TodoList（新格式：todo/*.md）；兼容旧 list.md 迁移 */
+export function readTodoLists(dir: string): TodoList[] {
+  const todoDir = path.join(dir, 'todo')
+  if (!fs.existsSync(todoDir)) return []
+
+  const lists: TodoList[] = []
+  const listPath = path.join(todoDir, 'list.md')
+  if (fs.existsSync(listPath)) {
+    lists.push(...migrateLegacyListMd(dir))
+  }
+
+  const files = listMdFiles(todoDir)
+  const seenIds = new Set(lists.map((l) => l.id))
+  for (const fp of files) {
+    if (path.basename(fp, EXT) === 'list') continue
+    const list = readSingleTodoListFile(fp)
+    if (list && !seenIds.has(list.id)) {
+      seenIds.add(list.id)
+      lists.push(list)
+    }
+  }
+  return lists.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
+}
+
+/** 写入所有 TodoList（todo/ 下每 list 一个 {listId}.md） */
+export function writeTodoLists(dir: string, lists: TodoList[]): void {
   const todoDir = path.join(dir, 'todo')
   const itemsDir = path.join(todoDir, 'items')
-  if (!list) {
-    if (fs.existsSync(todoDir)) {
-      fs.rmSync(todoDir, { recursive: true })
-    }
+  if (lists.length === 0) {
+    if (fs.existsSync(todoDir)) fs.rmSync(todoDir, { recursive: true })
     return
   }
   if (!fs.existsSync(todoDir)) fs.mkdirSync(todoDir, { recursive: true })
 
-  // 单文件格式：list + items 全部写入 list.md
-  const frontmatter: Record<string, unknown> = {
-    id: list.id,
-    title: list.title,
-    createdAt: list.createdAt,
-    updatedAt: list.updatedAt,
-    items: list.items.map((it) => ({
-      id: it.id,
-      title: it.title,
-      status: it.status,
-      ...(it.description && { description: it.description }),
-      createdAt: it.createdAt ?? 0,
-      updatedAt: it.updatedAt ?? 0
-    }))
+  const ids = new Set(lists.map((l) => l.id))
+  for (const list of lists) {
+    const fp = path.join(todoDir, `${safeId(list.id)}${EXT}`)
+    const frontmatter: Record<string, unknown> = {
+      id: list.id,
+      title: list.title,
+      createdAt: list.createdAt,
+      updatedAt: list.updatedAt,
+      items: list.items.map((it) => ({
+        id: it.id,
+        title: it.title,
+        status: it.status,
+        ...(it.description && { description: it.description }),
+        createdAt: it.createdAt ?? 0,
+        updatedAt: it.updatedAt ?? 0
+      }))
+    }
+    writeMd(fp, frontmatter, '')
   }
-  writeMd(path.join(todoDir, 'list.md'), frontmatter, '')
 
-  // 删除旧格式 items 目录
-  if (fs.existsSync(itemsDir)) {
-    fs.rmSync(itemsDir, { recursive: true })
+  for (const fp of listMdFiles(todoDir)) {
+    const base = path.basename(fp, EXT)
+    if (!ids.has(base)) {
+      try {
+        fs.unlinkSync(fp)
+      } catch {}
+    }
   }
+  if (fs.existsSync(itemsDir)) fs.rmSync(itemsDir, { recursive: true })
+}
+
+/** @deprecated 使用 readTodoLists；保留用于迁移 */
+export function readTodoList(dir: string): TodoList | null {
+  const lists = readTodoLists(dir)
+  if (lists.length > 0) return lists[0]
+  return null
+}
+
+/** @deprecated 使用 writeTodoLists；保留用于迁移 */
+export function writeTodoList(dir: string, list: TodoList | null): void {
+  writeTodoLists(dir, list ? [list] : [])
 }
 
 // ============ Pomodoro ============
