@@ -417,7 +417,7 @@ function createStdioServer(): McpServer {
     'prizm_search',
     {
       description:
-        '统一关键词搜索：在便签、文档、剪贴板、待办中按关键词匹配。输入关键词（支持空格/逗号分隔，自动分词），返回按相关性排序的结果。面向自然语言与大模型，高宽容度子串匹配。',
+        '统一关键词搜索：在便签、文档、剪贴板、待办中按关键词匹配。默认模糊搜索，支持拼写容错。输入关键词（支持空格/逗号分隔，自动分词），返回按相关性排序的结果。',
       inputSchema: z.object({
         keywords: z
           .union([z.string(), z.array(z.string())])
@@ -430,10 +430,11 @@ function createStdioServer(): McpServer {
         mode: z
           .enum(['any', 'all'])
           .optional()
-          .describe('any=任一关键词命中，all=需全部命中，默认 any')
+          .describe('any=任一关键词命中，all=需全部命中，默认 any'),
+        fuzzy: z.number().min(0).max(1).optional().describe('模糊程度 0~1，默认 0.2；0 关闭模糊')
       })
     },
-    async ({ keywords, types, limit, mode }) => {
+    async ({ keywords, types, limit, mode, fuzzy }) => {
       const url = `${PRIZM_URL.replace(/\/+$/, '')}/search${
         PRIZM_SCOPE ? `?scope=${encodeURIComponent(PRIZM_SCOPE)}` : ''
       }`
@@ -448,7 +449,8 @@ function createStdioServer(): McpServer {
           scope: PRIZM_SCOPE,
           types,
           limit: limit ?? 50,
-          mode: mode ?? 'any'
+          mode: mode ?? 'any',
+          fuzzy
         })
       })
       if (!res.ok) throw new Error(`Prizm search error: ${res.status} ${await res.text()}`)

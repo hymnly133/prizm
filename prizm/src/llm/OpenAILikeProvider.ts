@@ -78,6 +78,15 @@ export class OpenAILikeLLMProvider implements ILLMProvider {
 
     if (!response.ok) {
       const errText = await response.text()
+      try {
+        const parsed = JSON.parse(errText) as {
+          usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+        }
+        const errUsage = parseUsageFromChunk(parsed)
+        if (errUsage) yield { done: true, usage: errUsage }
+      } catch {
+        /* ignore parse */
+      }
       throw new Error(`LLM API error ${response.status}: ${errText}`)
     }
 
@@ -176,6 +185,11 @@ export class OpenAILikeLLMProvider implements ILLMProvider {
       yield toolCalls.length
         ? { done: true, usage: lastUsage, toolCalls }
         : { done: true, usage: lastUsage }
+    } catch (e) {
+      if (lastUsage) {
+        yield { done: true, usage: lastUsage }
+      }
+      throw e
     } finally {
       reader.releaseLock()
     }
