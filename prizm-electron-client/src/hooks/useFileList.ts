@@ -84,15 +84,15 @@ export function useFileList(scope: string) {
       if (!http) return
       if (!options?.silent) setFileListLoading(true)
       try {
-        const [notes, todoList, documents] = await Promise.all([
+        const [notes, todoLists, documents] = await Promise.all([
           http.listNotes({ scope: s }),
-          http.getTodoList(s),
+          http.getTodoLists(s),
           http.listDocuments({ scope: s })
         ])
 
         const items: FileItem[] = [
           ...notes.map(toFileItem),
-          ...(todoList ? [todoToFileItem(todoList)] : []),
+          ...todoLists.map(todoToFileItem),
           ...documents.map(docToFileItem)
         ]
 
@@ -134,7 +134,9 @@ export function useFileList(scope: string) {
         else if ((eventType === 'document:created' || eventType === 'document:updated') && id)
           toFetchDoc.add(id)
         else if (eventType === 'todo_list:deleted' && payload?.deleted === true) {
-          removeTodoList = true
+          const listId = (payload as { listId?: string }).listId
+          if (listId) toDelete.add(`todoList:${listId}`)
+          else removeTodoList = true
         } else if (eventType === 'todo_list:created') {
           fetchTodoList = true
         } else if (eventType === 'todo_list:updated') {
@@ -270,15 +272,22 @@ export function useFileList(scope: string) {
       let todoListFetchIndex = -1
       if (fetchTodoList) {
         todoListFetchIndex = fetches.length
-        fetches.push(http.getTodoList(s).then((tl) => (tl ? todoToFileItem(tl) : null)))
+        fetches.push(http.getTodoLists(s).then((lists) => lists.map(todoToFileItem)))
       }
 
       if (fetches.length === 0) return
 
       const results = await Promise.all(fetches)
-      const newItems = results.filter((x): x is FileItem => x !== null)
+      const newItems = results.flatMap((x) =>
+        Array.isArray(x) ? (x as FileItem[]) : x != null ? [x as FileItem] : []
+      )
 
-      if (fetchTodoList && todoListFetchIndex >= 0 && results[todoListFetchIndex] === null) {
+      if (
+        fetchTodoList &&
+        todoListFetchIndex >= 0 &&
+        Array.isArray(results[todoListFetchIndex]) &&
+        (results[todoListFetchIndex] as FileItem[]).length === 0
+      ) {
         setFileList((prev) => sortByUpdatedAt(prev.filter((p) => p.kind !== 'todoList')))
       }
 

@@ -114,8 +114,8 @@ export default function WorkPage() {
           currentScope
         )
       } else if (payload.kind === 'todoList') {
-        await http.updateTodoListTitle(currentScope, payload.title)
-        await http.replaceTodoItems(currentScope, payload.items)
+        await http.updateTodoListTitle(currentScope, f.id, payload.title)
+        await http.replaceTodoItems(currentScope, f.id, payload.items)
       }
       await refreshFileList(currentScope, { silent: true })
       addLog('已保存', 'success')
@@ -133,7 +133,7 @@ export default function WorkPage() {
       if (f.kind === 'note') {
         await http.deleteNote(f.id, currentScope)
       } else if (f.kind === 'todoList') {
-        await http.deleteTodoList(currentScope)
+        await http.deleteTodoList(currentScope, f.id)
       } else {
         await http.deleteDocument(f.id, currentScope)
       }
