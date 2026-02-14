@@ -1,0 +1,251 @@
+/**
+ * Agent 通用设置（LLM 模型 + 记忆模块）
+ * 从 McpSettings.tsx 分离的 AgentLLMSection + 新增 Memory 配置
+ */
+import { Button, Checkbox, Form, Input, Text, toast } from '@lobehub/ui'
+import { Select } from './ui/Select'
+import type { AgentLLMSettings, AvailableModel } from '@prizm/client-core'
+import { createStaticStyles } from 'antd-style'
+import { Brain, MessageSquare } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import type { PrizmClient } from '@prizm/client-core'
+
+const styles = createStaticStyles(({ css, cssVar }) => ({
+  sectionTitle: css`
+    position: relative;
+    display: flex;
+    gap: ${cssVar.marginXS};
+    align-items: center;
+    height: 32px;
+    font-size: ${cssVar.fontSizeLG};
+    font-weight: 600;
+    color: ${cssVar.colorTextHeading};
+    &::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      margin-inline-start: ${cssVar.marginMD};
+      background: linear-gradient(to right, ${cssVar.colorBorder}, transparent);
+    }
+  `,
+  serverCard: css`
+    padding: ${cssVar.paddingMD};
+    border: 1px solid ${cssVar.colorBorder};
+    border-radius: ${cssVar.borderRadiusLG};
+    background: ${cssVar.colorFillAlter};
+    margin-bottom: ${cssVar.marginSM};
+  `
+}))
+
+interface AgentGeneralSettingsProps {
+  http: PrizmClient | null
+  onLog?: (msg: string, type: 'info' | 'success' | 'error' | 'warning') => void
+}
+
+export function AgentGeneralSettings({ http, onLog }: AgentGeneralSettingsProps) {
+  const [agent, setAgent] = useState<Partial<AgentLLMSettings>>({})
+  const [models, setModels] = useState<AvailableModel[]>([])
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  const load = useCallback(async () => {
+    if (!http) return
+    setLoading(true)
+    try {
+      const [tools, modelsRes] = await Promise.all([http.getAgentTools(), http.getAgentModels()])
+      setAgent(tools.agent ?? {})
+      setModels(modelsRes.models ?? [])
+    } catch (e) {
+      onLog?.(`加载 Agent LLM 配置失败: ${e}`, 'error')
+    } finally {
+      setLoading(false)
+    }
+  }, [http, onLog])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  async function handleSave() {
+    if (!http) return
+    setSaving(true)
+    try {
+      await http.updateAgentTools({ agent })
+      toast.success('Agent 设置已保存')
+      void load()
+    } catch (e) {
+      toast.error(String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const modelOptions = [
+    { label: '默认（跟随 Provider）', value: '' },
+    ...models.map((m) => ({ label: m.label, value: m.id }))
+  ]
+
+  if (loading) return <Text type="secondary">加载中...</Text>
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-header">
+        <h2>Agent 服务端设置</h2>
+        <p className="form-hint">配置 Agent 的默认模型、摘要策略和记忆模块</p>
+      </div>
+
+      {/* LLM 模型 & 摘要配置 */}
+      <div className={styles.serverCard} style={{ marginTop: 12 }}>
+        <div className={styles.sectionTitle}>
+          <MessageSquare size={16} />
+          LLM 模型 & 摘要
+        </div>
+        <p className="form-hint" style={{ marginTop: 6, marginBottom: 10 }}>
+          文档摘要、对话摘要及默认模型，可在客户端选择覆盖
+        </p>
+        <Form className="compact-form" gap={8} layout="vertical">
+          <Form.Item label="默认对话模型" extra="客户端发消息时可覆盖">
+            <Select
+              options={modelOptions}
+              value={agent.defaultModel ?? ''}
+              onChange={(v) => setAgent((a) => ({ ...a, defaultModel: v || undefined }))}
+            />
+          </Form.Item>
+          <Form.Item label="文档摘要">
+            <Checkbox
+              checked={agent.documentSummary?.enabled !== false}
+              onChange={(checked: boolean) =>
+                setAgent((a) => ({
+                  ...a,
+                  documentSummary: { ...a.documentSummary, enabled: checked }
+                }))
+              }
+            />
+            <span style={{ marginLeft: 8 }}>启用</span>
+          </Form.Item>
+          <Form.Item label="文档摘要模型" extra="超长文档异步生成摘要">
+            <Select
+              options={modelOptions}
+              value={agent.documentSummary?.model ?? ''}
+              onChange={(v) =>
+                setAgent((a) => ({
+                  ...a,
+                  documentSummary: {
+                    ...a.documentSummary,
+                    model: v || undefined
+                  }
+                }))
+              }
+            />
+          </Form.Item>
+          <Form.Item label="文档摘要最小长度" extra="字符数超过此值才触发，默认 500">
+            <Input
+              type="number"
+              min={100}
+              value={agent.documentSummary?.minLen ?? 500}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                setAgent((a) => ({
+                  ...a,
+                  documentSummary: {
+                    ...a.documentSummary,
+                    minLen: parseInt(e.target.value, 10) || 500
+                  }
+                }))
+              }
+            />
+          </Form.Item>
+          <Form.Item label="对话摘要">
+            <Checkbox
+              checked={agent.conversationSummary?.enabled !== false}
+              onChange={(checked: boolean) =>
+                setAgent((a) => ({
+                  ...a,
+                  conversationSummary: { ...a.conversationSummary, enabled: checked }
+                }))
+              }
+            />
+            <span style={{ marginLeft: 8 }}>启用</span>
+          </Form.Item>
+          <Form.Item label="对话摘要间隔" extra="每 N 轮 user+assistant 后生成摘要，默认 10">
+            <Input
+              type="number"
+              min={2}
+              value={agent.conversationSummary?.interval ?? 10}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                setAgent((a) => ({
+                  ...a,
+                  conversationSummary: {
+                    ...a.conversationSummary,
+                    interval: parseInt(e.target.value, 10) || 10
+                  }
+                }))
+              }
+            />
+          </Form.Item>
+          <Form.Item label="对话摘要模型">
+            <Select
+              options={modelOptions}
+              value={agent.conversationSummary?.model ?? ''}
+              onChange={(v) =>
+                setAgent((a) => ({
+                  ...a,
+                  conversationSummary: {
+                    ...a.conversationSummary,
+                    model: v || undefined
+                  }
+                }))
+              }
+            />
+          </Form.Item>
+        </Form>
+      </div>
+
+      {/* 记忆模块 */}
+      <div className={styles.serverCard} style={{ marginTop: 12 }}>
+        <div className={styles.sectionTitle}>
+          <Brain size={16} />
+          记忆模块
+        </div>
+        <p className="form-hint" style={{ marginTop: 6, marginBottom: 10 }}>
+          启用后 Agent 将自动记住对话中的关键信息，跨会话提供个性化服务
+        </p>
+        <Form className="compact-form" gap={8} layout="vertical">
+          <Form.Item label="启用记忆">
+            <Checkbox
+              checked={agent.memory?.enabled === true}
+              onChange={(checked: boolean) =>
+                setAgent((a) => ({
+                  ...a,
+                  memory: { ...a.memory, enabled: checked }
+                }))
+              }
+            />
+            <span style={{ marginLeft: 8 }}>启用</span>
+          </Form.Item>
+          <Form.Item label="记忆处理模型" extra="用于提取和检索记忆的 LLM 模型">
+            <Select
+              options={modelOptions}
+              value={agent.memory?.model ?? ''}
+              onChange={(v) =>
+                setAgent((a) => ({
+                  ...a,
+                  memory: {
+                    ...a.memory,
+                    model: v || undefined
+                  }
+                }))
+              }
+            />
+          </Form.Item>
+        </Form>
+      </div>
+
+      {/* 统一保存按钮 */}
+      <div style={{ marginTop: 12 }}>
+        <Button onClick={() => void handleSave()} type="primary" loading={saving}>
+          保存 Agent 设置
+        </Button>
+      </div>
+    </div>
+  )
+}

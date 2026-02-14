@@ -4,7 +4,7 @@
  * 支持停止生成、错误提示、会话重命名
  * 输入框使用 @lobehub/editor ChatInput，悬浮面板样式
  */
-import { ActionIcon, Button, Empty, List, Markdown } from '@lobehub/ui'
+import { ActionIcon, Button, Empty, Flexbox, List, Markdown } from '@lobehub/ui'
 import { ChatActionsBar as BaseChatActionsBar, ChatList, type ChatMessage } from '@lobehub/ui/chat'
 
 /** 过滤 createAt/updateAt 等非 DOM 属性，避免 React 警告 */
@@ -17,6 +17,7 @@ function ChatActionsBar(props: React.ComponentProps<typeof BaseChatActionsBar>) 
 }
 import { Pencil, Plus, Trash2 } from 'lucide-react'
 import { useRef, useState, useMemo, useCallback } from 'react'
+import { usePrizmContext } from '../context/PrizmContext'
 import { useAgent } from '../hooks/useAgent'
 import { useAgentScopeData } from '../hooks/useAgentScopeData'
 import { useScope } from '../hooks/useScope'
@@ -25,7 +26,7 @@ import { AgentRightSidebar } from '../components/AgentRightSidebar'
 import { ResizableSidebar } from '../components/layout'
 import { ChatInputProvider, DesktopChatInput, type ActionKeys } from '../features/ChatInput'
 import type { AgentMessage, MessagePart, MessagePartTool } from '@prizm/client-core'
-import { ToolCallCard } from '../components/agent'
+import { ToolCallCard, MemoryGrowthTag } from '../components/agent'
 
 /** 从消息得到按顺序的段落：有 parts 用 parts，否则用 content + toolCalls 推导（一段文本 + 工具在末尾） */
 function getMessageParts(m: AgentMessage): MessagePart[] {
@@ -78,24 +79,26 @@ function toChatMessage(m: AgentMessage & { streaming?: boolean }): ChatMessage {
       streaming: m.streaming,
       reasoning: m.reasoning,
       toolCalls: m.toolCalls,
-      parts: getMessageParts(m)
+      parts: getMessageParts(m),
+      memoryGrowth: m.memoryGrowth,
+      messageId: m.id
     }
   }
 }
 
-/** 助手消息额外信息：思考过程 + MessageUsage；工具已内联时不再底部汇总 */
+/** 助手消息额外信息：思考过程 + MessageUsage + 记忆标签；工具已内联时不再底部汇总 */
 function AssistantMessageExtra(props: ChatMessage) {
+  const { manager } = usePrizmContext() ?? {}
+  const { currentScope } = useScope()
   const extra = props.extra as
     | {
         model?: string
-        usage?: {
-          totalTokens?: number
-          totalInputTokens?: number
-          totalOutputTokens?: number
-        }
+        usage?: { totalTokens?: number; totalInputTokens?: number; totalOutputTokens?: number }
         reasoning?: string
         toolCalls?: Array<MessagePartTool & { id: string }>
         parts?: MessagePart[]
+        memoryGrowth?: import('@prizm/shared').RoundMemoryGrowth | null
+        messageId?: string
       }
     | undefined
   const hasReasoning = !!extra?.reasoning?.trim()
@@ -103,6 +106,16 @@ function AssistantMessageExtra(props: ChatMessage) {
   const hasInlineTools = Array.isArray(parts) && parts.some((p) => p.type === 'tool')
   const toolCalls = Array.isArray(extra?.toolCalls) ? extra.toolCalls : []
   const hasToolCalls = !hasInlineTools && toolCalls.length > 0
+  const http = manager?.getHttpClient()
+
+  const handleFetchRoundMemories = useCallback(
+    async (messageId: string) => {
+      if (!http) return null
+      return http.getRoundMemories(messageId, currentScope)
+    },
+    [http, currentScope]
+  )
+
   return (
     <div className="assistant-message-extra">
       {hasReasoning && (
@@ -123,7 +136,17 @@ function AssistantMessageExtra(props: ChatMessage) {
           </ul>
         </details>
       )}
-      <MessageUsage model={extra?.model} usage={extra?.usage} />
+      <Flexbox horizontal align="center" gap={4} wrap="wrap">
+        <MessageUsage model={extra?.model} usage={extra?.usage} />
+        {extra?.messageId && (
+          <MemoryGrowthTag
+            messageId={extra.messageId}
+            memoryGrowth={extra.memoryGrowth}
+            onFetch={handleFetchRoundMemories}
+            scope={currentScope}
+          />
+        )}
+      </Flexbox>
     </div>
   )
 }

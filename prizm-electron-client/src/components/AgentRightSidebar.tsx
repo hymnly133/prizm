@@ -5,6 +5,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Modal } from '@lobehub/ui'
 import { Select } from './ui/Select'
 import { usePrizmContext } from '../context/PrizmContext'
+import { MemoryInspector } from './agent/MemoryInspector'
+import { TokenUsagePanel } from './agent/TokenUsagePanel'
 import { useScope } from '../hooks/useScope'
 import type {
   Document,
@@ -276,6 +278,18 @@ export function AgentRightSidebar({
           </Modal>
         </section>
 
+        {/* 记忆库 */}
+        <section className="agent-right-section">
+          <h3 className="agent-right-section-title">记忆库</h3>
+          <MemoryInspector />
+        </section>
+
+        {/* Token 使用 */}
+        <section className="agent-right-section">
+          <h3 className="agent-right-section-title">Token 使用</h3>
+          <TokenUsagePanel />
+        </section>
+
         {/* 工作区上下文 */}
         <section className="agent-right-section">
           <h3 className="agent-right-section-title">工作区上下文</h3>
@@ -438,24 +452,24 @@ export function AgentRightSidebar({
                   action === 'read' || action === 'list'
                     ? BookOpen
                     : action === 'search'
-                      ? Search
-                      : action === 'create'
-                        ? PlusCircle
-                        : action === 'update'
-                          ? Pencil
-                          : Trash2
+                    ? Search
+                    : action === 'create'
+                    ? PlusCircle
+                    : action === 'update'
+                    ? Pencil
+                    : Trash2
                 const label =
                   action === 'read'
                     ? '已读取'
                     : action === 'list'
-                      ? '已列出'
-                      : action === 'search'
-                        ? '已搜索'
-                        : action === 'create'
-                          ? '已创建'
-                          : action === 'update'
-                            ? '已更新'
-                            : '已删除'
+                    ? '已列出'
+                    : action === 'search'
+                    ? '已搜索'
+                    : action === 'create'
+                    ? '已创建'
+                    : action === 'update'
+                    ? '已更新'
+                    : '已删除'
                 return (
                   <div key={action} className="agent-scope-interaction-group">
                     <span className="agent-scope-interaction-label">

@@ -163,6 +163,8 @@ export function useAgent(scope: string) {
       const sessionId = session.id
       let lastUsage: AgentMessage['usage'] | undefined
       let lastModel: string | undefined
+      let lastMemoryGrowth: AgentMessage['memoryGrowth'] | undefined
+      let lastMessageId: string | undefined
 
       try {
         let fullContent = ''
@@ -311,6 +313,8 @@ export function useAgent(scope: string) {
                 parts.push({ type: 'text', content: segmentContent })
                 segmentContent = ''
               }
+              lastMemoryGrowth = chunk.memoryGrowth ?? undefined
+              lastMessageId = chunk.messageId
               if (!commandResultContent) {
                 setOptimisticMessages((prev) => {
                   if (prev.length < 2) return prev
@@ -318,12 +322,14 @@ export function useAgent(scope: string) {
                     prev[0],
                     {
                       ...prev[1],
+                      id: lastMessageId ?? prev[1].id,
                       content: prev[1].content,
                       model: lastModel ?? prev[1].model,
                       usage: lastUsage ?? prev[1].usage,
                       toolCalls: fullToolCalls.length > 0 ? fullToolCalls : prev[1].toolCalls,
                       ...(parts.length > 0 && { parts: [...parts] }),
-                      ...(fullReasoning && { reasoning: fullReasoning })
+                      ...(fullReasoning && { reasoning: fullReasoning }),
+                      ...(lastMemoryGrowth && { memoryGrowth: lastMemoryGrowth })
                     }
                   ]
                 })
@@ -354,21 +360,20 @@ export function useAgent(scope: string) {
               ]
             }
           }
+          const assistantWithGrowth = {
+            ...assistantMsg,
+            id: lastMessageId ?? assistantMsg.id,
+            content: fullContent,
+            model: lastModel,
+            usage: lastUsage,
+            ...(fullReasoning && { reasoning: fullReasoning }),
+            ...(fullToolCalls.length > 0 && { toolCalls: fullToolCalls }),
+            ...(parts.length > 0 && { parts: [...parts] }),
+            ...(lastMemoryGrowth && { memoryGrowth: lastMemoryGrowth })
+          }
           return {
             ...base,
-            messages: [
-              ...base.messages,
-              userMsg,
-              {
-                ...assistantMsg,
-                content: fullContent,
-                model: lastModel,
-                usage: lastUsage,
-                ...(fullReasoning && { reasoning: fullReasoning }),
-                ...(fullToolCalls.length > 0 && { toolCalls: fullToolCalls }),
-                ...(parts.length > 0 && { parts: [...parts] })
-              }
-            ]
+            messages: [...base.messages, userMsg, assistantWithGrowth]
           }
         })
         setOptimisticMessages([])
