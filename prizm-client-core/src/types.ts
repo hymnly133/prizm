@@ -3,6 +3,8 @@
  * 领域类型、Auth 类型从 @prizm/shared 导入
  */
 
+import type { MessageUsage } from "@prizm/shared";
+
 // 从 shared 重导出，供依赖 client-core 的包使用
 export type {
 	StickyNote,
@@ -19,6 +21,7 @@ export type {
 	Document,
 	AgentSession,
 	AgentMessage,
+	MessageUsage,
 	NotificationPayload,
 	ClientInfo,
 	ScopeDescription,
@@ -162,7 +165,21 @@ export type WebSocketEventHandler<T extends WebSocketEventType> = (
 
 // ============ Agent 流式对话（仅 client-core） ============
 
+/** SSE 流式 chunk：text 为文本片段，done 为结束（含 model、usage），error 为流式错误 */
+export interface StreamChatChunk {
+	type: string;
+	value?: string;
+	model?: string;
+	usage?: MessageUsage;
+	/** 是否因用户停止而提前结束 */
+	stopped?: boolean;
+}
+
 export interface StreamChatOptions {
 	model?: string;
-	onChunk?: (chunk: { type: string; value?: string }) => void;
+	onChunk?: (chunk: StreamChatChunk) => void;
+	/** 流式错误回调 */
+	onError?: (message: string) => void;
+	/** AbortSignal，用于前端主动取消流式请求 */
+	signal?: AbortSignal;
 }

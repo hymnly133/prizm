@@ -14,6 +14,7 @@ import type {
 	AgentSession,
 	AgentMessage,
 	StreamChatOptions,
+	StreamChatChunk,
 } from "../types";
 
 export interface PrizmClientOptions {
@@ -599,8 +600,35 @@ export class PrizmClient {
 		}
 	}
 
+	async updateAgentSession(
+		id: string,
+		update: { title?: string },
+		scope?: string
+	): Promise<AgentSession> {
+		const s = scope ?? this.defaultScope;
+		const url = this.buildUrl(`/agent/sessions/${encodeURIComponent(id)}`, {
+			scope: s,
+		});
+		const response = await fetch(url, {
+			method: "PATCH",
+			headers: this.buildHeaders(),
+			body: JSON.stringify(update),
+		});
+		if (!response.ok) {
+			const text = await response.text().catch(() => "");
+			throw new Error(
+				`HTTP ${response.status} ${response.statusText}: ${
+					text || "Request failed"
+				}`
+			);
+		}
+		const data = (await response.json()) as { session: AgentSession };
+		return data.session;
+	}
+
 	/**
 	 * 流式对话，消费 SSE 并逐块回调
+	 * 支持 signal 取消和 onError 错误回调
 	 */
 	async streamChat(
 		sessionId: string,
@@ -622,6 +650,7 @@ export class PrizmClient {
 				content,
 				model: options?.model,
 			}),
+			signal: options?.signal,
 		});
 
 		if (!response.ok) {
@@ -644,6 +673,7 @@ export class PrizmClient {
 
 		try {
 			while (true) {
+				if (options?.signal?.aborted) break;
 				const { done, value } = await reader.read();
 				if (done) break;
 
@@ -655,10 +685,10 @@ export class PrizmClient {
 					if (line.startsWith("data: ")) {
 						const data = line.slice(6);
 						try {
-							const parsed = JSON.parse(data) as {
-								type: string;
-								value?: string;
-							};
+							const parsed = JSON.parse(data) as StreamChatChunk;
+							if (parsed.type === "error") {
+								options?.onError?.(parsed.value ?? "Unknown error");
+							}
 							options?.onChunk?.(parsed);
 							if (parsed.type === "text" && parsed.value) {
 								fullContent += parsed.value;
