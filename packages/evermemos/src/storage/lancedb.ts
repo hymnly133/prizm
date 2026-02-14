@@ -22,10 +22,18 @@ export class LanceDBAdapter implements VectorStoreAdapter {
     try {
       table = await db.openTable(collectionName)
       await table.add(items)
-    } catch (e) {
-      // Table might not exist, create it
-      // LanceDB infers schema from first batch
-      table = await db.createTable(collectionName, items)
+    } catch {
+      try {
+        table = await db.createTable(collectionName, items)
+      } catch (createErr) {
+        const msg = createErr instanceof Error ? createErr.message : String(createErr)
+        if (msg.includes('already exists')) {
+          table = await db.openTable(collectionName)
+          await table.add(items)
+        } else {
+          throw createErr
+        }
+      }
     }
   }
 
