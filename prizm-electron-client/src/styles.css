@@ -239,11 +239,67 @@
   overflow-y: auto;
   padding: 24px;
 }
-.work-page--cards .work-page__cards-grid {
+/* 瀑布流网格：Pinterest 风格，小 6 个/行、大 2 个/行，不同高度自动填充空隙
+ * 参考：grid-auto-rows 微行 + grid-row-end span 控制高度 + grid-auto-flow: dense 填缝 */
+.work-page--cards .work-page__cards-grid.work-page__cards-masonry {
+  --masonry-row: 6px;
+  --masonry-gap: 20px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(12, 1fr);
+  grid-auto-rows: var(--masonry-row);
+  gap: var(--masonry-gap);
+  grid-auto-flow: dense;
   align-content: start;
+}
+.work-page--cards .work-page__cards-grid .work-page__card-item {
+  align-self: start;
+  display: flex;
+  min-height: 0;
+}
+.work-page--cards .work-page__cards-grid .work-page__card-item .data-card {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+}
+/* 便签：最小，2 列宽 */
+.work-page--cards .work-page__cards-grid .work-page__card-item:has(.data-card--note),
+.work-page--cards .work-page__cards-grid .work-page__card-item:has(.data-card--skeleton) {
+  grid-column: span 2;
+  grid-row-end: span 10;
+}
+/* 待办：中等，2 列宽 */
+.work-page--cards .work-page__cards-grid .work-page__card-item:has(.data-card--todoList) {
+  grid-column: span 2;
+  grid-row-end: span 14;
+}
+/* 文档：大卡片，6 列宽 */
+.work-page--cards .work-page__cards-grid .work-page__card-item:has(.data-card--document) {
+  grid-column: span 6;
+  grid-row-end: span 22;
+}
+@media (max-width: 1200px) {
+  .work-page--cards .work-page__cards-grid .work-page__card-item:has(.data-card--note),
+  .work-page--cards .work-page__cards-grid .work-page__card-item:has(.data-card--skeleton) {
+    grid-column: span 4;
+    grid-row-end: span 10;
+  }
+  .work-page--cards .work-page__cards-grid .work-page__card-item:has(.data-card--todoList) {
+    grid-column: span 4;
+    grid-row-end: span 14;
+  }
+  .work-page--cards .work-page__cards-grid .work-page__card-item:has(.data-card--document) {
+    grid-column: span 6;
+    grid-row-end: span 22;
+  }
+}
+@media (max-width: 768px) {
+  .work-page--cards .work-page__cards-grid .work-page__card-item:has(.data-card--note),
+  .work-page--cards .work-page__cards-grid .work-page__card-item:has(.data-card--todoList),
+  .work-page--cards .work-page__cards-grid .work-page__card-item:has(.data-card--document),
+  .work-page--cards .work-page__cards-grid .work-page__card-item:has(.data-card--skeleton) {
+    grid-column: span 12;
+    grid-row-end: span 18;
+  }
 }
 .work-page--cards .work-page__empty {
   display: flex;
@@ -260,7 +316,7 @@
   flex-shrink: 0;
 }
 
-/* 大卡片 */
+/* 大卡片 - 基础样式 */
 .data-card {
   background: var(--ant-color-bg-elevated);
   border: 1px solid var(--ant-color-border-secondary);
@@ -270,7 +326,27 @@
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
   display: flex;
   flex-direction: column;
+  min-height: 120px;
+}
+/* 便签：紧凑型，少行预览 */
+.data-card--note {
+  min-height: 100px;
+}
+.data-card--note .data-card__preview {
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+/* 待办：中等 */
+.data-card--todoList {
+  min-height: 120px;
+}
+/* 文档：大卡片，展示更多内容，横跨整行 */
+.data-card--document {
   min-height: 140px;
+}
+.data-card--document .data-card__preview {
+  -webkit-line-clamp: 6;
+  line-clamp: 6;
 }
 .data-card:hover {
   border-color: var(--ant-color-primary);
@@ -304,6 +380,7 @@
   line-height: 1.4;
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -313,6 +390,7 @@
   color: var(--ant-color-text-secondary);
   display: -webkit-box;
   -webkit-line-clamp: 4;
+  line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -326,6 +404,7 @@
   margin: 0;
   display: -webkit-box;
   -webkit-line-clamp: 3;
+  line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -562,10 +641,16 @@
 }
 .task-meta {
   display: flex;
-  gap: 16px;
+  flex-direction: column;
+  gap: 8px;
   margin-bottom: 12px;
-  font-size: 13px;
-  color: var(--ant-color-text-secondary);
+}
+.todo-item-row {
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+.todo-item-row:hover {
+  border-color: var(--ant-color-border);
+  background: var(--ant-color-fill-tertiary);
 }
 .task-desc {
   font-size: 14px;

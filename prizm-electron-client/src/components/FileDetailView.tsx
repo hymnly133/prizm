@@ -1,6 +1,8 @@
-import { Button, Empty, Markdown, Tag } from '@lobehub/ui'
+import { Button, Empty, Flexbox, Markdown, Tag, Text } from '@lobehub/ui'
 import type { FileItem } from '../hooks/useFileList'
 import type { StickyNote, TodoList, Document } from '@prizm/client-core'
+import { getKindLabel } from '../constants/todo'
+import TodoItemRow from './todo/TodoItemRow'
 
 interface FileDetailViewProps {
   file: FileItem | null
@@ -8,8 +10,6 @@ interface FileDetailViewProps {
   onDone: () => void
   onTodoItemStatus?: (itemId: string, status: string) => void
 }
-
-const STATUS_LABELS: Record<string, string> = { todo: '待办', doing: '进行中', done: '已完成' }
 
 export default function FileDetailView({
   file,
@@ -28,7 +28,7 @@ export default function FileDetailView({
   return (
     <div className="file-detail">
       <div className="file-detail-header">
-        <Tag>{file.kind === 'note' ? '便签' : file.kind === 'todoList' ? 'TODO' : '文档'}</Tag>
+        <Tag>{getKindLabel(file.kind)}</Tag>
         <Button type="primary" danger onClick={onDelete}>
           删除
         </Button>
@@ -51,40 +51,20 @@ export default function FileDetailView({
         )}
         {file.kind === 'todoList' && (
           <div className="task-detail">
-            <h2 className="task-title">{(file.raw as TodoList).title}</h2>
-            <ul className="task-meta space-y-2">
+            <h2 className="task-title">{(file.raw as TodoList).title || '待办'}</h2>
+            <Flexbox gap={8} style={{ flexDirection: 'column' }} className="task-meta">
               {(file.raw as TodoList).items.map((it) => (
-                <li
+                <TodoItemRow
                   key={it.id}
-                  className="flex items-start justify-between gap-2 rounded border border-zinc-600/50 p-2"
-                >
-                  <span>
-                    <span className="text-zinc-100">{it.title}</span>
-                    {it.description && (
-                      <p className="mt-1 text-sm text-zinc-400">{it.description}</p>
-                    )}
-                  </span>
-                  {onTodoItemStatus ? (
-                    <select
-                      value={it.status}
-                      className="rounded border border-zinc-600 bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300"
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => onTodoItemStatus(it.id, e.target.value)}
-                    >
-                      <option value="todo">{STATUS_LABELS.todo}</option>
-                      <option value="doing">{STATUS_LABELS.doing}</option>
-                      <option value="done">{STATUS_LABELS.done}</option>
-                    </select>
-                  ) : (
-                    <span className="text-xs text-zinc-500">
-                      {STATUS_LABELS[it.status] ?? it.status}
-                    </span>
-                  )}
-                </li>
+                  item={it}
+                  onStatusChange={
+                    onTodoItemStatus ? (id, status) => onTodoItemStatus(id, status) : undefined
+                  }
+                />
               ))}
-            </ul>
+            </Flexbox>
             {(file.raw as TodoList).items.length === 0 && (
-              <p className="text-zinc-500">暂无 TODO 项</p>
+              <Text type="secondary">暂无 TODO 项</Text>
             )}
           </div>
         )}

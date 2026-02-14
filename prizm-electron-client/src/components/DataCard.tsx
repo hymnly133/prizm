@@ -3,10 +3,12 @@
  */
 import { memo } from 'react'
 import { Button, Markdown, Tag } from '@lobehub/ui'
+import { Icon } from '@lobehub/ui'
 import type { FileItem } from '../hooks/useFileList'
 import type { StickyNote, TodoList, Document } from '@prizm/client-core'
-import { FileText, StickyNote as StickyNoteIcon, ListTodo } from 'lucide-react'
-import { Icon } from '@lobehub/ui'
+import { FileText, ListTodo, StickyNote as StickyNoteIcon } from 'lucide-react'
+import { getKindLabel } from '../constants/todo'
+import TodoListPreview from './todo/TodoListPreview'
 
 function getKindIcon(kind: FileItem['kind']) {
   switch (kind) {
@@ -18,17 +20,6 @@ function getKindIcon(kind: FileItem['kind']) {
       return FileText
     default:
       return FileText
-  }
-}
-
-function getKindLabel(kind: FileItem['kind']) {
-  switch (kind) {
-    case 'note':
-      return '便签'
-    case 'todoList':
-      return 'TODO'
-    case 'document':
-      return '文档'
   }
 }
 
@@ -92,13 +83,7 @@ function DataCard({ file, onClick, onDelete, onDone }: DataCardProps) {
         {file.kind === 'todoList' && (
           <>
             <h3 className="data-card__title">{(file.raw as TodoList).title || '待办'}</h3>
-            <p className="data-card__desc">
-              {(file.raw as TodoList).items
-                .map((it) => it.title)
-                .slice(0, 3)
-                .join(' · ')}
-              {(file.raw as TodoList).items.length > 3 ? ' …' : ''}
-            </p>
+            <TodoListPreview items={(file.raw as TodoList).items} maxItems={3} />
           </>
         )}
       </div>

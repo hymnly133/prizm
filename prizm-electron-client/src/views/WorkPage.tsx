@@ -3,7 +3,7 @@
  */
 import { useState, useMemo, useEffect } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { ActionIcon, Button, Checkbox, Drawer, Empty, Skeleton, toast } from '@lobehub/ui'
+import { ActionIcon, Button, Checkbox, Empty, Flexbox, Modal, Skeleton, toast } from '@lobehub/ui'
 import { App } from 'antd'
 import ScopeSidebar from '../components/ui/ScopeSidebar'
 import SearchSection from '../components/SearchSection'
@@ -16,6 +16,7 @@ import { useLogsContext } from '../context/LogsContext'
 import type { FileKind, FileItem } from '../hooks/useFileList'
 import type { TodoItemStatus } from '@prizm/client-core'
 import { FileText, StickyNote } from 'lucide-react'
+import { getKindLabel, STATUS_LABELS } from '../constants/todo'
 
 export default function WorkPage() {
   const { modal } = App.useApp()
@@ -34,15 +35,15 @@ export default function WorkPage() {
     kind: FileKind
     id: string
   } | null>(null)
-  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
 
   useEffect(() => {
     setSelectedFile(null)
-    setDrawerOpen(false)
+    setPreviewOpen(false)
   }, [currentScope])
 
   useEffect(() => {
-    setDrawerOpen(!!selectedFile)
+    setPreviewOpen(!!selectedFile)
   }, [selectedFile])
 
   const filteredFileList = useMemo(() => {
@@ -98,7 +99,7 @@ export default function WorkPage() {
         await http.deleteDocument(f.id, currentScope)
       }
       setSelectedFile(null)
-      setDrawerOpen(false)
+      setPreviewOpen(false)
       await refreshFileList(currentScope, { silent: true })
       addLog('已删除', 'success')
     } catch (e) {
@@ -126,7 +127,7 @@ export default function WorkPage() {
           }
           if (selectedFile?.kind === file.kind && selectedFile?.id === file.id) {
             setSelectedFile(null)
-            setDrawerOpen(false)
+            setPreviewOpen(false)
           }
           await refreshFileList(currentScope, { silent: true })
           addLog('已删除', 'success')
@@ -142,13 +143,12 @@ export default function WorkPage() {
 
   async function onTodoItemStatus(itemId: string, status: string) {
     if (!manager || !['todo', 'doing', 'done'].includes(status)) return
-    const labels: Record<string, string> = { todo: '待办', doing: '进行中', done: '已完成' }
     try {
       await manager
         .getHttpClient()
         .updateTodoItem(itemId, { status: status as TodoItemStatus }, currentScope)
       await refreshFileList(currentScope, { silent: true })
-      toast.success(`已设为 ${labels[status] ?? status}`)
+      toast.success(`已设为 ${STATUS_LABELS[status as TodoItemStatus] ?? status}`)
       addLog('已更新 TODO 状态', 'success')
     } catch (e) {
       toast.error('更新失败')
@@ -242,10 +242,12 @@ export default function WorkPage() {
 
       <div className="work-page__content">
         {fileListLoading ? (
-          <div className="work-page__cards-grid">
+          <div className="work-page__cards-grid work-page__cards-masonry">
             {[1, 2, 3, 4, 5, 6].map((i) => (
-              <div key={i} className="data-card data-card--skeleton">
-                <Skeleton active paragraph={{ rows: 4 }} />
+              <div key={i} className="work-page__card-item">
+                <div className="data-card data-card--skeleton">
+                  <Skeleton active paragraph={{ rows: 4 }} />
+                </div>
               </div>
             ))}
           </div>
@@ -271,11 +273,12 @@ export default function WorkPage() {
             />
           </div>
         ) : (
-          <div className="work-page__cards-grid">
+          <div className="work-page__cards-grid work-page__cards-masonry">
             <AnimatePresence mode="popLayout" initial={false}>
               {filteredFileList.map((file) => (
                 <motion.div
                   key={`${file.kind}-${file.id}`}
+                  className="work-page__card-item"
                   layout
                   transition={layoutTransition}
                   variants={cardVariants}
@@ -296,34 +299,40 @@ export default function WorkPage() {
         )}
       </div>
 
-      <Drawer
-        title={
-          selectedFileData
-            ? selectedFileData.kind === 'todoList'
-              ? 'TODO'
-              : selectedFileData.kind === 'note'
-              ? '便签'
-              : '文档'
-            : ''
-        }
-        placement="right"
-        open={drawerOpen}
-        onClose={() => {
+      <Modal
+        destroyOnClose
+        open={previewOpen}
+        title={selectedFileData ? getKindLabel(selectedFileData.kind) : ''}
+        width={560}
+        onCancel={() => {
           setSelectedFile(null)
-          setDrawerOpen(false)
+          setPreviewOpen(false)
         }}
-        width={420}
-        styles={{ body: { paddingTop: 12 } }}
+        footer={
+          <Flexbox horizontal justify="flex-end">
+            <Button
+              type="primary"
+              onClick={() => {
+                setSelectedFile(null)
+                setPreviewOpen(false)
+              }}
+            >
+              关闭
+            </Button>
+          </Flexbox>
+        }
       >
         {selectedFileData && (
-          <FileDetailView
-            file={selectedFileData}
-            onDelete={onDeleteFile}
-            onDone={() => {}}
-            onTodoItemStatus={selectedFileData.kind === 'todoList' ? onTodoItemStatus : undefined}
-          />
+          <div style={{ paddingTop: 16, maxHeight: '70vh', overflowY: 'auto' }}>
+            <FileDetailView
+              file={selectedFileData}
+              onDelete={onDeleteFile}
+              onDone={() => {}}
+              onTodoItemStatus={selectedFileData.kind === 'todoList' ? onTodoItemStatus : undefined}
+            />
+          </div>
         )}
-      </Drawer>
+      </Modal>
     </section>
   )
 }

@@ -1,18 +1,10 @@
 import { Input, List, Tag } from '@lobehub/ui'
-import type { ClipboardItem, Document, StickyNote, TodoList } from '@prizm/client-core'
+import type { SearchResult } from '@prizm/client-core'
 import { useRef, useState, useEffect } from 'react'
-import { useDebounce } from '../hooks/useDebounce'
+import { getSearchResultKindLabel } from '../constants/todo'
 import { useLogsContext } from '../context/LogsContext'
 import { usePrizmContext } from '../context/PrizmContext'
-
-type SearchResultKind = 'note' | 'todoList' | 'clipboard' | 'document'
-
-interface SearchResult {
-  kind: SearchResultKind
-  id: string
-  preview: string
-  raw?: StickyNote | TodoList | ClipboardItem | Document
-}
+import { useDebounce } from '../hooks/useDebounce'
 
 interface SearchSectionProps {
   activeTab: string
@@ -49,67 +41,17 @@ export default function SearchSection({
     const http = manager?.getHttpClient()
     if (!http || !query.trim()) return []
 
-    const q = query.trim().toLowerCase()
-    const out: SearchResult[] = []
-
     try {
-      const [notes, todoList, clipboardItems, documents] = await Promise.all([
-        http.listNotes({ q, scope }),
-        http.getTodoList(scope),
-        http.getClipboardHistory({ limit: 50, scope }),
-        http.listDocuments({ scope })
-      ])
-
-      for (const n of notes) {
-        const text = n.content || ''
-        out.push({
-          kind: 'note',
-          id: n.id,
-          preview: text.length > 60 ? text.slice(0, 60) + '…' : text,
-          raw: n
-        })
-      }
-
-      if (todoList) {
-        for (const it of todoList.items) {
-          const title = it.title || ''
-          const desc = it.description || ''
-          if (title.toLowerCase().includes(q) || desc.toLowerCase().includes(q)) {
-            out.push({
-              kind: 'todoList',
-              id: todoList.id,
-              preview: `${title}${desc ? ` · ${desc.slice(0, 30)}` : ''}`,
-              raw: todoList
-            })
-          }
-        }
-      }
-
-      for (const c of clipboardItems) {
-        if (c.content.toLowerCase().includes(q)) {
-          const preview = c.content.length > 60 ? c.content.slice(0, 60) + '…' : c.content
-          out.push({ kind: 'clipboard', id: c.id, preview, raw: c })
-        }
-      }
-
-      for (const d of documents) {
-        const title = d.title || ''
-        const content = d.content || ''
-        if (title.toLowerCase().includes(q) || content.toLowerCase().includes(q)) {
-          const preview = title || (content.length > 60 ? content.slice(0, 60) + '…' : content)
-          out.push({
-            kind: 'document',
-            id: d.id,
-            preview: preview || '(空)',
-            raw: d
-          })
-        }
-      }
+      return await http.search({
+        keywords: query.trim(),
+        scope,
+        limit: 50,
+        mode: 'any'
+      })
     } catch (e) {
       addLog(`搜索失败: ${String(e)}`, 'error')
+      return []
     }
-
-    return out
   }
 
   useEffect(() => {
@@ -167,7 +109,7 @@ export default function SearchSection({
       onActiveTabChange('notes')
       onRefreshNotes()
       onSelectFile?.({ kind: 'document', id: r.id })
-    } else if (r.kind === 'clipboard' && r.raw && 'content' in r.raw) {
+    } else if (r.kind === 'clipboard' && r.raw && typeof r.raw === 'object' && 'content' in r.raw) {
       const content = (r.raw as { content?: string }).content
       if (content != null) void window.prizm.writeClipboard(content)
       addLog('已复制到剪贴板', 'success')
@@ -225,14 +167,11 @@ export default function SearchSection({
     }
   }, [])
 
-  const kindLabel = (k: SearchResultKind) =>
-    k === 'note' ? '便签' : k === 'todoList' ? 'TODO' : k === 'document' ? '文档' : '剪贴板'
-
   const listItems = results.map((r, i) => ({
     key: `${r.id}-${r.kind}`,
     title: r.preview || '(空)',
     active: focusedIndex === i,
-    addon: <Tag>{kindLabel(r.kind)}</Tag>,
+    addon: <Tag>{getSearchResultKindLabel(r.kind)}</Tag>,
     onClick: () => handleClick(r),
     onMouseEnter: () => setFocusedIndex(i)
   }))
