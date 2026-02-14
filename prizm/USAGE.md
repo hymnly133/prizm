@@ -404,7 +404,7 @@ curl http://$WIN_IP:4127/health
 ### 6. 数据持久化
 
 - 客户端信息：`.prizm-data/clients.json`
-- 便签与分组：`.prizm-data/scopes/{scope}.json`
+- 便签与分组：`.prizm-data/scopes/{scope}/` 目录下按类型分 .md 单文件（notes/{id}.md、groups/{id}.md、todo/items/{id}.md 等），YAML frontmatter 存元数据
 - 重启后数据保留
 
 ---

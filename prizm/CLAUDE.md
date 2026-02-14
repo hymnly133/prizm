@@ -90,7 +90,7 @@ The server decouples from underlying services via adapters:
 
 All data (notes, groups) is isolated by scope:
 
-- Scope path: `.prizm-data/scopes/{scope}.json`
+- Scope path: `.prizm-data/scopes/{scope}/` 目录下按类型分 .md 单文件（frontmatter 存元数据）
 - Default scope: `default`
 - Persistence: JSON files with auto-save on mutations
 - Runtime cache: In-memory `Map` in `ScopeStore`
@@ -124,6 +124,7 @@ Auth routes mounted separately at `/auth/*` to avoid path conflicts with the mai
 ### Server Lifecycle
 
 `PrizmServer` interface provides:
+
 - `start(): Promise<void>` - Start listening on configured host/port
 - `stop(): Promise<void>` - Close HTTP server
 - `isRunning(): boolean` - Check status
@@ -144,7 +145,7 @@ Server created via `createPrizmServer(adapters, options)` with options for `port
 ### Data Persistence
 
 - Client registry: `.prizm-data/clients.json`
-- Scope data: `.prizm-data/scopes/{scope}.json` (notes + groups arrays)
+- Scope data: `.prizm-data/scopes/{scope}/` 下 notes/、groups/、todo/、documents/ 等 .md 单文件
 - Auto-save: Mutations trigger immediate disk write via `ScopeStore.saveScope()`
 
 ## Integration Notes
@@ -160,6 +161,7 @@ import { createPrizmServer, createDefaultAdapters } from '@prizm/server'
 ### CLI Entry Point
 
 Bin command `prizm-server` at `cli.js` supports:
+
 - Default port 4127, host 127.0.0.1
 - Custom port via argument: `prizm-server 5000`
 - Custom host: `--host 0.0.0.0`
@@ -167,6 +169,7 @@ Bin command `prizm-server` at `cli.js` supports:
 ### Panel Integration
 
 Panel static files served from `panel/dist/` at `/dashboard/`:
+
 - SPA fallback for all `/dashboard/*` routes to `index.html`
 - Development: Run `yarn dev:panel` for hot-reload
 - Production: Build with `yarn build:panel`, served by Express static middleware

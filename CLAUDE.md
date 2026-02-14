@@ -164,7 +164,7 @@ Implement interfaces from `src/adapters/interfaces.ts` and pass to `createPrizmS
 
 All data (notes, groups) is isolated by scope:
 
-- Scope path: `.prizm-data/scopes/{scope}.json`
+- Scope path: `.prizm-data/scopes/{scope}/` 目录下按类型分 .md 单文件（frontmatter 存元数据）
 - Default scope: `default`
 - Persistence: JSON files with auto-save on mutations
 - Runtime cache: In-memory `Map` in `ScopeStore`
@@ -224,7 +224,7 @@ Auth routes mounted separately at `/auth/*` to avoid path conflicts with the mai
 ### Data Persistence
 
 - Client registry: `.prizm-data/clients.json`
-- Scope data: `.prizm-data/scopes/{scope}.json` (notes + groups arrays)
+- Scope data: `.prizm-data/scopes/{scope}/` 下 notes/、groups/、todo/、documents/ 等 .md 单文件
 - Auto-save: Mutations trigger immediate disk write via `ScopeStore.saveScope()`
 
 ### Server Lifecycle
