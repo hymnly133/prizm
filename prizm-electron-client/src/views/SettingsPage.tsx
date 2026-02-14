@@ -172,7 +172,7 @@ export default function SettingsPage() {
           <h2>服务器配置</h2>
           <p className="form-hint">连接 Prizm 服务端地址与客户端注册信息</p>
         </div>
-        <Form layout="vertical">
+        <Form className="compact-form" gap={8} layout="vertical">
           <Form.Item label="服务器地址">
             <Input
               variant={inputVariant}
