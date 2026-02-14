@@ -1,0 +1,9 @@
+out
+dist
+**/dist
+pnpm-lock.yaml
+yarn.lock
+LICENSE.md
+tsconfig.json
+tsconfig.*.json
+node_modules

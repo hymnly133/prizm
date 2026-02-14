@@ -1,0 +1,71 @@
+{
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.formatOnSave": true,
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.tabSize": 4,
+    "editor.insertSpaces": false
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.tabSize": 4,
+    "editor.insertSpaces": false
+  },
+  "[vue]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.tabSize": 4,
+    "editor.insertSpaces": false
+  },
+  "[html]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.tabSize": 4,
+    "editor.insertSpaces": false
+  },
+  "[json]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "js/ts.implicitProjectConfig.module": "NodeNext",
+  // "terminal.integrated.defaultProfile.windows": "PowerShell"
+
+  "clangd.fallbackFlags": [
+    "-I${NODE_HOME}/include/node",
+    "-I${workspaceFolder}/src/main/icon/node_modules/node-addon-api",
+    "-I${workspaceFolder}/src/main/icon/include",
+    "-I${env:USERPROFILE}/.electron-gyp/31.7.7/include/node",
+    "-std=c++17"
+  ],
+  "cmake.ignoreCMakeListsMissing": true,
+  "files.associations": {
+    // 保持 .vue 文件的主关联为 "vue"，这样 Volar 等 Vue 插件能正常工作
+    "*.vue": "vue",
+    // 关键！将 .css 文件关联到 "tailwindcss" 语言模式
+    // 这会让 VSCode 优先使用 Tailwind CSS IntelliSense 来处理 CSS 文件
+    // 由于 Vue 文件中的 <style> 块本质上也是 CSS (或其变种如 scss/less)，
+    // 这个设置通常能间接影响到 VSCode 如何处理这些嵌入的 CSS，
+    // 让 Tailwind 的能力更容易介入。
+    "*.css": "tailwindcss"
+  },
+  // 确保 Tailwind 插件的校验功能是开启的
+  "tailwindCSS.validate": true,
+  "css.customData": [".vscode/tailwind.json"],
+  // 确保基础的 CSS 校验也开着（如果你需要的话）
+  "css.validate": true,
+  // 对 scss/less 等也开启校验（如果使用的话）
+  "scss.validate": true,
+  "less.validate": true,
+
+  // （可选但推荐）改善模板中 Tailwind 类名的智能提示
+  "editor.quickSuggestions": {
+    "strings": "on" // 在字符串中也启用快速建议，方便写 class="..."
+  },
+
+  // （可选但推荐）确保 includeLanguages 设置正确，利于类名扫描
+  "tailwindCSS.includeLanguages": {
+    "vue": "html", // 主要针对模板部分
+    "html": "html",
+    "php": "html", // 如果你在 PHP 文件里也用 Tailwind
+    "javascript": "javascript", // 如果在 JS 里动态拼接类名
+    "typescript": "javascript" // 同上
+    // 根据你的项目需要添加其他语言
+  }
+}
