@@ -23,6 +23,8 @@ export type {
   Document,
   AgentSession,
   AgentMessage,
+  MessagePart,
+  MessagePartTool,
   MessageUsage,
   NotificationPayload,
   ClientInfo,
@@ -134,10 +136,25 @@ export type WebSocketEventHandler<T extends WebSocketEventType> = (
 
 // ============ Agent 流式对话（仅 client-core） ============
 
-/** SSE 流式 chunk：text 为文本片段，done 为结束（含 model、usage），error 为流式错误 */
+/** 工具调用记录（SSE tool_call 事件） */
+export interface ToolCallRecord {
+  id: string
+  name: string
+  arguments: string
+  result: string
+  isError?: boolean
+}
+
+/** 工具结果流式分块（大 result 时先下发） */
+export interface ToolResultChunkValue {
+  id: string
+  chunk: string
+}
+
+/** SSE 流式 chunk：text / tool_result_chunk / tool_call / done / error */
 export interface StreamChatChunk {
   type: string
-  value?: string
+  value?: string | ToolCallRecord | ToolResultChunkValue
   model?: string
   usage?: MessageUsage
   /** 是否因用户停止而提前结束 */
@@ -146,6 +163,8 @@ export interface StreamChatChunk {
 
 export interface StreamChatOptions {
   model?: string
+  /** 是否注入 scope 上下文，默认 true */
+  includeScopeContext?: boolean
   onChunk?: (chunk: StreamChatChunk) => void
   /** 流式错误回调 */
   onError?: (message: string) => void

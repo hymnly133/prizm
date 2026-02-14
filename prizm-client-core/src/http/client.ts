@@ -548,6 +548,116 @@ export class PrizmClient {
 
   // ============ Agent 会话 ============
 
+  /** 调试用：获取 scope 上下文摘要预览（便签/待办/文档） */
+  async getAgentScopeContext(scope?: string): Promise<{ summary: string; scope: string }> {
+    const s = scope ?? this.defaultScope
+    const url = this.buildUrl('/agent/debug/scope-context', { scope: s })
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: this.buildHeaders()
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
+    }
+    return (await response.json()) as { summary: string; scope: string }
+  }
+
+  /** 可引用项列表（用于 @ 自动补全） */
+  async getAgentScopeItems(scope?: string): Promise<{
+    refTypes: { key: string; label: string; aliases: string[] }[]
+    items: {
+      id: string
+      kind: string
+      title: string
+      charCount: number
+      isShort: boolean
+      updatedAt: number
+      groupOrStatus?: string
+    }[]
+  }> {
+    const s = scope ?? this.defaultScope
+    const url = this.buildUrl('/agent/scope-items', { scope: s })
+    const response = await fetch(url, { method: 'GET', headers: this.buildHeaders() })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
+    }
+    return (await response.json()) as {
+      refTypes: { key: string; label: string; aliases: string[] }[]
+      items: {
+        id: string
+        kind: string
+        title: string
+        charCount: number
+        isShort: boolean
+        updatedAt: number
+        groupOrStatus?: string
+      }[]
+    }
+  }
+
+  /** slash 命令列表（用于 / 下拉菜单） */
+  async getAgentSlashCommands(scope?: string): Promise<{
+    commands: { name: string; aliases: string[]; description: string }[]
+  }> {
+    const s = scope ?? this.defaultScope
+    const url = this.buildUrl('/agent/slash-commands', { scope: s })
+    const response = await fetch(url, { method: 'GET', headers: this.buildHeaders() })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
+    }
+    return (await response.json()) as {
+      commands: { name: string; aliases: string[]; description: string }[]
+    }
+  }
+
+  /** 会话上下文追踪状态（提供状态、修改记录） */
+  async getAgentSessionContext(
+    sessionId: string,
+    scope?: string
+  ): Promise<{
+    sessionId: string
+    scope: string
+    provisions: {
+      itemId: string
+      kind: string
+      mode: string
+      providedAt: number
+      charCount: number
+      version: number
+      stale: boolean
+    }[]
+    totalProvidedChars: number
+    modifications: { itemId: string; type: string; action: string; timestamp: number }[]
+  }> {
+    const s = scope ?? this.defaultScope
+    const url = this.buildUrl(`/agent/sessions/${encodeURIComponent(sessionId)}/context`, {
+      scope: s
+    })
+    const response = await fetch(url, { method: 'GET', headers: this.buildHeaders() })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
+    }
+    return (await response.json()) as {
+      sessionId: string
+      scope: string
+      provisions: {
+        itemId: string
+        kind: string
+        mode: string
+        providedAt: number
+        charCount: number
+        version: number
+        stale: boolean
+      }[]
+      totalProvidedChars: number
+      modifications: { itemId: string; type: string; action: string; timestamp: number }[]
+    }
+  }
+
   async listAgentSessions(scope?: string): Promise<AgentSession[]> {
     const s = scope ?? this.defaultScope
     const url = this.buildUrl('/agent/sessions', { scope: s })
@@ -645,7 +755,8 @@ export class PrizmClient {
       headers: this.buildHeaders(),
       body: JSON.stringify({
         content,
-        model: options?.model
+        model: options?.model,
+        includeScopeContext: options?.includeScopeContext
       }),
       signal: options?.signal
     })
@@ -680,10 +791,12 @@ export class PrizmClient {
             try {
               const parsed = JSON.parse(data) as StreamChatChunk
               if (parsed.type === 'error') {
-                options?.onError?.(parsed.value ?? 'Unknown error')
+                options?.onError?.(
+                  typeof parsed.value === 'string' ? parsed.value : 'Unknown error'
+                )
               }
               options?.onChunk?.(parsed)
-              if (parsed.type === 'text' && parsed.value) {
+              if (parsed.type === 'text' && typeof parsed.value === 'string') {
                 fullContent += parsed.value
               }
             } catch {
@@ -749,6 +862,32 @@ export class PrizmClient {
   async getMcpServerTools(id: string): Promise<{ tools: McpTool[] }> {
     return this.request<{ tools: McpTool[] }>(`/mcp/servers/${encodeURIComponent(id)}/tools`)
   }
+
+  // ============ Agent 工具设置（内置 + MCP 统一） ============
+
+  async getAgentModels(): Promise<{ provider: string; models: AvailableModel[] }> {
+    return this.request<{ provider: string; models: AvailableModel[] }>('/settings/agent-models')
+  }
+
+  async getAgentTools(): Promise<AgentToolsSettings> {
+    return this.request<AgentToolsSettings>('/settings/agent-tools')
+  }
+
+  async updateAgentTools(patch: Partial<AgentToolsSettings>): Promise<AgentToolsSettings> {
+    return this.request<AgentToolsSettings>('/settings/agent-tools', {
+      method: 'PATCH',
+      body: JSON.stringify(patch)
+    })
+  }
+
+  async updateTavilySettings(
+    update: Partial<TavilySettings>
+  ): Promise<{ tavily: TavilySettings | null }> {
+    return this.request<{ tavily: TavilySettings | null }>('/settings/agent-tools/builtin/tavily', {
+      method: 'PUT',
+      body: JSON.stringify(update)
+    })
+  }
 }
 
 export interface McpServerConfig {
@@ -767,4 +906,49 @@ export interface McpTool {
   fullName: string
   description?: string
   inputSchema?: object
+}
+
+/** 内置工具：Tavily 联网搜索 */
+export interface TavilySettings {
+  apiKey?: string
+  enabled?: boolean
+  maxResults?: number
+  searchDepth?: 'basic' | 'advanced' | 'fast' | 'ultra-fast'
+  configured?: boolean
+}
+
+/** 文档摘要设置 */
+export interface DocumentSummarySettings {
+  enabled?: boolean
+  minLen?: number
+  model?: string
+}
+
+/** 对话摘要设置 */
+export interface ConversationSummarySettings {
+  enabled?: boolean
+  interval?: number
+  model?: string
+}
+
+/** Agent LLM 设置 */
+export interface AgentLLMSettings {
+  documentSummary?: DocumentSummarySettings
+  conversationSummary?: ConversationSummarySettings
+  defaultModel?: string
+}
+
+/** Agent 工具统一设置 */
+export interface AgentToolsSettings {
+  builtin?: { tavily?: TavilySettings }
+  agent?: AgentLLMSettings
+  mcpServers?: McpServerConfig[]
+  updatedAt?: number
+}
+
+/** 可用模型项 */
+export interface AvailableModel {
+  id: string
+  label: string
+  provider: string
 }
