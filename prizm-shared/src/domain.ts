@@ -136,6 +136,9 @@ export interface MessageUsage {
   totalOutputTokens?: number
 }
 
+/** 工具调用状态：preparing=参数填写中 running=执行中 done=已完成 */
+export type ToolCallStatus = 'preparing' | 'running' | 'done'
+
 /** 单条工具调用（与 client-core ToolCallRecord 对齐，用于 parts） */
 export interface MessagePartTool {
   type: 'tool'
@@ -144,6 +147,8 @@ export interface MessagePartTool {
   arguments: string
   result: string
   isError?: boolean
+  /** 调用状态，默认 'done' 向后兼容 */
+  status?: ToolCallStatus
 }
 
 /** 消息段落：文本或工具调用，按流式顺序排列 */
