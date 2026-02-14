@@ -1,0 +1,19 @@
+export interface VectorStoreAdapter {
+  add(collection: string, items: any[]): Promise<void>
+  search(collection: string, vector: number[], limit: number, filter?: any): Promise<any[]>
+  delete(collection: string, id: string): Promise<void>
+}
+
+export interface RelationalStoreAdapter {
+  get(table: string, id: string): Promise<any>
+  find(table: string, query: any): Promise<any[]>
+  insert(table: string, item: any): Promise<void>
+  update(table: string, id: string, item: any): Promise<void>
+  delete(table: string, id: string): Promise<void>
+  query(sql: string, params?: any[]): Promise<any[]>
+}
+
+export interface StorageAdapter {
+  vector: VectorStoreAdapter
+  relational: RelationalStoreAdapter
+}

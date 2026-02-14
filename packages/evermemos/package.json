@@ -1,0 +1,29 @@
+{
+  "name": "@prizm/evermemos",
+  "version": "0.1.0",
+  "description": "EverMemOS core logic ported to TypeScript",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "dev": "tsup --watch",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@lancedb/lancedb": "^0.17.0",
+    "@node-rs/jieba": "^2.0.1",
+    "apache-arrow": "^21.1.0",
+    "better-sqlite3": "^11.8.1",
+    "uuid": "^11.0.5",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.13.1",
+    "@types/uuid": "^10.0.0",
+    "tsup": "^8.3.6",
+    "typescript": "^5.9.3",
+    "vitest": "^3.0.5"
+  }
+}
