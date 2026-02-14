@@ -217,9 +217,9 @@ export class WebSocketServer {
    */
   private handleRegister(
     context: WebSocketContext,
-    message: { type: 'register'; eventType: EventType; scope?: string }
+    message: { type: 'register'; eventType: EventType | string; scope?: string }
   ): void {
-    this.eventRegistry.registerEvent(context.id, message.eventType)
+    this.eventRegistry.registerEvent(context.id, message.eventType as EventType)
 
     // 更新 scope（如果提供）
     if (message.scope) {
@@ -237,9 +237,9 @@ export class WebSocketServer {
    */
   private handleUnregister(
     context: WebSocketContext,
-    message: { type: 'unregister'; eventType: EventType }
+    message: { type: 'unregister'; eventType: EventType | string }
   ): void {
-    this.eventRegistry.unregisterEvent(context.id, message.eventType)
+    this.eventRegistry.unregisterEvent(context.id, message.eventType as EventType)
 
     this.sendMessage(context.socket, {
       type: 'unregistered',

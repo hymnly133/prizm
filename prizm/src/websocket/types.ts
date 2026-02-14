@@ -2,118 +2,53 @@
  * Prizm WebSocket 消息类型定义
  */
 
-// 预定义的事件类型
-export const EVENT_TYPES = {
-  NOTIFICATION: 'notification',
-  SMTC_CHANGE: 'smtc:change',
-  NOTE_CREATED: 'note:created',
-  NOTE_UPDATED: 'note:updated',
-  NOTE_DELETED: 'note:deleted',
-  GROUP_CREATED: 'group:created',
-  GROUP_UPDATED: 'group:updated',
-  GROUP_DELETED: 'group:deleted',
-  TODO_LIST_UPDATED: 'todo_list:updated',
-  POMODORO_STARTED: 'pomodoro:started',
-  POMODORO_STOPPED: 'pomodoro:stopped',
-  CLIPBOARD_ITEM_ADDED: 'clipboard:itemAdded',
-  CLIPBOARD_ITEM_DELETED: 'clipboard:itemDeleted',
-  DOCUMENT_CREATED: 'document:created',
-  DOCUMENT_UPDATED: 'document:updated',
-  DOCUMENT_DELETED: 'document:deleted'
-} as const
+import {
+  EVENT_TYPES_OBJ,
+  type EventType,
+  type AuthMessage,
+  type RegisterEventMessage,
+  type UnregisterEventMessage,
+  type PingMessage,
+  type ClientToServerMessage,
+  type ConnectedMessage,
+  type AuthenticatedMessage,
+  type RegisteredMessage,
+  type UnregisteredMessage,
+  type EventPushMessage,
+  type ErrorMessage,
+  type ServerToClientMessage,
+  type WebSocketMessage,
+  isClientMessage,
+  isServerMessage,
+  type SMTCPayload
+} from '@prizm/shared'
 
-export type EventType = (typeof EVENT_TYPES)[keyof typeof EVENT_TYPES] | string
+/** 事件类型对象，供 server 键式访问（如 EVENT_TYPES.NOTE_CREATED） */
+export const EVENT_TYPES = EVENT_TYPES_OBJ
 
-// ============ 客户端 -> 服务器的消息 ============
+export type { EventType } from '@prizm/shared'
 
-export interface AuthMessage {
-  type: 'auth'
-  apiKey: string
-}
+export type {
+  AuthMessage,
+  RegisterEventMessage,
+  UnregisterEventMessage,
+  PingMessage,
+  ClientToServerMessage,
+  ConnectedMessage,
+  AuthenticatedMessage,
+  RegisteredMessage,
+  UnregisteredMessage,
+  EventPushMessage,
+  ErrorMessage,
+  ServerToClientMessage,
+  WebSocketMessage
+} from '@prizm/shared'
 
-export interface RegisterEventMessage {
-  type: 'register'
-  eventType: EventType
-  scope?: string
-}
+export { isClientMessage, isServerMessage } from '@prizm/shared'
 
-export interface UnregisterEventMessage {
-  type: 'unregister'
-  eventType: EventType
-}
+// ============ 事件载荷类型（简化版，与 domain 对齐） ============
 
-export interface PingMessage {
-  type: 'ping'
-}
-
-export type ClientToServerMessage =
-  | AuthMessage
-  | RegisterEventMessage
-  | UnregisterEventMessage
-  | PingMessage
-
-// ============ 服务器 -> 客户端的消息 ============
-
-export interface ConnectedMessage {
-  type: 'connected'
-  clientId: string
-  serverTime: number
-}
-
-export interface AuthenticatedMessage {
-  type: 'authenticated'
-  clientId: string
-  allowedScopes: string[]
-}
-
-export interface RegisteredMessage {
-  type: 'registered'
-  eventType: EventType
-}
-
-export interface UnregisteredMessage {
-  type: 'unregistered'
-  eventType: EventType
-}
-
-export interface EventPushMessage<T = unknown> {
-  type: 'event'
-  eventType: EventType
-  payload: T
-  scope?: string
-  timestamp: number
-}
-
-export interface ErrorMessage {
-  type: 'error'
-  code: string
-  message: string
-}
-
-export type ServerToClientMessage =
-  | ConnectedMessage
-  | AuthenticatedMessage
-  | RegisteredMessage
-  | UnregisteredMessage
-  | EventPushMessage
-  | ErrorMessage
-  | { type: 'pong' }
-
-// ============ 通用 WebSocket 消息 ============
-
-export type WebSocketMessage = ClientToServerMessage | ServerToClientMessage
-
-// ============ 事件载荷类型 ============
-
-export interface NotificationPayload {
-  title: string
-  body?: string
-}
-
-export interface SMTCPayload {
-  sessionId?: string
-  action: 'play' | 'pause' | 'stop' | 'skipNext' | 'skipPrevious' | 'toggle'
-}
+export type { SMTCPayload } from '@prizm/shared'
 
 export interface NotePayload {
   id: string
@@ -126,33 +61,9 @@ export interface GroupPayload {
   name: string
 }
 
-// ============ WebSocket 配置 ============
+// ============ WebSocket 配置（Server 专用） ============
 
 export interface WebSocketServerConfig {
   enableWebSocket?: boolean
   websocketPath?: string
-}
-
-// ============ 验证函数 ============
-
-export function isClientMessage(message: unknown): message is ClientToServerMessage {
-  if (typeof message !== 'object' || message === null) return false
-  const msg = message as Record<string, unknown>
-  const type = msg.type as string
-  return type === 'auth' || type === 'register' || type === 'unregister' || type === 'ping'
-}
-
-export function isServerMessage(message: unknown): message is ServerToClientMessage {
-  if (typeof message !== 'object' || message === null) return false
-  const msg = message as Record<string, unknown>
-  const type = msg.type as string
-  return (
-    type === 'connected' ||
-    type === 'authenticated' ||
-    type === 'registered' ||
-    type === 'unregistered' ||
-    type === 'event' ||
-    type === 'error' ||
-    type === 'pong'
-  )
 }

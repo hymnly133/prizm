@@ -30,6 +30,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
+import { parseTodoItemsFromInput } from '../utils/todoItems'
 
 const PRIZM_URL = process.env.PRIZM_URL || 'http://127.0.0.1:4127'
 const PRIZM_API_KEY = process.env.PRIZM_API_KEY || ''
@@ -188,7 +189,7 @@ function createStdioServer(): McpServer {
       inputSchema: z.object({})
     },
     async () => {
-      const data = (await fetchPrizm('/tasks')) as {
+      const data = (await fetchPrizm('/todo')) as {
         todoList: {
           title: string
           items: Array<{ id: string; status: string; title: string; description?: string }>
@@ -269,16 +270,11 @@ function createStdioServer(): McpServer {
       })
     },
     async ({ title, items, updateItem, updateItems }) => {
-      const payload: Record<string, unknown> = {}
-      if (title !== undefined) payload.title = title
-      if (items !== undefined) payload.items = items
-      if (updateItem !== undefined) payload.updateItem = updateItem
-      if (updateItems !== undefined && updateItems.length) payload.updateItems = updateItems
       const hasPayload =
-        payload.title !== undefined ||
-        payload.items !== undefined ||
-        payload.updateItem !== undefined ||
-        (payload.updateItems as unknown[] | undefined)?.length
+        title !== undefined ||
+        items !== undefined ||
+        updateItem !== undefined ||
+        (updateItems !== undefined && updateItems.length > 0)
       if (!hasPayload) {
         return {
           content: [
@@ -290,10 +286,52 @@ function createStdioServer(): McpServer {
           isError: true
         }
       }
-      const data = (await fetchPrizm('/tasks', {
-        method: 'PATCH',
-        body: JSON.stringify(payload)
-      })) as { todoList: { title: string; items: unknown[] } }
+      let data: { todoList: { title: string; items: unknown[] } }
+      if (items !== undefined) {
+        data = (await fetchPrizm('/todo/items', {
+          method: 'PUT',
+          body: JSON.stringify({ items: parseTodoItemsFromInput(items) })
+        })) as { todoList: { title: string; items: unknown[] } }
+        if (title !== undefined) {
+          data = (await fetchPrizm('/todo', {
+            method: 'PATCH',
+            body: JSON.stringify({ title })
+          })) as typeof data
+        }
+      } else {
+        data = (await fetchPrizm('/todo', {
+          method: 'POST',
+          body: JSON.stringify({})
+        })) as typeof data
+        if (title !== undefined) {
+          data = (await fetchPrizm('/todo', {
+            method: 'PATCH',
+            body: JSON.stringify({ title })
+          })) as typeof data
+        }
+        if (updateItem !== undefined) {
+          data = (await fetchPrizm(`/todo/items/${encodeURIComponent(updateItem.id)}`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+              status: updateItem.status,
+              title: updateItem.title,
+              description: updateItem.description
+            })
+          })) as typeof data
+        }
+        if (updateItems !== undefined && updateItems.length > 0) {
+          for (const u of updateItems) {
+            data = (await fetchPrizm(`/todo/items/${encodeURIComponent(u.id)}`, {
+              method: 'PATCH',
+              body: JSON.stringify({
+                status: u.status,
+                title: u.title,
+                description: u.description
+              })
+            })) as typeof data
+          }
+        }
+      }
       return {
         content: [
           {

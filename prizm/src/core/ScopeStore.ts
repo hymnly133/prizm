@@ -7,10 +7,12 @@
 import fs from 'fs'
 import path from 'path'
 import { createLogger } from '../logger'
+import { genUniqueId } from '../id'
 
 const log = createLogger('ScopeStore')
 import { getConfig } from '../config'
 import * as mdStore from './mdStore'
+import { DEFAULT_SCOPE, ONLINE_SCOPE, BUILTIN_SCOPES } from '@prizm/shared'
 import type {
   StickyNote,
   StickyNoteGroup,
@@ -23,12 +25,7 @@ import type {
   AgentSession
 } from '../types'
 
-export const DEFAULT_SCOPE = 'default'
-/** 语义 scope：用户实时上下文，Electron 客户端常驻显示其 TODO 和便签 */
-export const ONLINE_SCOPE = 'online'
-
-/** 内置 scope，始终在列表中可用 */
-const BUILTIN_SCOPES = [DEFAULT_SCOPE, ONLINE_SCOPE] as const
+export { DEFAULT_SCOPE, ONLINE_SCOPE }
 
 export interface ScopeData {
   /** 便签数据（沿用现有 StickyNote 结构） */
@@ -57,10 +54,6 @@ function safeScopeDirname(scope: string): string {
   return scope.replace(/[^a-zA-Z0-9_-]/g, '_') || 'default'
 }
 
-function genId(): string {
-  return Math.random().toString(36).substring(2, 15)
-}
-
 /** 将旧版 tasks 数组迁移为 TodoList */
 function migrateTasksToTodoList(tasks: unknown[]): TodoList {
   const now = Date.now()
@@ -69,7 +62,7 @@ function migrateTasksToTodoList(tasks: unknown[]): TodoList {
       Boolean(t && typeof t === 'object')
     )
     .map((t) => ({
-      id: genId(),
+      id: genUniqueId(),
       title: typeof t.title === 'string' ? t.title : '(无标题)',
       ...(typeof t.description === 'string' && t.description && { description: t.description }),
       status: 'todo' as TodoItemStatus,
@@ -77,7 +70,7 @@ function migrateTasksToTodoList(tasks: unknown[]): TodoList {
       updatedAt: now
     }))
   return {
-    id: genId(),
+    id: genUniqueId(),
     title: '待办',
     items,
     createdAt: now,
@@ -94,7 +87,7 @@ function migrateTodoListItems(list: TodoList): TodoList {
     const hasStatus = raw.status === 'todo' || raw.status === 'doing' || raw.status === 'done'
     if (hasId && hasStatus) return it
     return {
-      id: hasId ? (raw.id as string) : genId(),
+      id: hasId ? (raw.id as string) : genUniqueId(),
       title: typeof raw.title === 'string' ? raw.title : '(无标题)',
       ...(typeof raw.description === 'string' &&
         raw.description && { description: raw.description }),

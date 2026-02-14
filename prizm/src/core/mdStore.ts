@@ -152,6 +152,26 @@ export function writeGroups(dir: string, groups: StickyNoteGroup[]): void {
 }
 
 // ============ TodoList ============
+// 存储格式：一个 list 一个文件，items 在 frontmatter 内部
+
+function parseTodoItem(raw: unknown): TodoItem | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const id = typeof r.id === 'string' ? r.id : null
+  const title = typeof r.title === 'string' ? r.title : '(无标题)'
+  if (!id) return null
+  const status = (
+    r.status === 'todo' || r.status === 'doing' || r.status === 'done' ? r.status : 'todo'
+  ) as TodoItemStatus
+  return {
+    id,
+    title,
+    description: typeof r.description === 'string' ? r.description : undefined,
+    status,
+    createdAt: (r.createdAt as number) ?? 0,
+    updatedAt: (r.updatedAt as number) ?? 0
+  }
+}
 
 export function readTodoList(dir: string): TodoList | null {
   const listPath = path.join(dir, 'todo', 'list.md')
@@ -163,27 +183,37 @@ export function readTodoList(dir: string): TodoList | null {
   const createdAt = (d.createdAt as number) ?? 0
   const updatedAt = (d.updatedAt as number) ?? 0
 
-  const itemsDir = path.join(dir, 'todo', 'items')
-  const itemFiles = listMdFiles(itemsDir)
-  const items: TodoItem[] = []
-  for (const fp of itemFiles) {
-    const p = readMd(fp)
-    if (!p) continue
-    const fd = p.data
-    const itemId = typeof fd.id === 'string' ? fd.id : path.basename(fp, EXT)
-    const status = (
-      fd.status === 'todo' || fd.status === 'doing' || fd.status === 'done' ? fd.status : 'todo'
-    ) as TodoItemStatus
-    const desc = typeof fd.description === 'string' ? fd.description : p.content || undefined
-    items.push({
-      id: itemId,
-      title: typeof fd.title === 'string' ? fd.title : '(无标题)',
-      description: desc || undefined,
-      status,
-      createdAt: (fd.createdAt as number) ?? 0,
-      updatedAt: (fd.updatedAt as number) ?? 0
-    })
+  let items: TodoItem[] = []
+
+  // 新格式：items 在 frontmatter 内
+  if (Array.isArray(d.items) && d.items.length > 0) {
+    items = d.items.map(parseTodoItem).filter((it): it is TodoItem => it !== null)
+  } else {
+    // 旧格式迁移：从 items/ 目录读取
+    const itemsDir = path.join(dir, 'todo', 'items')
+    if (fs.existsSync(itemsDir)) {
+      const itemFiles = listMdFiles(itemsDir)
+      for (const fp of itemFiles) {
+        const p = readMd(fp)
+        if (!p) continue
+        const fd = p.data
+        const itemId = typeof fd.id === 'string' ? fd.id : path.basename(fp, EXT)
+        const status = (
+          fd.status === 'todo' || fd.status === 'doing' || fd.status === 'done' ? fd.status : 'todo'
+        ) as TodoItemStatus
+        const desc = typeof fd.description === 'string' ? fd.description : p.content || undefined
+        items.push({
+          id: itemId,
+          title: typeof fd.title === 'string' ? fd.title : '(无标题)',
+          description: desc || undefined,
+          status,
+          createdAt: (fd.createdAt as number) ?? 0,
+          updatedAt: (fd.updatedAt as number) ?? 0
+        })
+      }
+    }
   }
+
   items.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
   return { id, title, items, createdAt, updatedAt }
 }
@@ -198,35 +228,27 @@ export function writeTodoList(dir: string, list: TodoList | null): void {
     return
   }
   if (!fs.existsSync(todoDir)) fs.mkdirSync(todoDir, { recursive: true })
-  writeMd(path.join(todoDir, 'list.md'), {
+
+  // 单文件格式：list + items 全部写入 list.md
+  const frontmatter: Record<string, unknown> = {
     id: list.id,
     title: list.title,
     createdAt: list.createdAt,
-    updatedAt: list.updatedAt
-  })
-  if (!fs.existsSync(itemsDir)) fs.mkdirSync(itemsDir, { recursive: true })
-  const existing = new Set(listMdFiles(itemsDir).map((fp) => path.basename(fp, EXT)))
-  const ids = new Set(list.items.map((i) => i.id))
-  for (const it of list.items) {
-    const fp = path.join(itemsDir, `${safeId(it.id)}${EXT}`)
-    writeMd(
-      fp,
-      {
-        id: it.id,
-        title: it.title,
-        status: it.status,
-        createdAt: it.createdAt ?? 0,
-        updatedAt: it.updatedAt ?? 0
-      },
-      it.description ?? ''
-    )
+    updatedAt: list.updatedAt,
+    items: list.items.map((it) => ({
+      id: it.id,
+      title: it.title,
+      status: it.status,
+      ...(it.description && { description: it.description }),
+      createdAt: it.createdAt ?? 0,
+      updatedAt: it.updatedAt ?? 0
+    }))
   }
-  for (const old of existing) {
-    if (!ids.has(old)) {
-      try {
-        fs.unlinkSync(path.join(itemsDir, `${old}${EXT}`))
-      } catch {}
-    }
+  writeMd(path.join(todoDir, 'list.md'), frontmatter, '')
+
+  // 删除旧格式 items 目录
+  if (fs.existsSync(itemsDir)) {
+    fs.rmSync(itemsDir, { recursive: true })
   }
 }
 
@@ -383,10 +405,41 @@ export function writeDocuments(dir: string, docs: Document[]): void {
 }
 
 // ============ Agent Sessions ============
+// 存储格式：一个 session 一个文件，messages 在 frontmatter 内部
 
-export function readAgentSessions(dir: string): AgentSession[] {
+function parseAgentMessage(raw: unknown): AgentMessage | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const id = typeof r.id === 'string' ? r.id : null
+  const role = (
+    r.role === 'user' || r.role === 'assistant' || r.role === 'system' ? r.role : 'user'
+  ) as AgentMessage['role']
+  const content = typeof r.content === 'string' ? r.content : ''
+  const createdAt = (r.createdAt as number) ?? 0
+  if (!id) return null
+  return {
+    id,
+    role,
+    content,
+    createdAt,
+    ...(typeof r.model === 'string' && { model: r.model }),
+    ...(Array.isArray(r.toolCalls) && { toolCalls: r.toolCalls }),
+    ...(r.usage && typeof r.usage === 'object' && { usage: r.usage as AgentMessage['usage'] }),
+    ...(typeof r.reasoning === 'string' && { reasoning: r.reasoning })
+  }
+}
+
+/**
+ * 迁移 Agent Sessions 从旧格式（子目录）到新格式（单文件）
+ * 仅用于一次性迁移，迁移后删除旧目录
+ */
+export function migrateAgentSessionsToSingleFile(dir: string): void {
   const sessionsDir = path.join(dir, 'agent-sessions')
+  if (!fs.existsSync(sessionsDir)) return
+
   const subdirs = listSubdirs(sessionsDir)
+  if (subdirs.length === 0) return
+
   const sessions: AgentSession[] = []
   for (const name of subdirs) {
     const metaPath = path.join(sessionsDir, name, 'meta.md')
@@ -429,52 +482,88 @@ export function readAgentSessions(dir: string): AgentSession[] {
       updatedAt: (d.updatedAt as number) ?? 0
     })
   }
+  if (sessions.length === 0) return
+
+  writeAgentSessions(dir, sessions)
+  for (const name of subdirs) {
+    try {
+      fs.rmSync(path.join(sessionsDir, name), { recursive: true })
+    } catch {}
+  }
+}
+
+export function readAgentSessions(dir: string): AgentSession[] {
+  const sessionsDir = path.join(dir, 'agent-sessions')
+  if (!fs.existsSync(sessionsDir)) return []
+
+  migrateAgentSessionsToSingleFile(dir)
+
+  const sessions: AgentSession[] = []
+  const sessionFiles = listMdFiles(sessionsDir)
+  for (const fp of sessionFiles) {
+    const parsed = readMd(fp)
+    if (!parsed) continue
+    const d = parsed.data
+    const id = typeof d.id === 'string' ? d.id : path.basename(fp, EXT)
+    const title = typeof d.title === 'string' ? d.title : '新会话'
+    const scope = typeof d.scope === 'string' ? d.scope : ''
+    const createdAt = (d.createdAt as number) ?? 0
+    const updatedAt = (d.updatedAt as number) ?? 0
+
+    let messages: AgentMessage[] = []
+    if (Array.isArray(d.messages) && d.messages.length > 0) {
+      messages = d.messages.map(parseAgentMessage).filter((m): m is AgentMessage => m !== null)
+    }
+    messages.sort((a, b) => a.createdAt - b.createdAt)
+    sessions.push({ id, title, scope, messages, createdAt, updatedAt })
+  }
   return sessions.sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
 export function writeAgentSessions(dir: string, sessions: AgentSession[]): void {
   const sessionsDir = path.join(dir, 'agent-sessions')
-  const existing = new Set(listSubdirs(sessionsDir))
+  if (!fs.existsSync(sessionsDir)) fs.mkdirSync(sessionsDir, { recursive: true })
+
   const ids = new Set(sessions.map((s) => s.id))
+
+  // 新格式：每个 session 一个 .md 文件
   for (const s of sessions) {
-    const sessionDir = path.join(sessionsDir, safeId(s.id))
-    if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true })
-    writeMd(path.join(sessionDir, 'meta.md'), {
+    const fp = path.join(sessionsDir, `${safeId(s.id)}${EXT}`)
+    const frontmatter: Record<string, unknown> = {
       id: s.id,
       title: s.title ?? '新会话',
       scope: s.scope,
       createdAt: s.createdAt,
-      updatedAt: s.updatedAt
-    })
-    const messagesDir = path.join(sessionDir, 'messages')
-    if (!fs.existsSync(messagesDir)) fs.mkdirSync(messagesDir, { recursive: true })
-    const existingMsgs = new Set(listMdFiles(messagesDir).map((fp) => path.basename(fp, EXT)))
-    const msgIds = new Set(s.messages.map((m) => m.id))
-    for (const m of s.messages) {
-      const fp = path.join(messagesDir, `${safeId(m.id)}${EXT}`)
-      const meta: Record<string, unknown> = {
+      updatedAt: s.updatedAt,
+      messages: s.messages.map((m) => ({
         id: m.id,
         role: m.role,
+        content: m.content,
         createdAt: m.createdAt,
         ...(m.model && { model: m.model }),
         ...(m.toolCalls?.length && { toolCalls: m.toolCalls }),
         ...(m.usage && { usage: m.usage }),
         ...(m.reasoning && { reasoning: m.reasoning })
-      }
-      writeMd(fp, meta, m.content)
+      }))
     }
-    for (const old of existingMsgs) {
-      if (!msgIds.has(old)) {
-        try {
-          fs.unlinkSync(path.join(messagesDir, `${old}${EXT}`))
-        } catch {}
-      }
-    }
+    writeMd(fp, frontmatter, '')
   }
-  for (const old of existing) {
-    if (!ids.has(old)) {
+
+  // 删除旧格式子目录（迁移后全部移除）
+  const subdirs = listSubdirs(sessionsDir)
+  for (const old of subdirs) {
+    try {
+      fs.rmSync(path.join(sessionsDir, old), { recursive: true })
+    } catch {}
+  }
+
+  // 删除已不存在的 session 文件
+  const existingFiles = listMdFiles(sessionsDir)
+  for (const fp of existingFiles) {
+    const base = path.basename(fp, EXT)
+    if (!ids.has(base)) {
       try {
-        fs.rmSync(path.join(sessionsDir, old), { recursive: true })
+        fs.unlinkSync(fp)
       } catch {}
     }
   }

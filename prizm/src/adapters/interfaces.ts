@@ -10,7 +10,8 @@ import type {
   UpdateNotePayload,
   TodoList,
   TodoItem,
-  UpdateTodoListPayload,
+  CreateTodoItemPayload,
+  UpdateTodoItemPayload,
   PomodoroSession,
   ClipboardItem,
   Document,
@@ -91,13 +92,28 @@ export interface INotificationAdapter {
 }
 
 // ============ TODO 列表适配器 ============
+// 设计：item 为顶层元素，list 为包装。list 仅含元数据（title），items 独立 CRUD。
 
 export interface ITodoListAdapter {
-  getTodoList?(scope: string, options?: { itemId?: string }): Promise<TodoList | null>
+  getTodoList(scope: string, options?: { itemId?: string }): Promise<TodoList | null>
 
-  getTodoItem?(scope: string, itemId: string): Promise<TodoItem | null>
+  /** 确保 list 存在，不存在则创建。幂等。 */
+  createTodoList(scope: string, payload?: { title?: string }): Promise<TodoList>
 
-  updateTodoList?(scope: string, payload: UpdateTodoListPayload): Promise<TodoList>
+  /** 更新 list 标题（包装层元数据） */
+  updateTodoListTitle(scope: string, title: string): Promise<TodoList>
+
+  createTodoItem(scope: string, payload: CreateTodoItemPayload): Promise<TodoList>
+
+  updateTodoItem(scope: string, itemId: string, payload: UpdateTodoItemPayload): Promise<TodoList>
+
+  deleteTodoItem(scope: string, itemId: string): Promise<TodoList>
+
+  /** 全量替换 items（与 updateTodoItem 正交，互斥使用） */
+  replaceTodoItems(scope: string, items: TodoItem[]): Promise<TodoList>
+
+  /** 删除 list 实体（空或非空均可） */
+  deleteTodoList(scope: string): Promise<void>
 }
 
 // ============ 番茄钟适配器 ============

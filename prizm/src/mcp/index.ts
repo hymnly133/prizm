@@ -20,6 +20,7 @@ import type { WebSocketServer } from '../websocket/WebSocketServer'
 import { EVENT_TYPES } from '../websocket/types'
 import { ONLINE_SCOPE } from '../core/ScopeStore'
 import { getConfig } from '../config'
+import { parseTodoItemsFromInput } from '../utils/todoItems'
 
 function createMcpServerWithTools(
   adapters: PrizmAdapters,
@@ -254,7 +255,7 @@ function createMcpServerWithTools(
     'prizm_update_todo_list',
     {
       description:
-        '更新 Prizm TODO 列表。推荐：仅改某条状态时用 updateItem(id 来自 prizm_list_todo_list)；改多条用 updateItems；全量替换用 items。title 可单独改列表标题。',
+        '更新 Todo 列表。title 改标题；updateItem/updateItems 改单条/批量（与 items 互斥）；items 全量替换。',
       inputSchema: z.object({
         title: z.string().optional().describe('列表标题'),
         items: z
@@ -270,7 +271,7 @@ function createMcpServerWithTools(
             })
           )
           .optional()
-          .describe('全量替换：传入则完整替换整个列表，慎用'),
+          .describe('全量替换（与 updateItem/updateItems 互斥）'),
         updateItem: z
           .object({
             id: z.string().describe('来自 prizm_list_todo_list 返回的 item.id'),
@@ -282,7 +283,7 @@ function createMcpServerWithTools(
             description: z.string().optional()
           })
           .optional()
-          .describe('单条更新：仅改状态/标题时推荐用此，无需拉全量'),
+          .describe('单条更新'),
         updateItems: z
           .array(
             z.object({
@@ -296,26 +297,28 @@ function createMcpServerWithTools(
             })
           )
           .optional()
-          .describe('批量更新：一次改多条 item 的状态或内容')
+          .describe('批量更新')
       })
     },
     async ({ title, items, updateItem, updateItems }) => {
-      if (!adapters.todoList?.updateTodoList) {
+      const adapter = adapters.todoList
+      if (
+        !adapter?.getTodoList ||
+        !adapter?.createTodoList ||
+        !adapter?.updateTodoListTitle ||
+        !adapter?.replaceTodoItems ||
+        !adapter?.updateTodoItem
+      ) {
         return {
           content: [{ type: 'text' as const, text: 'TodoList adapter not available' }],
           isError: true
         }
       }
-      const payload: Parameters<NonNullable<typeof adapters.todoList.updateTodoList>>[1] = {}
-      if (title !== undefined) payload.title = title
-      if (items !== undefined) payload.items = items as Parameters<typeof payload.items>[0]
-      if (updateItem !== undefined) payload.updateItem = updateItem
-      if (updateItems !== undefined && updateItems.length) payload.updateItems = updateItems
       const hasPayload =
-        payload.title !== undefined ||
-        payload.items !== undefined ||
-        payload.updateItem !== undefined ||
-        (payload.updateItems?.length ?? 0) > 0
+        title !== undefined ||
+        items !== undefined ||
+        updateItem !== undefined ||
+        (updateItems !== undefined && updateItems.length > 0)
       if (!hasPayload) {
         return {
           content: [
@@ -324,7 +327,28 @@ function createMcpServerWithTools(
           isError: true
         }
       }
-      const todoList = await adapters.todoList.updateTodoList(scope, payload)
+      let todoList = await adapter.getTodoList(scope)
+      if (!todoList) todoList = await adapter.createTodoList(scope)
+      if (title !== undefined) todoList = await adapter.updateTodoListTitle(scope, title)
+      if (items !== undefined) {
+        todoList = await adapter.replaceTodoItems(scope, parseTodoItemsFromInput(items))
+      } else {
+        if (updateItem !== undefined)
+          todoList = await adapter.updateTodoItem(scope, updateItem.id, {
+            status: updateItem.status,
+            title: updateItem.title,
+            description: updateItem.description
+          })
+        if (updateItems !== undefined && updateItems.length > 0) {
+          for (const u of updateItems) {
+            todoList = await adapter.updateTodoItem(scope, u.id, {
+              status: u.status,
+              title: u.title,
+              description: u.description
+            })
+          }
+        }
+      }
       return {
         content: [
           {

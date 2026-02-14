@@ -24,7 +24,7 @@ import type {
   TodoList,
   TodoItem,
   TodoItemStatus,
-  UpdateTodoListPayload,
+  CreateTodoItemPayload,
   UpdateTodoItemPayload,
   PomodoroSession,
   ClipboardItem,
@@ -35,6 +35,7 @@ import type {
   AgentMessage
 } from '../types'
 import { scopeStore } from '../core/ScopeStore'
+import { genUniqueId } from '../id'
 import { getLLMProvider } from '../llm'
 import { getMcpClientManager } from '../mcp-client/McpClientManager'
 
@@ -56,7 +57,7 @@ export class DefaultStickyNotesAdapter implements IStickyNotesAdapter {
   async createNote(scope: string, payload: CreateNotePayload): Promise<StickyNote> {
     const data = scopeStore.getScopeData(scope)
     const note: StickyNote = {
-      id: Math.random().toString(36).substring(2, 15),
+      id: genUniqueId(),
       content: payload.content ?? '',
       imageUrls: payload.imageUrls,
       createdAt: Date.now(),
@@ -108,7 +109,7 @@ export class DefaultStickyNotesAdapter implements IStickyNotesAdapter {
   async createGroup(scope: string, name: string): Promise<StickyNoteGroup> {
     const data = scopeStore.getScopeData(scope)
     const group: StickyNoteGroup = {
-      id: Math.random().toString(36).substring(2, 15),
+      id: genUniqueId(),
       name
     }
     data.groups.push(group)
@@ -147,10 +148,18 @@ export class DefaultNotificationAdapter implements INotificationAdapter {
   }
 }
 
-function ensureTodoItem(it: Partial<TodoItem> & { title: string }): TodoItem {
+function ensureTodoItem(
+  it: Partial<TodoItem> & { title: string },
+  usedIds?: Set<string>
+): TodoItem {
   const now = Date.now()
+  let id = (it as TodoItem).id
+  if (!id || (usedIds && usedIds.has(id))) {
+    id = genUniqueId()
+  }
+  usedIds?.add(id)
   return {
-    id: (it as TodoItem).id ?? Math.random().toString(36).substring(2, 15),
+    id,
     title: it.title,
     description: it.description,
     status: (it as TodoItem).status ?? 'todo',
@@ -160,6 +169,7 @@ function ensureTodoItem(it: Partial<TodoItem> & { title: string }): TodoItem {
 }
 
 // ============ 默认 TODO 列表适配器 ============
+// item 为顶层元素，list 为包装。list 仅含元数据，items 独立 CRUD。
 
 export class DefaultTodoListAdapter implements ITodoListAdapter {
   async getTodoList(scope: string, options?: { itemId?: string }): Promise<TodoList | null> {
@@ -173,78 +183,111 @@ export class DefaultTodoListAdapter implements ITodoListAdapter {
     return list
   }
 
-  async getTodoItem(scope: string, itemId: string): Promise<TodoItem | null> {
-    const data = scopeStore.getScopeData(scope)
-    return data.todoList?.items.find((it) => it.id === itemId) ?? null
-  }
-
-  async updateTodoList(scope: string, payload: UpdateTodoListPayload): Promise<TodoList> {
+  async createTodoList(scope: string, payload?: { title?: string }): Promise<TodoList> {
     const data = scopeStore.getScopeData(scope)
     const now = Date.now()
-
-    if (!data.todoList) {
-      const items = (payload.items ?? []).map((it) =>
-        ensureTodoItem(it as Partial<TodoItem> & { title: string })
-      )
-      const list: TodoList = {
-        id: Math.random().toString(36).substring(2, 15),
-        title: payload.title ?? '待办',
-        items,
-        createdAt: now,
-        updatedAt: now
-      }
-      data.todoList = list
-      scopeStore.saveScope(scope)
-      log.info('TodoList created:', list.id, 'scope:', scope)
-      return list
-    }
-
-    const existing = data.todoList
-    let items = [...existing.items]
-
-    if (payload.updateItem) {
-      const { id, ...upd } = payload.updateItem
-      const idx = items.findIndex((it) => it.id === id)
-      if (idx >= 0) {
-        const cur = items[idx]
-        items[idx] = {
-          ...cur,
-          ...(upd.status !== undefined && { status: upd.status as TodoItemStatus }),
-          ...(upd.title !== undefined && { title: upd.title }),
-          ...(upd.description !== undefined && { description: upd.description }),
-          updatedAt: now
-        }
-      }
-    }
-    if (payload.updateItems?.length) {
-      for (const { id, ...upd } of payload.updateItems) {
-        const idx = items.findIndex((it) => it.id === id)
-        if (idx >= 0) {
-          const cur = items[idx]
-          items[idx] = {
-            ...cur,
-            ...(upd.status !== undefined && { status: upd.status as TodoItemStatus }),
-            ...(upd.title !== undefined && { title: upd.title }),
-            ...(upd.description !== undefined && { description: upd.description }),
-            updatedAt: now
-          }
-        }
-      }
-    }
-    if (payload.items !== undefined && !payload.updateItem && !payload.updateItems?.length) {
-      items = payload.items.map((it) => ensureTodoItem(it as Partial<TodoItem> & { title: string }))
-    }
-
-    const updated: TodoList = {
-      ...existing,
-      ...(payload.title !== undefined && { title: payload.title }),
-      items,
+    if (data.todoList) return data.todoList
+    const list: TodoList = {
+      id: genUniqueId(),
+      title: payload?.title ?? '待办',
+      items: [],
+      createdAt: now,
       updatedAt: now
     }
+    data.todoList = list
+    scopeStore.saveScope(scope)
+    log.info('TodoList created:', list.id, 'scope:', scope)
+    return list
+  }
+
+  async updateTodoListTitle(scope: string, title: string): Promise<TodoList> {
+    const data = scopeStore.getScopeData(scope)
+    const list = data.todoList
+    if (!list) {
+      return this.createTodoList(scope, { title })
+    }
+    const updated: TodoList = { ...list, title, updatedAt: Date.now() }
     data.todoList = updated
     scopeStore.saveScope(scope)
-    log.info('TodoList updated:', updated.id, 'scope:', scope)
     return updated
+  }
+
+  async createTodoItem(scope: string, payload: CreateTodoItemPayload): Promise<TodoList> {
+    const data = scopeStore.getScopeData(scope)
+    let list = data.todoList
+    if (!list) list = await this.createTodoList(scope, { title: '待办' })
+    const now = Date.now()
+    const item: TodoItem = {
+      id: genUniqueId(),
+      title: payload.title,
+      description: payload.description,
+      status: payload.status ?? 'todo',
+      createdAt: now,
+      updatedAt: now
+    }
+    const items = [...list.items, item]
+    const updated: TodoList = { ...list, items, updatedAt: now }
+    data.todoList = updated
+    scopeStore.saveScope(scope)
+    return updated
+  }
+
+  async updateTodoItem(
+    scope: string,
+    itemId: string,
+    payload: UpdateTodoItemPayload
+  ): Promise<TodoList> {
+    const data = scopeStore.getScopeData(scope)
+    const list = data.todoList
+    if (!list) throw new Error('TodoList not found')
+    const now = Date.now()
+    const idx = list.items.findIndex((it) => it.id === itemId)
+    if (idx < 0) return list
+    const cur = list.items[idx]
+    const items = [...list.items]
+    items[idx] = {
+      ...cur,
+      ...(payload.status !== undefined && { status: payload.status as TodoItemStatus }),
+      ...(payload.title !== undefined && { title: payload.title }),
+      ...(payload.description !== undefined && { description: payload.description }),
+      updatedAt: now
+    }
+    const updated: TodoList = { ...list, items, updatedAt: now }
+    data.todoList = updated
+    scopeStore.saveScope(scope)
+    return updated
+  }
+
+  async deleteTodoItem(scope: string, itemId: string): Promise<TodoList> {
+    const data = scopeStore.getScopeData(scope)
+    const list = data.todoList
+    if (!list) return this.createTodoList(scope)
+    const items = list.items.filter((it) => it.id !== itemId)
+    const updated: TodoList = { ...list, items, updatedAt: Date.now() }
+    data.todoList = updated
+    scopeStore.saveScope(scope)
+    return updated
+  }
+
+  async replaceTodoItems(scope: string, items: TodoItem[]): Promise<TodoList> {
+    const data = scopeStore.getScopeData(scope)
+    let list = data.todoList
+    if (!list) list = await this.createTodoList(scope, { title: '待办' })
+    const usedIds = new Set<string>()
+    const normalized = items.map((it) =>
+      ensureTodoItem(it as Partial<TodoItem> & { title: string }, usedIds)
+    )
+    const updated: TodoList = { ...list, items: normalized, updatedAt: Date.now() }
+    data.todoList = updated
+    scopeStore.saveScope(scope)
+    return updated
+  }
+
+  async deleteTodoList(scope: string): Promise<void> {
+    const data = scopeStore.getScopeData(scope)
+    data.todoList = null
+    scopeStore.saveScope(scope)
+    log.info('TodoList deleted, scope:', scope)
   }
 }
 
@@ -258,7 +301,7 @@ export class DefaultPomodoroAdapter implements IPomodoroAdapter {
     const data = scopeStore.getScopeData(scope)
     const now = Date.now()
     const session: PomodoroSession = {
-      id: Math.random().toString(36).substring(2, 15),
+      id: genUniqueId(),
       taskId: payload.taskId,
       startedAt: now,
       endedAt: now,
@@ -319,7 +362,7 @@ export class DefaultClipboardAdapter implements IClipboardAdapter {
   async addItem(scope: string, item: Omit<ClipboardItem, 'id'>): Promise<ClipboardItem> {
     const data = scopeStore.getScopeData(scope)
     const record: ClipboardItem = {
-      id: Math.random().toString(36).substring(2, 15),
+      id: genUniqueId(),
       ...item
     }
     data.clipboard.unshift(record)
@@ -365,7 +408,7 @@ export class DefaultDocumentsAdapter implements IDocumentsAdapter {
     const data = scopeStore.getScopeData(scope)
     const now = Date.now()
     const doc: Document = {
-      id: Math.random().toString(36).substring(2, 15),
+      id: genUniqueId(),
       title: payload.title || '未命名文档',
       content: payload.content ?? '',
       createdAt: now,
@@ -427,7 +470,7 @@ export class DefaultAgentAdapter implements IAgentAdapter {
     const data = scopeStore.getScopeData(scope)
     const now = Date.now()
     const session: AgentSession = {
-      id: Math.random().toString(36).substring(2, 15),
+      id: genUniqueId(),
       title: '新会话',
       scope,
       messages: [],
@@ -479,7 +522,7 @@ export class DefaultAgentAdapter implements IAgentAdapter {
 
     const now = Date.now()
     const msg: AgentMessage = {
-      id: Math.random().toString(36).substring(2, 15),
+      id: genUniqueId(),
       ...message,
       createdAt: now
     }
