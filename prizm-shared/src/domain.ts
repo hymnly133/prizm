@@ -66,6 +66,14 @@ export interface UpdateTodoItemPayload {
   description?: string
 }
 
+/** 创建 TODO 项（id 由服务端生成） */
+export interface CreateTodoItemPayload {
+  title: string
+  description?: string
+  status?: TodoItemStatus
+}
+
+/** @deprecated 使用 createTodoList/updateTodoListTitle/replaceTodoItems/createTodoItem/updateTodoItem/deleteTodoItem 替代 */
 export interface UpdateTodoListPayload {
   title?: string
   items?: TodoItem[]

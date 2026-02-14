@@ -3,13 +3,10 @@
  */
 
 export interface ClientInfo {
-	clientId: string;
-	name: string;
-	allowedScopes: string[];
-	createdAt: number;
+  clientId: string
+  name: string
+  allowedScopes: string[]
+  createdAt: number
 }
 
-export interface ScopeDescription {
-	label: string;
-	description: string;
-}
+export type { ScopeDescription } from './scopes'
