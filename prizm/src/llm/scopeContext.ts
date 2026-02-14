@@ -16,18 +16,18 @@ import { getScopeStats } from './scopeItemRegistry'
 import { recordProvision } from './contextTracker'
 
 /** 单条内容最大字符数（摘要时） */
-const MAX_CONTENT_LEN = 180
+const MAX_CONTENT_LEN = 100
 
-/** 整体摘要最大字符数（约 1500-2000 tokens） */
-const DEFAULT_MAX_SUMMARY_LEN = 4000
+/** 整体摘要最大字符数（约 1000-1500 tokens） */
+const DEFAULT_MAX_SUMMARY_LEN = 2800
 
 /** 短内容阈值：低于此用全文 */
-const SHORT_THRESHOLD = 500
+const SHORT_THRESHOLD = 400
 
 /** 每类最大条数 */
-const MAX_NOTES = 12
-const MAX_TODO_ITEMS = 15
-const MAX_DOCUMENTS = 8
+const MAX_NOTES = 8
+const MAX_TODO_ITEMS = 10
+const MAX_DOCUMENTS = 5
 
 function getMaxSummaryLen(): number {
   const v = process.env.PRIZM_AGENT_SCOPE_CONTEXT_MAX_CHARS?.trim()
@@ -147,7 +147,7 @@ function buildDocumentsSection(
   for (const d of sorted.slice(0, maxItems)) {
     const content = (d.content ?? '').trim()
     const isShort = content.length < SHORT_THRESHOLD
-    const desc = isShort ? content : d.llmSummary ?? truncate(content, 150)
+    const desc = isShort ? content : d.llmSummary ?? truncate(content, MAX_CONTENT_LEN)
     lines.push(`- [id:${d.id}] ${d.title}: ${desc}`)
     if (sessionId) {
       recordProvision(scope, sessionId, {
@@ -231,6 +231,6 @@ export function buildScopeContextSummary(scope: string, options?: { sessionId?: 
   )
 
   const stats = getScopeStats(scope)
-  const statsLine = `\n\n---\n统计: ${stats.totalItems} 项, 共 ${stats.totalChars} 字 (便签 ${stats.byKind.notes.count} 条, 待办 ${stats.byKind.todoList.count} 项, 文档 ${stats.byKind.document.count} 篇, 会话 ${stats.byKind.sessions.count} 个)`
+  const statsLine = `\n--- ${stats.totalItems} 项`
   return summary + statsLine
 }

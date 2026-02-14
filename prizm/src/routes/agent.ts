@@ -27,6 +27,14 @@ import { deriveScopeActivities, collectToolCallsFromMessages } from '../llm/scop
 import { registerBuiltinSlashCommands, tryRunSlashCommand } from '../llm/slashCommands'
 import { listSlashCommands } from '../llm/slashCommandRegistry'
 import { getAllToolMetadata } from '../llm/toolMetadata'
+import {
+  isMemoryEnabled,
+  searchUserAndScopeMemories,
+  searchThreeLevelMemories,
+  addMemoryInteraction,
+  deleteMemoriesByGroupId
+} from '../llm/EverMemService'
+import { recordTokenUsage } from '../llm/tokenUsage'
 
 const log = createLogger('Agent')
 
@@ -293,6 +301,15 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
       }
 
       await adapter.deleteSession(scope, id)
+
+      // 异步清除该 session 的记忆（group_id = scope:session:sessionId）
+      if (isMemoryEnabled()) {
+        const sessionGroupId = `${scope}:session:${id}`
+        deleteMemoriesByGroupId(sessionGroupId).catch((e) =>
+          log.warn('Failed to delete session memories:', sessionGroupId, e)
+        )
+      }
+
       res.status(204).send()
     } catch (error) {
       log.error('delete agent session error:', error)
@@ -331,6 +348,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
           ? bodyModel.trim()
           : agentSettings.defaultModel?.trim() || undefined
       const { mcpEnabled, includeScopeContext } = req.body ?? {}
+      const userId = req.prizmClient?.clientId ?? 'default'
 
       // 追加用户消息
       await adapter.appendMessage(scope, id, {
@@ -360,13 +378,83 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
       }
 
       // 构建消息历史
-      const history = [
+      const history: Array<{ role: string; content: string }> = [
         ...session.messages.map((m) => ({
           role: m.role,
           content: m.content
         })),
         { role: 'user' as const, content: content.trim() }
       ]
+
+      // 记忆注入策略：首条前仅 user/scope；每 n 轮注入 user+scope+session；其余轮不注入
+      const trimmedContent = content.trim()
+      const isFirstMessage = session.messages.length === 0
+      const userTurnCount = session.messages.filter((m) => m.role === 'user').length
+      const memoryInjectTurnInterval =
+        typeof process.env.PRIZM_MEMORY_INJECT_TURN_INTERVAL !== 'undefined'
+          ? Math.max(1, parseInt(process.env.PRIZM_MEMORY_INJECT_TURN_INTERVAL, 10) || 3)
+          : 3
+      const isThresholdTurn = isFirstMessage || (userTurnCount + 1) % memoryInjectTurnInterval === 0
+      const shouldInjectMemory =
+        isMemoryEnabled() &&
+        isThresholdTurn &&
+        (trimmedContent.length >= 4 || (isFirstMessage && trimmedContent.length >= 1))
+      const memoryQuery = trimmedContent.length >= 4 ? trimmedContent : '用户偏好与工作区概况'
+
+      if (shouldInjectMemory) {
+        try {
+          const maxCharsPerMemory = 80
+          const truncate = (s: string) =>
+            s.length <= maxCharsPerMemory ? s : s.slice(0, maxCharsPerMemory) + '…'
+
+          let userMem: { memory: string }[] = []
+          let scopeMem: { memory: string }[] = []
+          let sessionMem: { memory: string }[] = []
+
+          if (isFirstMessage) {
+            const two = await searchUserAndScopeMemories(memoryQuery, userId, scope)
+            userMem = two.user
+            scopeMem = two.scope
+          } else {
+            const three = await searchThreeLevelMemories(memoryQuery, userId, scope, id)
+            userMem = three.user
+            scopeMem = three.scope
+            sessionMem = three.session
+          }
+
+          const sections: string[] = []
+          if (userMem.length > 0) {
+            sections.push(
+              '[User Memory]\n' + userMem.map((m) => `- ${truncate(m.memory)}`).join('\n')
+            )
+          }
+          if (scopeMem.length > 0) {
+            sections.push(
+              '[Scope Memory]\n' + scopeMem.map((m) => `- ${truncate(m.memory)}`).join('\n')
+            )
+          }
+          if (sessionMem.length > 0) {
+            sections.push(
+              '[Session Memory]\n' + sessionMem.map((m) => `- ${truncate(m.memory)}`).join('\n')
+            )
+          }
+
+          if (sections.length > 0) {
+            const memoryPrompt = sections.join('\n\n') + '\n\n请自然使用上述记忆，勿复述。'
+            history.splice(history.length - 1, 0, { role: 'system', content: memoryPrompt })
+            log.info(
+              'Injected memories: user=%d, scope=%d, session=%d (first=%s, turn=%d)',
+              userMem.length,
+              scopeMem.length,
+              sessionMem.length,
+              isFirstMessage,
+              userTurnCount + 1
+            )
+          }
+        } catch (memErr) {
+          log.warn('Memory search failed, proceeding without:', memErr)
+        }
+      }
 
       // 创建 AbortController，注册到 activeChats
       const key = chatKey(scope, id)
@@ -424,6 +512,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
             totalOutputTokens?: number
           }
         | undefined
+      let usageSent = false
       let hasError = false
       try {
         for await (const chunk of adapter.chat(scope, id, history, {
@@ -433,6 +522,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
           includeScopeContext: includeScopeContext !== false
         })) {
           if (ac.signal.aborted) break
+          if (chunk.usage) lastUsage = chunk.usage
           if (chunk.text) {
             fullContent += chunk.text
             segmentContent += chunk.text
@@ -496,9 +586,8 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
           }
           if (chunk.done) {
             flushSegment()
-            if (chunk.usage) lastUsage = chunk.usage
             const usedModel = typeof model === 'string' && model.trim() ? model.trim() : undefined
-            await adapter.appendMessage(scope, id, {
+            const appendedMsg = await adapter.appendMessage(scope, id, {
               role: 'assistant',
               content: fullContent,
               model: usedModel,
@@ -507,14 +596,35 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
               ...(fullToolCalls.length > 0 && { toolCalls: fullToolCalls }),
               ...(parts.length > 0 && { parts })
             })
-            scheduleConversationSummary(scope, id)
+            scheduleConversationSummary(scope, id, userId)
+
+            let memoryGrowth = null
+            if (isMemoryEnabled() && fullContent) {
+              try {
+                memoryGrowth = await addMemoryInteraction(
+                  [
+                    { role: 'user', content: content.trim() },
+                    { role: 'assistant', content: fullContent }
+                  ],
+                  userId,
+                  scope,
+                  id,
+                  appendedMsg.id
+                )
+              } catch (e) {
+                log.warn('Memory storage failed:', e)
+              }
+            }
             res.write(
               `data: ${JSON.stringify({
                 type: 'done',
                 model: usedModel,
-                usage: lastUsage ?? undefined
+                usage: lastUsage ?? undefined,
+                messageId: appendedMsg.id,
+                ...(memoryGrowth && { memoryGrowth })
               })}\n\n`
             )
+            usageSent = true
             res.flush?.()
           }
         }
@@ -523,7 +633,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         if (ac.signal.aborted && fullContent) {
           flushSegment()
           const usedModel = typeof model === 'string' && model.trim() ? model.trim() : undefined
-          await adapter.appendMessage(scope, id, {
+          const appendedMsg = await adapter.appendMessage(scope, id, {
             role: 'assistant',
             content: fullContent,
             model: usedModel,
@@ -532,20 +642,39 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
             ...(fullToolCalls.length > 0 && { toolCalls: fullToolCalls }),
             ...(parts.length > 0 && { parts })
           })
-          scheduleConversationSummary(scope, id)
+          scheduleConversationSummary(scope, id, userId)
+          let memoryGrowth = null
+          if (isMemoryEnabled() && fullContent) {
+            try {
+              memoryGrowth = await addMemoryInteraction(
+                [
+                  { role: 'user', content: content.trim() },
+                  { role: 'assistant', content: fullContent }
+                ],
+                userId,
+                scope,
+                id,
+                appendedMsg.id
+              )
+            } catch (e) {
+              log.warn('Memory storage failed:', e)
+            }
+          }
           res.write(
             `data: ${JSON.stringify({
               type: 'done',
               model: usedModel,
               usage: lastUsage ?? undefined,
-              stopped: true
+              stopped: true,
+              messageId: appendedMsg.id,
+              ...(memoryGrowth && { memoryGrowth })
             })}\n\n`
           )
+          usageSent = true
           res.flush?.()
         }
       } catch (err) {
         hasError = true
-        // AbortError 是正常停止，不算错误
         const isAbort = err instanceof Error && err.name === 'AbortError'
         if (!isAbort) {
           log.error('agent chat stream error:', err)
@@ -556,10 +685,15 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
             })}\n\n`
           )
           res.flush?.()
+          if (lastUsage) {
+            res.write(`data: ${JSON.stringify({ type: 'usage', value: lastUsage })}\n\n`)
+            usageSent = true
+            res.flush?.()
+          }
         } else if (fullContent) {
           flushSegment()
           const usedModel = typeof model === 'string' && model.trim() ? model.trim() : undefined
-          await adapter.appendMessage(scope, id, {
+          const appendedMsg = await adapter.appendMessage(scope, id, {
             role: 'assistant',
             content: fullContent,
             model: usedModel,
@@ -568,18 +702,50 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
             ...(fullToolCalls.length > 0 && { toolCalls: fullToolCalls }),
             ...(parts.length > 0 && { parts })
           })
-          scheduleConversationSummary(scope, id)
+          scheduleConversationSummary(scope, id, userId)
+          let memoryGrowth = null
+          if (isMemoryEnabled() && fullContent) {
+            try {
+              memoryGrowth = await addMemoryInteraction(
+                [
+                  { role: 'user', content: content.trim() },
+                  { role: 'assistant', content: fullContent }
+                ],
+                userId,
+                scope,
+                id,
+                appendedMsg.id
+              )
+            } catch (e) {
+              log.warn('Memory storage failed:', e)
+            }
+          }
           res.write(
             `data: ${JSON.stringify({
               type: 'done',
               model: usedModel,
               usage: lastUsage ?? undefined,
-              stopped: true
+              stopped: true,
+              messageId: appendedMsg.id,
+              ...(memoryGrowth && { memoryGrowth })
             })}\n\n`
           )
+          usageSent = true
+          res.flush?.()
+        } else if (lastUsage) {
+          res.write(`data: ${JSON.stringify({ type: 'usage', value: lastUsage })}\n\n`)
+          usageSent = true
           res.flush?.()
         }
       } finally {
+        const usedModel = typeof model === 'string' && model.trim() ? model.trim() : undefined
+        if (userId && lastUsage) {
+          recordTokenUsage(userId, 'chat', lastUsage, usedModel)
+        }
+        if (!usageSent && lastUsage) {
+          res.write(`data: ${JSON.stringify({ type: 'usage', value: lastUsage })}\n\n`)
+          res.flush?.()
+        }
         activeChats.delete(key)
         res.end()
       }

@@ -1,9 +1,12 @@
 /**
  * Agent 工具统一设置类型
- * 内置工具 + MCP 服务器 + LLM 摘要配置
+ * 内置工具 + MCP 服务器 + LLM 摘要配置 + 记忆模块
  */
 
 import type { McpServerConfig } from '../mcp-client/types'
+import type { MemorySettings } from '@prizm/shared'
+
+export type { MemorySettings }
 
 /** 内置工具：Tavily 联网搜索 */
 export interface TavilySettings {
@@ -31,7 +34,7 @@ export interface ConversationSummarySettings {
   model?: string
 }
 
-/** Agent LLM 相关设置（文档摘要、对话摘要、默认模型） */
+/** Agent LLM 相关设置（文档摘要、对话摘要、默认模型、记忆） */
 export interface AgentLLMSettings {
   /** 文档摘要配置 */
   documentSummary?: DocumentSummarySettings
@@ -39,6 +42,8 @@ export interface AgentLLMSettings {
   conversationSummary?: ConversationSummarySettings
   /** 默认对话模型，客户端可覆盖 */
   defaultModel?: string
+  /** 记忆模块配置 */
+  memory?: MemorySettings
 }
 
 /** 内置工具集合（可扩展） */
@@ -49,7 +54,7 @@ export interface BuiltinToolsSettings {
 /** 统一 Agent 工具设置 */
 export interface AgentToolsSettings {
   builtin?: BuiltinToolsSettings
-  /** Agent LLM 设置：摘要、默认模型 */
+  /** Agent LLM 设置：摘要、默认模型、记忆 */
   agent?: AgentLLMSettings
   mcpServers?: McpServerConfig[]
   updatedAt?: number

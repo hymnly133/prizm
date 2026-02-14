@@ -20,46 +20,46 @@ export function buildSystemPrompt(options: SystemPromptOptions): string {
 
   const parts: string[] = []
 
-  parts.push(
-    '你是用户工作区的 AI 助手。请根据工作区数据与用户需求进行回复，必要时主动使用工具查询或修改数据。'
-  )
+  parts.push('你是用户工作区的 AI 助手，根据工作区数据与用户需求回复，必要时使用工具查询或修改。')
 
   if (includeScopeContext) {
     const contextSummary = buildScopeContextSummary(scope, sessionId ? { sessionId } : undefined)
     if (contextSummary) {
       parts.push('')
-      parts.push('当前工作区 (scope: ' + scope + ') 包含以下数据：')
-      parts.push('')
+      parts.push('[工作区 ' + scope + ']')
       parts.push(contextSummary)
-      parts.push('')
       parts.push('---')
     }
   }
 
   parts.push('')
-  parts.push('## 你的能力')
-  parts.push('- 你可以通过工具读取、创建、修改、删除便签/待办/文档')
-  parts.push('- 用户用 @note:id、@doc:id、@todo:id 引用具体项目时，相关内容已附在上下文中')
-  parts.push('- 如果需要更多信息，请主动使用搜索和读取工具')
-  parts.push('- 进行修改操作时，请先确认用户意图')
+  parts.push('## 能力')
+  parts.push('- 工具：便签/待办/文档的读建改删；@note/@doc/@todo 引用时内容已附上')
+  parts.push('- 需更多信息时用搜索、文档检索或 prizm_search_memories / prizm_list_memories')
+  parts.push('- 修改前确认意图，删除需二次确认')
+  parts.push('')
+
+  parts.push('## 记忆')
+  parts.push('- 每条消息会注入 [User/Scope/Session Memory] 相关片段，自然使用即可')
+  parts.push(
+    '- 需更多时调用 prizm_search_memories 或 prizm_list_memories；默认混合检索，agentic 仅复杂查询时用'
+  )
   parts.push('')
 
   if (sessionId) {
     const provisionSummary = buildProvisionSummary(scope, sessionId)
     if (provisionSummary) {
-      parts.push('## 上下文状态')
+      parts.push('## 上下文')
       parts.push(provisionSummary)
-      parts.push('- 标记为 [摘要] 的项目可通过工具获取全文')
-      parts.push('- 标记为 [已过期] 的项目内容可能已变更')
+      parts.push('- [摘要]可工具取全文；[已过期]可能已变更')
       parts.push('')
     }
   }
 
-  parts.push('## 工作原则')
-  parts.push('1. 主动利用工作区数据回答问题，不要仅凭常识')
-  parts.push('2. 修改数据前需确认，删除操作需二次确认')
-  parts.push('3. 引用工作区内容时标注来源（类型+ID）')
-  parts.push('4. 搜索相关内容以给出更完整的回答')
+  parts.push('## 原则')
+  parts.push('1. 用工作区与记忆作答，不重复已有内容')
+  parts.push('2. 修改/删除前确认；引用标来源(类型+ID)')
+  parts.push('3. 日常用默认检索，慎用 agentic')
 
   return parts.join('\n')
 }

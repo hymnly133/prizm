@@ -22,7 +22,8 @@ import type {
   PomodoroSession,
   ClipboardItem,
   Document,
-  AgentSession
+  AgentSession,
+  TokenUsageRecord
 } from '../types'
 
 export { DEFAULT_SCOPE, ONLINE_SCOPE }
@@ -42,6 +43,8 @@ export interface ScopeData {
   documents: Document[]
   /** Agent 会话列表 */
   agentSessions: AgentSession[]
+  /** Token 使用记录 */
+  tokenUsage: TokenUsageRecord[]
 }
 
 const SCOPES_DIR = 'scopes'
@@ -107,7 +110,8 @@ function createEmptyScopeData(): ScopeData {
     pomodoroSessions: [],
     clipboard: [],
     documents: [],
-    agentSessions: []
+    agentSessions: [],
+    tokenUsage: []
   }
 }
 
@@ -164,7 +168,8 @@ export class ScopeStore {
       pomodoroSessions: Array.isArray(raw.pomodoroSessions) ? raw.pomodoroSessions : [],
       clipboard: Array.isArray(raw.clipboard) ? raw.clipboard : [],
       documents: Array.isArray(raw.documents) ? raw.documents : [],
-      agentSessions: Array.isArray(raw.agentSessions) ? raw.agentSessions : []
+      agentSessions: Array.isArray(raw.agentSessions) ? raw.agentSessions : [],
+      tokenUsage: Array.isArray(raw.tokenUsage) ? raw.tokenUsage : []
     }
   }
 
@@ -240,7 +245,8 @@ export class ScopeStore {
         pomodoroSessions: mdStore.readPomodoroSessions(dirPath),
         clipboard: mdStore.readClipboard(dirPath),
         documents: mdStore.readDocuments(dirPath),
-        agentSessions: mdStore.readAgentSessions(dirPath)
+        agentSessions: mdStore.readAgentSessions(dirPath),
+        tokenUsage: mdStore.readTokenUsage(dirPath)
       }
       this.store.set(scope, data)
     } catch (e) {
@@ -292,6 +298,7 @@ export class ScopeStore {
       mdStore.writeClipboard(dirPath, data.clipboard)
       mdStore.writeDocuments(dirPath, data.documents)
       mdStore.writeAgentSessions(dirPath, data.agentSessions)
+      mdStore.writeTokenUsage(dirPath, data.tokenUsage)
     } catch (e) {
       log.error('Failed to save scope', scope, e)
     }
@@ -320,6 +327,7 @@ export class ScopeStore {
     if (!Array.isArray(data.clipboard)) data.clipboard = []
     if (!Array.isArray(data.documents)) data.documents = []
     if (!Array.isArray(data.agentSessions)) data.agentSessions = []
+    if (!Array.isArray(data.tokenUsage)) data.tokenUsage = []
 
     return data
   }

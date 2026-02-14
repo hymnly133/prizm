@@ -10,6 +10,7 @@ export type ToolMetadataCategory =
   | 'clipboard'
   | 'notice'
   | 'search'
+  | 'memory'
   | 'external'
   | 'other'
 
@@ -238,6 +239,22 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     category: 'notice',
     scopeActivity: 'none',
     docUrl: 'https://github.com/prizm-project/prizm/blob/main/prizm/MCP-CONFIG.md#通知-notification'
+  },
+
+  // === 记忆（与 MCP、HTTP 检索对齐） ===
+  prizm_list_memories: {
+    name: 'prizm_list_memories',
+    displayName: '列出记忆',
+    category: 'memory',
+    scopeActivity: 'list',
+    docUrl: 'https://github.com/prizm-project/prizm/blob/main/prizm/MCP-CONFIG.md'
+  },
+  prizm_search_memories: {
+    name: 'prizm_search_memories',
+    displayName: '搜索记忆',
+    category: 'memory',
+    scopeActivity: 'search',
+    docUrl: 'https://github.com/prizm-project/prizm/blob/main/prizm/MCP-CONFIG.md'
   },
 
   // === Tavily 联网搜索 ===

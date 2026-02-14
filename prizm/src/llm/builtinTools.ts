@@ -11,6 +11,7 @@ import { scheduleDocumentSummary } from './documentSummaryService'
 import { listRefItems, getScopeRefItem, getScopeStats, searchScopeItems } from './scopeItemRegistry'
 import { recordActivity } from './contextTracker'
 import type { ScopeActivityItemKind, ScopeActivityAction } from '@prizm/shared'
+import { isMemoryEnabled, getAllMemories, searchMemories } from './EverMemService'
 
 function tool(
   name: string,
@@ -150,6 +151,14 @@ export function getBuiltinTools(): LLMTool[] {
     tool('prizm_scope_stats', '获取当前工作区数据统计（条数、字数等）。', {
       properties: {},
       required: []
+    }),
+    tool('prizm_list_memories', '列出当前用户的记忆条目（与对话相关的长期记忆）。', {
+      properties: {},
+      required: []
+    }),
+    tool('prizm_search_memories', '按语义/关键词搜索用户记忆，用于回忆过往对话或偏好。', {
+      properties: { query: { type: 'string', description: '搜索问题或关键词' } },
+      required: ['query']
     })
   ]
 }
@@ -161,12 +170,14 @@ export interface BuiltinToolResult {
 
 /**
  * 执行内置工具；sessionId 可选，用于记录修改到 ContextTracker
+ * userId 可选，用于记忆检索的真实用户 ID
  */
 export async function executeBuiltinTool(
   scope: string,
   toolName: string,
   args: Record<string, unknown>,
-  sessionId?: string
+  sessionId?: string,
+  userId?: string
 ): Promise<BuiltinToolResult> {
   const data = scopeStore.getScopeData(scope)
 
@@ -425,6 +436,33 @@ export async function executeBuiltinTool(
         return { text }
       }
 
+      case 'prizm_list_memories': {
+        if (!isMemoryEnabled()) return { text: '记忆模块未启用。', isError: true }
+        const memUserId = userId ?? 'default'
+        const memories = await getAllMemories(memUserId)
+        if (!memories.length) return { text: '当前无记忆条目。' }
+        const lines = memories
+          .slice(0, 50)
+          .map(
+            (m) =>
+              `- [${m.id}] ${(m.memory || '').slice(0, 120)}${
+                (m.memory?.length ?? 0) > 120 ? '...' : ''
+              }`
+          )
+        return { text: lines.join('\n') }
+      }
+
+      case 'prizm_search_memories': {
+        if (!isMemoryEnabled()) return { text: '记忆模块未启用。', isError: true }
+        const searchQuery = typeof args.query === 'string' ? args.query.trim() : ''
+        if (!searchQuery) return { text: '请提供搜索关键词。', isError: true }
+        const memSearchUserId = userId ?? 'default'
+        const memories = await searchMemories(searchQuery, memSearchUserId)
+        if (!memories.length) return { text: '未找到相关记忆。' }
+        const lines = memories.map((m) => `- ${m.memory}`)
+        return { text: lines.join('\n') }
+      }
+
       default:
         return { text: `未知内置工具: ${toolName}`, isError: true }
     }
@@ -453,5 +491,7 @@ export const BUILTIN_TOOL_NAMES = new Set([
   'prizm_update_document',
   'prizm_delete_document',
   'prizm_search',
-  'prizm_scope_stats'
+  'prizm_scope_stats',
+  'prizm_list_memories',
+  'prizm_search_memories'
 ])

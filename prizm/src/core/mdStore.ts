@@ -17,7 +17,8 @@ import type {
   Document,
   AgentSession,
   AgentMessage,
-  MessagePart
+  MessagePart,
+  TokenUsageRecord
 } from '../types'
 
 const EXT = '.md'
@@ -32,7 +33,7 @@ function writeMd(filePath: string, frontmatter: Record<string, unknown>, body = 
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true })
   }
-  const content = matter.stringify(body, frontmatter, { lineWidth: -1 })
+  const content = matter.stringify(body, frontmatter, { lineWidth: -1 } as any)
   fs.writeFileSync(filePath, content, 'utf-8')
 }
 
@@ -511,17 +512,20 @@ function parseAgentMessage(raw: unknown): AgentMessage | null {
       .filter((x): x is NonNullable<typeof x> => x !== null)
     if (parsed.length > 0) parts = parsed
   }
-  return {
+  const res: AgentMessage = {
     id,
     role,
     content,
     createdAt,
-    ...(typeof r.model === 'string' && { model: r.model }),
-    ...(Array.isArray(r.toolCalls) && { toolCalls: r.toolCalls }),
-    ...(r.usage && typeof r.usage === 'object' && { usage: r.usage as AgentMessage['usage'] }),
-    ...(typeof r.reasoning === 'string' && { reasoning: r.reasoning }),
-    ...(parts && { parts })
+    ...(typeof r.model === 'string' ? { model: r.model } : {}),
+    ...(Array.isArray(r.toolCalls) ? { toolCalls: r.toolCalls } : {}),
+    ...(r.usage && typeof r.usage === 'object' ? { usage: r.usage as AgentMessage['usage'] } : {}),
+    ...(typeof r.reasoning === 'string' ? { reasoning: r.reasoning } : {})
   }
+  if (parts) {
+    res.parts = parts
+  }
+  return res
 }
 
 /**
@@ -663,4 +667,41 @@ export function writeAgentSessions(dir: string, sessions: AgentSession[]): void 
       } catch {}
     }
   }
+}
+
+// ============ Token Usage ============
+
+const VALID_USAGE_SCOPES: Set<string> = new Set([
+  'chat',
+  'document_summary',
+  'conversation_summary',
+  'memory'
+])
+
+function isTokenUsageRecord(r: unknown): r is TokenUsageRecord {
+  if (typeof r !== 'object' || r === null) return false
+  const o = r as Record<string, unknown>
+  return (
+    typeof o.id === 'string' &&
+    VALID_USAGE_SCOPES.has(String(o.usageScope)) &&
+    typeof o.timestamp === 'number' &&
+    typeof o.model === 'string' &&
+    typeof o.inputTokens === 'number' &&
+    typeof o.outputTokens === 'number' &&
+    typeof o.totalTokens === 'number'
+  )
+}
+
+export function readTokenUsage(dir: string): TokenUsageRecord[] {
+  const filePath = path.join(dir, 'token_usage.md')
+  const parsed = readMd(filePath)
+  if (!parsed) return []
+  const d = parsed.data
+  if (!Array.isArray(d.records)) return []
+  return (d.records as unknown[]).filter(isTokenUsageRecord)
+}
+
+export function writeTokenUsage(dir: string, records: TokenUsageRecord[]): void {
+  const filePath = path.join(dir, 'token_usage.md')
+  writeMd(filePath, { records }, '')
 }

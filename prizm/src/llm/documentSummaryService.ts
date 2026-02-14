@@ -8,6 +8,8 @@ import { scopeStore } from '../core/ScopeStore'
 import { getLLMProvider } from './index'
 import { createLogger } from '../logger'
 import { getDocumentSummarySettings } from '../settings/agentToolsStore'
+import { recordTokenUsage } from './tokenUsage'
+import { isMemoryEnabled, addDocumentToMemory } from './EverMemService'
 
 const log = createLogger('DocumentSummary')
 
@@ -16,9 +18,9 @@ const ENV_DISABLED = process.env.PRIZM_DOC_SUMMARY_ENABLED === '0'
 
 /**
  * 异步生成文档摘要并持久化
- * 不阻塞调用方，失败时仅记录日志
+ * @param userId 可选，用于 token 记录；无则记到 anonymous
  */
-export function scheduleDocumentSummary(scope: string, documentId: string): void {
+export function scheduleDocumentSummary(scope: string, documentId: string, userId?: string): void {
   const settings = getDocumentSummarySettings()
   const enabled = !ENV_DISABLED && settings?.enabled !== false
   if (!enabled) return
@@ -27,6 +29,9 @@ export function scheduleDocumentSummary(scope: string, documentId: string): void
   const model = settings?.model?.trim() || undefined
 
   void (async () => {
+    let lastUsage:
+      | { totalInputTokens?: number; totalOutputTokens?: number; totalTokens?: number }
+      | undefined
     try {
       const data = scopeStore.getScopeData(scope)
       const doc = data.documents.find((d) => d.id === documentId)
@@ -53,6 +58,7 @@ export function scheduleDocumentSummary(scope: string, documentId: string): void
         model
       })) {
         if (chunk.text) llmContent += chunk.text
+        if (chunk.usage) lastUsage = chunk.usage
         if (chunk.done) break
       }
 
@@ -71,8 +77,19 @@ export function scheduleDocumentSummary(scope: string, documentId: string): void
       }
       scopeStore.saveScope(scope)
       log.info('Document summary generated:', documentId, 'scope:', scope)
+
+      // 异步将文档内容写入 scope:docs 记忆层
+      if (isMemoryEnabled()) {
+        addDocumentToMemory(userId ?? 'anonymous', scope, documentId).catch((e) =>
+          log.warn('Failed to store document memory:', documentId, e)
+        )
+      }
     } catch (err) {
       log.error('Document summary failed:', documentId, 'scope:', scope, err)
+    } finally {
+      if (lastUsage) {
+        recordTokenUsage(userId ?? 'anonymous', 'document_summary', lastUsage, model)
+      }
     }
   })()
 }

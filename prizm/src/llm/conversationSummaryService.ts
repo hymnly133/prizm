@@ -8,14 +8,12 @@ import { scopeStore } from '../core/ScopeStore'
 import { getLLMProvider } from './index'
 import { createLogger } from '../logger'
 import { getConversationSummarySettings } from '../settings/agentToolsStore'
+import { recordTokenUsage } from './tokenUsage'
 
 const log = createLogger('ConversationSummary')
 
 const DEFAULT_INTERVAL = 10
 
-/**
- * 计算 user+assistant 轮数（每对算 1 轮）
- */
 function countTurns(messages: Array<{ role: string }>): number {
   let turns = 0
   let lastWasUser = false
@@ -32,9 +30,13 @@ function countTurns(messages: Array<{ role: string }>): number {
 
 /**
  * 异步生成对话摘要并更新会话
- * 不阻塞调用方，失败时仅记录日志
+ * @param userId 可选，用于 token 记录；无则记到 anonymous
  */
-export function scheduleConversationSummary(scope: string, sessionId: string): void {
+export function scheduleConversationSummary(
+  scope: string,
+  sessionId: string,
+  userId?: string
+): void {
   const settings = getConversationSummarySettings()
   if (settings?.enabled === false) return
 
@@ -42,6 +44,9 @@ export function scheduleConversationSummary(scope: string, sessionId: string): v
   const model = settings?.model?.trim() || undefined
 
   void (async () => {
+    let lastUsage:
+      | { totalInputTokens?: number; totalOutputTokens?: number; totalTokens?: number }
+      | undefined
     try {
       const data = scopeStore.getScopeData(scope)
       const session = data.agentSessions.find((s) => s.id === sessionId)
@@ -56,7 +61,6 @@ export function scheduleConversationSummary(scope: string, sessionId: string): v
         return
       }
 
-      // 取最近 interval 轮对话用于摘要（约 2*interval 条消息）
       const recent = session.messages.slice(-(interval * 2))
       const text = recent
         .map((m) => `[${m.role}]: ${(m as { content?: string }).content ?? ''}`)
@@ -78,6 +82,7 @@ export function scheduleConversationSummary(scope: string, sessionId: string): v
         model
       })) {
         if (chunk.text) llmContent += chunk.text
+        if (chunk.usage) lastUsage = chunk.usage
         if (chunk.done) break
       }
 
@@ -96,6 +101,10 @@ export function scheduleConversationSummary(scope: string, sessionId: string): v
       log.info('Conversation summary generated:', sessionId, 'scope:', scope)
     } catch (err) {
       log.error('Conversation summary failed:', sessionId, 'scope:', scope, err)
+    } finally {
+      if (lastUsage) {
+        recordTokenUsage(userId ?? 'anonymous', 'conversation_summary', lastUsage, model)
+      }
     }
   })()
 }

@@ -25,11 +25,15 @@ import { createPomodoroRoutes } from './routes/pomodoro'
 import { createClipboardRoutes } from './routes/clipboard'
 import { createDocumentsRoutes } from './routes/documents'
 import { createSearchRoutes } from './routes/search'
+import { SearchIndexService } from './search/searchIndexService'
+import { SQLiteAdapter } from '@prizm/evermemos'
 import { createAgentRoutes } from './routes/agent'
 import { createMcpConfigRoutes } from './routes/mcpConfig'
 import { createSettingsRoutes } from './routes/settings'
+import { createMemoryRoutes } from './routes/memory'
 import { mountMcpRoutes } from './mcp'
 import { WebSocketServer } from './websocket/WebSocketServer'
+import { initEverMemService } from './llm/EverMemService'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -123,16 +127,21 @@ export function createPrizmServer(
 
   // 挂载路由
   const router = express.Router()
+  const searchIndexDbPath = path.join(dataDir, 'evermemos.db')
+  const searchIndexStore = new SQLiteAdapter(searchIndexDbPath)
+  const searchIndex = new SearchIndexService(searchIndexStore)
+  searchIndex.setAdapters(adapters)
   createNotesRoutes(router, adapters.notes)
   createNotifyRoutes(router, adapters.notification)
   createTodoListRoutes(router, adapters.todoList)
   createPomodoroRoutes(router, adapters.pomodoro)
   createClipboardRoutes(router, adapters.clipboard)
-  createDocumentsRoutes(router, adapters.documents)
-  createSearchRoutes(router, adapters)
+  createDocumentsRoutes(router, adapters.documents, searchIndex)
+  createSearchRoutes(router, adapters, searchIndex)
   createAgentRoutes(router, adapters.agent)
   createMcpConfigRoutes(router)
   createSettingsRoutes(router)
+  createMemoryRoutes(router)
   app.use('/', router)
 
   // MCP 端点：供 Cursor、LobeChat 等 Agent 连接（wsServer 在 start 后注入）
@@ -180,10 +189,15 @@ export function createPrizmServer(
 
       return new Promise((resolve, reject) => {
         try {
-          server = app.listen(port, host, () => {
+          server = app.listen(port, host, async () => {
             isRunning = true
 
-            // 初始化 WebSocket 服务器（如果启用）
+            try {
+              await initEverMemService()
+            } catch (e) {
+              log.warn('EverMemService init failed:', e)
+            }
+
             if (enableWebSocket && server) {
               wsServer = new WebSocketServer(server, clientRegistry, {
                 path: websocketPath
