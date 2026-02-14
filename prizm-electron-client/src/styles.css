@@ -160,6 +160,50 @@
 .notification-item__close {
   flex-shrink: 0;
 }
+.notification-item__todo-stats {
+  font-weight: 500;
+  color: var(--ant-color-primary);
+}
+.notification-item__todo-items {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  list-style: none;
+}
+.notification-item__todo-items li {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+}
+.notification-item__todo-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.notification-item__todo-status {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--ant-color-fill-quaternary);
+  color: var(--ant-color-text-tertiary);
+}
+.notification-item__todo-item--done .notification-item__todo-status {
+  background: var(--ant-color-success-bg);
+  color: var(--ant-color-success);
+}
+.notification-item__todo-item--doing .notification-item__todo-status {
+  background: var(--ant-color-warning-bg);
+  color: var(--ant-color-warning);
+}
+.notification-item__todo-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.notification-item__todo-more {
+  color: var(--ant-color-text-tertiary);
+  font-style: italic;
+}
 
 /* App header（由 Layout 提供，此处定义内容样式） */
 .app-header-inner {

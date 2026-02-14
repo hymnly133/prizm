@@ -56,7 +56,11 @@ contextBridge.exposeInMainWorld('prizm', {
     }
   },
 
-  showNotification(payload: { title: string; body?: string; updateId?: string }) {
+  showNotification(
+    payload:
+      | { title: string; body?: string; updateId?: string }
+      | { eventType: string; payload: unknown; updateId?: string; title?: string; body?: string }
+  ) {
     return ipcRenderer.invoke('show_notification', payload)
   },
 

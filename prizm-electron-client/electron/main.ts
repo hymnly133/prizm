@@ -105,7 +105,7 @@ async function loadConfigFromDisk(): Promise<PrizmConfig> {
         minimize_to_tray: 'true',
         show_notification: 'true'
       },
-      notify_events: ['notification', 'todo_list:updated']
+      notify_events: ['notification', 'todo_list:created', 'todo_list:updated', 'todo_list:deleted']
     }
   }
 }
@@ -223,7 +223,7 @@ function createMainWindow(): BrowserWindow {
   }
 
   mainWindow = new BrowserWindow({
-    width: 480,
+    width: 980,
     height: 640,
     minWidth: 400,
     minHeight: 500,
@@ -378,17 +378,26 @@ function createNotificationWindow(): BrowserWindow {
 }
 
 /** 待发送通知队列（窗口未就绪时缓存） */
-const notificationQueue: { title: string; body?: string; source?: string; updateId?: string }[] = []
-
-/**
- * 在通知窗口显示通知
- * updateId 存在时更新同 id 的现有通知，否则新建
- */
-function showNotificationInWindow(payload: {
-  title: string
+const notificationQueue: Array<{
+  title?: string
   body?: string
   source?: string
   updateId?: string
+  eventType?: string
+  payload?: unknown
+}> = []
+
+/**
+ * 在通知窗口显示通知
+ * 支持两种格式：1) 旧格式 { title, body, updateId } 2) 新格式 { eventType, payload, updateId } 用于自定义展示
+ */
+function showNotificationInWindow(payload: {
+  title?: string
+  body?: string
+  source?: string
+  updateId?: string
+  eventType?: string
+  payload?: unknown
 }): void {
   logNotify('showNotificationInWindow 被调用', payload)
   const win = createNotificationWindow()
@@ -659,7 +668,17 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(
     'show_notification',
-    (_event, payload: { title: string; body?: string; source?: string; updateId?: string }) => {
+    (
+      _event,
+      payload: {
+        title?: string
+        body?: string
+        source?: string
+        updateId?: string
+        eventType?: string
+        payload?: unknown
+      }
+    ) => {
       logNotify('IPC show_notification 收到', payload)
       showNotificationInWindow(payload)
       return true

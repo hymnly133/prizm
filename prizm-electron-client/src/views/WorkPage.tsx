@@ -15,7 +15,8 @@ import { usePrizmContext } from '../context/PrizmContext'
 import { useLogsContext } from '../context/LogsContext'
 import type { FileKind, FileItem } from '../hooks/useFileList'
 import type { TodoItemStatus } from '@prizm/client-core'
-import { FileText, StickyNote } from 'lucide-react'
+import type { SavePayload } from '../components/FileDetailView'
+import { FileText, ListTodo, StickyNote } from 'lucide-react'
 import { getKindLabel, STATUS_LABELS } from '../constants/todo'
 
 export default function WorkPage() {
@@ -86,6 +87,44 @@ export default function WorkPage() {
     }
   }
 
+  async function onAddTodo() {
+    const http = manager?.getHttpClient()
+    if (!http) return
+    try {
+      const todoList = await http.createTodoList(currentScope, { title: '待办' })
+      await refreshFileList(currentScope, { silent: true })
+      setSelectedFile({ kind: 'todoList', id: todoList.id })
+      addLog('已新建待办列表', 'success')
+    } catch (e) {
+      addLog(`创建待办失败: ${String(e)}`, 'error')
+    }
+  }
+
+  async function onSaveFile(payload: SavePayload) {
+    const f = selectedFileData
+    const http = manager?.getHttpClient()
+    if (!http || !f) return
+    try {
+      if (payload.kind === 'note') {
+        await http.updateNote(f.id, { content: payload.content }, currentScope)
+      } else if (payload.kind === 'document') {
+        await http.updateDocument(
+          f.id,
+          { title: payload.title, content: payload.content },
+          currentScope
+        )
+      } else if (payload.kind === 'todoList') {
+        await http.updateTodoListTitle(currentScope, payload.title)
+        await http.replaceTodoItems(currentScope, payload.items)
+      }
+      await refreshFileList(currentScope, { silent: true })
+      addLog('已保存', 'success')
+    } catch (e) {
+      addLog(`保存失败: ${String(e)}`, 'error')
+      throw e
+    }
+  }
+
   async function onDeleteFile() {
     const f = selectedFileData
     if (!f || !manager) return
@@ -94,7 +133,7 @@ export default function WorkPage() {
       if (f.kind === 'note') {
         await http.deleteNote(f.id, currentScope)
       } else if (f.kind === 'todoList') {
-        await http.updateTodoList({ items: [] }, currentScope)
+        await http.deleteTodoList(currentScope)
       } else {
         await http.deleteDocument(f.id, currentScope)
       }
@@ -121,7 +160,7 @@ export default function WorkPage() {
           if (file.kind === 'note') {
             await http.deleteNote(file.id, currentScope)
           } else if (file.kind === 'todoList') {
-            await http.updateTodoList({ items: [] }, currentScope)
+            await http.deleteTodoList(currentScope)
           } else {
             await http.deleteDocument(file.id, currentScope)
           }
@@ -236,6 +275,7 @@ export default function WorkPage() {
         </div>
         <div className="work-page__toolbar-actions">
           <ActionIcon icon={StickyNote} title="新建便签" onClick={onAddNote} size="large" />
+          <ActionIcon icon={ListTodo} title="新建待办" onClick={onAddTodo} size="large" />
           <ActionIcon icon={FileText} title="新建文档" onClick={onAddDocument} size="large" />
         </div>
       </div>
@@ -266,6 +306,7 @@ export default function WorkPage() {
                     <Button type="primary" onClick={onAddNote}>
                       新建便签
                     </Button>
+                    <Button onClick={onAddTodo}>新建待办</Button>
                     <Button onClick={onAddDocument}>新建文档</Button>
                   </div>
                 ) : undefined
@@ -303,7 +344,7 @@ export default function WorkPage() {
         destroyOnClose
         open={previewOpen}
         title={selectedFileData ? getKindLabel(selectedFileData.kind) : ''}
-        width={560}
+        width={800}
         onCancel={() => {
           setSelectedFile(null)
           setPreviewOpen(false)
@@ -323,11 +364,12 @@ export default function WorkPage() {
         }
       >
         {selectedFileData && (
-          <div style={{ paddingTop: 16, maxHeight: '70vh', overflowY: 'auto' }}>
+          <div style={{ paddingTop: 16, maxHeight: '80vh', overflowY: 'auto' }}>
             <FileDetailView
               file={selectedFileData}
               onDelete={onDeleteFile}
               onDone={() => {}}
+              onSave={onSaveFile}
               onTodoItemStatus={selectedFileData.kind === 'todoList' ? onTodoItemStatus : undefined}
             />
           </div>

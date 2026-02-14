@@ -81,9 +81,7 @@ export default function TestPage() {
     setMockResult(null)
     try {
       const http = manager.getHttpClient()
-      const list = await http.getTodoList(currentScope)
-      const items = list?.items ?? []
-      await http.updateTodoList({ items: [...items, { title: mockTask.trim() }] }, currentScope)
+      await http.createTodoItem(currentScope, { title: mockTask.trim() })
       setLastSyncEvent('todo_list:updated')
       setMockResult({ ok: true, msg: '已添加 TODO 项，列表将刷新' })
       addLog('已添加 TODO 项', 'success')

@@ -5,7 +5,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { usePrizmContext } from '../context/PrizmContext'
 import { subscribeSyncEvents, type SyncEventPayload } from '../events/syncEventEmitter'
-import type { StickyNote, TodoList, Document } from '@prizm/client-core'
+import type { StickyNote, TodoList, Document, TodoItem } from '@prizm/client-core'
 
 const SYNC_INCREMENTAL_DEBOUNCE_MS = 100
 const SYNC_FULL_REFRESH_DEBOUNCE_MS = 400
@@ -32,7 +32,8 @@ function docToTitle(d: Document): string {
 function isFileSyncEvent(eventType: string): boolean {
   return (
     eventType.startsWith('note:') ||
-    eventType === 'todo_list:updated' ||
+    eventType.startsWith('todo_list:') ||
+    eventType.startsWith('todo_item:') ||
     eventType.startsWith('document:')
   )
 }
@@ -105,6 +106,8 @@ export function useFileList(scope: string) {
     [manager]
   )
 
+  const needTodoListFetchRef = useRef(false)
+
   const applyIncrementalUpdate = useCallback(
     async (s: string, events: Array<{ eventType: string; payload?: SyncEventPayload }>) => {
       const http = manager?.getHttpClient()
@@ -114,6 +117,9 @@ export function useFileList(scope: string) {
       const toFetchNote = new Set<string>()
       const toFetchDoc = new Set<string>()
       let fetchTodoList = false
+      let removeTodoList = false
+      const todoItemEvents: Array<{ eventType: string; payload?: SyncEventPayload }> = []
+      const todoListUpdatedEvents: Array<{ payload?: SyncEventPayload }> = []
 
       for (const { eventType, payload } of events) {
         const eventScope = payload?.scope ?? s
@@ -127,7 +133,19 @@ export function useFileList(scope: string) {
           toFetchNote.add(id)
         else if ((eventType === 'document:created' || eventType === 'document:updated') && id)
           toFetchDoc.add(id)
-        else if (eventType === 'todo_list:updated') fetchTodoList = true
+        else if (eventType === 'todo_list:deleted' && payload?.deleted === true) {
+          removeTodoList = true
+        } else if (eventType === 'todo_list:created') {
+          fetchTodoList = true
+        } else if (eventType === 'todo_list:updated') {
+          todoListUpdatedEvents.push({ payload })
+        } else if (
+          eventType === 'todo_item:created' ||
+          eventType === 'todo_item:updated' ||
+          eventType === 'todo_item:deleted'
+        ) {
+          todoItemEvents.push({ eventType, payload })
+        }
       }
 
       for (const k of toDelete) {
@@ -136,10 +154,101 @@ export function useFileList(scope: string) {
         else if (kind === 'document') toFetchDoc.delete(id)
       }
 
+      needTodoListFetchRef.current = false
       setFileList((prev) => {
         let next = prev.filter((p) => !toDelete.has(`${p.kind}:${p.id}`))
+        if (removeTodoList) next = next.filter((p) => p.kind !== 'todoList')
+
+        for (const { payload } of todoListUpdatedEvents) {
+          const p = payload as Record<string, unknown>
+          const listId = p?.listId as string | undefined
+          const todoFile = next.find((x) => x.kind === 'todoList' && x.id === listId)
+          if (!todoFile || !listId) {
+            needTodoListFetchRef.current = true
+            break
+          }
+          const list = todoFile.raw as TodoList
+          if (p?.itemsOmitted === true) {
+            const updated: TodoList = {
+              ...list,
+              title: (p?.title as string) ?? list.title,
+              updatedAt: (p?.updatedAt as number) ?? Date.now()
+            }
+            next = next.map((x) =>
+              x.kind === 'todoList' && x.id === listId ? todoToFileItem(updated) : x
+            )
+          } else if (Array.isArray(p?.items)) {
+            const updated: TodoList = {
+              ...list,
+              title: (p?.title as string) ?? list.title,
+              items: p.items as TodoItem[],
+              updatedAt: (p?.updatedAt as number) ?? Date.now()
+            }
+            next = next.map((x) =>
+              x.kind === 'todoList' && x.id === listId ? todoToFileItem(updated) : x
+            )
+          } else {
+            needTodoListFetchRef.current = true
+          }
+        }
+
+        for (const { eventType, payload } of todoItemEvents) {
+          const todoFile = next.find((p) => p.kind === 'todoList')
+          if (!todoFile) {
+            needTodoListFetchRef.current = true
+            break
+          }
+          const list = todoFile.raw as TodoList
+          const p = payload as Record<string, unknown>
+          const listId = p?.listId as string | undefined
+
+          if (eventType === 'todo_item:created' && listId && list.id === listId) {
+            const item = {
+              id: (p?.itemId ?? p?.id) as string,
+              title: (p?.title as string) ?? '',
+              description: p?.description as string | undefined,
+              status: (p?.status as string) ?? 'todo',
+              createdAt: (p?.createdAt as number) ?? Date.now(),
+              updatedAt: (p?.updatedAt as number) ?? Date.now()
+            } as TodoItem
+            const items = [...list.items, item]
+            const updated: TodoList = { ...list, items, updatedAt: item.updatedAt ?? Date.now() }
+            next = next.map((x) =>
+              x.kind === 'todoList' && x.id === list.id ? todoToFileItem(updated) : x
+            )
+          } else if (eventType === 'todo_item:updated' && listId && list.id === listId) {
+            const itemId = (p?.itemId ?? p?.id) as string
+            if (itemId) {
+              const item = {
+                id: itemId,
+                title: (p?.title as string) ?? '',
+                description: p?.description as string | undefined,
+                status: (p?.status as string) ?? 'todo',
+                createdAt: (p?.createdAt as number) ?? Date.now(),
+                updatedAt: (p?.updatedAt as number) ?? Date.now()
+              } as TodoItem
+              const items = list.items.map((it) => (it.id === itemId ? item : it))
+              const updated: TodoList = { ...list, items, updatedAt: item.updatedAt ?? Date.now() }
+              next = next.map((x) =>
+                x.kind === 'todoList' && x.id === list.id ? todoToFileItem(updated) : x
+              )
+            }
+          } else if (eventType === 'todo_item:deleted') {
+            const itemId = p?.itemId as string
+            if (itemId) {
+              const items = list.items.filter((it) => it.id !== itemId)
+              const updated: TodoList = { ...list, items, updatedAt: Date.now() }
+              next = next.map((x) =>
+                x.kind === 'todoList' && x.id === list.id ? todoToFileItem(updated) : x
+              )
+            }
+          }
+        }
+
         return sortByUpdatedAt(next)
       })
+
+      if (needTodoListFetchRef.current) fetchTodoList = true
 
       const fetches: Promise<FileItem | null>[] = []
       for (const id of toFetchNote) {
@@ -158,7 +267,9 @@ export function useFileList(scope: string) {
             .catch(() => null)
         )
       }
+      let todoListFetchIndex = -1
       if (fetchTodoList) {
+        todoListFetchIndex = fetches.length
         fetches.push(http.getTodoList(s).then((tl) => (tl ? todoToFileItem(tl) : null)))
       }
 
@@ -166,6 +277,10 @@ export function useFileList(scope: string) {
 
       const results = await Promise.all(fetches)
       const newItems = results.filter((x): x is FileItem => x !== null)
+
+      if (fetchTodoList && todoListFetchIndex >= 0 && results[todoListFetchIndex] === null) {
+        setFileList((prev) => sortByUpdatedAt(prev.filter((p) => p.kind !== 'todoList')))
+      }
 
       if (newItems.length === 0) return
 
@@ -192,10 +307,12 @@ export function useFileList(scope: string) {
     const unsubscribe = subscribeSyncEvents((eventType: string, payload?: SyncEventPayload) => {
       if (!isFileSyncEvent(eventType)) return
 
-      const hasPayload = payload && 'id' in payload
+      const hasPayload = payload && ('id' in payload || 'deleted' in payload)
       const canIncremental =
         hasPayload &&
-        (eventType.endsWith(':deleted') ||
+        (eventType.startsWith('todo_list:') ||
+          eventType.startsWith('todo_item:') ||
+          eventType.endsWith(':deleted') ||
           eventType.endsWith(':created') ||
           eventType.endsWith(':updated'))
 

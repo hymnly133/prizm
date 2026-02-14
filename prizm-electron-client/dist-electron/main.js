@@ -108,7 +108,7 @@ async function loadConfigFromDisk() {
                 minimize_to_tray: 'true',
                 show_notification: 'true'
             },
-            notify_events: ['notification', 'todo_list:updated']
+            notify_events: ['notification', 'todo_list:created', 'todo_list:updated', 'todo_list:deleted']
         };
     }
 }
@@ -211,7 +211,7 @@ function createMainWindow() {
         return mainWindow;
     }
     mainWindow = new electron_1.BrowserWindow({
-        width: 480,
+        width: 980,
         height: 640,
         minWidth: 400,
         minHeight: 500,
@@ -344,7 +344,7 @@ function createNotificationWindow() {
 const notificationQueue = [];
 /**
  * 在通知窗口显示通知
- * updateId 存在时更新同 id 的现有通知，否则新建
+ * 支持两种格式：1) 旧格式 { title, body, updateId } 2) 新格式 { eventType, payload, updateId } 用于自定义展示
  */
 function showNotificationInWindow(payload) {
     logNotify('showNotificationInWindow 被调用', payload);

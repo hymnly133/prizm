@@ -127,7 +127,12 @@ export function PrizmProvider({ children }: { children: ReactNode }) {
         const m = new PrizmClientManager({
           config: cfg,
           subscribeEvents: 'all',
-          notifyEvents: cfg.notify_events ?? ['notification', 'todo_list:updated'],
+          notifyEvents: cfg.notify_events ?? [
+            'notification',
+            'todo_list:created',
+            'todo_list:updated',
+            'todo_list:deleted'
+          ],
           onNotify: (payload: NotificationPayload) => {
             opt.onNotify(payload)
             const isUserInitiated =
@@ -138,16 +143,24 @@ export function PrizmProvider({ children }: { children: ReactNode }) {
                 : payload.title ?? '通知'
               toast.success(msg)
             } else if (cfg.tray?.show_notification === 'true') {
-              void window.prizm.showNotification({
-                title: payload.title ?? '通知',
-                body: payload.body,
-                updateId: payload.updateId
-              })
+              const raw = (payload as { rawEvent?: { eventType: string; payload: unknown } })
+                .rawEvent
+              void window.prizm.showNotification(
+                raw
+                  ? { eventType: raw.eventType, payload: raw.payload, updateId: payload.updateId }
+                  : {
+                      eventType: 'notification',
+                      payload: { title: payload.title, body: payload.body },
+                      updateId: payload.updateId,
+                      title: payload.title ?? '通知',
+                      body: payload.body
+                    }
+              )
             }
           },
           onDataSync: (eventType: string, payload?: unknown) => {
             setLastSyncEvent(
-              eventType,
+              eventType as import('@prizm/client-core').EventType,
               payload as import('../events/syncEventEmitter').SyncEventPayload
             )
           },

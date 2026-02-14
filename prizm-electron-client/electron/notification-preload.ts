@@ -8,15 +8,24 @@ import { contextBridge, ipcRenderer } from 'electron'
 contextBridge.exposeInMainWorld('notificationApi', {
   onNotification(
     callback: (payload: {
-      title: string
+      title?: string
       body?: string
       source?: string
       updateId?: string
+      eventType?: string
+      payload?: unknown
     }) => void
   ) {
     const handler = (
       _: unknown,
-      payload: { title: string; body?: string; source?: string; updateId?: string }
+      payload: {
+        title?: string
+        body?: string
+        source?: string
+        updateId?: string
+        eventType?: string
+        payload?: unknown
+      }
     ) => {
       console.log('[Notify preload] 收到 IPC notification', payload)
       callback(payload)
