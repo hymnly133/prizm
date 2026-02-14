@@ -110,6 +110,8 @@ export interface Document {
   id: string
   title: string
   content?: string
+  /** LLM 生成的持久化摘要，用于 Agent 上下文 */
+  llmSummary?: string
   createdAt: number
   updatedAt: number
 }
@@ -122,6 +124,7 @@ export interface CreateDocumentPayload {
 export interface UpdateDocumentPayload {
   title?: string
   content?: string
+  llmSummary?: string
 }
 
 // ============ Agent ============
@@ -133,6 +136,19 @@ export interface MessageUsage {
   totalOutputTokens?: number
 }
 
+/** 单条工具调用（与 client-core ToolCallRecord 对齐，用于 parts） */
+export interface MessagePartTool {
+  type: 'tool'
+  id: string
+  name: string
+  arguments: string
+  result: string
+  isError?: boolean
+}
+
+/** 消息段落：文本或工具调用，按流式顺序排列 */
+export type MessagePart = { type: 'text'; content: string } | MessagePartTool
+
 export interface AgentMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
@@ -140,6 +156,8 @@ export interface AgentMessage {
   createdAt: number
   model?: string
   toolCalls?: unknown[]
+  /** 按流式顺序的段落（文本 + 工具），存在时优先于 content+toolCalls 展示 */
+  parts?: MessagePart[]
   /** token 使用量，后端 LLM 返回时填充 */
   usage?: MessageUsage
   /** 思考链 / reasoning，支持 thinking 的模型流式输出 */
@@ -151,8 +169,75 @@ export interface AgentSession {
   title?: string
   scope: string
   messages: AgentMessage[]
+  /** LLM 生成的对话摘要，用于压缩长对话上下文 */
+  llmSummary?: string
   createdAt: number
   updatedAt: number
+}
+
+// ============ Agent Scope / 上下文（API 与客户端类型） ============
+
+/** 可引用项类型 */
+export type ScopeRefKind = 'note' | 'todo' | 'document'
+
+/** 顶层聚合类型 */
+export type ScopeTopLevelKind = 'notes' | 'todoList' | 'document' | 'sessions'
+
+/** 可引用的单条项（用于 @ 补全与 scope-items API） */
+export interface ScopeRefItem {
+  id: string
+  kind: ScopeRefKind
+  title: string
+  charCount: number
+  isShort: boolean
+  updatedAt: number
+  groupOrStatus?: string
+}
+
+/** 顶层元素（列表/文档/会话聚合） */
+export interface ScopeTopLevelItem {
+  kind: ScopeTopLevelKind
+  id: string
+  title: string
+  itemCount: number
+  totalCharCount: number
+  updatedAt: number
+  dataAvailable?: boolean
+}
+
+/** 工作区统计 */
+export interface ScopeStats {
+  totalItems: number
+  totalChars: number
+  byKind: Record<ScopeTopLevelKind, { count: number; chars: number }>
+}
+
+/** 会话中某条的提供状态 */
+export interface ItemProvision {
+  itemId: string
+  kind: ScopeRefKind
+  mode: 'summary' | 'full'
+  providedAt: number
+  charCount: number
+  version: number
+  stale: boolean
+}
+
+/** Agent 修改记录 */
+export interface ModificationRecord {
+  itemId: string
+  type: ScopeRefKind
+  action: 'create' | 'update' | 'delete'
+  timestamp: number
+}
+
+/** 会话上下文追踪状态（GET /agent/sessions/:id/context） */
+export interface SessionContextState {
+  sessionId: string
+  scope: string
+  provisions: ItemProvision[]
+  totalProvidedChars: number
+  modifications: ModificationRecord[]
 }
 
 // ============ 通知 ============
