@@ -13,7 +13,8 @@ import type {
   AgentSession,
   AgentMessage,
   StreamChatOptions,
-  StreamChatChunk
+  StreamChatChunk,
+  SearchResult
 } from '../types'
 
 export interface PrizmClientOptions {
@@ -430,6 +431,62 @@ export class PrizmClient {
       method: 'DELETE',
       scope
     })
+  }
+
+  // ============ 统一搜索（关键词列表匹配，面向 LLM） ============
+
+  /**
+   * 统一关键词搜索 - 输入关键词列表，返回按相关性排序的文档
+   * 支持自然语言分词（空格、逗号等分隔），高宽容度子串匹配
+   */
+  async search(options: {
+    keywords: string | string[]
+    scope?: string
+    types?: Array<'note' | 'document' | 'clipboard' | 'todoList'>
+    limit?: number
+    mode?: 'any' | 'all'
+  }): Promise<SearchResult[]> {
+    const scope = options.scope ?? this.defaultScope
+    const url = this.buildUrl('/search', { scope })
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: this.buildHeaders(),
+      body: JSON.stringify({
+        keywords: options.keywords,
+        scope,
+        types: options.types,
+        limit: options.limit ?? 50,
+        mode: options.mode ?? 'any'
+      })
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
+    }
+    const data = (await response.json()) as { results: SearchResult[] }
+    return data.results
+  }
+
+  /**
+   * 便捷搜索 - GET 方式，适用于简单关键词
+   */
+  async searchQuery(q: string, scope?: string, limit?: number): Promise<SearchResult[]> {
+    const s = scope ?? this.defaultScope
+    const url = this.buildUrl('/search', {
+      q,
+      scope: s,
+      limit: limit != null ? String(limit) : undefined
+    })
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: this.buildHeaders()
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
+    }
+    const data = (await response.json()) as { results: SearchResult[] }
+    return data.results
   }
 
   // ============ Agent 会话 ============

@@ -180,3 +180,16 @@ export interface StreamChatOptions {
   /** AbortSignal，用于前端主动取消流式请求 */
   signal?: AbortSignal
 }
+
+// ============ 统一搜索结果（仅 client-core） ============
+
+export type SearchResultKind = 'note' | 'document' | 'clipboard' | 'todoList'
+
+export interface SearchResult {
+  kind: SearchResultKind
+  id: string
+  score: number
+  matchedKeywords: string[]
+  preview: string
+  raw: unknown
+}
