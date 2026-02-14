@@ -84,20 +84,18 @@ export function formatEventToNotification(ev: EventPushPayload): NotificationPay
     if (ev.eventType === 'todo_list:updated') {
       const scope = (payload?.scope as string) ?? ''
       const id = (payload?.id as string) ?? ''
-      const cleared = payload?.cleared === true
       const itemCount = payload?.itemCount as number | undefined
       const doneCount = payload?.doneCount as number | undefined
       const listTitle = (payload?.title as string) || '待办'
-      const bodyText = cleared
-        ? '列表已清空'
-        : typeof itemCount === 'number' && typeof doneCount === 'number'
-        ? `${doneCount}/${itemCount} 已完成`
-        : '已更新'
+      const bodyText =
+        typeof itemCount === 'number' && typeof doneCount === 'number'
+          ? `${doneCount}/${itemCount} 已完成`
+          : '已更新'
       return {
         ...base,
         title: listTitle,
         body: bodyText,
-        updateId: `todo_list:${scope}:${cleared ? 'cleared' : id}`
+        updateId: `todo_list:${scope}:${id}`
       }
     }
     return base

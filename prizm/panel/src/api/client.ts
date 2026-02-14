@@ -168,7 +168,7 @@ export const getTodoList = (scope: string, options?: { itemId?: string }) => {
   return request<{ todoList: TodoList | null }>(url)
 }
 export const updateTodoList = (payload: UpdateTodoListPayload, scope?: string) =>
-  request<{ todoList: TodoList | null }>('/tasks', {
+  request<{ todoList: TodoList }>('/tasks', {
     method: 'PATCH',
     body: JSON.stringify(payload),
     scope

@@ -252,8 +252,8 @@ export class PrizmClient {
     return data.todoList
   }
 
-  async updateTodoList(payload: UpdateTodoListPayload, scope?: string): Promise<TodoList | null> {
-    const data = await this.request<{ todoList: TodoList | null }>('/tasks', {
+  async updateTodoList(payload: UpdateTodoListPayload, scope?: string): Promise<TodoList> {
+    const data = await this.request<{ todoList: TodoList }>('/tasks', {
       method: 'PATCH',
       scope,
       body: JSON.stringify(payload)
@@ -265,7 +265,7 @@ export class PrizmClient {
     itemId: string,
     payload: UpdateTodoItemPayload,
     scope?: string
-  ): Promise<TodoList | null> {
+  ): Promise<TodoList> {
     return this.updateTodoList({ updateItem: { id: itemId, ...payload } }, scope)
   }
 
