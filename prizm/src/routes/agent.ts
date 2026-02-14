@@ -15,14 +15,21 @@ import {
 } from '../scopeUtils'
 import { DEFAULT_SCOPE } from '../core/ScopeStore'
 import { buildScopeContextSummary } from '../llm/scopeContext'
+import { buildSystemPrompt } from '../llm/systemPrompt'
 import { scheduleConversationSummary } from '../llm/conversationSummaryService'
 import { getAgentLLMSettings } from '../settings/agentToolsStore'
 import { listRefItems } from '../llm/scopeItemRegistry'
 import { listAtReferences } from '../llm/atReferenceRegistry'
 import { registerBuiltinAtReferences } from '../llm/atReferenceRegistry'
 import { getSessionContext } from '../llm/contextTracker'
+import type { ScopeInteraction } from '../llm/scopeInteractionParser'
+import {
+  deriveScopeInteractions,
+  collectToolCallsFromMessages
+} from '../llm/scopeInteractionParser'
 import { registerBuiltinSlashCommands, tryRunSlashCommand } from '../llm/slashCommands'
 import { listSlashCommands } from '../llm/slashCommandRegistry'
+import { getAllToolMetadata } from '../llm/toolMetadata'
 
 const log = createLogger('Agent')
 
@@ -43,6 +50,18 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
     log.warn('Agent adapter not provided, routes will return 503')
   }
 
+  // GET /agent/tools/metadata - 工具元数据（显示名、文档链接等），供客户端 ToolCallCard 使用
+  router.get('/agent/tools/metadata', async (_req: Request, res: Response) => {
+    try {
+      const metadata = getAllToolMetadata()
+      res.json({ tools: metadata })
+    } catch (error) {
+      log.error('get tool metadata error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
   // GET /agent/debug/scope-context - 调试用：获取当前 scope 的上下文摘要预览
   router.get('/agent/debug/scope-context', async (req: Request, res: Response) => {
     try {
@@ -54,6 +73,30 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
       res.json({ summary, scope })
     } catch (error) {
       log.error('get scope context error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // GET /agent/system-prompt - 获取发送消息前注入的完整系统提示词（含工作区上下文、能力说明、上下文状态、工作原则）
+  router.get('/agent/system-prompt', async (req: Request, res: Response) => {
+    try {
+      const scope = getScopeFromQuery(req)
+      if (!hasScopeAccess(req, scope)) {
+        return res.status(403).json({ error: 'scope access denied' })
+      }
+      const sessionId =
+        typeof req.query.sessionId === 'string' && req.query.sessionId.trim()
+          ? req.query.sessionId.trim()
+          : undefined
+      const systemPrompt = buildSystemPrompt({
+        scope,
+        sessionId,
+        includeScopeContext: true
+      })
+      res.json({ systemPrompt, scope, sessionId: sessionId ?? null })
+    } catch (error) {
+      log.error('get system prompt error:', error)
       const { status, body } = toErrorResponse(error)
       res.status(status).json(body)
     }
@@ -102,7 +145,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
     }
   })
 
-  // GET /agent/sessions/:id/context - 会话上下文追踪状态
+  // GET /agent/sessions/:id/context - 会话上下文追踪状态（含 scope 交互）
   router.get('/agent/sessions/:id/context', async (req: Request, res: Response) => {
     try {
       const id = ensureStringParam(req.params.id)
@@ -111,13 +154,26 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         return res.status(403).json({ error: 'scope access denied' })
       }
       const state = getSessionContext(scope, id)
+      let scopeInteractions: ScopeInteraction[] = []
+      if (adapter?.getSession) {
+        const session = await adapter.getSession(scope, id)
+        if (session?.messages?.length) {
+          const collected = collectToolCallsFromMessages(session.messages)
+          const all: ScopeInteraction[] = []
+          for (const { tc, createdAt } of collected) {
+            all.push(...deriveScopeInteractions([tc], createdAt))
+          }
+          scopeInteractions = all
+        }
+      }
       if (!state) {
         return res.json({
           sessionId: id,
           scope,
           provisions: [],
           totalProvidedChars: 0,
-          modifications: []
+          modifications: [],
+          scopeInteractions
         })
       }
       res.json({
@@ -125,7 +181,8 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         scope: state.scope,
         provisions: state.provisions,
         totalProvidedChars: state.totalProvidedChars,
-        modifications: state.modifications
+        modifications: state.modifications,
+        scopeInteractions
       })
     } catch (error) {
       log.error('get session context error:', error)
@@ -330,13 +387,33 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
 
       let fullContent = ''
       let fullReasoning = ''
+      let segmentContent = ''
+      const parts: Array<
+        | { type: 'text'; content: string }
+        | {
+            type: 'tool'
+            id: string
+            name: string
+            arguments: string
+            result: string
+            isError?: boolean
+            status?: 'preparing' | 'running' | 'done'
+          }
+      > = []
       const fullToolCalls: Array<{
         id: string
         name: string
         arguments: string
         result: string
         isError?: boolean
+        status?: 'preparing' | 'running' | 'done'
       }> = []
+      function flushSegment(): void {
+        if (segmentContent) {
+          parts.push({ type: 'text', content: segmentContent })
+          segmentContent = ''
+        }
+      }
       let lastUsage:
         | {
             totalTokens?: number
@@ -355,6 +432,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
           if (ac.signal.aborted) break
           if (chunk.text) {
             fullContent += chunk.text
+            segmentContent += chunk.text
             res.write(
               `data: ${JSON.stringify({
                 type: 'text',
@@ -374,6 +452,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
             res.flush?.()
           }
           if (chunk.toolResultChunk) {
+            flushSegment()
             res.write(
               `data: ${JSON.stringify({
                 type: 'tool_result_chunk',
@@ -383,7 +462,27 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
             res.flush?.()
           }
           if (chunk.toolCall) {
-            fullToolCalls.push(chunk.toolCall)
+            flushSegment()
+            const tc = chunk.toolCall
+            const toolPart = {
+              type: 'tool' as const,
+              id: tc.id,
+              name: tc.name,
+              arguments: tc.arguments,
+              result: tc.result,
+              ...(tc.isError && { isError: true }),
+              ...(tc.status && { status: tc.status })
+            }
+            const existingIdx = fullToolCalls.findIndex((t) => t.id === tc.id)
+            if (existingIdx >= 0) {
+              fullToolCalls[existingIdx] = tc
+              const partIdx = parts.findIndex((p) => p.type === 'tool' && p.id === tc.id)
+              if (partIdx >= 0) parts[partIdx] = toolPart
+              else parts.push(toolPart)
+            } else {
+              fullToolCalls.push(tc)
+              parts.push(toolPart)
+            }
             res.write(
               `data: ${JSON.stringify({
                 type: 'tool_call',
@@ -393,6 +492,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
             res.flush?.()
           }
           if (chunk.done) {
+            flushSegment()
             if (chunk.usage) lastUsage = chunk.usage
             const usedModel = typeof model === 'string' && model.trim() ? model.trim() : undefined
             await adapter.appendMessage(scope, id, {
@@ -401,7 +501,8 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
               model: usedModel,
               usage: lastUsage,
               ...(fullReasoning && { reasoning: fullReasoning }),
-              ...(fullToolCalls.length > 0 && { toolCalls: fullToolCalls })
+              ...(fullToolCalls.length > 0 && { toolCalls: fullToolCalls }),
+              ...(parts.length > 0 && { parts })
             })
             scheduleConversationSummary(scope, id)
             res.write(
@@ -417,6 +518,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
 
         // 被 abort 时：若已有部分内容，保存到 assistant 消息
         if (ac.signal.aborted && fullContent) {
+          flushSegment()
           const usedModel = typeof model === 'string' && model.trim() ? model.trim() : undefined
           await adapter.appendMessage(scope, id, {
             role: 'assistant',
@@ -424,7 +526,8 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
             model: usedModel,
             usage: lastUsage,
             ...(fullReasoning && { reasoning: fullReasoning }),
-            ...(fullToolCalls.length > 0 && { toolCalls: fullToolCalls })
+            ...(fullToolCalls.length > 0 && { toolCalls: fullToolCalls }),
+            ...(parts.length > 0 && { parts })
           })
           scheduleConversationSummary(scope, id)
           res.write(
@@ -451,6 +554,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
           )
           res.flush?.()
         } else if (fullContent) {
+          flushSegment()
           const usedModel = typeof model === 'string' && model.trim() ? model.trim() : undefined
           await adapter.appendMessage(scope, id, {
             role: 'assistant',
@@ -458,7 +562,8 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
             model: usedModel,
             usage: lastUsage,
             ...(fullReasoning && { reasoning: fullReasoning }),
-            ...(fullToolCalls.length > 0 && { toolCalls: fullToolCalls })
+            ...(fullToolCalls.length > 0 && { toolCalls: fullToolCalls }),
+            ...(parts.length > 0 && { parts })
           })
           scheduleConversationSummary(scope, id)
           res.write(

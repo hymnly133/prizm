@@ -690,6 +690,16 @@ export class DefaultAgentAdapter implements IAgentAdapter {
 
       const manager = getMcpClientManager()
       for (const tc of toolCalls) {
+        // 执行前 yield running，便于 UI 提前显示「正在执行」
+        yield {
+          toolCall: {
+            id: tc.id,
+            name: tc.name,
+            arguments: tc.arguments,
+            result: '',
+            status: 'running' as const
+          }
+        }
         try {
           const args = JSON.parse(tc.arguments || '{}') as Record<string, unknown>
           let text: string
@@ -734,7 +744,8 @@ export class DefaultAgentAdapter implements IAgentAdapter {
               name: tc.name,
               arguments: tc.arguments,
               result: text,
-              isError
+              isError,
+              status: 'done' as const
             }
           }
           currentMessages.push({
@@ -750,7 +761,8 @@ export class DefaultAgentAdapter implements IAgentAdapter {
               name: tc.name,
               arguments: tc.arguments,
               result: `Error: ${errText}`,
-              isError: true
+              isError: true,
+              status: 'done' as const
             }
           }
           currentMessages.push({

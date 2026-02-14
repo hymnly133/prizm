@@ -16,7 +16,8 @@ import type {
   ClipboardItem,
   Document,
   AgentSession,
-  AgentMessage
+  AgentMessage,
+  MessagePart
 } from '../types'
 
 const EXT = '.md'
@@ -409,6 +410,31 @@ export function writeDocuments(dir: string, docs: Document[]): void {
 // ============ Agent Sessions ============
 // 存储格式：一个 session 一个文件，messages 在 frontmatter 内部
 
+function parseMessagePart(p: unknown): MessagePart | null {
+  if (!p || typeof p !== 'object') return null
+  const x = p as Record<string, unknown>
+  if (x.type === 'text' && typeof x.content === 'string') {
+    return { type: 'text', content: x.content }
+  }
+  if (
+    x.type === 'tool' &&
+    typeof x.id === 'string' &&
+    typeof x.name === 'string' &&
+    typeof x.arguments === 'string' &&
+    typeof x.result === 'string'
+  ) {
+    return {
+      type: 'tool',
+      id: x.id,
+      name: x.name,
+      arguments: x.arguments,
+      result: x.result,
+      ...(x.isError === true && { isError: true })
+    }
+  }
+  return null
+}
+
 function parseAgentMessage(raw: unknown): AgentMessage | null {
   if (!raw || typeof raw !== 'object') return null
   const r = raw as Record<string, unknown>
@@ -419,6 +445,13 @@ function parseAgentMessage(raw: unknown): AgentMessage | null {
   const content = typeof r.content === 'string' ? r.content : ''
   const createdAt = (r.createdAt as number) ?? 0
   if (!id) return null
+  let parts: AgentMessage['parts']
+  if (Array.isArray(r.parts) && r.parts.length > 0) {
+    const parsed = r.parts
+      .map(parseMessagePart)
+      .filter((x): x is NonNullable<typeof x> => x !== null)
+    if (parsed.length > 0) parts = parsed
+  }
   return {
     id,
     role,
@@ -427,7 +460,8 @@ function parseAgentMessage(raw: unknown): AgentMessage | null {
     ...(typeof r.model === 'string' && { model: r.model }),
     ...(Array.isArray(r.toolCalls) && { toolCalls: r.toolCalls }),
     ...(r.usage && typeof r.usage === 'object' && { usage: r.usage as AgentMessage['usage'] }),
-    ...(typeof r.reasoning === 'string' && { reasoning: r.reasoning })
+    ...(typeof r.reasoning === 'string' && { reasoning: r.reasoning }),
+    ...(parts && { parts })
   }
 }
 
@@ -545,7 +579,8 @@ export function writeAgentSessions(dir: string, sessions: AgentSession[]): void 
         ...(m.model && { model: m.model }),
         ...(m.toolCalls?.length && { toolCalls: m.toolCalls }),
         ...(m.usage && { usage: m.usage }),
-        ...(m.reasoning && { reasoning: m.reasoning })
+        ...(m.reasoning && { reasoning: m.reasoning }),
+        ...(m.parts && m.parts.length > 0 && { parts: m.parts })
       }))
     }
     writeMd(fp, frontmatter, '')

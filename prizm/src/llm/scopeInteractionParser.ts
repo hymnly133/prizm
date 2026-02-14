@@ -1,0 +1,308 @@
+/**
+ * 从工具调用解析 Scope 交互记录
+ * 用于 AgentRightSidebar 展示「正在读取 / 已读 / 已创建 / 已更新 / 已删除」等
+ */
+
+export type ScopeInteractionAction = 'read' | 'create' | 'update' | 'delete' | 'list' | 'search'
+
+export type ScopeInteractionItemKind = 'note' | 'document' | 'todo' | 'clipboard'
+
+export interface ScopeInteraction {
+  toolName: string
+  action: ScopeInteractionAction
+  itemKind?: ScopeInteractionItemKind
+  itemId?: string
+  title?: string
+  /** 消息时间戳，用于排序 */
+  timestamp?: number
+}
+
+/** 工具调用记录（与 MessagePartTool / ToolCallRecord 兼容） */
+export interface ToolCallInput {
+  id: string
+  name: string
+  arguments: string
+  result: string
+}
+
+/** 不产生 scope 交互的工具 */
+const NO_SCOPE_TOOLS = new Set(['prizm_notice', 'tavily_web_search', 'prizm_scope_stats'])
+
+/** 从 result 提取 ID 的正则：已创建/更新/删除 xxx {id} */
+const ID_FROM_RESULT = /(?:已创建|已更新|已删除)(?:便签|待办项|文档|剪贴板项?)\s+([a-zA-Z0-9_-]+)/
+
+function safeParseJson<T = Record<string, unknown>>(str: string): T | null {
+  if (!str || typeof str !== 'string') return null
+  try {
+    return JSON.parse(str) as T
+  } catch {
+    return null
+  }
+}
+
+function extractIdFromResult(result: string): string | undefined {
+  const m = result.match(ID_FROM_RESULT)
+  return m?.[1]
+}
+
+/**
+ * 从会话中收集的 toolCalls 解析出 scope 交互列表
+ */
+export function deriveScopeInteractions(
+  toolCalls: ToolCallInput[],
+  messageCreatedAt?: number
+): ScopeInteraction[] {
+  const out: ScopeInteraction[] = []
+  const ts = messageCreatedAt ?? Date.now()
+
+  for (const tc of toolCalls) {
+    const name = tc.name
+    if (NO_SCOPE_TOOLS.has(name)) continue
+
+    const args = safeParseJson<Record<string, unknown>>(tc.arguments) ?? {}
+    const result = tc.result ?? ''
+
+    switch (name) {
+      // === 便签 ===
+      case 'prizm_read_note':
+      case 'prizm_get_note':
+        out.push({
+          toolName: name,
+          action: 'read',
+          itemKind: 'note',
+          itemId: (args.noteId ?? args.id) as string,
+          timestamp: ts
+        })
+        break
+      case 'prizm_list_notes':
+        out.push({ toolName: name, action: 'list', itemKind: 'note', timestamp: ts })
+        break
+      case 'prizm_create_note':
+        out.push({
+          toolName: name,
+          action: 'create',
+          itemKind: 'note',
+          itemId: extractIdFromResult(result),
+          title: '便签',
+          timestamp: ts
+        })
+        break
+      case 'prizm_update_note':
+        out.push({
+          toolName: name,
+          action: 'update',
+          itemKind: 'note',
+          itemId: args.noteId as string,
+          timestamp: ts
+        })
+        break
+      case 'prizm_delete_note':
+        out.push({
+          toolName: name,
+          action: 'delete',
+          itemKind: 'note',
+          itemId: args.noteId as string,
+          timestamp: ts
+        })
+        break
+      case 'prizm_search_notes':
+        out.push({ toolName: name, action: 'search', itemKind: 'note', timestamp: ts })
+        break
+
+      // === 待办 ===
+      case 'prizm_read_todo':
+        out.push({
+          toolName: name,
+          action: 'read',
+          itemKind: 'todo',
+          itemId: args.todoId as string,
+          timestamp: ts
+        })
+        break
+      case 'prizm_list_todos':
+      case 'prizm_list_todo_list':
+        out.push({ toolName: name, action: 'list', itemKind: 'todo', timestamp: ts })
+        break
+      case 'prizm_create_todo':
+        out.push({
+          toolName: name,
+          action: 'create',
+          itemKind: 'todo',
+          itemId: extractIdFromResult(result),
+          title: args.title as string,
+          timestamp: ts
+        })
+        break
+      case 'prizm_update_todo':
+      case 'prizm_update_todo_list':
+        out.push({
+          toolName: name,
+          action: 'update',
+          itemKind: 'todo',
+          itemId: args.todoId as string,
+          timestamp: ts
+        })
+        break
+      case 'prizm_delete_todo':
+        out.push({
+          toolName: name,
+          action: 'delete',
+          itemKind: 'todo',
+          itemId: args.todoId as string,
+          timestamp: ts
+        })
+        break
+
+      // === 文档 ===
+      case 'prizm_get_document':
+      case 'prizm_get_document_content':
+        out.push({
+          toolName: name,
+          action: 'read',
+          itemKind: 'document',
+          itemId: (args.documentId ?? args.id) as string,
+          timestamp: ts
+        })
+        break
+      case 'prizm_list_documents':
+        out.push({ toolName: name, action: 'list', itemKind: 'document', timestamp: ts })
+        break
+      case 'prizm_create_document':
+        out.push({
+          toolName: name,
+          action: 'create',
+          itemKind: 'document',
+          itemId: extractIdFromResult(result),
+          title: args.title as string,
+          timestamp: ts
+        })
+        break
+      case 'prizm_update_document':
+        out.push({
+          toolName: name,
+          action: 'update',
+          itemKind: 'document',
+          itemId: args.documentId as string,
+          timestamp: ts
+        })
+        break
+      case 'prizm_delete_document':
+        out.push({
+          toolName: name,
+          action: 'delete',
+          itemKind: 'document',
+          itemId: args.documentId as string,
+          timestamp: ts
+        })
+        break
+
+      // === 剪贴板 ===
+      case 'prizm_get_clipboard':
+      case 'prizm_get_clipboard_item':
+        out.push({
+          toolName: name,
+          action: 'read',
+          itemKind: 'clipboard',
+          itemId: args.id as string,
+          timestamp: ts
+        })
+        break
+      case 'prizm_add_clipboard_item':
+        out.push({
+          toolName: name,
+          action: 'create',
+          itemKind: 'clipboard',
+          itemId: extractIdFromResult(result),
+          timestamp: ts
+        })
+        break
+      case 'prizm_delete_clipboard_item':
+        out.push({
+          toolName: name,
+          action: 'delete',
+          itemKind: 'clipboard',
+          itemId: args.id as string,
+          timestamp: ts
+        })
+        break
+
+      // === 搜索 ===
+      case 'prizm_search':
+        out.push({ toolName: name, action: 'search', timestamp: ts })
+        break
+
+      default:
+        // MCP 工具若以 prizm_ 开头可尝试按模式推断，暂跳过
+        break
+    }
+  }
+
+  return out
+}
+
+/**
+ * 从会话消息中收集所有 toolCalls（parts 优先，否则用 toolCalls，按 id 去重）
+ */
+export function collectToolCallsFromMessages(
+  messages: Array<{
+    toolCalls?: unknown[]
+    parts?: Array<{ type: string; id?: string; name?: string; arguments?: string; result?: string }>
+    createdAt?: number
+  }>
+): Array<{ tc: ToolCallInput; createdAt?: number }> {
+  const seen = new Set<string>()
+  const collected: Array<{ tc: ToolCallInput; createdAt?: number }> = []
+
+  function add(t: ToolCallInput, createdAt?: number) {
+    if (t.id && t.name && !seen.has(t.id)) {
+      seen.add(t.id)
+      collected.push({ tc: t, createdAt })
+    }
+  }
+
+  for (const msg of messages) {
+    const ts = msg.createdAt
+    const parts = msg.parts ?? []
+    const fromParts = parts.filter(
+      (p): p is { type: 'tool'; id: string; name: string; arguments: string; result: string } =>
+        p.type === 'tool' && 'name' in p && 'id' in p
+    )
+    if (fromParts.length > 0) {
+      for (const p of fromParts) {
+        add(
+          {
+            id: p.id,
+            name: p.name,
+            arguments:
+              typeof p.arguments === 'string' ? p.arguments : JSON.stringify(p.arguments ?? {}),
+            result: typeof p.result === 'string' ? p.result : ''
+          },
+          ts
+        )
+      }
+    } else {
+      const fromToolCalls = (msg.toolCalls ?? []) as Array<{
+        id?: string
+        name?: string
+        arguments?: string
+        result?: string
+      }>
+      for (const t of fromToolCalls) {
+        if (t?.name && t.id) {
+          add(
+            {
+              id: t.id,
+              name: t.name,
+              arguments:
+                typeof t.arguments === 'string' ? t.arguments : JSON.stringify(t.arguments ?? {}),
+              result: typeof t.result === 'string' ? t.result : ''
+            },
+            ts
+          )
+        }
+      }
+    }
+  }
+
+  return collected
+}
