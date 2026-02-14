@@ -37,13 +37,17 @@ export function createNotifyRoutes(router: Router, adapter?: INotificationAdapte
           wsServer.broadcastToClient(
             targetClientId,
             EVENT_TYPES.NOTIFICATION,
-            { title, body },
+            { title, body, sourceClientId: req.prizmClient?.clientId },
             undefined
           )
           log.info('Sent notification to client', targetClientId)
         } else {
           // 广播到所有订阅者
-          const delivered = wsServer.broadcast(EVENT_TYPES.NOTIFICATION, { title, body }, undefined)
+          const delivered = wsServer.broadcast(
+            EVENT_TYPES.NOTIFICATION,
+            { title, body, sourceClientId: req.prizmClient?.clientId },
+            undefined
+          )
           log.info('Broadcasted notification to', delivered, 'subscribers')
         }
       } else {
@@ -111,7 +115,11 @@ export function createNotifyRoutes(router: Router, adapter?: INotificationAdapte
         return res.status(503).json({ error: 'WebSocket server not available' })
       }
 
-      const delivered = wsServer.broadcast(EVENT_TYPES.NOTIFICATION, { title, body }, undefined)
+      const delivered = wsServer.broadcast(
+        EVENT_TYPES.NOTIFICATION,
+        { title, body, sourceClientId: req.prizmClient?.clientId },
+        undefined
+      )
 
       res.json({
         success: true,

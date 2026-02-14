@@ -83,7 +83,12 @@ export function createClipboardRoutes(router: Router, adapter?: IClipboardAdapte
       if (wsServer) {
         wsServer.broadcast(
           EVENT_TYPES.CLIPBOARD_ITEM_ADDED,
-          { id: item.id, scope, content: item.content },
+          {
+            id: item.id,
+            scope,
+            content: item.content,
+            sourceClientId: req.prizmClient?.clientId
+          },
           scope
         )
       }
@@ -122,7 +127,11 @@ export function createClipboardRoutes(router: Router, adapter?: IClipboardAdapte
 
       const wsServer = req.prizmServer
       if (wsServer) {
-        wsServer.broadcast(EVENT_TYPES.CLIPBOARD_ITEM_DELETED, { id, scope }, scope)
+        wsServer.broadcast(
+          EVENT_TYPES.CLIPBOARD_ITEM_DELETED,
+          { id, scope, sourceClientId: req.prizmClient?.clientId },
+          scope
+        )
       }
       res.status(204).send()
     } catch (error) {

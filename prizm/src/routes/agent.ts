@@ -164,7 +164,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         return res.status(400).json({ error: 'content is required' })
       }
 
-      const { model } = req.body ?? {}
+      const { model, mcpEnabled } = req.body ?? {}
 
       // 追加用户消息
       await adapter.appendMessage(scope, id, {
@@ -213,7 +213,8 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
       try {
         for await (const chunk of adapter.chat(scope, id, history, {
           model,
-          signal: ac.signal
+          signal: ac.signal,
+          mcpEnabled: mcpEnabled !== false
         })) {
           if (ac.signal.aborted) break
           if (chunk.text) {

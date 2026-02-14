@@ -219,7 +219,12 @@ export function createNotesRoutes(router: Router, adapter?: IStickyNotesAdapter)
       if (wsServer) {
         wsServer.broadcast(
           EVENT_TYPES.NOTE_CREATED,
-          { id: note.id, scope, content: note.content },
+          {
+            id: note.id,
+            scope,
+            content: note.content,
+            sourceClientId: req.prizmClient?.clientId
+          },
           scope
         )
       }
@@ -258,7 +263,12 @@ export function createNotesRoutes(router: Router, adapter?: IStickyNotesAdapter)
       if (wsServer) {
         wsServer.broadcast(
           EVENT_TYPES.NOTE_UPDATED,
-          { id: note.id, scope, content: note.content },
+          {
+            id: note.id,
+            scope,
+            content: note.content,
+            sourceClientId: req.prizmClient?.clientId
+          },
           scope
         )
       }
@@ -295,7 +305,11 @@ export function createNotesRoutes(router: Router, adapter?: IStickyNotesAdapter)
 
       const wsServer = req.prizmServer
       if (wsServer) {
-        wsServer.broadcast(EVENT_TYPES.NOTE_DELETED, { id, scope }, scope)
+        wsServer.broadcast(
+          EVENT_TYPES.NOTE_DELETED,
+          { id, scope, sourceClientId: req.prizmClient?.clientId },
+          scope
+        )
       }
 
       res.status(204).send()

@@ -90,7 +90,12 @@ export function createDocumentsRoutes(router: Router, adapter?: IDocumentsAdapte
       if (wsServer) {
         wsServer.broadcast(
           EVENT_TYPES.DOCUMENT_CREATED,
-          { id: doc.id, scope, title: doc.title },
+          {
+            id: doc.id,
+            scope,
+            title: doc.title,
+            sourceClientId: req.prizmClient?.clientId
+          },
           scope
         )
       }
@@ -129,7 +134,12 @@ export function createDocumentsRoutes(router: Router, adapter?: IDocumentsAdapte
       if (wsServer) {
         wsServer.broadcast(
           EVENT_TYPES.DOCUMENT_UPDATED,
-          { id: doc.id, scope, title: doc.title },
+          {
+            id: doc.id,
+            scope,
+            title: doc.title,
+            sourceClientId: req.prizmClient?.clientId
+          },
           scope
         )
       }
@@ -165,7 +175,11 @@ export function createDocumentsRoutes(router: Router, adapter?: IDocumentsAdapte
 
       const wsServer = req.prizmServer
       if (wsServer) {
-        wsServer.broadcast(EVENT_TYPES.DOCUMENT_DELETED, { id, scope }, scope)
+        wsServer.broadcast(
+          EVENT_TYPES.DOCUMENT_DELETED,
+          { id, scope, sourceClientId: req.prizmClient?.clientId },
+          scope
+        )
       }
 
       res.status(204).send()

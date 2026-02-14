@@ -211,32 +211,39 @@ function createMcpServerWithTools(
   )
 
   server.registerTool(
-    'prizm_list_tasks',
+    'prizm_list_todo_list',
     {
-      description: '列出 Prizm 任务/TODO',
-      inputSchema: z.object({
-        status: z.enum(['todo', 'doing', 'done']).optional().describe('按状态过滤')
-      })
+      description:
+        '列出 Prizm TODO 列表。返回 { title, items }，每个 item 含 id、status(todo|doing|done)、title、description(可选)。更新某条状态时需用此工具获取 item.id，再调用 prizm_update_todo_list 的 updateItem。',
+      inputSchema: z.object({})
     },
-    async ({ status }) => {
-      const tasks = adapters.tasks?.getAllTasks
-        ? await adapters.tasks.getAllTasks(scope, { status })
-        : []
+    async () => {
+      const list = adapters.todoList?.getTodoList
+        ? await adapters.todoList.getTodoList(scope)
+        : null
+      if (!list) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify({ title: null, items: [] }, null, 2)
+            }
+          ]
+        }
+      }
+      const output = {
+        title: list.title,
+        items: list.items.map((it) =>
+          it.description
+            ? { id: it.id, status: it.status, title: it.title, description: it.description }
+            : { id: it.id, status: it.status, title: it.title }
+        )
+      }
       return {
         content: [
           {
             type: 'text' as const,
-            text: JSON.stringify(
-              tasks.map((t) => ({
-                id: t.id,
-                title: t.title,
-                status: t.status,
-                priority: t.priority,
-                dueAt: t.dueAt
-              })),
-              null,
-              2
-            )
+            text: JSON.stringify(output, null, 2)
           }
         ]
       }
@@ -244,131 +251,89 @@ function createMcpServerWithTools(
   )
 
   server.registerTool(
-    'prizm_create_task',
+    'prizm_update_todo_list',
     {
-      description: '在 Prizm 中创建任务',
+      description:
+        '更新 Prizm TODO 列表。推荐：仅改某条状态时用 updateItem(id 来自 prizm_list_todo_list)；改多条用 updateItems；全量替换用 items。title 可单独改列表标题。',
       inputSchema: z.object({
-        title: z.string().describe('任务标题'),
-        description: z.string().optional(),
-        priority: z.enum(['low', 'medium', 'high']).optional()
+        title: z.string().optional().describe('列表标题'),
+        items: z
+          .array(
+            z.object({
+              id: z.string().optional().describe('可选，缺则自动生成'),
+              title: z.string().describe('任务标题'),
+              description: z.string().optional(),
+              status: z
+                .enum(['todo', 'doing', 'done'])
+                .optional()
+                .describe('todo=待办 doing=进行中 done=已完成')
+            })
+          )
+          .optional()
+          .describe('全量替换：传入则完整替换整个列表，慎用'),
+        updateItem: z
+          .object({
+            id: z.string().describe('来自 prizm_list_todo_list 返回的 item.id'),
+            status: z
+              .enum(['todo', 'doing', 'done'])
+              .optional()
+              .describe('todo=待办 doing=进行中 done=已完成'),
+            title: z.string().optional(),
+            description: z.string().optional()
+          })
+          .optional()
+          .describe('单条更新：仅改状态/标题时推荐用此，无需拉全量'),
+        updateItems: z
+          .array(
+            z.object({
+              id: z.string().describe('来自 prizm_list_todo_list 返回的 item.id'),
+              status: z
+                .enum(['todo', 'doing', 'done'])
+                .optional()
+                .describe('todo=待办 doing=进行中 done=已完成'),
+              title: z.string().optional(),
+              description: z.string().optional()
+            })
+          )
+          .optional()
+          .describe('批量更新：一次改多条 item 的状态或内容')
       })
     },
-    async ({ title, description, priority }) => {
-      if (!adapters.tasks?.createTask) {
+    async ({ title, items, updateItem, updateItems }) => {
+      if (!adapters.todoList?.updateTodoList) {
         return {
-          content: [{ type: 'text' as const, text: 'Tasks adapter not available' }],
+          content: [{ type: 'text' as const, text: 'TodoList adapter not available' }],
           isError: true
         }
       }
-      const task = await adapters.tasks.createTask(scope, {
-        title,
-        description: description ?? '',
-        status: 'todo',
-        priority: (priority as 'low' | 'medium' | 'high') ?? 'medium'
-      })
+      const payload: Parameters<NonNullable<typeof adapters.todoList.updateTodoList>>[1] = {}
+      if (title !== undefined) payload.title = title
+      if (items !== undefined) payload.items = items as Parameters<typeof payload.items>[0]
+      if (updateItem !== undefined) payload.updateItem = updateItem
+      if (updateItems !== undefined && updateItems.length) payload.updateItems = updateItems
+      const hasPayload =
+        payload.title !== undefined ||
+        payload.items !== undefined ||
+        payload.updateItem !== undefined ||
+        (payload.updateItems?.length ?? 0) > 0
+      if (!hasPayload) {
+        return {
+          content: [
+            { type: 'text' as const, text: 'title, items, updateItem or updateItems required' }
+          ],
+          isError: true
+        }
+      }
+      const todoList = await adapters.todoList.updateTodoList(scope, payload)
       return {
         content: [
           {
             type: 'text' as const,
-            text: `Created task ${task.id}: ${task.title}`
+            text: todoList
+              ? `Updated todo list: ${todoList.title} (${todoList.items.length} items)`
+              : 'Todo list cleared'
           }
         ]
-      }
-    }
-  )
-
-  server.registerTool(
-    'prizm_update_task',
-    {
-      description: '更新 Prizm 任务（状态、标题、优先级等）',
-      inputSchema: z.object({
-        id: z.string().describe('任务 ID'),
-        status: z.enum(['todo', 'doing', 'done']).optional(),
-        title: z.string().optional(),
-        priority: z.enum(['low', 'medium', 'high']).optional()
-      })
-    },
-    async ({ id, status, title, priority }) => {
-      if (!adapters.tasks?.updateTask) {
-        return {
-          content: [{ type: 'text' as const, text: 'Tasks adapter not available' }],
-          isError: true
-        }
-      }
-      const payload: Record<string, unknown> = {}
-      if (status) payload.status = status
-      if (title) payload.title = title
-      if (priority) payload.priority = priority
-      const task = await adapters.tasks.updateTask(scope, id, payload)
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `Updated task ${task.id}: status=${task.status}`
-          }
-        ]
-      }
-    }
-  )
-
-  server.registerTool(
-    'prizm_get_task',
-    {
-      description: '根据 ID 获取单条任务详情',
-      inputSchema: z.object({
-        id: z.string().describe('任务 ID')
-      })
-    },
-    async ({ id }) => {
-      const task = adapters.tasks?.getTaskById ? await adapters.tasks.getTaskById(scope, id) : null
-      if (!task) {
-        return {
-          content: [{ type: 'text' as const, text: `Task not found: ${id}` }],
-          isError: true
-        }
-      }
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(
-              {
-                id: task.id,
-                title: task.title,
-                description: task.description,
-                status: task.status,
-                priority: task.priority,
-                dueAt: task.dueAt,
-                createdAt: task.createdAt,
-                updatedAt: task.updatedAt
-              },
-              null,
-              2
-            )
-          }
-        ]
-      }
-    }
-  )
-
-  server.registerTool(
-    'prizm_delete_task',
-    {
-      description: '删除 Prizm 任务',
-      inputSchema: z.object({
-        id: z.string().describe('任务 ID')
-      })
-    },
-    async ({ id }) => {
-      if (!adapters.tasks?.deleteTask) {
-        return {
-          content: [{ type: 'text' as const, text: 'Tasks adapter not available' }],
-          isError: true
-        }
-      }
-      await adapters.tasks.deleteTask(scope, id)
-      return {
-        content: [{ type: 'text' as const, text: `Deleted task ${id}` }]
       }
     }
   )

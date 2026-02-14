@@ -7,22 +7,25 @@ import { createLogger } from '../logger'
 import type {
   IStickyNotesAdapter,
   INotificationAdapter,
-  ITasksAdapter,
+  ITodoListAdapter,
   IPomodoroAdapter,
   IClipboardAdapter,
   IDocumentsAdapter,
   IAgentAdapter,
   PrizmAdapters,
-  LLMStreamChunk
+  LLMStreamChunk,
+  LLMTool
 } from './interfaces'
 import type {
   StickyNote,
   StickyNoteGroup,
   CreateNotePayload,
   UpdateNotePayload,
-  Task,
-  TaskStatus,
-  TaskPriority,
+  TodoList,
+  TodoItem,
+  TodoItemStatus,
+  UpdateTodoListPayload,
+  UpdateTodoItemPayload,
   PomodoroSession,
   ClipboardItem,
   Document,
@@ -33,6 +36,7 @@ import type {
 } from '../types'
 import { scopeStore } from '../core/ScopeStore'
 import { getLLMProvider } from '../llm'
+import { getMcpClientManager } from '../mcp-client/McpClientManager'
 
 const log = createLogger('Adapter')
 
@@ -143,91 +147,111 @@ export class DefaultNotificationAdapter implements INotificationAdapter {
   }
 }
 
-// ============ 默认 Tasks 适配器 ============
+function ensureTodoItem(it: Partial<TodoItem> & { title: string }): TodoItem {
+  const now = Date.now()
+  return {
+    id: (it as TodoItem).id ?? Math.random().toString(36).substring(2, 15),
+    title: it.title,
+    description: it.description,
+    status: (it as TodoItem).status ?? 'todo',
+    createdAt: (it as TodoItem).createdAt ?? now,
+    updatedAt: (it as TodoItem).updatedAt ?? now
+  }
+}
 
-export class DefaultTasksAdapter implements ITasksAdapter {
-  async getAllTasks(
-    scope: string,
-    filters?: { status?: string; dueBefore?: number }
-  ): Promise<Task[]> {
+// ============ 默认 TODO 列表适配器 ============
+
+export class DefaultTodoListAdapter implements ITodoListAdapter {
+  async getTodoList(scope: string, options?: { itemId?: string }): Promise<TodoList | null> {
     const data = scopeStore.getScopeData(scope)
-    let tasks = [...data.tasks]
-
-    if (filters?.status) {
-      tasks = tasks.filter((t) => t.status === (filters.status as TaskStatus))
+    const list = data.todoList
+    if (!list) return null
+    if (options?.itemId) {
+      const item = list.items.find((it) => it.id === options.itemId)
+      return item ? { ...list, items: [item] } : list
     }
-    if (typeof filters?.dueBefore === 'number') {
-      tasks = tasks.filter((t) => typeof t.dueAt === 'number' && t.dueAt <= filters.dueBefore!)
-    }
-
-    return tasks
+    return list
   }
 
-  async getTaskById(scope: string, id: string): Promise<Task | null> {
+  async getTodoItem(scope: string, itemId: string): Promise<TodoItem | null> {
     const data = scopeStore.getScopeData(scope)
-    return data.tasks.find((t) => t.id === id) ?? null
+    return data.todoList?.items.find((it) => it.id === itemId) ?? null
   }
 
-  async createTask(
-    scope: string,
-    payload: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>
-  ): Promise<Task> {
+  async updateTodoList(scope: string, payload: UpdateTodoListPayload): Promise<TodoList | null> {
     const data = scopeStore.getScopeData(scope)
     const now = Date.now()
-    const task: Task = {
-      id: Math.random().toString(36).substring(2, 15),
-      title: payload.title,
-      description: payload.description,
-      status: payload.status ?? 'todo',
-      priority: payload.priority ?? 'medium',
-      dueAt: payload.dueAt,
-      noteId: payload.noteId,
-      createdAt: now,
-      updatedAt: now
+
+    if (!data.todoList) {
+      const items = (payload.items ?? []).map((it) =>
+        ensureTodoItem(it as Partial<TodoItem> & { title: string })
+      )
+      const list: TodoList = {
+        id: Math.random().toString(36).substring(2, 15),
+        title: payload.title ?? '待办',
+        items,
+        createdAt: now,
+        updatedAt: now
+      }
+      data.todoList = list
+      scopeStore.saveScope(scope)
+      log.info('TodoList created:', list.id, 'scope:', scope)
+      return list
     }
-    data.tasks.push(task)
-    scopeStore.saveScope(scope)
-    log.info('Task created:', task.id, 'scope:', scope)
-    return task
-  }
 
-  async updateTask(
-    scope: string,
-    id: string,
-    payload: Partial<Omit<Task, 'id' | 'createdAt'>>
-  ): Promise<Task> {
-    const data = scopeStore.getScopeData(scope)
-    const idx = data.tasks.findIndex((t) => t.id === id)
-    if (idx < 0) throw new Error(`Task not found: ${id}`)
+    const existing = data.todoList
+    let items = [...existing.items]
 
-    const existing = data.tasks[idx]
-    const updated: Task = {
+    if (payload.updateItem) {
+      const { id, ...upd } = payload.updateItem
+      const idx = items.findIndex((it) => it.id === id)
+      if (idx >= 0) {
+        const cur = items[idx]
+        items[idx] = {
+          ...cur,
+          ...(upd.status !== undefined && { status: upd.status as TodoItemStatus }),
+          ...(upd.title !== undefined && { title: upd.title }),
+          ...(upd.description !== undefined && { description: upd.description }),
+          updatedAt: now
+        }
+      }
+    }
+    if (payload.updateItems?.length) {
+      for (const { id, ...upd } of payload.updateItems) {
+        const idx = items.findIndex((it) => it.id === id)
+        if (idx >= 0) {
+          const cur = items[idx]
+          items[idx] = {
+            ...cur,
+            ...(upd.status !== undefined && { status: upd.status as TodoItemStatus }),
+            ...(upd.title !== undefined && { title: upd.title }),
+            ...(upd.description !== undefined && { description: upd.description }),
+            updatedAt: now
+          }
+        }
+      }
+    }
+    if (payload.items !== undefined && !payload.updateItem && !payload.updateItems?.length) {
+      items = payload.items.map((it) => ensureTodoItem(it as Partial<TodoItem> & { title: string }))
+    }
+
+    if (items.length === 0) {
+      data.todoList = null
+      scopeStore.saveScope(scope)
+      log.info('TodoList cleared (items empty), scope:', scope)
+      return null
+    }
+
+    const updated: TodoList = {
       ...existing,
       ...(payload.title !== undefined && { title: payload.title }),
-      ...(payload.description !== undefined && {
-        description: payload.description
-      }),
-      ...(payload.status !== undefined && { status: payload.status }),
-      ...(payload.priority !== undefined && { priority: payload.priority }),
-      ...(payload.dueAt !== undefined && { dueAt: payload.dueAt }),
-      ...(payload.noteId !== undefined && { noteId: payload.noteId }),
-      updatedAt: Date.now()
+      items,
+      updatedAt: now
     }
-
-    data.tasks[idx] = updated
+    data.todoList = updated
     scopeStore.saveScope(scope)
-    log.info('Task updated:', id, 'scope:', scope)
+    log.info('TodoList updated:', updated.id, 'scope:', scope)
     return updated
-  }
-
-  async deleteTask(scope: string, id: string): Promise<void> {
-    const data = scopeStore.getScopeData(scope)
-    const idx = data.tasks.findIndex((t) => t.id === id)
-    if (idx >= 0) {
-      data.tasks.splice(idx, 1)
-      scopeStore.saveScope(scope)
-      log.info('Task deleted:', id, 'scope:', scope)
-    }
   }
 }
 
@@ -482,10 +506,105 @@ export class DefaultAgentAdapter implements IAgentAdapter {
     scope: string,
     sessionId: string,
     messages: Array<{ role: string; content: string }>,
-    options?: { model?: string; signal?: AbortSignal }
+    options?: { model?: string; signal?: AbortSignal; mcpEnabled?: boolean }
   ): AsyncIterable<LLMStreamChunk> {
-    // 根据环境变量选择：XIAOMIMIMO > ZHIPU > OPENAI（默认优先 MiMo）
     const provider = getLLMProvider()
+    const mcpEnabled = options?.mcpEnabled !== false
+
+    if (mcpEnabled && provider.chatNonStreaming) {
+      const manager = getMcpClientManager()
+      await manager.connectAll()
+      const mcpTools = await manager.listAllTools()
+      const llmTools: LLMTool[] = mcpTools.map((t) => ({
+        type: 'function',
+        function: {
+          name: t.fullName,
+          description: t.description,
+          parameters: t.inputSchema
+        }
+      }))
+
+      if (llmTools.length > 0) {
+        const MAX_ROUNDS = 5
+        let currentMessages: Array<
+          | { role: string; content: string }
+          | {
+              role: 'assistant'
+              content: string | null
+              tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>
+            }
+          | { role: 'tool'; tool_call_id: string; content: string }
+        > = [...messages]
+        let lastUsage: LLMStreamChunk['usage']
+        let fullReasoning = ''
+
+        for (let round = 0; round < MAX_ROUNDS; round++) {
+          if (options?.signal?.aborted) break
+
+          const result = await provider.chatNonStreaming(currentMessages, {
+            model: options?.model,
+            temperature: 0.7,
+            signal: options?.signal,
+            tools: llmTools
+          })
+
+          if (result.usage) {
+            lastUsage = {
+              totalTokens: result.usage.totalTokens,
+              totalInputTokens: result.usage.totalInputTokens,
+              totalOutputTokens: result.usage.totalOutputTokens
+            }
+          }
+          if (result.reasoning) fullReasoning += result.reasoning
+
+          if (!result.toolCalls?.length) {
+            if (result.reasoning) yield { reasoning: result.reasoning }
+            if (result.content) yield { text: result.content }
+            yield { done: true, usage: lastUsage }
+            return
+          }
+
+          currentMessages = [
+            ...currentMessages,
+            {
+              role: 'assistant' as const,
+              content: result.content || null,
+              tool_calls: result.toolCalls.map((tc) => ({
+                id: tc.id,
+                function: { name: tc.name, arguments: tc.arguments }
+              }))
+            }
+          ]
+
+          for (const tc of result.toolCalls) {
+            try {
+              const args = JSON.parse(tc.arguments || '{}') as Record<string, unknown>
+              const toolResult = await manager.callTool(tc.name, args)
+              const text =
+                toolResult.content
+                  ?.map((c) => ('text' in c ? c.text : JSON.stringify(c)))
+                  .join('\n') ?? ''
+              currentMessages.push({
+                role: 'tool',
+                tool_call_id: tc.id,
+                content: toolResult.isError ? `Error: ${text}` : text
+              })
+            } catch (err) {
+              currentMessages.push({
+                role: 'tool',
+                tool_call_id: tc.id,
+                content: `Error: ${err instanceof Error ? err.message : String(err)}`
+              })
+            }
+          }
+        }
+
+        yield { text: '（MCP 工具调用达到最大轮次，请简化请求）' }
+        yield { done: true, usage: lastUsage }
+        return
+      }
+    }
+
     yield* provider.chat(messages, {
       model: options?.model,
       temperature: 0.7,
@@ -500,7 +619,7 @@ export function createDefaultAdapters(): PrizmAdapters {
   return {
     notes: new DefaultStickyNotesAdapter(),
     notification: new DefaultNotificationAdapter(),
-    tasks: new DefaultTasksAdapter(),
+    todoList: new DefaultTodoListAdapter(),
     pomodoro: new DefaultPomodoroAdapter(),
     clipboard: new DefaultClipboardAdapter(),
     documents: new DefaultDocumentsAdapter(),

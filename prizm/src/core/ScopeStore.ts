@@ -11,7 +11,9 @@ import { getConfig } from '../config'
 import type {
   StickyNote,
   StickyNoteGroup,
-  Task,
+  TodoList,
+  TodoItem,
+  TodoItemStatus,
   PomodoroSession,
   ClipboardItem,
   Document,
@@ -30,8 +32,8 @@ export interface ScopeData {
   notes: StickyNote[]
   /** 便签分组 */
   groups: StickyNoteGroup[]
-  /** 任务 / TODO 列表 */
-  tasks: Task[]
+  /** TODO 列表（每个 scope 一个） */
+  todoList: TodoList | null
   /** 番茄钟会话记录 */
   pomodoroSessions: PomodoroSession[]
   /** 剪贴板历史记录 */
@@ -52,11 +54,58 @@ function safeScopeFilename(scope: string): string {
   return scope.replace(/[^a-zA-Z0-9_-]/g, '_') || 'default'
 }
 
+function genId(): string {
+  return Math.random().toString(36).substring(2, 15)
+}
+
+/** 将旧版 tasks 数组迁移为 TodoList */
+function migrateTasksToTodoList(tasks: unknown[]): TodoList {
+  const now = Date.now()
+  const items: TodoItem[] = tasks
+    .filter((t): t is { title?: string; description?: string } => t && typeof t === 'object')
+    .map((t) => ({
+      id: genId(),
+      title: typeof t.title === 'string' ? t.title : '(无标题)',
+      ...(typeof t.description === 'string' && t.description && { description: t.description }),
+      status: 'todo' as TodoItemStatus,
+      createdAt: now,
+      updatedAt: now
+    }))
+  return {
+    id: genId(),
+    title: '待办',
+    items,
+    createdAt: now,
+    updatedAt: now
+  }
+}
+
+/** 数据迁移：补全 item 缺的 id、status */
+function migrateTodoListItems(list: TodoList): TodoList {
+  const now = Date.now()
+  const items = list.items.map((it) => {
+    const raw = it as Record<string, unknown>
+    const hasId = typeof raw.id === 'string' && raw.id.length > 0
+    const hasStatus = raw.status === 'todo' || raw.status === 'doing' || raw.status === 'done'
+    if (hasId && hasStatus) return it as TodoItem
+    return {
+      id: hasId ? (raw.id as string) : genId(),
+      title: typeof raw.title === 'string' ? raw.title : '(无标题)',
+      ...(typeof raw.description === 'string' &&
+        raw.description && { description: raw.description }),
+      status: (hasStatus ? raw.status : 'todo') as TodoItemStatus,
+      createdAt: (raw.createdAt as number | undefined) ?? now,
+      updatedAt: (raw.updatedAt as number | undefined) ?? now
+    } as TodoItem
+  })
+  return { ...list, items }
+}
+
 function createEmptyScopeData(): ScopeData {
   return {
     notes: [],
     groups: [],
-    tasks: [],
+    todoList: null,
     pomodoroSessions: [],
     clipboard: [],
     documents: [],
@@ -94,7 +143,18 @@ export class ScopeStore {
       const data: ScopeData = {
         notes: Array.isArray(raw.notes) ? raw.notes : [],
         groups: Array.isArray(raw.groups) ? raw.groups : [],
-        tasks: Array.isArray(raw.tasks) ? raw.tasks : [],
+        todoList: (() => {
+          let list: TodoList | null = null
+          if (raw.todoList && typeof raw.todoList === 'object') {
+            list = raw.todoList as TodoList
+          } else if (
+            Array.isArray((raw as { tasks?: unknown[] }).tasks) &&
+            (raw as { tasks: unknown[] }).tasks.length > 0
+          ) {
+            list = migrateTasksToTodoList((raw as { tasks: unknown[] }).tasks)
+          }
+          return list ? migrateTodoListItems(list) : null
+        })(),
         pomodoroSessions: Array.isArray(raw.pomodoroSessions) ? raw.pomodoroSessions : [],
         clipboard: Array.isArray(raw.clipboard) ? raw.clipboard : [],
         documents: Array.isArray(raw.documents) ? raw.documents : [],
@@ -143,7 +203,7 @@ export class ScopeStore {
           {
             notes: data.notes,
             groups: data.groups,
-            tasks: data.tasks,
+            todoList: data.todoList,
             pomodoroSessions: data.pomodoroSessions,
             clipboard: data.clipboard,
             documents: data.documents,
@@ -174,7 +234,7 @@ export class ScopeStore {
     // 容错：老版本数据文件可能缺少新字段或字段被意外修改，这里补齐默认值
     if (!Array.isArray(data.notes)) data.notes = []
     if (!Array.isArray(data.groups)) data.groups = []
-    if (!Array.isArray(data.tasks)) data.tasks = []
+    if (data.todoList === undefined) data.todoList = null
     if (!Array.isArray(data.pomodoroSessions)) data.pomodoroSessions = []
     if (!Array.isArray(data.clipboard)) data.clipboard = []
     if (!Array.isArray(data.documents)) data.documents = []

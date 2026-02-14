@@ -3,7 +3,12 @@
  * 环境变量：OPENAI_API_URL、OPENAI_API_KEY
  */
 
-import type { ILLMProvider, LLMStreamChunk } from '../adapters/interfaces'
+import type {
+  ILLMProvider,
+  LLMStreamChunk,
+  LLMChatResult,
+  LLMTool
+} from '../adapters/interfaces'
 import { parseUsageFromChunk } from './parseUsage'
 
 function getApiUrl(): string {
@@ -137,6 +142,96 @@ export class OpenAILikeLLMProvider implements ILLMProvider {
       yield { done: true }
     } finally {
       reader.releaseLock()
+    }
+  }
+
+  async chatNonStreaming(
+    messages: Array<
+      | { role: string; content: string }
+      | {
+          role: 'assistant'
+          content: string | null
+          tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>
+        }
+      | { role: 'tool'; tool_call_id: string; content: string }
+    >,
+    options?: { model?: string; temperature?: number; signal?: AbortSignal; tools?: LLMTool[] }
+  ): Promise<LLMChatResult> {
+    const apiKey = getApiKey()
+    if (!apiKey) {
+      return { content: '（请配置 OPENAI_API_KEY 环境变量以使用 LLM）' }
+    }
+
+    const baseUrl = getApiUrl().replace(/\/$/, '')
+    const url = `${baseUrl}/chat/completions`
+    const model = options?.model ?? process.env.OPENAI_MODEL ?? 'gpt-4o-mini'
+
+    const body: Record<string, unknown> = {
+      model,
+      messages: messages.map((m) => {
+        if (m.role === 'assistant' && 'tool_calls' in m && m.tool_calls) {
+          return { role: 'assistant', content: m.content ?? '', tool_calls: m.tool_calls }
+        }
+        if (m.role === 'tool') {
+          return { role: 'tool', tool_call_id: m.tool_call_id, content: m.content }
+        }
+        return { role: m.role, content: m.content }
+      }),
+      stream: false,
+      temperature: options?.temperature ?? 0.7
+    }
+    if (options?.tools?.length) {
+      body.tools = options.tools
+      body.tool_choice = 'auto'
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(body),
+      signal: options?.signal
+    })
+
+    if (!response.ok) {
+      const errText = await response.text()
+      throw new Error(`LLM API error ${response.status}: ${errText}`)
+    }
+
+    const data = (await response.json()) as {
+      choices?: Array<{
+        message?: {
+          content?: string
+          tool_calls?: Array<{
+            id: string
+            function: { name: string; arguments: string }
+          }>
+        }
+      }>
+      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+    }
+
+    const msg = data.choices?.[0]?.message
+    if (!msg) return { content: '' }
+
+    const toolCalls = msg.tool_calls?.map((tc) => ({
+      id: tc.id,
+      name: tc.function.name,
+      arguments: tc.function.arguments
+    }))
+
+    return {
+      content: msg.content ?? '',
+      toolCalls,
+      usage: data.usage
+        ? {
+            totalTokens: data.usage.total_tokens,
+            totalInputTokens: data.usage.prompt_tokens,
+            totalOutputTokens: data.usage.completion_tokens
+          }
+        : undefined
     }
   }
 }

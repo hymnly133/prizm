@@ -19,11 +19,12 @@ import { createAuthMiddleware } from './auth/authMiddleware'
 import { createAuthRoutes } from './routes/auth'
 import { createNotesRoutes } from './routes/notes'
 import { createNotifyRoutes } from './routes/notify'
-import { createTasksRoutes } from './routes/tasks'
+import { createTodoListRoutes } from './routes/todoList'
 import { createPomodoroRoutes } from './routes/pomodoro'
 import { createClipboardRoutes } from './routes/clipboard'
 import { createDocumentsRoutes } from './routes/documents'
 import { createAgentRoutes } from './routes/agent'
+import { createMcpConfigRoutes } from './routes/mcpConfig'
 import { mountMcpRoutes } from './mcp'
 import { WebSocketServer } from './websocket/WebSocketServer'
 
@@ -112,11 +113,12 @@ export function createPrizmServer(
   const router = express.Router()
   createNotesRoutes(router, adapters.notes)
   createNotifyRoutes(router, adapters.notification)
-  createTasksRoutes(router, adapters.tasks)
+  createTodoListRoutes(router, adapters.todoList)
   createPomodoroRoutes(router, adapters.pomodoro)
   createClipboardRoutes(router, adapters.clipboard)
   createDocumentsRoutes(router, adapters.documents)
   createAgentRoutes(router, adapters.agent)
+  createMcpConfigRoutes(router)
   app.use('/', router)
 
   // MCP 端点：供 Cursor、LobeChat 等 Agent 连接（wsServer 在 start 后注入）

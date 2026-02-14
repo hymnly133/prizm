@@ -49,7 +49,7 @@ yarn build
 
 ### 3. 重启 Cursor
 
-保存配置后重启 Cursor，或在 MCP 设置中刷新。工具列表中应出现 `prizm_list_notes`、`prizm_create_note`、`prizm_list_tasks` 等。
+保存配置后重启 Cursor，或在 MCP 设置中刷新。工具列表中应出现 `prizm_list_notes`、`prizm_create_note`、`prizm_list_todo_list` 等。
 
 ---
 
@@ -146,15 +146,14 @@ Scope 用于隔离不同工作场景的数据（便签、任务、剪贴板等�
 | `prizm_update_note` | 更新便签内容 | `id` (string)：便签 ID；`content` (string, 可选)：新内容；`groupId` (string, 可选)：分组 ID |
 | `prizm_delete_note` | 删除便签 | `id` (string)：便签 ID |
 
-### 任务 (Tasks)
+### 任务 (TODO 列表)
+
+每个 scope 一个 TODO 列表，含若干 item。item 有 `id`、`status`(todo|doing|done)、`title`、`description`(可选)。
 
 | 工具名 | 说明 | 参数 |
 |-------|------|------|
-| `prizm_list_tasks` | 列出任务，可选状态过滤 | `status` (string, 可选)：`todo` / `doing` / `done` |
-| `prizm_create_task` | 创建任务 | `title` (string)：任务标题；`description` (string, 可选)；`priority` (string, 可选)：`low` / `medium` / `high`，默认 `medium` |
-| `prizm_get_task` | 根据 ID 获取单条任务详情 | `id` (string)：任务 ID |
-| `prizm_update_task` | 更新任务（状态、标题、优先级等） | `id` (string)：任务 ID；`status` (string, 可选)：`todo` / `doing` / `done`；`title` (string, 可选)；`priority` (string, 可选)：`low` / `medium` / `high` |
-| `prizm_delete_task` | 删除任务 | `id` (string)：任务 ID |
+| `prizm_list_todo_list` | 列出 TODO 列表，返回 `{ title, items }`，每个 item 含 id、status、title、description | 无 |
+| `prizm_update_todo_list` | 更新 TODO 列表 | `title` (string, 可选)：列表标题；`items` (array, 可选)：全量替换；`updateItem` (object, 可选)：单条更新 `{ id, status?, title?, description? }`，id 来自 list；`updateItems` (array, 可选)：批量更新。仅改状态时推荐用 updateItem |
 
 ### 文档 (Documents)
 
@@ -193,11 +192,8 @@ Scope 用于隔离不同工作场景的数据（便签、任务、剪贴板等�
 | prizm_get_note | GET | /notes/:id |
 | prizm_update_note | PATCH | /notes/:id |
 | prizm_delete_note | DELETE | /notes/:id |
-| prizm_list_tasks | GET | /tasks?scope=xxx |
-| prizm_create_task | POST | /tasks |
-| prizm_get_task | GET | /tasks/:id |
-| prizm_update_task | PATCH | /tasks/:id |
-| prizm_delete_task | DELETE | /tasks/:id |
+| prizm_list_todo_list | GET | /tasks?scope=xxx |
+| prizm_update_todo_list | PATCH | /tasks（body 含 updateItem/updateItems/items） |
 | prizm_list_documents | GET | /documents?scope=xxx |
 | prizm_create_document | POST | /documents |
 | prizm_get_document | GET | /documents/:id |
@@ -208,6 +204,78 @@ Scope 用于隔离不同工作场景的数据（便签、任务、剪贴板等�
 | prizm_get_clipboard_item | GET | /clipboard/history?limit=500 (需 scope)，再从结果中查找 |
 | prizm_delete_clipboard_item | DELETE | /clipboard/:id |
 | prizm_notice | POST | /notify |
+
+---
+
+## MCP 客户端配置（Agent 调用外部 MCP 服务器）
+
+Prizm Agent 对话支持**调用**用户配置的外部 MCP 服务器，使 LLM 能够使用 GitHub、文件系统、搜索等外部工具。
+
+### 配置方式
+
+**方式一：Electron 客户端设置页**
+
+1. 打开 Prizm Electron 客户端 → 设置
+2. 在「MCP 服务器（Agent 工具）」区块添加服务器
+3. 填写 ID、名称、传输类型、URL 或 stdio 命令
+4. 点击「测试」验证连接
+
+**方式二：HTTP API**
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | /mcp/servers | 列出 MCP 服务器配置 |
+| POST | /mcp/servers | 添加 MCP 服务器 |
+| PATCH | /mcp/servers/:id | 更新配置 |
+| DELETE | /mcp/servers/:id | 删除配置 |
+| GET | /mcp/servers/:id/tools | 获取某服务器的工具列表（测试连接） |
+
+需鉴权（Bearer Token 或 X-Prizm-Api-Key）。
+
+### 配置格式
+
+```json
+{
+  "id": "prizm-local",
+  "name": "Prizm 本机",
+  "transport": "streamable-http",
+  "url": "http://127.0.0.1:4127/mcp?scope=online",
+  "headers": { "Authorization": "Bearer your-api-key" },
+  "enabled": true
+}
+```
+
+**传输类型：**
+
+- `streamable-http`：远程 HTTP 服务器（推荐）
+- `sse`：HTTP+SSE（已弃用，仅作回退；连接时会优先尝试 Streamable HTTP）
+- `stdio`：本地进程，需配置 `stdio.command` 和 `stdio.args`
+
+**stdio 示例：**
+
+```json
+{
+  "id": "filesystem",
+  "name": "文件系统",
+  "transport": "stdio",
+  "stdio": {
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allow"]
+  },
+  "enabled": true
+}
+```
+
+### 存储位置
+
+配置持久化于 `.prizm-data/mcp-servers.json`。
+
+### 对话中的使用
+
+- Agent 对话默认启用 MCP（`mcpEnabled: true`）
+- 发送消息时，若已配置 MCP 服务器，LLM 会收到工具列表
+- LLM 可请求调用工具，服务端执行后继续生成
+- 请求体可传 `mcpEnabled: false` 禁用 MCP
 
 ---
 

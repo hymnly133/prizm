@@ -36,7 +36,11 @@ export function createPomodoroRoutes(router: Router, adapter?: IPomodoroAdapter)
 
       const wsServer = req.prizmServer
       if (wsServer) {
-        wsServer.broadcast(EVENT_TYPES.POMODORO_STARTED, { id: session.id, scope }, scope)
+        wsServer.broadcast(
+          EVENT_TYPES.POMODORO_STARTED,
+          { id: session.id, scope, sourceClientId: req.prizmClient?.clientId },
+          scope
+        )
       }
 
       res.status(201).json({ session })
@@ -79,7 +83,11 @@ export function createPomodoroRoutes(router: Router, adapter?: IPomodoroAdapter)
 
       const wsServer = req.prizmServer
       if (wsServer) {
-        wsServer.broadcast(EVENT_TYPES.POMODORO_STOPPED, { id: session.id, scope }, scope)
+        wsServer.broadcast(
+          EVENT_TYPES.POMODORO_STOPPED,
+          { id: session.id, scope, sourceClientId: req.prizmClient?.clientId },
+          scope
+        )
       }
 
       res.json({ session })

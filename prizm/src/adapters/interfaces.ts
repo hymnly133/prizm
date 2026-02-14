@@ -8,7 +8,9 @@ import type {
   StickyNoteGroup,
   CreateNotePayload,
   UpdateNotePayload,
-  Task,
+  TodoList,
+  TodoItem,
+  UpdateTodoListPayload,
   PomodoroSession,
   ClipboardItem,
   Document,
@@ -88,22 +90,14 @@ export interface INotificationAdapter {
   notify(title: string, body?: string): void
 }
 
-// ============ Tasks / TODO 适配器 ============
+// ============ TODO 列表适配器 ============
 
-export interface ITasksAdapter {
-  getAllTasks?(scope: string, filters?: { status?: string; dueBefore?: number }): Promise<Task[]>
+export interface ITodoListAdapter {
+  getTodoList?(scope: string, options?: { itemId?: string }): Promise<TodoList | null>
 
-  getTaskById?(scope: string, id: string): Promise<Task | null>
+  getTodoItem?(scope: string, itemId: string): Promise<TodoItem | null>
 
-  createTask?(scope: string, payload: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>): Promise<Task>
-
-  updateTask?(
-    scope: string,
-    id: string,
-    payload: Partial<Omit<Task, 'id' | 'createdAt'>>
-  ): Promise<Task>
-
-  deleteTask?(scope: string, id: string): Promise<void>
+  updateTodoList?(scope: string, payload: UpdateTodoListPayload): Promise<TodoList | null>
 }
 
 // ============ 番茄钟适配器 ============
@@ -172,12 +166,42 @@ export interface LLMStreamChunk {
   usage?: MessageUsage
 }
 
+/** OpenAI 风格 tool 定义 */
+export interface LLMTool {
+  type: 'function'
+  function: { name: string; description?: string; parameters?: object }
+}
+
+/** 非流式 LLM 响应（用于 tool calling 轮次） */
+export interface LLMChatResult {
+  content: string
+  reasoning?: string
+  toolCalls?: Array<{ id: string; name: string; arguments: string }>
+  usage?: MessageUsage
+}
+
 /** LLM 提供商接口（可插拔 OpenAI、Ollama 等） */
 export interface ILLMProvider {
   chat(
     messages: Array<{ role: string; content: string }>,
     options?: { model?: string; temperature?: number; signal?: AbortSignal }
   ): AsyncIterable<LLMStreamChunk>
+
+  /**
+   * 非流式对话，支持 tools。用于 MCP tool calling 轮次。
+   */
+  chatNonStreaming?(
+    messages: Array<
+      | { role: string; content: string }
+      | {
+          role: 'assistant'
+          content: string | null
+          tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>
+        }
+      | { role: 'tool'; tool_call_id: string; content: string }
+    >,
+    options?: { model?: string; temperature?: number; signal?: AbortSignal; tools?: LLMTool[] }
+  ): Promise<LLMChatResult>
 }
 
 // ============ Agent 适配器 ============
@@ -207,7 +231,7 @@ export interface IAgentAdapter {
     scope: string,
     sessionId: string,
     messages: Array<{ role: string; content: string }>,
-    options?: { model?: string; signal?: AbortSignal }
+    options?: { model?: string; signal?: AbortSignal; mcpEnabled?: boolean }
   ): AsyncIterable<LLMStreamChunk>
 }
 
@@ -216,7 +240,7 @@ export interface IAgentAdapter {
 export interface PrizmAdapters {
   notes?: IStickyNotesAdapter
   notification?: INotificationAdapter
-  tasks?: ITasksAdapter
+  todoList?: ITodoListAdapter
   pomodoro?: IPomodoroAdapter
   clipboard?: IClipboardAdapter
   documents?: IDocumentsAdapter
