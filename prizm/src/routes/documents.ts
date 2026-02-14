@@ -15,10 +15,15 @@ import {
   getScopeForReadById,
   findAcrossScopes
 } from '../scopeUtils'
+import type { SearchIndexService } from '../search/searchIndexService'
 
 const log = createLogger('Documents')
 
-export function createDocumentsRoutes(router: Router, adapter?: IDocumentsAdapter): void {
+export function createDocumentsRoutes(
+  router: Router,
+  adapter?: IDocumentsAdapter,
+  searchIndex?: SearchIndexService | null
+): void {
   if (!adapter) {
     log.warn('Documents adapter not provided, routes will return 503')
   }
@@ -85,6 +90,7 @@ export function createDocumentsRoutes(router: Router, adapter?: IDocumentsAdapte
       const scope = getScopeForCreate(req)
       const payload: CreateDocumentPayload = { title, content }
       const doc = await adapter.createDocument(scope, payload)
+      if (searchIndex) await searchIndex.addDocument(scope, doc)
 
       const wsServer = req.prizmServer
       if (wsServer) {
@@ -129,6 +135,7 @@ export function createDocumentsRoutes(router: Router, adapter?: IDocumentsAdapte
         scope = found.scope
       }
       const doc = await adapter.updateDocument(scope, id, payload)
+      if (searchIndex) await searchIndex.updateDocument(scope, id, doc)
 
       const wsServer = req.prizmServer
       if (wsServer) {
@@ -172,6 +179,7 @@ export function createDocumentsRoutes(router: Router, adapter?: IDocumentsAdapte
         scope = found.scope
       }
       await adapter.deleteDocument(scope, id)
+      if (searchIndex) await searchIndex.removeDocument(scope, id)
 
       const wsServer = req.prizmServer
       if (wsServer) {

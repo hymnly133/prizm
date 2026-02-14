@@ -1,11 +1,11 @@
 /**
- * 统一搜索路由 - 关键词列表匹配文档
- * 面向自然语言与大模型，不使用向量 embedding
+ * 统一搜索路由 - MiniSearch 全文检索，默认模糊搜索
+ * 文档在创建/更新时写入索引，检索时直接查索引；首次检索从 adapters 懒加载建索引
  */
 
 import type { Router, Request, Response } from 'express'
 import type { PrizmAdapters } from '../adapters/interfaces'
-import { keywordSearch, type ScoredItem } from '../search/keywordSearch'
+import type { SearchIndexService } from '../search/searchIndexService'
 import { toErrorResponse } from '../errors'
 import { createLogger } from '../logger'
 import {
@@ -28,96 +28,20 @@ export interface SearchResultItem {
   raw: unknown
 }
 
-async function runSearch(
+export function createSearchRoutes(
+  router: Router,
   adapters: PrizmAdapters,
-  params: {
-    keywords: string | string[]
-    scope: string
-    types?: SearchResultKind[]
-    limit?: number
-    mode?: 'any' | 'all'
-  }
-): Promise<SearchResultItem[]> {
-  const { keywords, scope } = params
-  const types = params.types
-  const limit = typeof params.limit === 'number' ? Math.min(params.limit, 100) : 50
-  const mode = params.mode === 'all' ? 'all' : 'any'
-
-  const searchTypes: SearchResultKind[] = types?.length
-    ? types.filter((t) => ['note', 'document', 'clipboard', 'todoList'].includes(t))
-    : ['note', 'document', 'clipboard', 'todoList']
-
-  const items: Array<{ text: string; title?: string; raw: unknown; kind: SearchResultKind }> = []
-
-  if (searchTypes.includes('note') && adapters.notes?.getAllNotes) {
-    const notes = await adapters.notes.getAllNotes(scope)
-    for (const n of notes) {
-      const content = n.content ?? ''
-      items.push({ text: content, title: content.slice(0, 80), raw: n, kind: 'note' })
-    }
-  }
-
-  if (searchTypes.includes('document') && adapters.documents?.getAllDocuments) {
-    const docs = await adapters.documents.getAllDocuments(scope)
-    for (const d of docs) {
-      const title = d.title ?? ''
-      const content = d.content ?? ''
-      items.push({ text: `${title}\n${content}`, title, raw: d, kind: 'document' })
-    }
-  }
-
-  if (searchTypes.includes('clipboard') && adapters.clipboard?.getHistory) {
-    const clips = await adapters.clipboard.getHistory(scope, { limit: 200 })
-    for (const c of clips) {
-      const content = c.content ?? ''
-      items.push({ text: content, title: content.slice(0, 80), raw: c, kind: 'clipboard' })
-    }
-  }
-
-  if (searchTypes.includes('todoList') && adapters.todoList?.getTodoLists) {
-    const todoLists = await adapters.todoList.getTodoLists(scope)
-    for (const todo of todoLists) {
-      const parts: string[] = [todo.title ?? '']
-      for (const it of todo.items) {
-        parts.push(it.title ?? '')
-        if (it.description) parts.push(it.description)
-      }
-      items.push({ text: parts.join('\n'), title: todo.title ?? '', raw: todo, kind: 'todoList' })
-    }
-  }
-
-  const scored = keywordSearch(keywords, items, { mode, limit })
-
-  return scored.map((s: ScoredItem<unknown>) => {
-    const raw = s.item as { id?: string; content?: string; title?: string }
-    const id = raw?.id ?? ''
-    let preview = ''
-    if ('content' in raw && typeof raw.content === 'string') {
-      preview = raw.content.length > 80 ? raw.content.slice(0, 80) + '…' : raw.content
-    } else if ('title' in raw && typeof raw.title === 'string') {
-      preview = raw.title
-    }
-    const kind = items.find((i) => i.raw === s.item)?.kind ?? 'note'
-    return {
-      kind,
-      id,
-      score: s.score,
-      matchedKeywords: s.matchedKeywords,
-      preview: preview || '(空)',
-      raw: s.item
-    }
-  })
-}
-
-export function createSearchRoutes(router: Router, adapters: PrizmAdapters): void {
+  searchIndex: SearchIndexService
+): void {
   /**
    * POST /search - 统一关键词搜索
-   * Body: { keywords: string | string[], scope?: string, types?: SearchResultKind[], limit?: number, mode?: 'any'|'all' }
+   * Body: { keywords, scope?, types?, limit?, mode?, fuzzy? }
    * - keywords: 关键词列表或可分词字符串（空格、逗号等分隔）
    * - scope: 必填（query.scope 或 body.scope）
    * - types: 限定搜索类型，默认全部
    * - limit: 最大返回数，默认 50
    * - mode: 'any' 任一关键词命中，'all' 需全部命中
+   * - fuzzy: 模糊程度 0~1，默认 0.2；0 关闭模糊
    */
   router.post('/search', async (req: Request, res: Response) => {
     try {
@@ -135,12 +59,11 @@ export function createSearchRoutes(router: Router, adapters: PrizmAdapters): voi
         return res.status(400).json({ error: 'keywords is required (string or string[])' })
       }
 
-      const results = await runSearch(adapters, {
-        keywords,
-        scope,
+      const results = await searchIndex.search(scope, keywords, {
         types: body.types,
         limit: body.limit,
-        mode: body.mode
+        mode: body.mode,
+        fuzzy: body.fuzzy
       })
       res.json({ results })
     } catch (error) {
@@ -165,11 +88,12 @@ export function createSearchRoutes(router: Router, adapters: PrizmAdapters): voi
       }
 
       const limit = req.query.limit ? Number(req.query.limit) : 50
-      const results = await runSearch(adapters, {
-        keywords: q.trim(),
-        scope,
+      const fuzzyParam = req.query.fuzzy
+      const fuzzy = fuzzyParam != null ? Number(fuzzyParam) : 0.2
+      const results = await searchIndex.search(scope, q.trim(), {
         limit: Number.isNaN(limit) ? 50 : Math.min(limit, 100),
-        mode: 'any'
+        mode: 'any',
+        fuzzy: Number.isNaN(fuzzy) ? 0.2 : Math.max(0, Math.min(1, fuzzy))
       })
       res.json({ results })
     } catch (error) {
