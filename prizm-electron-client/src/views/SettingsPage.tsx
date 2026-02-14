@@ -170,13 +170,19 @@ export default function SettingsPage() {
 		}
 	}, []);
 
+	const inputVariant = "filled" as const;
+
 	return (
 		<section className="page settings-page">
 			<div className="settings-section">
-				<h2>服务器配置</h2>
+				<div className="settings-section-header">
+					<h2>服务器配置</h2>
+					<p className="form-hint">连接 Prizm 服务端地址与客户端注册信息</p>
+				</div>
 				<Form layout="vertical">
 					<Form.Item label="服务器地址">
 						<Input
+							variant={inputVariant}
 							value={form.host}
 							onChange={(e) => setForm((f) => ({ ...f, host: e.target.value }))}
 							placeholder="127.0.0.1"
@@ -184,6 +190,7 @@ export default function SettingsPage() {
 					</Form.Item>
 					<Form.Item label="端口" extra="默认端口: 4127">
 						<Input
+							variant={inputVariant}
 							value={form.port}
 							onChange={(e) => setForm((f) => ({ ...f, port: e.target.value }))}
 							placeholder="4127"
@@ -191,6 +198,7 @@ export default function SettingsPage() {
 					</Form.Item>
 					<Form.Item label="客户端名称">
 						<Input
+							variant={inputVariant}
 							value={form.clientName}
 							onChange={(e) =>
 								setForm((f) => ({ ...f, clientName: e.target.value }))
@@ -203,6 +211,7 @@ export default function SettingsPage() {
 						extra="例如: default, online（online 为实时上下文）"
 					>
 						<Input
+							variant={inputVariant}
 							value={form.scopesText}
 							onChange={(e) =>
 								setForm((f) => ({ ...f, scopesText: e.target.value }))
@@ -244,7 +253,10 @@ export default function SettingsPage() {
 			</div>
 
 			<div className="settings-section">
-				<h2>快捷操作</h2>
+				<div className="settings-section-header">
+					<h2>快捷操作</h2>
+					<p className="form-hint">重新连接 WebSocket 或打开服务端仪表板</p>
+				</div>
 				<div className="config-actions">
 					<Button onClick={reconnect} disabled={reconnecting}>
 						{reconnecting ? "重新连接中..." : "重新连接"}
@@ -254,7 +266,10 @@ export default function SettingsPage() {
 			</div>
 
 			<div className="settings-section logs-section">
-				<h2>日志</h2>
+				<div className="settings-section-header">
+					<h2>日志</h2>
+					<p className="form-hint">连接与操作记录</p>
+				</div>
 				<div className="logs">
 					{logs.length === 0 ? (
 						<div className="log-placeholder">等待连接...</div>

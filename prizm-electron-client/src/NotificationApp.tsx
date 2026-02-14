@@ -1,5 +1,6 @@
+import { ActionIcon, Markdown } from "@lobehub/ui";
+import { X } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
-import ReactMarkdown from "react-markdown";
 
 interface NotifItem {
 	id: string;
@@ -112,11 +113,11 @@ export default function NotificationApp() {
 				>
 					<div className="notification-item__content">
 						<div className="notification-item__title">
-							<ReactMarkdown>{item.title || "通知"}</ReactMarkdown>
+							<Markdown>{item.title || "通知"}</Markdown>
 						</div>
 						{item.body && (
 							<div className="notification-item__body">
-								<ReactMarkdown>{item.body}</ReactMarkdown>
+								<Markdown>{item.body}</Markdown>
 							</div>
 						)}
 						<div className="notification-item__meta">
@@ -128,17 +129,16 @@ export default function NotificationApp() {
 							)}
 						</div>
 					</div>
-					<button
-						className="notification-item__close"
-						type="button"
+					<ActionIcon
+						icon={X}
+						size="small"
 						aria-label="关闭"
 						onClick={(e) => {
 							e.stopPropagation();
 							remove(item.id);
 						}}
-					>
-						×
-					</button>
+						className="notification-item__close"
+					/>
 				</div>
 			))}
 		</div>

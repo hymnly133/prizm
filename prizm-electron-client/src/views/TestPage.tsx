@@ -1,10 +1,12 @@
-import { Button, Input } from "@lobehub/ui";
+import { Button, Flexbox, Input } from "@lobehub/ui";
 import { useState } from "react";
 import { useLogsContext } from "../context/LogsContext";
-import { usePrizmContext } from "../context/PrizmContext";
+import { usePrizmContext, useSyncEventContext } from "../context/PrizmContext";
+import { setLastSyncEvent } from "../events/syncEventStore";
 
 export default function TestPage() {
-	const { manager, lastSyncEvent, setLastSyncEvent } = usePrizmContext();
+	const { manager } = usePrizmContext();
+	const { lastSyncEvent } = useSyncEventContext();
 	const { addLog } = useLogsContext();
 
 	const [localNotif, setLocalNotif] = useState({
@@ -127,27 +129,40 @@ export default function TestPage() {
 		addLog(`已触发刷新: ${eventType}`, "info");
 	}
 
+	const inputProps = {
+		variant: "filled" as const,
+		className: "test-input",
+	};
+
 	return (
 		<section className="page settings-page">
 			<div className="settings-section">
-				<h2>本地通知测试</h2>
-				<p className="form-hint">直接弹出应用内通知窗口，无需服务器</p>
-				<div className="test-row">
+				<div className="settings-section-header">
+					<h2>本地通知测试</h2>
+					<p className="form-hint">直接弹出应用内通知窗口，无需服务器</p>
+				</div>
+				<Flexbox
+					className="test-row"
+					horizontal
+					gap={12}
+					align="center"
+					wrap="wrap"
+				>
 					<Input
+						{...inputProps}
 						value={localNotif.title}
 						onChange={(e) =>
 							setLocalNotif((f) => ({ ...f, title: e.target.value }))
 						}
 						placeholder="标题"
-						className="test-input"
 					/>
 					<Input
+						{...inputProps}
 						value={localNotif.body}
 						onChange={(e) =>
 							setLocalNotif((f) => ({ ...f, body: e.target.value }))
 						}
 						placeholder="内容（可选）"
-						className="test-input"
 					/>
 					<Button
 						type="primary"
@@ -156,30 +171,38 @@ export default function TestPage() {
 					>
 						发送本地通知
 					</Button>
-				</div>
+				</Flexbox>
 			</div>
 
 			<div className="settings-section">
-				<h2>服务器通知测试</h2>
-				<p className="form-hint">
-					通过 POST /notify 发送，会经 WebSocket 推送给已连接的客户端
-				</p>
-				<div className="test-row">
+				<div className="settings-section-header">
+					<h2>服务器通知测试</h2>
+					<p className="form-hint">
+						通过 POST /notify 发送，会经 WebSocket 推送给已连接的客户端
+					</p>
+				</div>
+				<Flexbox
+					className="test-row"
+					horizontal
+					gap={12}
+					align="center"
+					wrap="wrap"
+				>
 					<Input
+						{...inputProps}
 						value={serverNotif.title}
 						onChange={(e) =>
 							setServerNotif((f) => ({ ...f, title: e.target.value }))
 						}
 						placeholder="标题"
-						className="test-input"
 					/>
 					<Input
+						{...inputProps}
 						value={serverNotif.body}
 						onChange={(e) =>
 							setServerNotif((f) => ({ ...f, body: e.target.value }))
 						}
 						placeholder="内容（可选）"
-						className="test-input"
 					/>
 					<Button
 						type="primary"
@@ -188,10 +211,10 @@ export default function TestPage() {
 					>
 						发送服务器通知
 					</Button>
-				</div>
+				</Flexbox>
 				{serverNotifResult && (
 					<p
-						className={`form-hint ${
+						className={`form-hint test-result-hint ${
 							serverNotifResult.ok ? "text-success" : "text-error"
 						}`}
 					>
@@ -201,17 +224,19 @@ export default function TestPage() {
 			</div>
 
 			<div className="settings-section">
-				<h2>模拟数据</h2>
-				<p className="form-hint">
-					通过 API 创建数据，触发 WebSocket 同步，各 Tab 会自动刷新
-				</p>
+				<div className="settings-section-header">
+					<h2>模拟数据</h2>
+					<p className="form-hint">
+						通过 API 创建数据，触发 WebSocket 同步，各 Tab 会自动刷新
+					</p>
+				</div>
 				<div className="test-actions">
 					<div className="test-action">
 						<Input
+							{...inputProps}
 							value={mockNote}
 							onChange={(e) => setMockNote(e.target.value)}
 							placeholder="便签内容"
-							className="test-input"
 						/>
 						<Button
 							onClick={mockCreateNote}
@@ -222,10 +247,10 @@ export default function TestPage() {
 					</div>
 					<div className="test-action">
 						<Input
+							{...inputProps}
 							value={mockTask}
 							onChange={(e) => setMockTask(e.target.value)}
 							placeholder="任务标题"
-							className="test-input"
 						/>
 						<Button
 							onClick={mockCreateTask}
@@ -236,10 +261,10 @@ export default function TestPage() {
 					</div>
 					<div className="test-action">
 						<Input
+							{...inputProps}
 							value={mockClipboard}
 							onChange={(e) => setMockClipboard(e.target.value)}
 							placeholder="剪贴板内容"
-							className="test-input"
 						/>
 						<Button
 							onClick={mockAddClipboard}
@@ -251,7 +276,7 @@ export default function TestPage() {
 				</div>
 				{mockResult && (
 					<p
-						className={`form-hint ${
+						className={`form-hint test-result-hint ${
 							mockResult.ok ? "text-success" : "text-error"
 						}`}
 					>
@@ -261,8 +286,12 @@ export default function TestPage() {
 			</div>
 
 			<div className="settings-section">
-				<h2>手动刷新</h2>
-				<p className="form-hint">强制触发各 Tab 列表刷新（用于测试数据同步）</p>
+				<div className="settings-section-header">
+					<h2>手动刷新</h2>
+					<p className="form-hint">
+						强制触发各 Tab 列表刷新（用于测试数据同步）
+					</p>
+				</div>
 				<div className="config-actions">
 					<Button onClick={() => triggerRefresh("note:created")}>
 						刷新便签

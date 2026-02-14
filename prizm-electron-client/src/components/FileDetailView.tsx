@@ -34,7 +34,7 @@ export default function FileDetailView({
 						? "任务"
 						: "文档"}
 				</Tag>
-				<Button size="small" type="primary" danger onClick={onDelete}>
+				<Button type="primary" danger onClick={onDelete}>
 					删除
 				</Button>
 			</div>
@@ -70,7 +70,7 @@ export default function FileDetailView({
 						)}
 						<div className="task-actions">
 							{(file.raw as Task).status !== "done" && (
-								<Button size="small" type="primary" onClick={onDone}>
+								<Button type="primary" onClick={onDone}>
 									标记完成
 								</Button>
 							)}

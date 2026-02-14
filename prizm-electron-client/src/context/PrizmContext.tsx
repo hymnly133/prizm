@@ -6,6 +6,8 @@ import {
 	useContext,
 	useCallback,
 	useState,
+	useMemo,
+	useEffect,
 	type ReactNode,
 } from "react";
 import {
@@ -13,14 +15,11 @@ import {
 	buildServerUrl,
 	ONLINE_SCOPE,
 } from "@prizm/client-core";
-import type {
-	PrizmConfig,
-	NotificationPayload,
-	StickyNote,
-	Task,
-	ClipboardItem,
-	PomodoroSession,
-} from "@prizm/client-core";
+import type { PrizmConfig, NotificationPayload } from "@prizm/client-core";
+import {
+	setLastSyncEvent,
+	subscribeSyncEventStore,
+} from "../events/syncEventStore";
 
 export type ConnectionStatus =
 	| "connected"
@@ -43,12 +42,15 @@ function getManagerRef(): { current: PrizmClientManager | null } {
 
 const managerRef = getManagerRef();
 
+/** 同步事件上下文 - 仅 lastSyncEvent，供 TestPage/useAgent 使用，与 PrizmContext 分离避免 WorkPage 重渲染 */
+export interface SyncEventContextValue {
+	lastSyncEvent: string | null;
+}
+
 export interface PrizmContextValue {
 	status: ConnectionStatus;
 	config: PrizmConfig | null;
 	manager: PrizmClientManager | null;
-	lastSyncEvent: string | null;
-	setLastSyncEvent: (v: string | null) => void;
 	loadConfig: () => Promise<PrizmConfig | null>;
 	saveConfig: (cfg: PrizmConfig) => Promise<boolean>;
 	testConnection: (serverUrl: string) => Promise<boolean>;
@@ -72,11 +74,11 @@ export interface PrizmContextValue {
 }
 
 const PrizmContext = createContext<PrizmContextValue | null>(null);
+const SyncEventContext = createContext<SyncEventContextValue | null>(null);
 
 export function PrizmProvider({ children }: { children: ReactNode }) {
 	const [status, setStatus] = useState<ConnectionStatus>("disconnected");
 	const [config, setConfigState] = useState<PrizmConfig | null>(null);
-	const [lastSyncEvent, setLastSyncEvent] = useState<string | null>(null);
 	const [, setTriggerUpdate] = useState({});
 
 	const manager = managerRef.current;
@@ -208,24 +210,57 @@ export function PrizmProvider({ children }: { children: ReactNode }) {
 		setConfigState(c);
 	}, []);
 
-	const value: PrizmContextValue = {
-		status,
-		config,
-		manager,
-		lastSyncEvent,
-		setLastSyncEvent,
-		loadConfig,
-		saveConfig,
-		testConnection,
-		registerClient,
-		initializePrizm,
-		disconnect,
-		setConfig,
-	};
+	const prizmValue = useMemo<PrizmContextValue>(
+		() => ({
+			status,
+			config,
+			manager,
+			loadConfig,
+			saveConfig,
+			testConnection,
+			registerClient,
+			initializePrizm,
+			disconnect,
+			setConfig,
+		}),
+		[
+			status,
+			config,
+			manager,
+			loadConfig,
+			saveConfig,
+			testConnection,
+			registerClient,
+			initializePrizm,
+			disconnect,
+			setConfig,
+		]
+	);
 
 	return (
-		<PrizmContext.Provider value={value}>{children}</PrizmContext.Provider>
+		<PrizmContext.Provider value={prizmValue}>{children}</PrizmContext.Provider>
 	);
+}
+
+/** 仅包裹 Agent/Test 页，lastSyncEvent 变更时只重渲染这些页，不影响 WorkPage */
+export function SyncEventProvider({ children }: { children: ReactNode }) {
+	const [lastSyncEvent, setState] = useState<string | null>(null);
+	useEffect(() => subscribeSyncEventStore(setState), []);
+	const value = useMemo(() => ({ lastSyncEvent }), [lastSyncEvent]);
+	return (
+		<SyncEventContext.Provider value={value}>
+			{children}
+		</SyncEventContext.Provider>
+	);
+}
+
+export function useSyncEventContext(): SyncEventContextValue {
+	const ctx = useContext(SyncEventContext);
+	if (!ctx)
+		throw new Error(
+			"useSyncEventContext must be used within SyncEventProvider"
+		);
+	return ctx;
 }
 
 export function usePrizmContext(): PrizmContextValue {

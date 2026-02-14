@@ -1,8 +1,14 @@
-import { Button, Layout, Tag } from "@lobehub/ui";
+import { Button, Tag } from "@lobehub/ui";
 import type { NotificationPayload } from "@prizm/client-core";
 import { useState, useEffect } from "react";
 import { LogsProvider, useLogsContext } from "./context/LogsContext";
-import { PrizmProvider, usePrizmContext } from "./context/PrizmContext";
+import {
+	PrizmProvider,
+	usePrizmContext,
+	SyncEventProvider,
+} from "./context/PrizmContext";
+import { setLastSyncEvent } from "./events/syncEventStore";
+import { AppHeader } from "./components/layout";
 import AgentPage from "./views/AgentPage";
 import SettingsPage from "./views/SettingsPage";
 import TestPage from "./views/TestPage";
@@ -19,8 +25,7 @@ const STATUS_LABELS: Record<
 };
 
 function AppContent() {
-	const { status, loadConfig, initializePrizm, disconnect, setLastSyncEvent } =
-		usePrizmContext();
+	const { status, loadConfig, initializePrizm, disconnect } = usePrizmContext();
 	const { addLog } = useLogsContext();
 	const [activePage, setActivePage] = useState<
 		"work" | "settings" | "test" | "agent"
@@ -57,7 +62,7 @@ function AppContent() {
 			unsubscribeClipboard?.();
 			disconnect();
 		};
-	}, [addLog, loadConfig, initializePrizm, disconnect, setLastSyncEvent]);
+	}, [addLog, loadConfig, initializePrizm, disconnect]);
 
 	const statusColor =
 		status === "connected"
@@ -68,56 +73,61 @@ function AppContent() {
 			? "gold"
 			: "red";
 
-	const header = (
-		<div className="app-header-inner">
-			<div className="app-brand">
-				<Tag color={statusColor} size="small">
-					{STATUS_LABELS[status]}
-				</Tag>
-				<h1>Prizm</h1>
-			</div>
-			<nav className="app-nav">
-				<Button
-					size="small"
-					type={activePage === "work" ? "primary" : "default"}
-					onClick={() => setActivePage("work")}
-				>
-					工作
-				</Button>
-				<Button
-					size="small"
-					type={activePage === "agent" ? "primary" : "default"}
-					onClick={() => setActivePage("agent")}
-				>
-					Agent
-				</Button>
-				<Button
-					size="small"
-					type={activePage === "settings" ? "primary" : "default"}
-					onClick={() => setActivePage("settings")}
-				>
-					设置
-				</Button>
-				<Button
-					size="small"
-					type={activePage === "test" ? "primary" : "default"}
-					onClick={() => setActivePage("test")}
-				>
-					测试
-				</Button>
-			</nav>
-		</div>
-	);
-
 	return (
-		<Layout header={header} headerHeight={56}>
+		<div className="app-layout-wrap">
+			<AppHeader
+				brand={
+					<>
+						<Tag color={statusColor} size="small">
+							{STATUS_LABELS[status]}
+						</Tag>
+						<h1>Prizm</h1>
+					</>
+				}
+				nav={
+					<>
+						<Button
+							type={activePage === "work" ? "primary" : "default"}
+							onClick={() => setActivePage("work")}
+						>
+							工作
+						</Button>
+						<Button
+							type={activePage === "agent" ? "primary" : "default"}
+							onClick={() => setActivePage("agent")}
+						>
+							Agent
+						</Button>
+						<Button
+							type={activePage === "settings" ? "primary" : "default"}
+							onClick={() => setActivePage("settings")}
+						>
+							设置
+						</Button>
+						<Button
+							type={activePage === "test" ? "primary" : "default"}
+							onClick={() => setActivePage("test")}
+						>
+							测试
+						</Button>
+					</>
+				}
+			/>
 			<div className="app-main">
 				{activePage === "work" && <WorkPage />}
-				{activePage === "agent" && <AgentPage />}
+				{activePage === "agent" && (
+					<SyncEventProvider>
+						<AgentPage />
+					</SyncEventProvider>
+				)}
 				{activePage === "settings" && <SettingsPage />}
-				{activePage === "test" && <TestPage />}
+				{activePage === "test" && (
+					<SyncEventProvider>
+						<TestPage />
+					</SyncEventProvider>
+				)}
 			</div>
-		</Layout>
+		</div>
 	);
 }
 

@@ -3,7 +3,10 @@
  */
 import { useState, useCallback, useEffect } from "react";
 import { usePrizmContext } from "../context/PrizmContext";
+import { subscribeSyncEvents } from "../events/syncEventEmitter";
 import type { StickyNote, Task, Document } from "@prizm/client-core";
+
+const SYNC_REFRESH_DEBOUNCE_MS = 400;
 
 export type FileKind = "note" | "task" | "document";
 
@@ -20,16 +23,24 @@ function noteToTitle(n: StickyNote): string {
 	return firstLine || "(无标题)";
 }
 
+function isFileSyncEvent(eventType: string): boolean {
+	return (
+		eventType.startsWith("note:") ||
+		eventType.startsWith("task:") ||
+		eventType.startsWith("document:")
+	);
+}
+
 export function useFileList(scope: string) {
-	const { manager, lastSyncEvent } = usePrizmContext();
+	const { manager } = usePrizmContext();
 	const [fileList, setFileList] = useState<FileItem[]>([]);
 	const [fileListLoading, setFileListLoading] = useState(false);
 
 	const refreshFileList = useCallback(
-		async (s: string) => {
+		async (s: string, options?: { silent?: boolean }) => {
 			const http = manager?.getHttpClient();
 			if (!http) return;
-			setFileListLoading(true);
+			if (!options?.silent) setFileListLoading(true);
 			try {
 				const [notes, tasks, documents] = await Promise.all([
 					http.listNotes({ scope: s }),
@@ -62,7 +73,17 @@ export function useFileList(scope: string) {
 				];
 
 				items.sort((a, b) => b.updatedAt - a.updatedAt);
-				setFileList(items);
+				setFileList((prev) => {
+					if (prev.length === 0) return items;
+					const prevMap = new Map(prev.map((p) => [`${p.kind}:${p.id}`, p]));
+					const merged = items.map((newItem) => {
+						const key = `${newItem.kind}:${newItem.id}`;
+						const old = prevMap.get(key);
+						if (old && old.updatedAt === newItem.updatedAt) return old;
+						return newItem;
+					});
+					return merged;
+				});
 			} catch {
 				setFileList([]);
 			} finally {
@@ -77,15 +98,21 @@ export function useFileList(scope: string) {
 	}, [manager, scope, refreshFileList]);
 
 	useEffect(() => {
-		if (
-			lastSyncEvent &&
-			(lastSyncEvent.startsWith("note:") ||
-				lastSyncEvent.startsWith("task:") ||
-				lastSyncEvent.startsWith("document:"))
-		) {
-			if (scope) void refreshFileList(scope);
-		}
-	}, [lastSyncEvent, scope, refreshFileList]);
+		if (!scope) return;
+		let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+		const unsubscribe = subscribeSyncEvents((eventType) => {
+			if (!isFileSyncEvent(eventType)) return;
+			if (debounceTimer) clearTimeout(debounceTimer);
+			debounceTimer = setTimeout(() => {
+				debounceTimer = null;
+				void refreshFileList(scope, { silent: true });
+			}, SYNC_REFRESH_DEBOUNCE_MS);
+		});
+		return () => {
+			unsubscribe();
+			if (debounceTimer) clearTimeout(debounceTimer);
+		};
+	}, [scope, refreshFileList]);
 
 	return { fileList, fileListLoading, refreshFileList };
 }

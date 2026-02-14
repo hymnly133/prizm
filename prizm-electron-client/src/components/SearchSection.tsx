@@ -278,7 +278,6 @@ export default function SearchSection({
 							focusPrev();
 						}
 					}}
-					size="small"
 					style={{ width: "100%" }}
 				/>
 			</div>
