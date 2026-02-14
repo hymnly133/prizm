@@ -1,19 +1,28 @@
 {
-	"name": "@prizm/client-core",
-	"version": "0.1.0",
-	"description": "Prizm client core SDK (types and WebSocket client) for desktop/web integrations",
-	"type": "module",
-	"main": "dist/index.js",
-	"module": "dist/index.js",
-	"types": "dist/index.d.ts",
-	"scripts": {
-		"build": "tsc -p tsconfig.json",
-		"typecheck": "tsc -p tsconfig.json --noEmit"
-	},
-	"dependencies": {
-		"@prizm/shared": "workspace:*"
-	},
-	"devDependencies": {
-		"typescript": "^5.9.3"
-	}
+  "name": "@prizm/client-core",
+  "version": "0.1.0",
+  "description": "Prizm client core SDK (types and WebSocket client) for desktop/web integrations",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@prizm/shared": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "devDependencies": {
+    "@lobehub/ui": "^4.37.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.9.3"
+  }
 }

@@ -136,6 +136,9 @@ export type WebSocketEventHandler<T extends WebSocketEventType> = (
 
 // ============ Agent 流式对话（仅 client-core） ============
 
+/** 工具调用状态：preparing=参数填写中 running=执行中 done=已完成 */
+export type ToolCallStatus = 'preparing' | 'running' | 'done'
+
 /** 工具调用记录（SSE tool_call 事件） */
 export interface ToolCallRecord {
   id: string
@@ -143,6 +146,18 @@ export interface ToolCallRecord {
   arguments: string
   result: string
   isError?: boolean
+  /** 调用状态，默认 'done' 向后兼容 */
+  status?: ToolCallStatus
+}
+
+/** Scope 交互记录（从工具调用解析） */
+export interface ScopeInteraction {
+  toolName: string
+  action: 'read' | 'create' | 'update' | 'delete' | 'list' | 'search'
+  itemKind?: 'note' | 'document' | 'todo' | 'clipboard'
+  itemId?: string
+  title?: string
+  timestamp?: number
 }
 
 /** 工具结果流式分块（大 result 时先下发） */

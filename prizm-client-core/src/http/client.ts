@@ -563,6 +563,30 @@ export class PrizmClient {
     return (await response.json()) as { summary: string; scope: string }
   }
 
+  /** 获取发送消息前注入的完整系统提示词（含工作区上下文、能力说明、上下文状态、工作原则） */
+  async getAgentSystemPrompt(
+    scope?: string,
+    sessionId?: string
+  ): Promise<{ systemPrompt: string; scope: string; sessionId: string | null }> {
+    const s = scope ?? this.defaultScope
+    const params: Record<string, string> = { scope: s }
+    if (sessionId?.trim()) params.sessionId = sessionId.trim()
+    const url = this.buildUrl('/agent/system-prompt', params)
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: this.buildHeaders()
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
+    }
+    return (await response.json()) as {
+      systemPrompt: string
+      scope: string
+      sessionId: string | null
+    }
+  }
+
   /** 可引用项列表（用于 @ 自动补全） */
   async getAgentScopeItems(scope?: string): Promise<{
     refTypes: { key: string; label: string; aliases: string[] }[]
@@ -613,7 +637,38 @@ export class PrizmClient {
     }
   }
 
-  /** 会话上下文追踪状态（提供状态、修改记录） */
+  /** 工具元数据（显示名、文档链接等），供 ToolCallCard 使用 */
+  async getAgentToolsMetadata(): Promise<{
+    tools: Array<{
+      name: string
+      displayName: string
+      description?: string
+      docUrl?: string
+      category?: string
+      scopeInteraction?: string
+    }>
+  }> {
+    const response = await fetch(this.buildUrl('/agent/tools/metadata'), {
+      method: 'GET',
+      headers: this.buildHeaders()
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
+    }
+    return (await response.json()) as {
+      tools: Array<{
+        name: string
+        displayName: string
+        description?: string
+        docUrl?: string
+        category?: string
+        scopeInteraction?: string
+      }>
+    }
+  }
+
+  /** 会话上下文追踪状态（提供状态、修改记录、scope 交互） */
   async getAgentSessionContext(
     sessionId: string,
     scope?: string
@@ -631,6 +686,14 @@ export class PrizmClient {
     }[]
     totalProvidedChars: number
     modifications: { itemId: string; type: string; action: string; timestamp: number }[]
+    scopeInteractions: {
+      toolName: string
+      action: string
+      itemKind?: string
+      itemId?: string
+      title?: string
+      timestamp?: number
+    }[]
   }> {
     const s = scope ?? this.defaultScope
     const url = this.buildUrl(`/agent/sessions/${encodeURIComponent(sessionId)}/context`, {
@@ -641,7 +704,7 @@ export class PrizmClient {
       const text = await response.text().catch(() => '')
       throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
     }
-    return (await response.json()) as {
+    const json = (await response.json()) as {
       sessionId: string
       scope: string
       provisions: {
@@ -655,7 +718,16 @@ export class PrizmClient {
       }[]
       totalProvidedChars: number
       modifications: { itemId: string; type: string; action: string; timestamp: number }[]
+      scopeInteractions?: {
+        toolName: string
+        action: string
+        itemKind?: string
+        itemId?: string
+        title?: string
+        timestamp?: number
+      }[]
     }
+    return { ...json, scopeInteractions: json.scopeInteractions ?? [] }
   }
 
   async listAgentSessions(scope?: string): Promise<AgentSession[]> {
