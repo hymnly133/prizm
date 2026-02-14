@@ -235,10 +235,28 @@ export class PrizmClient {
   }
 
   // ============ TODO 列表 ============
-  // list 为包装，item 为顶层元素。list 仅含 title；item 独立 CRUD。
+  // list 为包装，item 为顶层元素。支持多 list 每 scope。
 
-  async getTodoList(scope?: string, options?: { itemId?: string }): Promise<TodoList | null> {
+  /** 列出 scope 下所有 TodoList */
+  async getTodoLists(scope?: string): Promise<TodoList[]> {
+    const data = await this.request<{ todoLists: TodoList[] }>('/todo/lists', { scope })
+    return data.todoLists ?? []
+  }
+
+  /** 获取指定 list 或首个 list；itemId 时查找包含该 item 的 list */
+  async getTodoList(
+    scope?: string,
+    listId?: string,
+    options?: { itemId?: string }
+  ): Promise<TodoList | null> {
     const s = scope ?? this.defaultScope
+    if (listId) {
+      const data = await this.request<{ todoList: TodoList }>(
+        `/todo/lists/${encodeURIComponent(listId)}`,
+        { scope: s }
+      )
+      return data.todoList ?? null
+    }
     const query: Record<string, string | undefined> = { scope: s }
     if (options?.itemId) query.itemId = options.itemId
     const url = this.buildUrl('/todo', query)
@@ -255,7 +273,7 @@ export class PrizmClient {
   }
 
   async createTodoList(scope?: string, payload?: { title?: string }): Promise<TodoList> {
-    const data = await this.request<{ todoList: TodoList }>('/todo', {
+    const data = await this.request<{ todoList: TodoList }>('/todo/lists', {
       method: 'POST',
       scope,
       body: JSON.stringify(payload ?? {})
@@ -263,27 +281,41 @@ export class PrizmClient {
     return data.todoList
   }
 
-  async updateTodoListTitle(scope: string | undefined, title: string): Promise<TodoList> {
-    const data = await this.request<{ todoList: TodoList }>('/todo', {
-      method: 'PATCH',
-      scope,
-      body: JSON.stringify({ title })
-    })
+  async updateTodoListTitle(
+    scope: string | undefined,
+    listId: string,
+    title: string
+  ): Promise<TodoList> {
+    const data = await this.request<{ todoList: TodoList }>(
+      `/todo/lists/${encodeURIComponent(listId)}`,
+      {
+        method: 'PATCH',
+        scope,
+        body: JSON.stringify({ title })
+      }
+    )
     return data.todoList
   }
 
-  async replaceTodoItems(scope: string | undefined, items: TodoItem[]): Promise<TodoList> {
-    const data = await this.request<{ todoList: TodoList }>('/todo/items', {
-      method: 'PUT',
-      scope,
-      body: JSON.stringify({ items })
-    })
+  async replaceTodoItems(
+    scope: string | undefined,
+    listId: string,
+    items: TodoItem[]
+  ): Promise<TodoList> {
+    const data = await this.request<{ todoList: TodoList }>(
+      `/todo/lists/${encodeURIComponent(listId)}/items`,
+      {
+        method: 'PUT',
+        scope,
+        body: JSON.stringify({ items })
+      }
+    )
     return data.todoList
   }
 
   async createTodoItem(
     scope: string | undefined,
-    payload: CreateTodoItemPayload
+    payload: CreateTodoItemPayload & { listId?: string; listTitle?: string }
   ): Promise<TodoList> {
     const data = await this.request<{ todoList: TodoList }>('/todo/items', {
       method: 'POST',
@@ -309,19 +341,19 @@ export class PrizmClient {
     return data.todoList
   }
 
-  async deleteTodoItem(itemId: string, scope?: string): Promise<TodoList> {
-    const data = await this.request<{ todoList: TodoList }>(
+  async deleteTodoItem(itemId: string, scope?: string): Promise<TodoList | null> {
+    const data = await this.request<{ todoList: TodoList | null }>(
       `/todo/items/${encodeURIComponent(itemId)}`,
       {
         method: 'DELETE',
         scope
       }
     )
-    return data.todoList
+    return data.todoList ?? null
   }
 
-  async deleteTodoList(scope?: string): Promise<void> {
-    await this.request<void>('/todo', {
+  async deleteTodoList(scope: string | undefined, listId: string): Promise<void> {
+    await this.request<void>(`/todo/lists/${encodeURIComponent(listId)}`, {
       method: 'DELETE',
       scope
     })
@@ -645,7 +677,7 @@ export class PrizmClient {
       description?: string
       docUrl?: string
       category?: string
-      scopeInteraction?: string
+      scopeActivity?: string
     }>
   }> {
     const response = await fetch(this.buildUrl('/agent/tools/metadata'), {
@@ -663,12 +695,12 @@ export class PrizmClient {
         description?: string
         docUrl?: string
         category?: string
-        scopeInteraction?: string
+        scopeActivity?: string
       }>
     }
   }
 
-  /** 会话上下文追踪状态（提供状态、修改记录、scope 交互） */
+  /** 会话上下文追踪状态（提供状态、统一活动时间线） */
   async getAgentSessionContext(
     sessionId: string,
     scope?: string
@@ -685,14 +717,14 @@ export class PrizmClient {
       stale: boolean
     }[]
     totalProvidedChars: number
-    modifications: { itemId: string; type: string; action: string; timestamp: number }[]
-    scopeInteractions: {
+    /** 统一活动时间线 */
+    activities: {
       toolName: string
       action: string
       itemKind?: string
       itemId?: string
       title?: string
-      timestamp?: number
+      timestamp: number
     }[]
   }> {
     const s = scope ?? this.defaultScope
@@ -717,17 +749,19 @@ export class PrizmClient {
         stale: boolean
       }[]
       totalProvidedChars: number
-      modifications: { itemId: string; type: string; action: string; timestamp: number }[]
-      scopeInteractions?: {
+      activities?: {
         toolName: string
         action: string
         itemKind?: string
         itemId?: string
         title?: string
-        timestamp?: number
+        timestamp: number
       }[]
     }
-    return { ...json, scopeInteractions: json.scopeInteractions ?? [] }
+    return {
+      ...json,
+      activities: json.activities ?? []
+    }
   }
 
   async listAgentSessions(scope?: string): Promise<AgentSession[]> {

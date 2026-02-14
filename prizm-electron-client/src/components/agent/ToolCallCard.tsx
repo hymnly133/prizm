@@ -52,8 +52,8 @@ function PrizmToolCard({ tc }: { tc: ToolCallRecord }) {
     return (
       <Block variant="filled" shadow>
         <Flexbox gap={8} horizontal align="center">
-          <Icon icon={FileText} size={{ fontSize: 18 }} />
-          <Flexbox flex={1} vertical gap={4}>
+          <Icon icon={FileText} size={18} />
+          <Flexbox flex={1} gap={4}>
             <span style={{ fontWeight: 600 }}>{displayName}</span>
             <Skeleton paragraph={false} title={{ width: 120 }} active />
           </Flexbox>
@@ -66,8 +66,8 @@ function PrizmToolCard({ tc }: { tc: ToolCallRecord }) {
     return (
       <Block variant="filled" shadow>
         <Flexbox gap={8} horizontal align="center">
-          <Icon icon={FileText} size={{ fontSize: 18 }} />
-          <Flexbox flex={1} vertical gap={4}>
+          <Icon icon={FileText} size={18} />
+          <Flexbox flex={1} gap={4}>
             <span style={{ fontWeight: 600 }}>{displayName}</span>
             {argsSummary && (
               <span style={{ fontSize: 12, color: 'var(--color-text-description)' }}>
@@ -91,7 +91,7 @@ function PrizmToolCard({ tc }: { tc: ToolCallRecord }) {
             icon: FileText,
             desc: [argsSummary, tc.isError && '失败'].filter(Boolean).join(' · ') || undefined,
             children: (
-              <Flexbox vertical gap={12} style={{ marginTop: 8 }}>
+              <Flexbox gap={12} style={{ marginTop: 8 }}>
                 {tc.arguments && (
                   <div>
                     <div
@@ -171,8 +171,8 @@ function TavilyToolCard({ tc }: { tc: ToolCallRecord }) {
     return (
       <Block variant="filled" shadow>
         <Flexbox gap={8} horizontal align="center">
-          <Icon icon={Search} size={{ fontSize: 18 }} />
-          <Flexbox flex={1} vertical gap={4}>
+          <Icon icon={Search} size={18} />
+          <Flexbox flex={1} gap={4}>
             <span style={{ fontWeight: 600 }}>{displayName}</span>
             <Skeleton paragraph={false} title={{ width: 120 }} active />
           </Flexbox>
@@ -185,8 +185,8 @@ function TavilyToolCard({ tc }: { tc: ToolCallRecord }) {
     return (
       <Block variant="filled" shadow>
         <Flexbox gap={8} horizontal align="center">
-          <Icon icon={Search} size={{ fontSize: 18 }} />
-          <Flexbox flex={1} vertical gap={4}>
+          <Icon icon={Search} size={18} />
+          <Flexbox flex={1} gap={4}>
             <span style={{ fontWeight: 600 }}>{displayName}</span>
             {query && (
               <span style={{ fontSize: 12, color: 'var(--color-text-description)' }}>{query}</span>
@@ -217,7 +217,7 @@ function TavilyToolCard({ tc }: { tc: ToolCallRecord }) {
                 .filter(Boolean)
                 .join(' · ') || undefined,
             children: (
-              <Flexbox vertical gap={12} style={{ marginTop: 8 }}>
+              <Flexbox gap={12} style={{ marginTop: 8 }}>
                 {query && <div style={{ fontSize: 12 }}>搜索词: {query}</div>}
                 <pre
                   style={{
@@ -260,8 +260,8 @@ function DefaultToolCard({ tc }: { tc: ToolCallRecord }) {
     return (
       <Block variant="filled" shadow>
         <Flexbox gap={8} horizontal align="center">
-          <Icon icon={Wrench} size={{ fontSize: 18 }} />
-          <Flexbox flex={1} vertical gap={4}>
+          <Icon icon={Wrench} size={18} />
+          <Flexbox flex={1} gap={4}>
             <span style={{ fontWeight: 600 }}>{displayName}</span>
             <Skeleton paragraph={false} title={{ width: 100 }} active />
           </Flexbox>
@@ -274,8 +274,8 @@ function DefaultToolCard({ tc }: { tc: ToolCallRecord }) {
     return (
       <Block variant="filled" shadow>
         <Flexbox gap={8} horizontal align="center">
-          <Icon icon={Wrench} size={{ fontSize: 18 }} />
-          <Flexbox flex={1} vertical gap={4}>
+          <Icon icon={Wrench} size={18} />
+          <Flexbox flex={1} gap={4}>
             <span style={{ fontWeight: 600 }}>{displayName}</span>
             <Skeleton paragraph={false} title={{ width: 80 }} active />
           </Flexbox>
@@ -294,7 +294,7 @@ function DefaultToolCard({ tc }: { tc: ToolCallRecord }) {
             icon: Wrench,
             desc: tc.isError ? '失败' : undefined,
             children: (
-              <Flexbox vertical gap={12} style={{ marginTop: 8 }}>
+              <Flexbox gap={12} style={{ marginTop: 8 }}>
                 <pre
                   style={{
                     margin: 0,

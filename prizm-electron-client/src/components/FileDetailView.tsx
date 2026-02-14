@@ -89,12 +89,15 @@ export default function FileDetailView({
   }, [editing, file])
 
   function addTodoItem() {
+    const now = Date.now()
     setTodoItems((prev) => [
       ...prev,
       {
         id: '',
         title: '',
-        status: 'todo' as TodoItemStatus
+        status: 'todo' as TodoItemStatus,
+        createdAt: now,
+        updatedAt: now
       }
     ])
   }

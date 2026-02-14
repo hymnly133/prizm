@@ -15,14 +15,14 @@ import type {
 } from '@prizm/client-core'
 import { getToolDisplayName } from '@prizm/client-core'
 
-/** Scope 交互记录（与 API 返回一致） */
-interface ScopeInteractionItem {
+/** 统一活动记录（与 API 返回一致） */
+interface ActivityItem {
   toolName: string
   action: string
   itemKind?: string
   itemId?: string
   title?: string
-  timestamp?: number
+  timestamp: number
 }
 import {
   FileText,
@@ -71,8 +71,7 @@ export function AgentRightSidebar({
   const [contextModalOpen, setContextModalOpen] = useState(false)
   const [sessionContext, setSessionContext] = useState<{
     provisions: { itemId: string; kind: string; mode: string; charCount: number; stale: boolean }[]
-    modifications: { itemId: string; type: string; action: string; timestamp: number }[]
-    scopeInteractions: ScopeInteractionItem[]
+    activities: ActivityItem[]
   } | null>(null)
   const [sessionContextLoading, setSessionContextLoading] = useState(false)
   const [systemPrompt, setSystemPrompt] = useState<string>('')
@@ -137,9 +136,7 @@ export function AgentRightSidebar({
       const ctx = await http.getAgentSessionContext(currentSession.id, currentScope)
       setSessionContext({
         provisions: ctx.provisions ?? [],
-        modifications: ctx.modifications ?? [],
-        scopeInteractions:
-          (ctx as { scopeInteractions?: ScopeInteractionItem[] }).scopeInteractions ?? []
+        activities: ctx.activities ?? []
       })
     } catch {
       setSessionContext(null)
@@ -417,11 +414,11 @@ export function AgentRightSidebar({
           )}
         </section>
 
-        {/* 修改记录：本会话内 Agent 对工作区的修改 */}
-        <section className="agent-right-section">
+        {/* 活动时间线：合并修改记录与 Scope 交互 */}
+        <section className="agent-right-section agent-scope-interactions-section">
           <h3 className="agent-right-section-title">
             <History size={14} className="agent-right-section-icon" />
-            修改记录
+            活动时间线
           </h3>
           {!currentSession ? (
             <p className="agent-right-empty">选择会话后显示</p>
@@ -430,62 +427,35 @@ export function AgentRightSidebar({
               <Loader2 size={14} className="spinning" />
               <span>加载中</span>
             </div>
-          ) : !sessionContext?.modifications?.length ? (
-            <p className="agent-right-empty">本会话暂无修改记录</p>
-          ) : (
-            <ul className="agent-tool-calls-list">
-              {sessionContext.modifications.map((m, i) => (
-                <li key={`${m.itemId}-${m.timestamp}-${i}`} className="agent-tool-call-item">
-                  <span className="agent-tool-call-name">
-                    {m.action} {m.type}:{m.itemId.slice(0, 8)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        {/* Scope 交互：从工具调用解析的读/写/删等 */}
-        <section className="agent-right-section agent-scope-interactions-section">
-          <h3 className="agent-right-section-title">Scope 交互</h3>
-          {!currentSession ? (
-            <p className="agent-right-empty">选择会话后显示</p>
-          ) : sessionContextLoading ? (
-            <div className="agent-right-loading">
-              <Loader2 size={14} className="spinning" />
-              <span>加载中</span>
-            </div>
-          ) : !sessionContext?.scopeInteractions?.length ? (
-            <p className="agent-right-empty">本会话暂无 scope 交互</p>
+          ) : !sessionContext?.activities?.length ? (
+            <p className="agent-right-empty">本会话暂无活动记录</p>
           ) : (
             <div className="agent-scope-interactions">
               {(['read', 'list', 'search', 'create', 'update', 'delete'] as const).map((action) => {
-                const items = (sessionContext.scopeInteractions ?? []).filter(
-                  (s) => s.action === action
-                )
+                const items = (sessionContext.activities ?? []).filter((s) => s.action === action)
                 if (items.length === 0) return null
                 const Icon =
                   action === 'read' || action === 'list'
                     ? BookOpen
                     : action === 'search'
-                    ? Search
-                    : action === 'create'
-                    ? PlusCircle
-                    : action === 'update'
-                    ? Pencil
-                    : Trash2
+                      ? Search
+                      : action === 'create'
+                        ? PlusCircle
+                        : action === 'update'
+                          ? Pencil
+                          : Trash2
                 const label =
                   action === 'read'
                     ? '已读取'
                     : action === 'list'
-                    ? '已列出'
-                    : action === 'search'
-                    ? '已搜索'
-                    : action === 'create'
-                    ? '已创建'
-                    : action === 'update'
-                    ? '已更新'
-                    : '已删除'
+                      ? '已列出'
+                      : action === 'search'
+                        ? '已搜索'
+                        : action === 'create'
+                          ? '已创建'
+                          : action === 'update'
+                            ? '已更新'
+                            : '已删除'
                 return (
                   <div key={action} className="agent-scope-interaction-group">
                     <span className="agent-scope-interaction-label">

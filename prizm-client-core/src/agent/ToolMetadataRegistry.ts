@@ -11,7 +11,7 @@ export interface ToolMetadata {
   description?: string
   docUrl?: string
   category?: string
-  scopeInteraction?: string
+  scopeActivity?: string
 }
 
 const FALLBACK_METADATA: Record<string, ToolMetadata> = {
