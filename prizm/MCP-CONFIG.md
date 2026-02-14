@@ -192,8 +192,8 @@ Scope 用于隔离不同工作场景的数据（便签、任务、剪贴板等�
 | prizm_get_note | GET | /notes/:id |
 | prizm_update_note | PATCH | /notes/:id |
 | prizm_delete_note | DELETE | /notes/:id |
-| prizm_list_todo_list | GET | /tasks?scope=xxx |
-| prizm_update_todo_list | PATCH | /tasks（body 含 updateItem/updateItems/items） |
+| prizm_list_todo_list | GET | /todo?scope=xxx |
+| prizm_update_todo_list | PATCH/PUT/POST | /todo、/todo/items（body 含 updateItem/updateItems/items） |
 | prizm_list_documents | GET | /documents?scope=xxx |
 | prizm_create_document | POST | /documents |
 | prizm_get_document | GET | /documents/:id |

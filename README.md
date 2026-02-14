@@ -89,7 +89,7 @@ Electron 客户端连接服务端，接收 WebSocket 推送（通知、待办更
 | `GET /health` | 健康检查（无需鉴权） |
 | `POST /auth/register` | 注册客户端，获取 API Key |
 | `GET/POST/PATCH/DELETE /notes` | 便签 CRUD |
-| `GET/PATCH /tasks` | 待办列表 |
+| `GET/POST/PATCH/DELETE /todo`、`/todo/items` | 待办列表 |
 | `POST /notify` | 发送通知 |
 | `GET/POST /documents` | 文档 CRUD |
 | `GET/POST /clipboard` | 剪贴板 |
