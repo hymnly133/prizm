@@ -68,7 +68,7 @@
             便签
           </router-link>
           <router-link
-            to="/tasks"
+            to="/todo"
             class="rounded bg-zinc-600 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-500"
           >
             TODO

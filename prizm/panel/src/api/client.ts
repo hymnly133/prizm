@@ -11,7 +11,6 @@ import type {
   UpdateNotePayload,
   TodoList,
   TodoItem,
-  UpdateTodoListPayload,
   PomodoroSession,
   ClipboardItem,
   ClipboardItemType,
@@ -30,7 +29,6 @@ export type {
   UpdateNotePayload,
   TodoList,
   TodoItem,
-  UpdateTodoListPayload,
   PomodoroSession,
   ClipboardItem,
   ClipboardItemType,
@@ -163,21 +161,48 @@ export const sendNotify = (title: string, body?: string) =>
 
 // TODO 列表（支持 scope）
 export const getTodoList = (scope: string, options?: { itemId?: string }) => {
-  let url = `/tasks?scope=${encodeURIComponent(scope)}`
+  let url = `/todo?scope=${encodeURIComponent(scope)}`
   if (options?.itemId) url += `&itemId=${encodeURIComponent(options.itemId)}`
   return request<{ todoList: TodoList | null }>(url)
 }
-export const updateTodoList = (payload: UpdateTodoListPayload, scope?: string) =>
-  request<{ todoList: TodoList }>('/tasks', {
+export const createTodoList = (scope: string, payload?: { title?: string }) =>
+  request<{ todoList: TodoList }>('/todo', {
+    method: 'POST',
+    body: JSON.stringify(payload ?? {}),
+    scope
+  })
+export const updateTodoListTitle = (scope: string, title: string) =>
+  request<{ todoList: TodoList }>('/todo', {
     method: 'PATCH',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ title }),
+    scope
+  })
+export const replaceTodoItems = (scope: string, items: TodoItem[]) =>
+  request<{ todoList: TodoList }>('/todo/items', {
+    method: 'PUT',
+    body: JSON.stringify({ items }),
     scope
   })
 export const updateTodoItem = (
   itemId: string,
   payload: { status?: string; title?: string; description?: string },
   scope?: string
-) => updateTodoList({ updateItem: { id: itemId, ...payload } }, scope)
+) =>
+  request<{ todoList: TodoList }>(`/todo/items/${encodeURIComponent(itemId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+    scope
+  })
+export const deleteTodoItem = (itemId: string, scope: string) =>
+  request<{ todoList: TodoList }>(`/todo/items/${encodeURIComponent(itemId)}`, {
+    method: 'DELETE',
+    scope
+  })
+export const deleteTodoList = (scope: string) =>
+  request<void>('/todo', {
+    method: 'DELETE',
+    scope
+  })
 
 // Pomodoro（支持 scope）
 export const getPomodoroSessions = (

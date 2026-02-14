@@ -9,6 +9,13 @@
         >
           {{ todoList ? '编辑列表' : '新建列表' }}
         </button>
+        <button
+          v-if="todoList"
+          class="rounded bg-red-600/80 px-4 py-2 text-sm font-medium text-white hover:bg-red-600"
+          @click="confirmDeleteList"
+        >
+          删除列表
+        </button>
       </div>
     </div>
 
@@ -42,6 +49,13 @@
               <option value="doing">进行中</option>
               <option value="done">已完成</option>
             </select>
+            <button
+              class="rounded px-2 py-0.5 text-xs text-zinc-400 hover:bg-red-600/30 hover:text-red-400"
+              title="删除"
+              @click="deleteItem(item.id)"
+            >
+              ×
+            </button>
           </li>
         </ul>
         <p v-if="todoList.items.length === 0" class="text-zinc-500">暂无 TODO 项</p>
@@ -103,8 +117,12 @@
 import { ref, onMounted, watch } from 'vue'
 import {
   getTodoList,
-  updateTodoList,
+  createTodoList,
+  updateTodoListTitle,
+  replaceTodoItems,
   updateTodoItem,
+  deleteTodoItem,
+  deleteTodoList,
   type TodoList,
   type TodoItem
 } from '../api/client'
@@ -145,6 +163,26 @@ async function setItemStatus(itemId: string, status: string) {
   if (!['todo', 'doing', 'done'].includes(status)) return
   try {
     await updateTodoItem(itemId, { status }, currentScope.value)
+    await load()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+async function deleteItem(itemId: string) {
+  if (!confirm('确定删除该任务？')) return
+  try {
+    await deleteTodoItem(itemId, currentScope.value)
+    await load()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+async function confirmDeleteList() {
+  if (!confirm('确定删除整个 TODO 列表？此操作不可恢复。')) return
+  try {
+    await deleteTodoList(currentScope.value)
     await load()
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
@@ -198,7 +236,12 @@ async function saveList() {
   })
   const scope = currentScope.value
   try {
-    await updateTodoList({ title, items }, scope)
+    if (!todoList.value) {
+      await createTodoList(scope, { title })
+    } else {
+      await updateTodoListTitle(scope, title)
+    }
+    await replaceTodoItems(scope, items)
     closeModal()
     await load()
   } catch (e) {
