@@ -14,8 +14,10 @@ import type {
   AgentMessage,
   StreamChatOptions,
   StreamChatChunk,
-  SearchResult
+  SearchResult,
+  TokenUsageRecord
 } from '../types'
+import { MemoryItem } from '@prizm/shared'
 
 export interface PrizmClientOptions {
   /**
@@ -534,6 +536,8 @@ export class PrizmClient {
     types?: Array<'note' | 'document' | 'clipboard' | 'todoList'>
     limit?: number
     mode?: 'any' | 'all'
+    /** 模糊程度 0~1，默认 0.2；0 关闭模糊 */
+    fuzzy?: number
   }): Promise<SearchResult[]> {
     const scope = options.scope ?? this.defaultScope
     const url = this.buildUrl('/search', { scope })
@@ -545,7 +549,8 @@ export class PrizmClient {
         scope,
         types: options.types,
         limit: options.limit ?? 50,
-        mode: options.mode ?? 'any'
+        mode: options.mode ?? 'any',
+        fuzzy: options.fuzzy
       })
     })
     if (!response.ok) {
@@ -934,7 +939,72 @@ export class PrizmClient {
     return (await response.json()) as { stopped: boolean }
   }
 
-  // ============ MCP 客户端配置 ============
+  // ============ 记忆模块 ============
+
+  /** 获取所有记忆 */
+  async getMemories(scope?: string): Promise<{ enabled: boolean; memories: MemoryItem[] }> {
+    return this.request<{ enabled: boolean; memories: MemoryItem[] }>(`/agent/memories`, {
+      method: 'GET',
+      scope
+    })
+  }
+
+  /** 搜索记忆（可选 method/use_rerank/limit/memory_types，与内置工具、MCP 对齐） */
+  async searchMemories(
+    query: string,
+    scope?: string,
+    options?: {
+      method?: 'keyword' | 'vector' | 'hybrid' | 'rrf' | 'agentic'
+      use_rerank?: boolean
+      limit?: number
+      memory_types?: string[]
+    }
+  ): Promise<{ enabled: boolean; memories: MemoryItem[] }> {
+    const body: {
+      query: string
+      method?: string
+      use_rerank?: boolean
+      limit?: number
+      memory_types?: string[]
+    } = {
+      query
+    }
+    if (options?.method) body.method = options.method
+    if (options?.use_rerank != null) body.use_rerank = options.use_rerank
+    if (options?.limit != null) body.limit = options.limit
+    if (options?.memory_types?.length) body.memory_types = options.memory_types
+    return this.request<{ enabled: boolean; memories: MemoryItem[] }>(`/agent/memories/search`, {
+      method: 'POST',
+      scope,
+      body: JSON.stringify(body)
+    })
+  }
+
+  /** 删除记忆 */
+  async deleteMemory(id: string, scope?: string): Promise<void> {
+    await this.request<void>(`/agent/memories/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      scope
+    })
+  }
+
+  /** 获取某轮对话的记忆增长（按 assistant 消息 ID，用于历史消息懒加载） */
+  async getRoundMemories(
+    messageId: string,
+    scope?: string
+  ): Promise<import('@prizm/shared').RoundMemoryGrowth | null> {
+    return this.request<import('@prizm/shared').RoundMemoryGrowth | null>(
+      `/agent/memories/round/${encodeURIComponent(messageId)}`,
+      { method: 'GET', scope }
+    )
+  }
+
+  /** 当前用户的 token 使用记录（按功能 scope） */
+  async getTokenUsage(): Promise<{ records: TokenUsageRecord[] }> {
+    return this.request<{ records: TokenUsageRecord[] }>('/agent/token-usage', { method: 'GET' })
+  }
+
+  // ============ MCP 工具配置 ============
 
   /** MCP 服务器配置（供 Agent 调用的外部 MCP 服务器） */
   async listMcpServers(): Promise<McpServerConfig[]> {
@@ -1042,6 +1112,13 @@ export interface AgentLLMSettings {
   documentSummary?: DocumentSummarySettings
   conversationSummary?: ConversationSummarySettings
   defaultModel?: string
+  memory?: MemorySettings
+}
+
+/** 记忆模块设置 */
+export interface MemorySettings {
+  enabled?: boolean
+  model?: string
 }
 
 /** Agent 工具统一设置 */

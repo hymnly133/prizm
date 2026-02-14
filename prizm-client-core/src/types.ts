@@ -49,6 +49,12 @@ export {
   DATA_SYNC_EVENTS
 } from '@prizm/shared'
 export type { EventType } from '@prizm/shared'
+export type {
+  MemoryItem,
+  RoundMemoryGrowth,
+  TokenUsageRecord,
+  TokenUsageScope
+} from '@prizm/shared'
 
 // ============ 客户端配置（仅 client-core） ============
 
@@ -174,6 +180,10 @@ export interface StreamChatChunk {
   usage?: MessageUsage
   /** 是否因用户停止而提前结束 */
   stopped?: boolean
+  /** 服务端生成的 assistant 消息 ID，用于替换客户端 tmpId */
+  messageId?: string
+  /** 本轮对话的记忆增长（done 时带回） */
+  memoryGrowth?: import('@prizm/shared').RoundMemoryGrowth | null
 }
 
 export interface StreamChatOptions {
