@@ -9,7 +9,7 @@ target/
 **/target/
 
 # IDE
-.vscode/
+# .vscode/ 不忽略，以共享通用 TS 开发设置
 .idea/
 *.swp
 *.swo
@@ -34,3 +34,4 @@ coverage/
 
 # Rust/Tauri
 src-tauri/target/
+lobehub
