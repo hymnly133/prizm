@@ -47,11 +47,11 @@ export interface TodoItem {
   title: string
   description?: string
   status: TodoItemStatus
-  createdAt?: number
-  updatedAt?: number
+  createdAt: number
+  updatedAt: number
 }
 
-/** TODO 列表：一个 scope 一个列表，含标题和若干 TODO 项 */
+/** TODO 列表：一个 scope 可拥有若干个列表，各含标题和若干 TODO 项 */
 export interface TodoList {
   id: string
   title: string
@@ -228,11 +228,27 @@ export interface ItemProvision {
   stale: boolean
 }
 
-/** Agent 修改记录 */
-export interface ModificationRecord {
-  itemId: string
-  type: ScopeRefKind
-  action: 'create' | 'update' | 'delete'
+// ============ 统一 Scope 活动记录 ============
+
+/** 活动动作类型（覆盖读/写/删/列/搜全部操作） */
+export type ScopeActivityAction = 'read' | 'create' | 'update' | 'delete' | 'list' | 'search'
+
+/** 活动目标项类型 */
+export type ScopeActivityItemKind = 'note' | 'todo' | 'document' | 'clipboard'
+
+/** 统一 Scope 活动记录 */
+export interface ScopeActivityRecord {
+  /** 产出此活动的工具名 */
+  toolName: string
+  /** 动作类型 */
+  action: ScopeActivityAction
+  /** 目标项类型 */
+  itemKind?: ScopeActivityItemKind
+  /** 目标项 ID */
+  itemId?: string
+  /** 显示标题（如便签内容前缀、文档标题） */
+  title?: string
+  /** 活动时间戳 (ms) */
   timestamp: number
 }
 
@@ -242,7 +258,8 @@ export interface SessionContextState {
   scope: string
   provisions: ItemProvision[]
   totalProvidedChars: number
-  modifications: ModificationRecord[]
+  /** 统一活动时间线 */
+  activities: ScopeActivityRecord[]
 }
 
 // ============ 通知 ============

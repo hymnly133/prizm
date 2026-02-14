@@ -92,28 +92,53 @@ export interface INotificationAdapter {
 }
 
 // ============ TODO 列表适配器 ============
-// 设计：item 为顶层元素，list 为包装。list 仅含元数据（title），items 独立 CRUD。
+// 设计：list 为包装层（含 title），item 为顶层元素，独立 CRUD。支持多 list 每 scope。
+
+export interface CreateTodoItemPayloadExt extends CreateTodoItemPayload {
+  /** 指定目标 list id，追加到该 list */
+  listId?: string
+  /** 新建 list 并添加 item（listTitle 作为新 list 的 title），优先于 listId */
+  listTitle?: string
+}
 
 export interface ITodoListAdapter {
-  getTodoList(scope: string, options?: { itemId?: string }): Promise<TodoList | null>
+  /** 列出 scope 下所有 TodoList */
+  getTodoLists(scope: string): Promise<TodoList[]>
 
-  /** 确保 list 存在，不存在则创建。幂等。 */
+  /** 按 listId 获取 list；或传 itemId 查找包含该 item 的 list */
+  getTodoList(
+    scope: string,
+    listId?: string,
+    options?: { itemId?: string }
+  ): Promise<TodoList | null>
+
+  /** 新建 list，返回新建的 list */
   createTodoList(scope: string, payload?: { title?: string }): Promise<TodoList>
 
-  /** 更新 list 标题（包装层元数据） */
-  updateTodoListTitle(scope: string, title: string): Promise<TodoList>
+  /** 更新 list 标题 */
+  updateTodoListTitle(scope: string, listId: string, title: string): Promise<TodoList>
 
-  createTodoItem(scope: string, payload: CreateTodoItemPayload): Promise<TodoList>
+  /** 删除指定 list */
+  deleteTodoList(scope: string, listId: string): Promise<void>
 
-  updateTodoItem(scope: string, itemId: string, payload: UpdateTodoItemPayload): Promise<TodoList>
+  /**
+   * 创建 item。必须指定 listId（追加到已有 list）或 listTitle（新建 list 并添加），二者必填其一。
+   */
+  createTodoItem(
+    scope: string,
+    payload: CreateTodoItemPayloadExt
+  ): Promise<{ list: TodoList; item: TodoItem }>
 
-  deleteTodoItem(scope: string, itemId: string): Promise<TodoList>
+  updateTodoItem(
+    scope: string,
+    itemId: string,
+    payload: UpdateTodoItemPayload
+  ): Promise<TodoList | null>
 
-  /** 全量替换 items（与 updateTodoItem 正交，互斥使用） */
-  replaceTodoItems(scope: string, items: TodoItem[]): Promise<TodoList>
+  deleteTodoItem(scope: string, itemId: string): Promise<TodoList | null>
 
-  /** 删除 list 实体（空或非空均可） */
-  deleteTodoList(scope: string): Promise<void>
+  /** 全量替换指定 list 的 items */
+  replaceTodoItems(scope: string, listId: string, items: TodoItem[]): Promise<TodoList>
 }
 
 // ============ 番茄钟适配器 ============

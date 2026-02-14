@@ -116,6 +116,7 @@ export interface TodoListUpdatePayload extends EventPayloadBase {
 /** TODO 列表删除载荷 */
 export interface TodoListDeletedPayload extends EventPayloadBase {
   scope: string
+  listId?: string
   deleted: true
 }
 

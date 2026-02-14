@@ -30,8 +30,10 @@ import type {
   ScopeTopLevelItem,
   ScopeStats,
   ItemProvision,
-  ModificationRecord,
-  SessionContextState
+  SessionContextState,
+  ScopeActivityRecord,
+  ScopeActivityAction,
+  ScopeActivityItemKind
 } from '@prizm/shared'
 
 // 重导出，供 routes、adapters 等使用
@@ -62,8 +64,10 @@ export type {
   ScopeTopLevelItem,
   ScopeStats,
   ItemProvision,
-  ModificationRecord,
-  SessionContextState
+  SessionContextState,
+  ScopeActivityRecord,
+  ScopeActivityAction,
+  ScopeActivityItemKind
 }
 
 // ============ Scope 与 Auth 类型（Server 专用） ============
