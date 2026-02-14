@@ -23,6 +23,7 @@ import { createTodoListRoutes } from './routes/todoList'
 import { createPomodoroRoutes } from './routes/pomodoro'
 import { createClipboardRoutes } from './routes/clipboard'
 import { createDocumentsRoutes } from './routes/documents'
+import { createSearchRoutes } from './routes/search'
 import { createAgentRoutes } from './routes/agent'
 import { createMcpConfigRoutes } from './routes/mcpConfig'
 import { mountMcpRoutes } from './mcp'
@@ -117,6 +118,7 @@ export function createPrizmServer(
   createPomodoroRoutes(router, adapters.pomodoro)
   createClipboardRoutes(router, adapters.clipboard)
   createDocumentsRoutes(router, adapters.documents)
+  createSearchRoutes(router, adapters)
   createAgentRoutes(router, adapters.agent)
   createMcpConfigRoutes(router)
   app.use('/', router)
