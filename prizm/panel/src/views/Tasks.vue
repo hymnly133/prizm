@@ -7,10 +7,10 @@
           class="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
           @click="showEdit = true"
         >
-          {{ todoList ? '编辑列表' : '新建列表' }}
+          {{ selectedList ? '编辑列表' : '新建列表' }}
         </button>
         <button
-          v-if="todoList"
+          v-if="selectedList"
           class="rounded bg-red-600/80 px-4 py-2 text-sm font-medium text-white hover:bg-red-600"
           @click="confirmDeleteList"
         >
@@ -19,18 +19,35 @@
       </div>
     </div>
 
+    <!-- 列表切换 -->
+    <div v-if="todoLists.length > 1" class="flex flex-wrap gap-2">
+      <button
+        v-for="list in todoLists"
+        :key="list.id"
+        :class="[
+          'rounded px-3 py-1.5 text-sm',
+          selectedList?.id === list.id
+            ? 'bg-emerald-600/80 text-white'
+            : 'bg-zinc-700 text-zinc-300 hover:bg-zinc-600'
+        ]"
+        @click="selectList(list.id)"
+      >
+        {{ list.title || '待办' }} ({{ list.items?.length ?? 0 }})
+      </button>
+    </div>
+
     <div v-if="loading" class="text-zinc-400">加载中...</div>
     <div v-else-if="error" class="rounded bg-red-950/30 p-4 text-red-400">
       {{ error }}
     </div>
 
     <div v-else class="space-y-4">
-      <div v-if="todoList" class="rounded-lg border border-zinc-700 bg-zinc-800/50 p-4">
-        <h2 class="mb-4 font-medium text-zinc-100">{{ todoList.title }}</h2>
-        <p class="mb-2 text-xs text-zinc-500">更新于 {{ formatDate(todoList.updatedAt) }}</p>
+      <div v-if="selectedList" class="rounded-lg border border-zinc-700 bg-zinc-800/50 p-4">
+        <h2 class="mb-4 font-medium text-zinc-100">{{ selectedList.title }}</h2>
+        <p class="mb-2 text-xs text-zinc-500">更新于 {{ formatDate(selectedList.updatedAt) }}</p>
         <ul class="space-y-2">
           <li
-            v-for="item in todoList.items"
+            v-for="item in selectedList.items"
             :key="item.id"
             class="flex items-start gap-2 rounded border border-zinc-600/50 bg-zinc-900/50 px-3 py-2"
           >
@@ -58,7 +75,7 @@
             </button>
           </li>
         </ul>
-        <p v-if="todoList.items.length === 0" class="text-zinc-500">暂无 TODO 项</p>
+        <p v-if="selectedList.items.length === 0" class="text-zinc-500">暂无 TODO 项</p>
       </div>
       <p v-else class="text-zinc-500">暂无 TODO 列表，点击「新建列表」创建</p>
     </div>
@@ -73,7 +90,7 @@
         class="max-h-[80vh] w-full max-w-md overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-800 p-6"
       >
         <h2 class="mb-4 text-lg font-semibold">
-          {{ todoList ? '编辑 TODO 列表' : '新建 TODO 列表' }}
+          {{ selectedList ? '编辑 TODO 列表' : '新建 TODO 列表' }}
         </h2>
         <div class="space-y-4">
           <div>
@@ -114,9 +131,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import {
-  getTodoList,
+  getTodoLists,
   createTodoList,
   updateTodoListTitle,
   replaceTodoItems,
@@ -129,12 +146,22 @@ import {
 import { useScope } from '../composables/useScope'
 
 const { currentScope } = useScope()
-const todoList = ref<TodoList | null>(null)
+const todoLists = ref<TodoList[]>([])
+const selectedListId = ref<string | null>(null)
 const loading = ref(true)
 const error = ref('')
 const showEdit = ref(false)
 const formTitle = ref('')
 const formItemsText = ref('')
+
+const selectedList = computed(() => {
+  if (!selectedListId.value) return null
+  return todoLists.value.find((l) => l.id === selectedListId.value) ?? null
+})
+
+function selectList(id: string) {
+  selectedListId.value = id
+}
 
 function parseItemsText(text: string): Array<Partial<TodoItem> & { title: string }> {
   return text
@@ -160,7 +187,7 @@ function itemsToText(items: TodoItem[]): string {
 }
 
 async function setItemStatus(itemId: string, status: string) {
-  if (!['todo', 'doing', 'done'].includes(status)) return
+  if (!['todo', 'doing', 'done'].includes(status) || !selectedListId.value) return
   try {
     await updateTodoItem(itemId, { status }, currentScope.value)
     await load()
@@ -180,9 +207,10 @@ async function deleteItem(itemId: string) {
 }
 
 async function confirmDeleteList() {
-  if (!confirm('确定删除整个 TODO 列表？此操作不可恢复。')) return
+  if (!selectedListId.value || !confirm('确定删除整个 TODO 列表？此操作不可恢复。')) return
   try {
-    await deleteTodoList(currentScope.value)
+    await deleteTodoList(currentScope.value, selectedListId.value)
+    selectedListId.value = null
     await load()
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
@@ -193,8 +221,16 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const res = await getTodoList(currentScope.value)
-    todoList.value = res.todoList ?? null
+    const lists = await getTodoLists(currentScope.value)
+    todoLists.value = lists
+    if (
+      lists.length > 0 &&
+      (!selectedListId.value || !lists.some((l) => l.id === selectedListId.value))
+    ) {
+      selectedListId.value = lists[0].id
+    } else if (lists.length === 0) {
+      selectedListId.value = null
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -207,8 +243,8 @@ function formatDate(ts: number) {
 }
 
 function openEdit() {
-  formTitle.value = todoList.value?.title ?? '待办'
-  formItemsText.value = todoList.value ? itemsToText(todoList.value.items) : ''
+  formTitle.value = selectedList.value?.title ?? '待办'
+  formItemsText.value = selectedList.value ? itemsToText(selectedList.value.items) : ''
 }
 
 function closeModal() {
@@ -224,24 +260,27 @@ async function saveList() {
     return
   }
   const parsed = parseItemsText(formItemsText.value)
-  const existingByTitle = new Map(todoList.value?.items.map((it) => [it.title, it]) ?? [])
+  const existing = selectedList.value
+  const existingByTitle = new Map(existing?.items.map((it) => [it.title, it]) ?? [])
   const items: TodoItem[] = parsed.map((it) => {
-    const existing = existingByTitle.get(it.title)
+    const ex = existingByTitle.get(it.title)
     return {
-      id: existing?.id ?? '',
+      id: ex?.id ?? '',
       title: it.title,
       description: it.description,
-      status: (existing?.status ?? 'todo') as 'todo' | 'doing' | 'done'
+      status: (ex?.status ?? 'todo') as 'todo' | 'doing' | 'done'
     }
   })
   const scope = currentScope.value
   try {
-    if (!todoList.value) {
-      await createTodoList(scope, { title })
+    if (!existing) {
+      const created = await createTodoList(scope, { title })
+      await replaceTodoItems(scope, created.id, items)
+      selectedListId.value = created.id
     } else {
-      await updateTodoListTitle(scope, title)
+      await updateTodoListTitle(scope, existing.id, title)
+      await replaceTodoItems(scope, existing.id, items)
     }
-    await replaceTodoItems(scope, items)
     closeModal()
     await load()
   } catch (e) {

@@ -159,30 +159,41 @@ export const sendNotify = (title: string, body?: string) =>
     body: JSON.stringify({ title, body })
   })
 
-// TODO 列表（支持 scope）
-export const getTodoList = (scope: string, options?: { itemId?: string }) => {
+// TODO 列表（支持 scope，多 list）
+export const getTodoLists = (scope: string) =>
+  request<{ todoLists: TodoList[] }>('/todo/lists', { scope }).then((r) => r.todoLists ?? [])
+
+export const getTodoList = (scope: string, listId?: string, options?: { itemId?: string }) => {
+  if (listId) {
+    return request<{ todoList: TodoList }>(`/todo/lists/${encodeURIComponent(listId)}`, {
+      scope
+    }).then((r) => r.todoList ?? null)
+  }
   let url = `/todo?scope=${encodeURIComponent(scope)}`
   if (options?.itemId) url += `&itemId=${encodeURIComponent(options.itemId)}`
-  return request<{ todoList: TodoList | null }>(url)
+  return request<{ todoList: TodoList | null }>(url).then((r) => r.todoList)
 }
+
 export const createTodoList = (scope: string, payload?: { title?: string }) =>
-  request<{ todoList: TodoList }>('/todo', {
+  request<{ todoList: TodoList }>('/todo/lists', {
     method: 'POST',
     body: JSON.stringify(payload ?? {}),
     scope
-  })
-export const updateTodoListTitle = (scope: string, title: string) =>
-  request<{ todoList: TodoList }>('/todo', {
+  }).then((r) => r.todoList)
+
+export const updateTodoListTitle = (scope: string, listId: string, title: string) =>
+  request<{ todoList: TodoList }>(`/todo/lists/${encodeURIComponent(listId)}`, {
     method: 'PATCH',
     body: JSON.stringify({ title }),
     scope
-  })
-export const replaceTodoItems = (scope: string, items: TodoItem[]) =>
-  request<{ todoList: TodoList }>('/todo/items', {
+  }).then((r) => r.todoList)
+
+export const replaceTodoItems = (scope: string, listId: string, items: TodoItem[]) =>
+  request<{ todoList: TodoList }>(`/todo/lists/${encodeURIComponent(listId)}/items`, {
     method: 'PUT',
     body: JSON.stringify({ items }),
     scope
-  })
+  }).then((r) => r.todoList)
 export const updateTodoItem = (
   itemId: string,
   payload: { status?: string; title?: string; description?: string },
@@ -198,8 +209,8 @@ export const deleteTodoItem = (itemId: string, scope: string) =>
     method: 'DELETE',
     scope
   })
-export const deleteTodoList = (scope: string) =>
-  request<void>('/todo', {
+export const deleteTodoList = (scope: string, listId: string) =>
+  request<void>(`/todo/lists/${encodeURIComponent(listId)}`, {
     method: 'DELETE',
     scope
   })

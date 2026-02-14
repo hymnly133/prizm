@@ -103,10 +103,11 @@ import {
   getHealth,
   getNotes,
   getClients,
-  getTodoList,
+  getTodoLists,
   getDocuments,
   listAgentSessions
 } from '../api/client'
+import type { TodoList } from '@prizm/shared'
 import { useScope } from '../composables/useScope'
 
 const loading = ref(true)
@@ -130,13 +131,13 @@ async function load() {
       getHealth(),
       getNotes(scope),
       getClients(),
-      getTodoList(scope).catch(() => ({ todoList: null })),
+      getTodoLists(scope).catch(() => []),
       getDocuments(scope).catch(() => ({ documents: [] })),
       listAgentSessions(scope).catch(() => ({ sessions: [] }))
     ])
     health.value = healthRes
     notesCount.value = notesRes.notes?.length ?? 0
-    todoItemsCount.value = todoRes.todoList?.items?.length ?? 0
+    todoItemsCount.value = (todoRes as TodoList[]).reduce((n, l) => n + (l.items?.length ?? 0), 0)
     documentsCount.value = docsRes.documents?.length ?? 0
     agentSessionsCount.value = sessionsRes.sessions?.length ?? 0
     scopesCount.value = scopes.value?.length ?? 0
