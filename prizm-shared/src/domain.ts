@@ -99,6 +99,13 @@ export interface UpdateDocumentPayload {
 
 // ============ Agent ============
 
+/** Token 使用量（供后端流式完成后回传） */
+export interface MessageUsage {
+	totalTokens?: number;
+	totalInputTokens?: number;
+	totalOutputTokens?: number;
+}
+
 export interface AgentMessage {
 	id: string;
 	role: "user" | "assistant" | "system";
@@ -106,6 +113,10 @@ export interface AgentMessage {
 	createdAt: number;
 	model?: string;
 	toolCalls?: unknown[];
+	/** token 使用量，后端 LLM 返回时填充 */
+	usage?: MessageUsage;
+	/** 思考链 / reasoning，支持 thinking 的模型流式输出 */
+	reasoning?: string;
 }
 
 export interface AgentSession {

@@ -1,16 +1,23 @@
 {
-	"name": "@prizm/shared",
-	"version": "0.1.0",
-	"description": "Prizm shared types, constants and data structures for server, panel and clients",
-	"type": "module",
-	"main": "dist/index.js",
-	"module": "dist/index.js",
-	"types": "dist/index.d.ts",
-	"scripts": {
-		"build": "tsc -p tsconfig.json",
-		"typecheck": "tsc -p tsconfig.json --noEmit"
-	},
-	"devDependencies": {
-		"typescript": "^5.9.3"
-	}
+  "name": "@prizm/shared",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Prizm shared types, constants and data structures for server, panel and clients",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
+  }
 }

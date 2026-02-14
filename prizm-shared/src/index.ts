@@ -3,7 +3,7 @@
  * 供 server、panel、client-core 复用
  */
 
-export * from "./domain";
-export * from "./auth";
-export * from "./events";
-export * from "./constants";
+export * from './domain'
+export * from './auth'
+export * from './events'
+export * from './constants'
