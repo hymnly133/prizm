@@ -183,6 +183,16 @@ export const PROFILE_PART3_PROMPT =
   '```\n' +
   '</output_format>\n'
 
+/** 单次调用完成 episode / event_log / foresight / profile 抽取，使用分段文本格式（非 JSON） */
+export const UNIFIED_MEMORY_EXTRACTION_PROMPT =
+  'Extract memory from the conversation. Current time: {{TIME}}\n\nConversation:\n{{INPUT_TEXT}}\n\n' +
+  'Output in the following format. Use only these section headers and key prefixes. Skip a section if nothing to extract.\n\n' +
+  '## EPISODE\nCONTENT: <full summary in one line>\nSUMMARY: <one sentence>\nKEYWORDS: k1, k2\n\n' +
+  '## EVENT_LOG\nTIME: YYYY-MM-DD\nFACT: <atomic fact one>\nFACT: <atomic fact two>\n\n' +
+  '## FORESIGHT\nCONTENT: <item description>\nSTART: YYYY-MM-DD\nEND: YYYY-MM-DD\n---\nCONTENT: <next item>\n\n' +
+  '## PROFILE\nUSER_ID: <id>\nUSER_NAME: <name>\nHARD_SKILLS: a, b\nSOFT_SKILLS: c\n\n' +
+  'Rules: One line per CONTENT/SUMMARY/FACT. At most 10 FACT lines, 5 FORESIGHT items (separate with ---). Profile only if user traits appear.'
+
 /** Agentic 检索用：将用户 query 扩展为 2～3 条子查询（不同表述或子问题） */
 export const QUERY_EXPANSION_PROMPT =
   'Given the following user question, generate 2 to 3 alternative phrasings or sub-questions that could help retrieve relevant information from a memory store. ' +

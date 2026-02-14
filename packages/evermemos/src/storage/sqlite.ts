@@ -38,7 +38,9 @@ export class SQLiteAdapter implements RelationalStoreAdapter {
   }
 
   /** 读取搜索索引（MiniSearch + byId），供 Prizm 统一搜索使用 */
-  async getSearchIndex(scope: string): Promise<{ miniSearchBlob: string; byIdBlob: string } | null> {
+  async getSearchIndex(
+    scope: string
+  ): Promise<{ miniSearchBlob: string; byIdBlob: string } | null> {
     const row = await this.get(SQLiteAdapter.SEARCH_INDEX_TABLE, scope)
     if (!row || typeof row.mini_search_blob !== 'string' || typeof row.by_id_blob !== 'string') {
       return null

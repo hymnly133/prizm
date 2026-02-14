@@ -66,6 +66,8 @@ export interface MemoryRoutingContext {
   scope: string
   /** 当前会话 ID；document 场景可不传 */
   sessionId?: string
+  /** 关联的 assistant 消息 ID，用于按轮次查询记忆增长 */
+  roundMessageId?: string
 }
 
 export const MemCellSchema = BaseMemorySchema.extend({
@@ -161,6 +163,20 @@ export const EventLogSchema = BaseMemorySchema.extend({
 })
 
 export type EventLog = z.infer<typeof EventLogSchema>
+
+/** 单次 LLM 调用返回的四类记忆原始结构，供 UnifiedExtractor 使用 */
+export interface UnifiedExtractionResult {
+  episode?: { content?: string; summary?: string; keywords?: string[] } | null
+  event_log?: { time?: string; atomic_fact?: string[] } | null
+  foresight?: Array<{
+    content?: string
+    evidence?: string
+    start_time?: string
+    end_time?: string
+    duration_days?: number
+  }> | null
+  profile?: { user_profiles?: Array<Record<string, unknown>> } | null
+}
 
 // Retrieval Types
 
