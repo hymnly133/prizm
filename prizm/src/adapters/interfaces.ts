@@ -173,6 +173,15 @@ export interface IDocumentsAdapter {
 
 // ============ Agent  LLM 提供商 ============
 
+/** 单次工具调用记录（用于 SSE 下发客户端展示） */
+export interface ToolCallRecord {
+  id: string
+  name: string
+  arguments: string
+  result: string
+  isError?: boolean
+}
+
 /** 流式 LLM 响应块（usage 在 done 时由 LLM 提供商回传，与 lobehub FinishData.usage 一致） */
 export interface LLMStreamChunk {
   text?: string
@@ -180,6 +189,12 @@ export interface LLMStreamChunk {
   done?: boolean
   /** token 使用量，流结束时返回 */
   usage?: MessageUsage
+  /** 工具调用，流结束时若有则一并返回（LobeChat 模式） */
+  toolCalls?: Array<{ id: string; name: string; arguments: string }>
+  /** 单次工具执行完成，用于 SSE 下发客户端展示 */
+  toolCall?: ToolCallRecord
+  /** 工具结果分块（大 result 时先流式下发，再发完整 toolCall） */
+  toolResultChunk?: { id: string; chunk: string }
 }
 
 /** OpenAI 风格 tool 定义 */
@@ -188,36 +203,27 @@ export interface LLMTool {
   function: { name: string; description?: string; parameters?: object }
 }
 
-/** 非流式 LLM 响应（用于 tool calling 轮次） */
-export interface LLMChatResult {
-  content: string
-  reasoning?: string
-  toolCalls?: Array<{ id: string; name: string; arguments: string }>
-  usage?: MessageUsage
-}
+/** 消息类型：支持 assistant（含 tool_calls）和 tool 角色，用于多轮工具调用 */
+export type LLMChatMessage =
+  | { role: string; content: string }
+  | {
+      role: 'assistant'
+      content: string | null
+      tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>
+    }
+  | { role: 'tool'; tool_call_id: string; content: string }
 
-/** LLM 提供商接口（可插拔 OpenAI、Ollama 等） */
+/** LLM 提供商接口（可插拔 OpenAI、Ollama 等），LobeChat 模式：单一 chat 接口支持 tools */
 export interface ILLMProvider {
   chat(
-    messages: Array<{ role: string; content: string }>,
-    options?: { model?: string; temperature?: number; signal?: AbortSignal }
+    messages: LLMChatMessage[],
+    options?: {
+      model?: string
+      temperature?: number
+      signal?: AbortSignal
+      tools?: LLMTool[]
+    }
   ): AsyncIterable<LLMStreamChunk>
-
-  /**
-   * 非流式对话，支持 tools。用于 MCP tool calling 轮次。
-   */
-  chatNonStreaming?(
-    messages: Array<
-      | { role: string; content: string }
-      | {
-          role: 'assistant'
-          content: string | null
-          tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>
-        }
-      | { role: 'tool'; tool_call_id: string; content: string }
-    >,
-    options?: { model?: string; temperature?: number; signal?: AbortSignal; tools?: LLMTool[] }
-  ): Promise<LLMChatResult>
 }
 
 // ============ Agent 适配器 ============
@@ -239,15 +245,25 @@ export interface IAgentAdapter {
 
   getMessages?(scope: string, sessionId: string): Promise<AgentMessage[]>
 
-  /** 更新会话（标题等） */
-  updateSession?(scope: string, id: string, update: { title?: string }): Promise<AgentSession>
+  /** 更新会话（标题、对话摘要等） */
+  updateSession?(
+    scope: string,
+    id: string,
+    update: { title?: string; llmSummary?: string }
+  ): Promise<AgentSession>
 
   /** 流式对话，返回 SSE 流 */
   chat?(
     scope: string,
     sessionId: string,
     messages: Array<{ role: string; content: string }>,
-    options?: { model?: string; signal?: AbortSignal; mcpEnabled?: boolean }
+    options?: {
+      model?: string
+      signal?: AbortSignal
+      mcpEnabled?: boolean
+      /** 是否注入 scope 上下文（便签、待办、文档等），默认 true */
+      includeScopeContext?: boolean
+    }
   ): AsyncIterable<LLMStreamChunk>
 }
 

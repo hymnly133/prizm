@@ -14,7 +14,8 @@ import type {
   IAgentAdapter,
   PrizmAdapters,
   LLMStreamChunk,
-  LLMTool
+  LLMTool,
+  LLMChatMessage
 } from './interfaces'
 import type {
   StickyNote,
@@ -37,9 +38,20 @@ import type {
 import { scopeStore } from '../core/ScopeStore'
 import { genUniqueId } from '../id'
 import { getLLMProvider } from '../llm'
+import { scheduleDocumentSummary } from '../llm/documentSummaryService'
 import { getMcpClientManager } from '../mcp-client/McpClientManager'
+import { getTavilySettings } from '../settings/agentToolsStore'
+import { searchTavily } from '../llm/tavilySearch'
+import { buildSystemPrompt } from '../llm/systemPrompt'
+import { processMessageAtRefs } from '../llm/atReferenceParser'
+import { registerBuiltinAtReferences } from '../llm/atReferenceRegistry'
+import { getBuiltinTools, executeBuiltinTool, BUILTIN_TOOL_NAMES } from '../llm/builtinTools'
 
 const log = createLogger('Adapter')
+
+/** 工具 result 超过此长度时先流式下发 tool_result_chunk，再发完整 tool_call */
+const TOOL_RESULT_STREAM_THRESHOLD = 500
+const TOOL_RESULT_CHUNK_SIZE = 200
 
 // ============ 默认 Sticky Notes 适配器 ============
 
@@ -417,6 +429,7 @@ export class DefaultDocumentsAdapter implements IDocumentsAdapter {
     data.documents.push(doc)
     scopeStore.saveScope(scope)
     log.info('Document created:', doc.id, 'scope:', scope)
+    scheduleDocumentSummary(scope, doc.id)
     return doc
   }
 
@@ -434,11 +447,13 @@ export class DefaultDocumentsAdapter implements IDocumentsAdapter {
       ...existing,
       ...(payload.title !== undefined && { title: payload.title }),
       ...(payload.content !== undefined && { content: payload.content }),
+      ...(payload.llmSummary !== undefined && { llmSummary: payload.llmSummary }),
       updatedAt: Date.now()
     }
     data.documents[idx] = updated
     scopeStore.saveScope(scope)
     log.info('Document updated:', id, 'scope:', scope)
+    scheduleDocumentSummary(scope, id)
     return updated
   }
 
@@ -496,7 +511,7 @@ export class DefaultAgentAdapter implements IAgentAdapter {
   async updateSession(
     scope: string,
     id: string,
-    update: { title?: string }
+    update: { title?: string; llmSummary?: string }
   ): Promise<AgentSession> {
     const data = scopeStore.getScopeData(scope)
     const session = data.agentSessions.find((s) => s.id === id)
@@ -504,6 +519,9 @@ export class DefaultAgentAdapter implements IAgentAdapter {
 
     if (update.title !== undefined) {
       session.title = update.title
+    }
+    if (update.llmSummary !== undefined) {
+      session.llmSummary = update.llmSummary
     }
     session.updatedAt = Date.now()
     scopeStore.saveScope(scope)
@@ -542,110 +560,207 @@ export class DefaultAgentAdapter implements IAgentAdapter {
     scope: string,
     sessionId: string,
     messages: Array<{ role: string; content: string }>,
-    options?: { model?: string; signal?: AbortSignal; mcpEnabled?: boolean }
+    options?: {
+      model?: string
+      signal?: AbortSignal
+      mcpEnabled?: boolean
+      includeScopeContext?: boolean
+    }
   ): AsyncIterable<LLMStreamChunk> {
     const provider = getLLMProvider()
     const mcpEnabled = options?.mcpEnabled !== false
+    const includeScopeContext = options?.includeScopeContext !== false
 
-    if (mcpEnabled && provider.chatNonStreaming) {
-      const manager = getMcpClientManager()
-      await manager.connectAll()
-      const mcpTools = await manager.listAllTools()
-      const llmTools: LLMTool[] = mcpTools.map((t) => ({
-        type: 'function',
-        function: {
-          name: t.fullName,
-          description: t.description,
-          parameters: t.inputSchema
+    registerBuiltinAtReferences()
+    const systemContent = buildSystemPrompt({
+      scope,
+      sessionId,
+      includeScopeContext
+    })
+    const baseMessages: Array<{ role: string; content: string }> = [
+      { role: 'system', content: systemContent }
+    ]
+
+    if (messages.length > 0) {
+      const last = messages[messages.length - 1]
+      const rest = messages.slice(0, -1)
+      if (last.role === 'user' && typeof last.content === 'string') {
+        const { injectedPrefix, message } = await processMessageAtRefs(
+          scope,
+          sessionId,
+          last.content
+        )
+        if (injectedPrefix) {
+          baseMessages.push({ role: 'system', content: injectedPrefix })
         }
-      }))
-
-      if (llmTools.length > 0) {
-        const MAX_ROUNDS = 5
-        let currentMessages: Array<
-          | { role: string; content: string }
-          | {
-              role: 'assistant'
-              content: string | null
-              tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>
-            }
-          | { role: 'tool'; tool_call_id: string; content: string }
-        > = [...messages]
-        let lastUsage: LLMStreamChunk['usage']
-        let fullReasoning = ''
-
-        for (let round = 0; round < MAX_ROUNDS; round++) {
-          if (options?.signal?.aborted) break
-
-          const result = await provider.chatNonStreaming(currentMessages, {
-            model: options?.model,
-            temperature: 0.7,
-            signal: options?.signal,
-            tools: llmTools
-          })
-
-          if (result.usage) {
-            lastUsage = {
-              totalTokens: result.usage.totalTokens,
-              totalInputTokens: result.usage.totalInputTokens,
-              totalOutputTokens: result.usage.totalOutputTokens
-            }
-          }
-          if (result.reasoning) fullReasoning += result.reasoning
-
-          if (!result.toolCalls?.length) {
-            if (result.reasoning) yield { reasoning: result.reasoning }
-            if (result.content) yield { text: result.content }
-            yield { done: true, usage: lastUsage }
-            return
-          }
-
-          currentMessages = [
-            ...currentMessages,
-            {
-              role: 'assistant' as const,
-              content: result.content || null,
-              tool_calls: result.toolCalls.map((tc) => ({
-                id: tc.id,
-                function: { name: tc.name, arguments: tc.arguments }
-              }))
-            }
-          ]
-
-          for (const tc of result.toolCalls) {
-            try {
-              const args = JSON.parse(tc.arguments || '{}') as Record<string, unknown>
-              const toolResult = await manager.callTool(tc.name, args)
-              const text =
-                toolResult.content
-                  ?.map((c) => ('text' in c ? c.text : JSON.stringify(c)))
-                  .join('\n') ?? ''
-              currentMessages.push({
-                role: 'tool',
-                tool_call_id: tc.id,
-                content: toolResult.isError ? `Error: ${text}` : text
-              })
-            } catch (err) {
-              currentMessages.push({
-                role: 'tool',
-                tool_call_id: tc.id,
-                content: `Error: ${err instanceof Error ? err.message : String(err)}`
-              })
-            }
-          }
-        }
-
-        yield { text: '（MCP 工具调用达到最大轮次，请简化请求）' }
-        yield { done: true, usage: lastUsage }
-        return
+        baseMessages.push(...rest, { role: 'user', content: message })
+      } else {
+        baseMessages.push(...messages)
       }
     }
 
-    yield* provider.chat(messages, {
-      model: options?.model,
-      temperature: 0.7,
-      signal: options?.signal
-    })
+    let llmTools: LLMTool[] = getBuiltinTools()
+    if (mcpEnabled) {
+      const manager = getMcpClientManager()
+      await manager.connectAll()
+      const mcpTools = await manager.listAllTools()
+
+      const tavilySettings = getTavilySettings()
+      const tavilyEnabled =
+        tavilySettings &&
+        tavilySettings.enabled !== false &&
+        (tavilySettings.apiKey?.trim() || process.env.TAVILY_API_KEY?.trim())
+
+      const builtinTavilyTool: LLMTool = {
+        type: 'function',
+        function: {
+          name: 'tavily_web_search',
+          description:
+            '在互联网上搜索实时信息。当用户询问最新新闻、事实、数据或需要联网查询时使用。',
+          parameters: {
+            type: 'object',
+            properties: { query: { type: 'string', description: '搜索关键词或问题' } },
+            required: ['query']
+          }
+        }
+      }
+
+      llmTools = [
+        ...llmTools,
+        ...(tavilyEnabled ? [builtinTavilyTool] : []),
+        ...mcpTools.map((t) => ({
+          type: 'function' as const,
+          function: {
+            name: t.fullName,
+            description: t.description,
+            parameters: t.inputSchema
+          }
+        }))
+      ]
+    }
+
+    let currentMessages: LLMChatMessage[] = [...baseMessages]
+    let lastUsage: LLMStreamChunk['usage'] | undefined
+
+    while (true) {
+      if (options?.signal?.aborted) break
+
+      const stream = provider.chat(currentMessages, {
+        model: options?.model,
+        temperature: 0.7,
+        signal: options?.signal,
+        tools: llmTools.length > 0 ? llmTools : undefined
+      })
+
+      let toolCalls: Array<{ id: string; name: string; arguments: string }> | undefined
+      let assistantContent = ''
+
+      for await (const chunk of stream) {
+        if (chunk.text) {
+          assistantContent += chunk.text
+          yield { text: chunk.text }
+        }
+        if (chunk.reasoning) yield { reasoning: chunk.reasoning }
+        if (chunk.usage) lastUsage = chunk.usage
+        if (chunk.done && chunk.toolCalls?.length) {
+          toolCalls = chunk.toolCalls
+        }
+        if (chunk.done && !chunk.toolCalls?.length) {
+          yield { done: true, usage: chunk.usage ?? lastUsage }
+          return
+        }
+      }
+
+      if (!toolCalls?.length) {
+        yield { done: true, usage: lastUsage }
+        return
+      }
+
+      currentMessages = [
+        ...currentMessages,
+        {
+          role: 'assistant' as const,
+          content: assistantContent || null,
+          tool_calls: toolCalls.map((tc) => ({
+            id: tc.id,
+            function: { name: tc.name, arguments: tc.arguments }
+          }))
+        }
+      ]
+
+      const manager = getMcpClientManager()
+      for (const tc of toolCalls) {
+        try {
+          const args = JSON.parse(tc.arguments || '{}') as Record<string, unknown>
+          let text: string
+          let isError = false
+          if (BUILTIN_TOOL_NAMES.has(tc.name)) {
+            const result = await executeBuiltinTool(scope, tc.name, args, sessionId)
+            text = result.text
+            isError = result.isError ?? false
+          } else if (tc.name === 'tavily_web_search') {
+            const query = typeof args.query === 'string' ? args.query : ''
+            const results = await searchTavily(query)
+            text =
+              results.length > 0
+                ? results
+                    .map((r, i) => `[${i + 1}] ${r.title}\nURL: ${r.url}\n${r.content}`)
+                    .join('\n\n---\n\n')
+                : '未找到相关结果'
+          } else {
+            const toolResult = await manager.callTool(tc.name, args)
+            text =
+              toolResult.content
+                ?.map((c) => ('text' in c ? c.text : JSON.stringify(c)))
+                .join('\n') ?? ''
+            if (toolResult.isError) {
+              isError = true
+              text = `Error: ${text}`
+            }
+          }
+          if (text.length >= TOOL_RESULT_STREAM_THRESHOLD) {
+            for (let i = 0; i < text.length; i += TOOL_RESULT_CHUNK_SIZE) {
+              yield {
+                toolResultChunk: {
+                  id: tc.id,
+                  chunk: text.slice(i, i + TOOL_RESULT_CHUNK_SIZE)
+                }
+              }
+            }
+          }
+          yield {
+            toolCall: {
+              id: tc.id,
+              name: tc.name,
+              arguments: tc.arguments,
+              result: text,
+              isError
+            }
+          }
+          currentMessages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: text
+          })
+        } catch (err) {
+          const errText = err instanceof Error ? err.message : String(err)
+          yield {
+            toolCall: {
+              id: tc.id,
+              name: tc.name,
+              arguments: tc.arguments,
+              result: `Error: ${errText}`,
+              isError: true
+            }
+          }
+          currentMessages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: `Error: ${errText}`
+          })
+        }
+      }
+    }
   }
 }
 

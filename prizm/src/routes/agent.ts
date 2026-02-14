@@ -14,6 +14,15 @@ import {
   hasScopeAccess
 } from '../scopeUtils'
 import { DEFAULT_SCOPE } from '../core/ScopeStore'
+import { buildScopeContextSummary } from '../llm/scopeContext'
+import { scheduleConversationSummary } from '../llm/conversationSummaryService'
+import { getAgentLLMSettings } from '../settings/agentToolsStore'
+import { listRefItems } from '../llm/scopeItemRegistry'
+import { listAtReferences } from '../llm/atReferenceRegistry'
+import { registerBuiltinAtReferences } from '../llm/atReferenceRegistry'
+import { getSessionContext } from '../llm/contextTracker'
+import { registerBuiltinSlashCommands, tryRunSlashCommand } from '../llm/slashCommands'
+import { listSlashCommands } from '../llm/slashCommandRegistry'
 
 const log = createLogger('Agent')
 
@@ -33,6 +42,97 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
   if (!adapter) {
     log.warn('Agent adapter not provided, routes will return 503')
   }
+
+  // GET /agent/debug/scope-context - 调试用：获取当前 scope 的上下文摘要预览
+  router.get('/agent/debug/scope-context', async (req: Request, res: Response) => {
+    try {
+      const scope = getScopeFromQuery(req)
+      if (!hasScopeAccess(req, scope)) {
+        return res.status(403).json({ error: 'scope access denied' })
+      }
+      const summary = buildScopeContextSummary(scope)
+      res.json({ summary, scope })
+    } catch (error) {
+      log.error('get scope context error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // GET /agent/scope-items - 可引用项列表（用于 @ 自动补全）
+  router.get('/agent/scope-items', async (req: Request, res: Response) => {
+    try {
+      const scope = getScopeFromQuery(req)
+      if (!hasScopeAccess(req, scope)) {
+        return res.status(403).json({ error: 'scope access denied' })
+      }
+      registerBuiltinAtReferences()
+      const refTypes = listAtReferences().map((d) => ({
+        key: d.key,
+        label: d.label,
+        aliases: d.aliases ?? []
+      }))
+      const items = listRefItems(scope)
+      res.json({ refTypes, items })
+    } catch (error) {
+      log.error('get scope-items error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // GET /agent/slash-commands - slash 命令列表（用于 / 下拉菜单）
+  router.get('/agent/slash-commands', async (req: Request, res: Response) => {
+    try {
+      const scope = getScopeFromQuery(req)
+      if (!hasScopeAccess(req, scope)) {
+        return res.status(403).json({ error: 'scope access denied' })
+      }
+      registerBuiltinSlashCommands()
+      const commands = listSlashCommands().map((c) => ({
+        name: c.name,
+        aliases: c.aliases ?? [],
+        description: c.description
+      }))
+      res.json({ commands })
+    } catch (error) {
+      log.error('get slash-commands error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // GET /agent/sessions/:id/context - 会话上下文追踪状态
+  router.get('/agent/sessions/:id/context', async (req: Request, res: Response) => {
+    try {
+      const id = ensureStringParam(req.params.id)
+      const scope = getScopeFromQuery(req)
+      if (!hasScopeAccess(req, scope)) {
+        return res.status(403).json({ error: 'scope access denied' })
+      }
+      const state = getSessionContext(scope, id)
+      if (!state) {
+        return res.json({
+          sessionId: id,
+          scope,
+          provisions: [],
+          totalProvidedChars: 0,
+          modifications: []
+        })
+      }
+      res.json({
+        sessionId: state.sessionId,
+        scope: state.scope,
+        provisions: state.provisions,
+        totalProvidedChars: state.totalProvidedChars,
+        modifications: state.modifications
+      })
+    } catch (error) {
+      log.error('get session context error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
 
   // GET /agent/sessions - 列出 scope 下会话
   router.get('/agent/sessions', async (req: Request, res: Response) => {
@@ -164,13 +264,40 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         return res.status(400).json({ error: 'content is required' })
       }
 
-      const { model, mcpEnabled } = req.body ?? {}
+      const bodyModel = req.body?.model
+      const agentSettings = getAgentLLMSettings()
+      const model =
+        typeof bodyModel === 'string' && bodyModel.trim()
+          ? bodyModel.trim()
+          : agentSettings.defaultModel?.trim() || undefined
+      const { mcpEnabled, includeScopeContext } = req.body ?? {}
 
       // 追加用户消息
       await adapter.appendMessage(scope, id, {
         role: 'user',
         content: content.trim()
       })
+
+      // Slash 命令：若为首位 / 且命中注册命令，执行后直接返回结果，不调用 LLM
+      if (content.trim().startsWith('/')) {
+        const cmdResult = await tryRunSlashCommand(scope, id, content.trim())
+        if (cmdResult != null) {
+          await adapter.appendMessage(scope, id, {
+            role: 'system',
+            content: cmdResult
+          })
+          res.setHeader('Content-Type', 'text/event-stream')
+          res.setHeader('Cache-Control', 'no-cache')
+          res.setHeader('Connection', 'keep-alive')
+          res.setHeader('X-Accel-Buffering', 'no')
+          res.flushHeaders?.()
+          res.write(`data: ${JSON.stringify({ type: 'command_result', value: cmdResult })}\n\n`)
+          res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`)
+          res.flush?.()
+          res.end()
+          return
+        }
+      }
 
       // 构建消息历史
       const history = [
@@ -188,10 +315,11 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
       const ac = new AbortController()
       activeChats.set(key, ac)
 
-      // SSE 流式响应
+      // SSE 流式响应：禁用代理缓冲，确保每块立即发送
       res.setHeader('Content-Type', 'text/event-stream')
       res.setHeader('Cache-Control', 'no-cache')
       res.setHeader('Connection', 'keep-alive')
+      res.setHeader('X-Accel-Buffering', 'no') // nginx 等代理不缓冲
       res.flushHeaders?.()
 
       // 客户端断开连接时也 abort
@@ -202,6 +330,13 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
 
       let fullContent = ''
       let fullReasoning = ''
+      const fullToolCalls: Array<{
+        id: string
+        name: string
+        arguments: string
+        result: string
+        isError?: boolean
+      }> = []
       let lastUsage:
         | {
             totalTokens?: number
@@ -214,7 +349,8 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         for await (const chunk of adapter.chat(scope, id, history, {
           model,
           signal: ac.signal,
-          mcpEnabled: mcpEnabled !== false
+          mcpEnabled: mcpEnabled !== false,
+          includeScopeContext: includeScopeContext !== false
         })) {
           if (ac.signal.aborted) break
           if (chunk.text) {
@@ -225,6 +361,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
                 value: chunk.text
               })}\n\n`
             )
+            res.flush?.()
           }
           if (chunk.reasoning) {
             fullReasoning += chunk.reasoning
@@ -234,6 +371,26 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
                 value: chunk.reasoning
               })}\n\n`
             )
+            res.flush?.()
+          }
+          if (chunk.toolResultChunk) {
+            res.write(
+              `data: ${JSON.stringify({
+                type: 'tool_result_chunk',
+                value: chunk.toolResultChunk
+              })}\n\n`
+            )
+            res.flush?.()
+          }
+          if (chunk.toolCall) {
+            fullToolCalls.push(chunk.toolCall)
+            res.write(
+              `data: ${JSON.stringify({
+                type: 'tool_call',
+                value: chunk.toolCall
+              })}\n\n`
+            )
+            res.flush?.()
           }
           if (chunk.done) {
             if (chunk.usage) lastUsage = chunk.usage
@@ -243,8 +400,10 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
               content: fullContent,
               model: usedModel,
               usage: lastUsage,
-              ...(fullReasoning && { reasoning: fullReasoning })
+              ...(fullReasoning && { reasoning: fullReasoning }),
+              ...(fullToolCalls.length > 0 && { toolCalls: fullToolCalls })
             })
+            scheduleConversationSummary(scope, id)
             res.write(
               `data: ${JSON.stringify({
                 type: 'done',
@@ -252,6 +411,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
                 usage: lastUsage ?? undefined
               })}\n\n`
             )
+            res.flush?.()
           }
         }
 
@@ -263,8 +423,10 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
             content: fullContent,
             model: usedModel,
             usage: lastUsage,
-            ...(fullReasoning && { reasoning: fullReasoning })
+            ...(fullReasoning && { reasoning: fullReasoning }),
+            ...(fullToolCalls.length > 0 && { toolCalls: fullToolCalls })
           })
+          scheduleConversationSummary(scope, id)
           res.write(
             `data: ${JSON.stringify({
               type: 'done',
@@ -273,6 +435,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
               stopped: true
             })}\n\n`
           )
+          res.flush?.()
         }
       } catch (err) {
         hasError = true
@@ -286,6 +449,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
               value: String(err)
             })}\n\n`
           )
+          res.flush?.()
         } else if (fullContent) {
           const usedModel = typeof model === 'string' && model.trim() ? model.trim() : undefined
           await adapter.appendMessage(scope, id, {
@@ -293,8 +457,10 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
             content: fullContent,
             model: usedModel,
             usage: lastUsage,
-            ...(fullReasoning && { reasoning: fullReasoning })
+            ...(fullReasoning && { reasoning: fullReasoning }),
+            ...(fullToolCalls.length > 0 && { toolCalls: fullToolCalls })
           })
+          scheduleConversationSummary(scope, id)
           res.write(
             `data: ${JSON.stringify({
               type: 'done',
@@ -303,6 +469,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
               stopped: true
             })}\n\n`
           )
+          res.flush?.()
         }
       } finally {
         activeChats.delete(key)

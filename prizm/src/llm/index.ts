@@ -37,6 +37,44 @@ export function resetLLMProvider(): void {
   _defaultProvider = null
 }
 
+/** 可用模型项，供客户端模型选择器使用 */
+export interface AvailableModel {
+  id: string
+  label: string
+  provider: 'xiaomi' | 'zhipu' | 'openai'
+}
+
+/** 各 Provider 支持的模型列表（参照 LobeHub 常用配置） */
+const XIAOMI_MODELS: AvailableModel[] = [
+  { id: 'mimo-v2-flash', label: 'MiMo v2 Flash', provider: 'xiaomi' },
+  { id: 'mimo-v2', label: 'MiMo v2', provider: 'xiaomi' }
+]
+
+const ZHIPU_MODELS: AvailableModel[] = [
+  { id: 'glm-4-flash', label: 'GLM-4 Flash', provider: 'zhipu' },
+  { id: 'glm-4', label: 'GLM-4', provider: 'zhipu' },
+  { id: 'glm-4-plus', label: 'GLM-4 Plus', provider: 'zhipu' }
+]
+
+const OPENAI_MODELS: AvailableModel[] = [
+  { id: 'gpt-4o-mini', label: 'GPT-4o Mini', provider: 'openai' },
+  { id: 'gpt-4o', label: 'GPT-4o', provider: 'openai' },
+  { id: 'gpt-4-turbo', label: 'GPT-4 Turbo', provider: 'openai' }
+]
+
+/**
+ * 根据当前配置的 API Key 返回可用模型列表
+ */
+export function getAvailableModels(): { provider: string; models: AvailableModel[] } {
+  if (process.env.XIAOMIMIMO_API_KEY?.trim()) {
+    return { provider: 'xiaomi', models: XIAOMI_MODELS }
+  }
+  if (process.env.ZHIPU_API_KEY?.trim()) {
+    return { provider: 'zhipu', models: ZHIPU_MODELS }
+  }
+  return { provider: 'openai', models: OPENAI_MODELS }
+}
+
 export { OpenAILikeLLMProvider } from './OpenAILikeProvider'
 export { ZhipuLLMProvider } from './ZhipuProvider'
 export { XiaomiMiMoLLMProvider } from './XiaomiMiMoProvider'

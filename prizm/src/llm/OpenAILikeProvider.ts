@@ -3,13 +3,14 @@
  * 环境变量：OPENAI_API_URL、OPENAI_API_KEY
  */
 
-import type {
-  ILLMProvider,
-  LLMStreamChunk,
-  LLMChatResult,
-  LLMTool
-} from '../adapters/interfaces'
+import type { ILLMProvider, LLMStreamChunk, LLMTool, LLMChatMessage } from '../adapters/interfaces'
+import type { MessageUsage } from '../types'
 import { parseUsageFromChunk } from './parseUsage'
+import {
+  createInitialAccumulator,
+  reduceStreamDelta,
+  type AccumulatedMessage
+} from './streamToolCallsReducer'
 
 function getApiUrl(): string {
   return process.env.OPENAI_API_URL?.trim() ?? 'https://api.openai.com/v1'
@@ -19,14 +20,32 @@ function getApiKey(): string | undefined {
   return process.env.OPENAI_API_KEY?.trim()
 }
 
+function mapMessageToApi(m: LLMChatMessage): Record<string, unknown> {
+  if (m.role === 'assistant' && 'tool_calls' in m && m.tool_calls) {
+    return {
+      role: 'assistant',
+      content: m.content ?? '',
+      tool_calls: m.tool_calls
+    }
+  }
+  if (m.role === 'tool') {
+    return { role: 'tool', tool_call_id: m.tool_call_id, content: m.content }
+  }
+  return { role: m.role, content: m.content }
+}
+
 export class OpenAILikeLLMProvider implements ILLMProvider {
   async *chat(
-    messages: Array<{ role: string; content: string }>,
-    options?: { model?: string; temperature?: number; signal?: AbortSignal }
+    messages: LLMChatMessage[],
+    options?: {
+      model?: string
+      temperature?: number
+      signal?: AbortSignal
+      tools?: LLMTool[]
+    }
   ): AsyncIterable<LLMStreamChunk> {
     const apiKey = getApiKey()
     if (!apiKey) {
-      // 无 API Key 时返回占位回复
       yield { text: '（请配置 OPENAI_API_KEY 环境变量以使用 LLM）' }
       yield { done: true }
       return
@@ -36,14 +55,15 @@ export class OpenAILikeLLMProvider implements ILLMProvider {
     const url = `${baseUrl}/chat/completions`
     const model = options?.model ?? process.env.OPENAI_MODEL ?? 'gpt-4o-mini'
 
-    const body = {
+    const body: Record<string, unknown> = {
       model,
-      messages: messages.map((m) => ({
-        role: m.role,
-        content: m.content
-      })),
+      messages: messages.map(mapMessageToApi),
       stream: true,
       temperature: options?.temperature ?? 0.7
+    }
+    if (options?.tools?.length) {
+      body.tools = options.tools
+      body.tool_choice = 'auto'
     }
 
     const response = await fetch(url, {
@@ -68,6 +88,8 @@ export class OpenAILikeLLMProvider implements ILLMProvider {
 
     const decoder = new TextDecoder()
     let buffer = ''
+    let accumulated: AccumulatedMessage = createInitialAccumulator()
+    let lastUsage: MessageUsage | undefined = undefined
 
     try {
       while (true) {
@@ -83,7 +105,10 @@ export class OpenAILikeLLMProvider implements ILLMProvider {
           if (line.startsWith('data: ')) {
             const data = line.slice(6)
             if (data === '[DONE]') {
-              yield { done: true }
+              const toolCalls = accumulated.toolCalls.filter((tc) => tc.id && tc.name)
+              yield toolCalls.length
+                ? { done: true, usage: lastUsage, toolCalls }
+                : { done: true, usage: lastUsage }
               return
             }
             try {
@@ -94,6 +119,12 @@ export class OpenAILikeLLMProvider implements ILLMProvider {
                     role?: string
                     reasoning_content?: string
                     reasoning?: string
+                    tool_calls?: Array<{
+                      index?: number
+                      id?: string
+                      function?: { name?: string; arguments?: string }
+                      type?: string
+                    }>
                   }
                   finish_reason?: string
                 }>
@@ -103,18 +134,20 @@ export class OpenAILikeLLMProvider implements ILLMProvider {
                   total_tokens?: number
                 }
               }
-              const delta = parsed.choices?.[0]?.delta
-              if (delta?.content) {
-                yield { text: delta.content }
+              const usageFromChunk = parseUsageFromChunk(parsed)
+              if (usageFromChunk) lastUsage = usageFromChunk
+              const choice = parsed.choices?.[0]
+              const delta = choice?.delta
+              if (delta) {
+                accumulated = reduceStreamDelta(accumulated, delta)
+                if (delta.content) yield { text: delta.content }
+                const reasoning = delta.reasoning_content ?? delta.reasoning
+                if (reasoning) yield { reasoning }
               }
-              // 思考链：OpenAI o1/o3 用 reasoning_content，部分提供商用 reasoning
-              const reasoning = delta?.reasoning_content ?? delta?.reasoning
-              if (reasoning) {
-                yield { reasoning }
-              }
-              if (parsed.choices?.[0]?.finish_reason) {
-                const usage = parseUsageFromChunk(parsed)
-                yield usage ? { done: true, usage } : { done: true }
+              if (choice?.finish_reason) {
+                const usage = lastUsage ?? parseUsageFromChunk(parsed)
+                const toolCalls = accumulated.toolCalls.filter((tc) => tc.id && tc.name)
+                yield toolCalls.length ? { done: true, usage, toolCalls } : { done: true, usage }
                 return
               }
             } catch {
@@ -139,99 +172,12 @@ export class OpenAILikeLLMProvider implements ILLMProvider {
         }
       }
 
-      yield { done: true }
+      const toolCalls = accumulated.toolCalls.filter((tc) => tc.id && tc.name)
+      yield toolCalls.length
+        ? { done: true, usage: lastUsage, toolCalls }
+        : { done: true, usage: lastUsage }
     } finally {
       reader.releaseLock()
-    }
-  }
-
-  async chatNonStreaming(
-    messages: Array<
-      | { role: string; content: string }
-      | {
-          role: 'assistant'
-          content: string | null
-          tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>
-        }
-      | { role: 'tool'; tool_call_id: string; content: string }
-    >,
-    options?: { model?: string; temperature?: number; signal?: AbortSignal; tools?: LLMTool[] }
-  ): Promise<LLMChatResult> {
-    const apiKey = getApiKey()
-    if (!apiKey) {
-      return { content: '（请配置 OPENAI_API_KEY 环境变量以使用 LLM）' }
-    }
-
-    const baseUrl = getApiUrl().replace(/\/$/, '')
-    const url = `${baseUrl}/chat/completions`
-    const model = options?.model ?? process.env.OPENAI_MODEL ?? 'gpt-4o-mini'
-
-    const body: Record<string, unknown> = {
-      model,
-      messages: messages.map((m) => {
-        if (m.role === 'assistant' && 'tool_calls' in m && m.tool_calls) {
-          return { role: 'assistant', content: m.content ?? '', tool_calls: m.tool_calls }
-        }
-        if (m.role === 'tool') {
-          return { role: 'tool', tool_call_id: m.tool_call_id, content: m.content }
-        }
-        return { role: m.role, content: m.content }
-      }),
-      stream: false,
-      temperature: options?.temperature ?? 0.7
-    }
-    if (options?.tools?.length) {
-      body.tools = options.tools
-      body.tool_choice = 'auto'
-    }
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify(body),
-      signal: options?.signal
-    })
-
-    if (!response.ok) {
-      const errText = await response.text()
-      throw new Error(`LLM API error ${response.status}: ${errText}`)
-    }
-
-    const data = (await response.json()) as {
-      choices?: Array<{
-        message?: {
-          content?: string
-          tool_calls?: Array<{
-            id: string
-            function: { name: string; arguments: string }
-          }>
-        }
-      }>
-      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
-    }
-
-    const msg = data.choices?.[0]?.message
-    if (!msg) return { content: '' }
-
-    const toolCalls = msg.tool_calls?.map((tc) => ({
-      id: tc.id,
-      name: tc.function.name,
-      arguments: tc.function.arguments
-    }))
-
-    return {
-      content: msg.content ?? '',
-      toolCalls,
-      usage: data.usage
-        ? {
-            totalTokens: data.usage.total_tokens,
-            totalInputTokens: data.usage.prompt_tokens,
-            totalOutputTokens: data.usage.completion_tokens
-          }
-        : undefined
     }
   }
 }

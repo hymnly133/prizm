@@ -371,6 +371,7 @@ export function readDocuments(dir: string): Document[] {
       id,
       title: typeof d.title === 'string' ? d.title : '(未命名)',
       content: parsed.content || undefined,
+      llmSummary: typeof d.llmSummary === 'string' ? d.llmSummary : undefined,
       createdAt: (d.createdAt as number) ?? 0,
       updatedAt: (d.updatedAt as number) ?? 0
     })
@@ -389,6 +390,7 @@ export function writeDocuments(dir: string, docs: Document[]): void {
       {
         id: doc.id,
         title: doc.title,
+        ...(doc.llmSummary != null && { llmSummary: doc.llmSummary }),
         createdAt: doc.createdAt,
         updatedAt: doc.updatedAt
       },

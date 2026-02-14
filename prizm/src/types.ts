@@ -22,7 +22,15 @@ import type {
   UpdateDocumentPayload,
   AgentSession,
   AgentMessage,
-  MessageUsage
+  MessageUsage,
+  ScopeRefKind,
+  ScopeTopLevelKind,
+  ScopeRefItem,
+  ScopeTopLevelItem,
+  ScopeStats,
+  ItemProvision,
+  ModificationRecord,
+  SessionContextState
 } from '@prizm/shared'
 
 // 重导出，供 routes、adapters 等使用
@@ -45,7 +53,15 @@ export type {
   UpdateDocumentPayload,
   AgentSession,
   AgentMessage,
-  MessageUsage
+  MessageUsage,
+  ScopeRefKind,
+  ScopeTopLevelKind,
+  ScopeRefItem,
+  ScopeTopLevelItem,
+  ScopeStats,
+  ItemProvision,
+  ModificationRecord,
+  SessionContextState
 }
 
 // ============ Scope 与 Auth 类型（Server 专用） ============
