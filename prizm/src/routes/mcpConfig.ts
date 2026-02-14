@@ -13,7 +13,7 @@ import {
 	addMcpServer,
 	updateMcpServer,
 	removeMcpServer,
-} from "../mcp-client/configStore";
+} from "../settings/agentToolsStore";
 import { getMcpClientManager } from "../mcp-client/McpClientManager";
 import type { McpServerConfig } from "../mcp-client/types";
 

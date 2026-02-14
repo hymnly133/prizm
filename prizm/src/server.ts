@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url'
 import path from 'path'
 import fs from 'fs'
 import express, { type Express } from 'express'
+import compression from 'compression'
 import cors from 'cors'
 import type { Server } from 'http'
 import { createLogger } from './logger'
@@ -26,6 +27,7 @@ import { createDocumentsRoutes } from './routes/documents'
 import { createSearchRoutes } from './routes/search'
 import { createAgentRoutes } from './routes/agent'
 import { createMcpConfigRoutes } from './routes/mcpConfig'
+import { createSettingsRoutes } from './routes/settings'
 import { mountMcpRoutes } from './mcp'
 import { WebSocketServer } from './websocket/WebSocketServer'
 
@@ -83,7 +85,16 @@ export function createPrizmServer(
 
   const clientRegistry = new ClientRegistry(dataDir)
 
-  // 中间件
+  // 中间件：compression 提供 res.flush()，SSE 需在每块后调用以实时推送
+  app.use(
+    compression({
+      filter: (req, res) => {
+        // Agent chat 为 SSE 流，强制走 compression 以获取 res.flush()
+        if (req.originalUrl?.includes('/agent/') && req.originalUrl?.includes('/chat')) return true
+        return compression.filter(req, res)
+      }
+    })
+  )
   app.use(express.json())
   app.use(express.urlencoded({ extended: true }))
 
@@ -121,6 +132,7 @@ export function createPrizmServer(
   createSearchRoutes(router, adapters)
   createAgentRoutes(router, adapters.agent)
   createMcpConfigRoutes(router)
+  createSettingsRoutes(router)
   app.use('/', router)
 
   // MCP 端点：供 Cursor、LobeChat 等 Agent 连接（wsServer 在 start 后注入）

@@ -9,7 +9,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 // SSEClientTransport 已弃用，仅用于 streamable-http 失败时的回退
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import type { McpServerConfig } from "./types";
-import { listMcpServers } from "./configStore";
+import { listMcpServers } from "../settings/agentToolsStore";
 import { createLogger } from "../logger";
 
 const log = createLogger("McpClientManager");
