@@ -14,7 +14,12 @@ export const EVENT_LABELS: Record<string, { title: string; body?: string }> = {
   'group:created': { title: '新分组', body: '已创建' },
   'group:updated': { title: '分组已更新', body: '' },
   'group:deleted': { title: '分组已删除', body: '' },
+  'todo_list:created': { title: 'TODO 列表', body: '已创建' },
   'todo_list:updated': { title: 'TODO 列表', body: '' },
+  'todo_list:deleted': { title: 'TODO 列表', body: '已删除' },
+  'todo_item:created': { title: 'TODO 项', body: '已添加' },
+  'todo_item:updated': { title: 'TODO 项', body: '已更新' },
+  'todo_item:deleted': { title: 'TODO 项', body: '已删除' },
   'clipboard:itemAdded': { title: '剪贴板', body: '新内容已记录' },
   'clipboard:itemDeleted': { title: '剪贴板', body: '记录已删除' },
   'document:created': { title: '新文档', body: '' },
@@ -34,7 +39,12 @@ export const EVENT_LABELS_UI: Record<string, string> = {
   'group:created': '新分组',
   'group:updated': '分组更新',
   'group:deleted': '分组删除',
+  'todo_list:created': 'TODO 列表创建',
   'todo_list:updated': 'TODO 列表更新',
+  'todo_list:deleted': 'TODO 列表删除',
+  'todo_item:created': 'TODO 项添加',
+  'todo_item:updated': 'TODO 项更新',
+  'todo_item:deleted': 'TODO 项删除',
   'clipboard:itemAdded': '剪贴板新增',
   'clipboard:itemDeleted': '剪贴板删除',
   'document:created': '新文档',
@@ -81,21 +91,42 @@ export function formatEventToNotification(ev: EventPushPayload): NotificationPay
         : truncateForNotif(String(extra), 80)
       : labels.body ?? ''
     const base = { title: labels.title, body, sourceClientId }
-    if (ev.eventType === 'todo_list:updated') {
+    if (
+      ev.eventType === 'todo_list:created' ||
+      ev.eventType === 'todo_list:updated' ||
+      ev.eventType === 'todo_list:deleted'
+    ) {
       const scope = (payload?.scope as string) ?? ''
-      const id = (payload?.id as string) ?? ''
+      const listId = (payload?.listId as string) ?? (payload?.id as string) ?? ''
       const itemCount = payload?.itemCount as number | undefined
       const doneCount = payload?.doneCount as number | undefined
       const listTitle = (payload?.title as string) || '待办'
       const bodyText =
         typeof itemCount === 'number' && typeof doneCount === 'number'
           ? `${doneCount}/${itemCount} 已完成`
-          : '已更新'
+          : labels.body ?? '已更新'
       return {
         ...base,
         title: listTitle,
         body: bodyText,
-        updateId: `todo_list:${scope}:${id}`
+        updateId: listId ? `todo_list:${scope}:${listId}` : undefined
+      }
+    }
+    if (
+      ev.eventType === 'todo_item:created' ||
+      ev.eventType === 'todo_item:updated' ||
+      ev.eventType === 'todo_item:deleted'
+    ) {
+      const scope = (payload?.scope as string) ?? ''
+      const listId = (payload?.listId as string) ?? ''
+      const itemTitle = (payload?.title as string) ?? ''
+      return {
+        ...base,
+        title: base.title,
+        body: itemTitle
+          ? `${base.body ?? ''} · ${truncateForNotif(itemTitle, 50)}`.trim()
+          : base.body,
+        updateId: listId ? `todo_list:${scope}:${listId}` : undefined
       }
     }
     return base

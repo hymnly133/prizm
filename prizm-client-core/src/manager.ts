@@ -4,23 +4,10 @@
  */
 
 import type { PrizmConfig, NotificationPayload, EventPushPayload } from './types'
-import { ONLINE_SCOPE } from './types'
+import { DATA_SYNC_EVENTS, ONLINE_SCOPE } from './types'
 import { PrizmClient } from './http/client'
 import { PrizmWebSocketClient } from './websocket/connection'
 import { buildServerUrl, formatEventToNotification } from './utils'
-
-/** 数据同步事件：便签/任务/剪贴板变更时触发，用于客户端实时刷新列表 */
-export const DATA_SYNC_EVENTS = [
-  'note:created',
-  'note:updated',
-  'note:deleted',
-  'todo_list:updated',
-  'clipboard:itemAdded',
-  'clipboard:itemDeleted',
-  'document:created',
-  'document:updated',
-  'document:deleted'
-] as const
 
 export interface PrizmClientManagerOptions {
   config: PrizmConfig
@@ -32,8 +19,10 @@ export interface PrizmClientManagerOptions {
   notifyEvents?: string[]
   /** 数据同步事件：收到会触发 onDataSync，用于实时刷新便签/任务列表。默认包含 note/task/clipboard 变更 */
   dataSyncEvents?: string[]
-  /** 收到应通知的事件时回调（平台无关，由调用方实现弹窗） */
-  onNotify?: (payload: NotificationPayload) => void | Promise<void>
+  /** 收到应通知的事件时回调（平台无关，由调用方实现弹窗）。payload 含 title/body 用于 toast，rawEvent 用于通知窗口自定义展示 */
+  onNotify?: (
+    payload: NotificationPayload & { rawEvent?: EventPushPayload }
+  ) => void | Promise<void>
   /** 收到数据同步事件时回调，用于刷新便签/任务/剪贴板列表；payload 含 id、scope 等，用于增量更新 */
   onDataSync?: (eventType: string, payload?: unknown) => void
   /** 连接成功回调 */
@@ -50,7 +39,9 @@ export class PrizmClientManager {
   private subscribeEventsOption: string[] | 'all'
   private notifyEvents: string[]
   private dataSyncEvents: string[]
-  private onNotify?: (payload: NotificationPayload) => void | Promise<void>
+  private onNotify?: (
+    payload: NotificationPayload & { rawEvent?: EventPushPayload }
+  ) => void | Promise<void>
   private onDataSync?: (eventType: string, payload?: unknown) => void
   private onConnected?: (msg: { clientId: string; serverTime: number }) => void
   private onDisconnected?: () => void
@@ -132,7 +123,7 @@ export class PrizmClientManager {
       }
       if (this.notifyEvents.includes(ev.eventType)) {
         const payload = formatEventToNotification(ev)
-        this.onNotify?.(payload)
+        this.onNotify?.({ ...payload, rawEvent: ev })
       }
     })
 

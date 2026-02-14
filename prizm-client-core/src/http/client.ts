@@ -5,7 +5,7 @@ import type {
   StickyNote,
   TodoList,
   TodoItem,
-  UpdateTodoListPayload,
+  CreateTodoItemPayload,
   UpdateTodoItemPayload,
   PomodoroSession,
   ClipboardItem,
@@ -235,12 +235,13 @@ export class PrizmClient {
   }
 
   // ============ TODO 列表 ============
+  // list 为包装，item 为顶层元素。list 仅含 title；item 独立 CRUD。
 
   async getTodoList(scope?: string, options?: { itemId?: string }): Promise<TodoList | null> {
     const s = scope ?? this.defaultScope
     const query: Record<string, string | undefined> = { scope: s }
     if (options?.itemId) query.itemId = options.itemId
-    const url = this.buildUrl('/tasks', query)
+    const url = this.buildUrl('/todo', query)
     const response = await fetch(url, {
       method: 'GET',
       headers: this.buildHeaders()
@@ -253,9 +254,39 @@ export class PrizmClient {
     return data.todoList
   }
 
-  async updateTodoList(payload: UpdateTodoListPayload, scope?: string): Promise<TodoList> {
-    const data = await this.request<{ todoList: TodoList }>('/tasks', {
+  async createTodoList(scope?: string, payload?: { title?: string }): Promise<TodoList> {
+    const data = await this.request<{ todoList: TodoList }>('/todo', {
+      method: 'POST',
+      scope,
+      body: JSON.stringify(payload ?? {})
+    })
+    return data.todoList
+  }
+
+  async updateTodoListTitle(scope: string | undefined, title: string): Promise<TodoList> {
+    const data = await this.request<{ todoList: TodoList }>('/todo', {
       method: 'PATCH',
+      scope,
+      body: JSON.stringify({ title })
+    })
+    return data.todoList
+  }
+
+  async replaceTodoItems(scope: string | undefined, items: TodoItem[]): Promise<TodoList> {
+    const data = await this.request<{ todoList: TodoList }>('/todo/items', {
+      method: 'PUT',
+      scope,
+      body: JSON.stringify({ items })
+    })
+    return data.todoList
+  }
+
+  async createTodoItem(
+    scope: string | undefined,
+    payload: CreateTodoItemPayload
+  ): Promise<TodoList> {
+    const data = await this.request<{ todoList: TodoList }>('/todo/items', {
+      method: 'POST',
       scope,
       body: JSON.stringify(payload)
     })
@@ -267,7 +298,33 @@ export class PrizmClient {
     payload: UpdateTodoItemPayload,
     scope?: string
   ): Promise<TodoList> {
-    return this.updateTodoList({ updateItem: { id: itemId, ...payload } }, scope)
+    const data = await this.request<{ todoList: TodoList }>(
+      `/todo/items/${encodeURIComponent(itemId)}`,
+      {
+        method: 'PATCH',
+        scope,
+        body: JSON.stringify(payload)
+      }
+    )
+    return data.todoList
+  }
+
+  async deleteTodoItem(itemId: string, scope?: string): Promise<TodoList> {
+    const data = await this.request<{ todoList: TodoList }>(
+      `/todo/items/${encodeURIComponent(itemId)}`,
+      {
+        method: 'DELETE',
+        scope
+      }
+    )
+    return data.todoList
+  }
+
+  async deleteTodoList(scope?: string): Promise<void> {
+    await this.request<void>('/todo', {
+      method: 'DELETE',
+      scope
+    })
   }
 
   // ============ Pomodoro ============

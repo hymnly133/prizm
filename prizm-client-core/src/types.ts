@@ -1,6 +1,6 @@
 /**
  * Prizm Client Core - 客户端专用类型
- * 领域类型、Auth 类型从 @prizm/shared 导入
+ * 领域类型、Auth 类型、WebSocket 消息类型从 @prizm/shared 导入
  */
 
 import type { MessageUsage } from '@prizm/shared'
@@ -15,7 +15,7 @@ export type {
   TodoList,
   TodoItem,
   TodoItemStatus,
-  UpdateTodoListPayload,
+  CreateTodoItemPayload,
   UpdateTodoItemPayload,
   PomodoroSession,
   ClipboardItem,
@@ -26,10 +26,26 @@ export type {
   MessageUsage,
   NotificationPayload,
   ClientInfo,
-  ScopeDescription
+  ScopeDescription,
+  ConnectedMessage,
+  AuthenticatedMessage,
+  RegisteredMessage,
+  UnregisteredMessage,
+  EventPushMessage,
+  ErrorMessage,
+  RegisterEventMessage,
+  UnregisterEventMessage,
+  AuthMessage,
+  PingMessage
 } from '@prizm/shared'
 
-export { ONLINE_SCOPE, EVENT_TYPES, ALL_EVENTS } from '@prizm/shared'
+export {
+  DEFAULT_SCOPE,
+  ONLINE_SCOPE,
+  EVENT_TYPES,
+  ALL_EVENTS,
+  DATA_SYNC_EVENTS
+} from '@prizm/shared'
 export type { EventType } from '@prizm/shared'
 
 // ============ 客户端配置（仅 client-core） ============
@@ -70,86 +86,42 @@ export interface WebSocketConfig {
   subscribeEvents?: string[] | 'all'
 }
 
-export interface ConnectedMessage {
-  type: 'connected'
-  clientId: string
-  serverTime: number
-}
-
-export interface AuthenticatedMessage {
-  type: 'authenticated'
-  clientId: string
-  allowedScopes: string[]
-}
-
-export interface RegisteredMessage {
-  type: 'registered'
-  eventType: string
-}
-
-export interface UnregisteredMessage {
-  type: 'unregistered'
-  eventType: string
-}
-
-export interface EventPushMessage<T = unknown> {
-  type: 'event'
-  eventType: string
-  payload: T
-  scope?: string
-  timestamp: number
-}
-
-export interface ErrorMessage {
-  type: 'error'
-  code: string
-  message: string
-}
-
 export type ServerMessage =
-  | ConnectedMessage
-  | AuthenticatedMessage
-  | RegisteredMessage
-  | UnregisteredMessage
-  | EventPushMessage
-  | ErrorMessage
+  | import('@prizm/shared').ConnectedMessage
+  | import('@prizm/shared').AuthenticatedMessage
+  | import('@prizm/shared').RegisteredMessage
+  | import('@prizm/shared').UnregisteredMessage
+  | import('@prizm/shared').EventPushMessage
+  | import('@prizm/shared').ErrorMessage
   | { type: 'pong' }
 
-export interface RegisterEventMessage {
-  type: 'register'
-  eventType: string
-  scope?: string
-}
-
-export interface UnregisterEventMessage {
-  type: 'unregister'
-  eventType: string
-}
-
-export interface AuthMessage {
-  type: 'auth'
-  apiKey: string
-}
-
-export interface PingMessage {
-  type: 'ping'
-}
-
 export type ClientMessage =
-  | AuthMessage
-  | RegisterEventMessage
-  | UnregisterEventMessage
-  | PingMessage
+  | import('@prizm/shared').AuthMessage
+  | import('@prizm/shared').RegisterEventMessage
+  | import('@prizm/shared').UnregisterEventMessage
+  | import('@prizm/shared').PingMessage
 
 export interface EventPushPayload {
   eventType: string
   payload: unknown
 }
 
+/** 通知窗口接收的载荷：含原始事件，用于自定义展示 */
+export interface NotifyWindowPayload {
+  eventType: string
+  payload: unknown
+  /** 用于合并同一条通知的多次更新，如 todo_list:{scope}:{id} */
+  updateId?: string
+  /** 兼容：主动通知 (POST /notify) 的 title/body */
+  title?: string
+  body?: string
+  source?: string
+}
+
 export type WebSocketEventType = 'connected' | 'disconnected' | 'error' | 'notification' | 'event'
 
 export interface WebSocketClientEventMap {
-  connected: ConnectedMessage
+  connected: import('@prizm/shared').ConnectedMessage
   disconnected: void
   error: Error
   notification: import('@prizm/shared').NotificationPayload
