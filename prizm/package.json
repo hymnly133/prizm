@@ -34,11 +34,13 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
+    "@prizm/evermemos": "workspace:*",
     "compression": "^1.8.1",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "gray-matter": "^4.0.3",
+    "minisearch": "^7.0.0",
     "uuid": "^13.0.0",
     "ws": "^8.19.0",
     "zod": "^4.3.6"
