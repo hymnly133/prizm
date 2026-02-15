@@ -5,7 +5,7 @@ import type { ActionKeys } from '../ActionBar/config'
 
 export type SendButtonHandler = (params: {
   clearContent: () => void
-  editor: IEditor
+  editor: IEditor | null
   getMarkdownContent: () => string
 }) => Promise<void> | void
 
@@ -53,19 +53,32 @@ export interface PublicState {
   showTypoBar?: boolean
 }
 
+export type OverlayReplacement = (
+  replaceStart: number,
+  replaceEnd: number,
+  replacementMarkdown: string,
+  chipLabel: string
+) => void
+
 export interface State extends PublicState {
+  applyOverlayReplacement: OverlayReplacement | null
   editor?: IEditor
+  focusBlockInput: (() => void) | null
   isContentEmpty: boolean
   markdownContent: string
+  overlayKeyHandler: ((e: KeyboardEvent) => void) | null
   slashMenuRef: ChatInputProps['slashMenuRef']
 }
 
 export const initialState: State = {
   allowExpand: true,
+  applyOverlayReplacement: null,
   expand: false,
+  focusBlockInput: null,
   isContentEmpty: false,
   leftActions: [],
   markdownContent: '',
+  overlayKeyHandler: null,
   rightActions: [],
   scopeItems: [],
   scopeSlashCommands: [],

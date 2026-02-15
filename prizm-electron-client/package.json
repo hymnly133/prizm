@@ -1,43 +1,43 @@
 {
-	"name": "@prizm/electron-client",
-	"version": "0.1.0",
-	"description": "Prizm WebSocket notification client built with Electron",
-	"private": true,
-	"main": "dist-electron/main.js",
-	"scripts": {
-		"build:electron": "tsc -p tsconfig.electron.json",
-		"dev": "yarn workspace @prizm/client-core build && yarn build:electron && concurrently \"vite\" \"electron .\"",
-		"build": "yarn workspace @prizm/shared build && yarn workspace @prizm/client-core build && yarn build:electron && vite build",
-		"typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit"
-	},
-	"dependencies": {
-		"@lobehub/editor": "^3.16.1",
-		"@lobehub/fluent-emoji": "^4.1.0",
-		"@lobehub/icons": "^4.5.0",
-		"@lobehub/ui": "^4.37.0",
-		"antd": "^6.3.0",
-		"dompurify": "^3.3.1",
-		"electron": "^40.4.1",
-		"electron-log": "^5.4.3",
-		"marked": "^17.0.2",
-		"motion": "^12.34.0",
-		"react": "^19.2.4",
-		"react-dom": "^19.2.4",
-		"react-markdown": "^10.1.0",
-		"remark": "^15.0.1",
-		"zustand": "^5.0.11",
-		"zustand-utils": "^2.1.1"
-	},
-	"devDependencies": {
-		"@prizm/client-core": "workspace:*",
-		"@types/dompurify": "^3.2.0",
-		"@types/node": "^25.2.3",
-		"@types/react": "^19.2.14",
-		"@types/react-dom": "^19.2.3",
-		"@vitejs/plugin-react": "^5.1.4",
-		"concurrently": "^9.2.1",
-		"patch-package": "^8.0.1",
-		"typescript": "^5.9.3",
-		"vite": "^7.3.1"
-	}
+  "name": "@prizm/electron-client",
+  "version": "0.1.0",
+  "description": "Prizm WebSocket notification client built with Electron",
+  "private": true,
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "dev": "yarn workspace @prizm/client-core build && yarn build:electron && concurrently \"vite\" \"electron .\"",
+    "build": "yarn workspace @prizm/shared build && yarn workspace @prizm/client-core build && yarn build:electron && vite build",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit"
+  },
+  "dependencies": {
+    "@lobehub/editor": "^3.16.1",
+    "@lobehub/fluent-emoji": "^4.1.0",
+    "@lobehub/icons": "^4.5.0",
+    "@lobehub/ui": "^4.37.0",
+    "antd": "^6.3.0",
+    "dompurify": "^3.3.1",
+    "electron": "^40.4.1",
+    "electron-log": "^5.4.3",
+    "marked": "^17.0.2",
+    "motion": "^12.34.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-markdown": "^10.1.0",
+    "remark": "^15.0.1",
+    "zustand": "^5.0.11",
+    "zustand-utils": "^2.1.1"
+  },
+  "devDependencies": {
+    "@prizm/client-core": "workspace:*",
+    "@types/dompurify": "^3.2.0",
+    "@types/node": "^25.2.3",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.4",
+    "concurrently": "^9.2.1",
+    "patch-package": "^8.0.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  }
 }

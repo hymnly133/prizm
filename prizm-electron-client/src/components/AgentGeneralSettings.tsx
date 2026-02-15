@@ -6,7 +6,7 @@ import { Button, Checkbox, Form, Input, Text, toast } from '@lobehub/ui'
 import { Select } from './ui/Select'
 import type { AgentLLMSettings, AvailableModel } from '@prizm/client-core'
 import { createStaticStyles } from 'antd-style'
-import { Brain, MessageSquare } from 'lucide-react'
+import { Brain, Layers, MessageSquare } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import type { PrizmClient } from '@prizm/client-core'
 
@@ -164,23 +164,7 @@ export function AgentGeneralSettings({ http, onLog }: AgentGeneralSettingsProps)
                 }))
               }
             />
-            <span style={{ marginLeft: 8 }}>启用</span>
-          </Form.Item>
-          <Form.Item label="对话摘要间隔" extra="每 N 轮 user+assistant 后生成摘要，默认 10">
-            <Input
-              type="number"
-              min={2}
-              value={agent.conversationSummary?.interval ?? 10}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                setAgent((a) => ({
-                  ...a,
-                  conversationSummary: {
-                    ...a.conversationSummary,
-                    interval: parseInt(e.target.value, 10) || 10
-                  }
-                }))
-              }
-            />
+            <span style={{ marginLeft: 8 }}>启用（用于会话列表标题）</span>
           </Form.Item>
           <Form.Item label="对话摘要模型">
             <Select
@@ -192,6 +176,54 @@ export function AgentGeneralSettings({ http, onLog }: AgentGeneralSettingsProps)
                   conversationSummary: {
                     ...a.conversationSummary,
                     model: v || undefined
+                  }
+                }))
+              }
+            />
+          </Form.Item>
+        </Form>
+      </div>
+
+      {/* 上下文窗口 A/B */}
+      <div className={styles.serverCard} style={{ marginTop: 12 }}>
+        <div className={styles.sectionTitle}>
+          <Layers size={16} />
+          上下文窗口
+        </div>
+        <p className="form-hint" style={{ marginTop: 6, marginBottom: 10 }}>
+          完全上下文轮数 A、缓存轮数 B。满 A+B 轮时将最老 B 轮压缩为 Session
+          记忆，发送顺序为「压缩块 + 最新 A 轮 raw」
+        </p>
+        <Form className="compact-form" gap={8} layout="vertical">
+          <Form.Item label="完全上下文轮数 A" extra="最新 A 轮保持原始发送">
+            <Input
+              type="number"
+              min={1}
+              max={20}
+              value={agent.contextWindow?.fullContextTurns ?? 4}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                setAgent((a) => ({
+                  ...a,
+                  contextWindow: {
+                    ...a.contextWindow,
+                    fullContextTurns: Math.max(1, parseInt(e.target.value, 10) || 4)
+                  }
+                }))
+              }
+            />
+          </Form.Item>
+          <Form.Item label="缓存轮数 B" extra="每 B 轮压缩为一段 Session 记忆">
+            <Input
+              type="number"
+              min={1}
+              max={10}
+              value={agent.contextWindow?.cachedContextTurns ?? 3}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                setAgent((a) => ({
+                  ...a,
+                  contextWindow: {
+                    ...a.contextWindow,
+                    cachedContextTurns: Math.max(1, parseInt(e.target.value, 10) || 3)
                   }
                 }))
               }

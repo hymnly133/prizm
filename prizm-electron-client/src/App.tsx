@@ -1,8 +1,10 @@
 import { Button, Tag } from '@lobehub/ui'
 import type { NotificationPayload } from '@prizm/client-core'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { ClientSettingsProvider } from './context/ClientSettingsContext'
 import { LogsProvider, useLogsContext } from './context/LogsContext'
 import { PrizmProvider, usePrizmContext, SyncEventProvider } from './context/PrizmContext'
+import { WorkNavigationProvider } from './context/WorkNavigationContext'
 import { setLastSyncEvent } from './events/syncEventStore'
 import { AppHeader } from './components/layout'
 import AgentPage from './views/AgentPage'
@@ -24,6 +26,7 @@ function AppContent() {
   const [activePage, setActivePage] = useState<'work' | 'settings' | 'test' | 'agent' | 'user'>(
     'work'
   )
+  const navigateToWork = useCallback(() => setActivePage('work'), [])
 
   useEffect(() => {
     addLog('Prizm Electron 通知客户端启动', 'info')
@@ -112,21 +115,23 @@ function AppContent() {
           </>
         }
       />
-      <div className="app-main">
-        {activePage === 'work' && <WorkPage />}
-        {activePage === 'agent' && (
-          <SyncEventProvider>
-            <AgentPage />
-          </SyncEventProvider>
-        )}
-        {activePage === 'user' && <UserPage />}
-        {activePage === 'settings' && <SettingsPage />}
-        {activePage === 'test' && (
-          <SyncEventProvider>
-            <TestPage />
-          </SyncEventProvider>
-        )}
-      </div>
+      <WorkNavigationProvider onNavigateToWork={navigateToWork}>
+        <div className="app-main">
+          {activePage === 'work' && <WorkPage />}
+          {activePage === 'agent' && (
+            <SyncEventProvider>
+              <AgentPage />
+            </SyncEventProvider>
+          )}
+          {activePage === 'user' && <UserPage />}
+          {activePage === 'settings' && <SettingsPage />}
+          {activePage === 'test' && (
+            <SyncEventProvider>
+              <TestPage />
+            </SyncEventProvider>
+          )}
+        </div>
+      </WorkNavigationProvider>
     </div>
   )
 }
@@ -135,7 +140,9 @@ export default function App() {
   return (
     <LogsProvider>
       <PrizmProvider>
-        <AppContent />
+        <ClientSettingsProvider>
+          <AppContent />
+        </ClientSettingsProvider>
       </PrizmProvider>
     </LogsProvider>
   )

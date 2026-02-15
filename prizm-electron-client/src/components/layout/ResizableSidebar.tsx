@@ -1,13 +1,16 @@
 /**
  * ResizableSidebar - 可复用、可用鼠标拉伸的侧边栏
- * 支持左侧/右侧，宽度可拖拽调整，可选持久化到 localStorage
+ * 支持左侧/右侧，宽度可拖拽调整，可选持久化到 localStorage，支持收起/展开
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Flexbox } from '@lobehub/ui'
+import { ActionIcon, Flexbox } from '@lobehub/ui'
+import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react'
 
 const DEFAULT_MIN = 160
-const DEFAULT_MAX = 480
+const DEFAULT_MAX = 800
+const COLLAPSED_WIDTH = 48
 const STORAGE_PREFIX = 'prizm-sidebar-width-'
+const COLLAPSED_PREFIX = 'prizm-sidebar-collapsed-'
 
 export interface ResizableSidebarProps {
   /** 侧边栏内容 */
@@ -22,6 +25,8 @@ export interface ResizableSidebarProps {
   maxWidth?: number
   /** 持久化 key：设置则把宽度存到 localStorage，下次用该 key 恢复 */
   storageKey?: string
+  /** 是否支持收起/展开，默认 true */
+  collapsible?: boolean
   /** 自定义类名（应用在侧栏容器上） */
   className?: string
   /** 自定义样式（应用在侧栏容器上） */
@@ -35,6 +40,7 @@ export function ResizableSidebar({
   minWidth = DEFAULT_MIN,
   maxWidth = DEFAULT_MAX,
   storageKey,
+  collapsible = true,
   className,
   style
 }: ResizableSidebarProps) {
@@ -53,7 +59,21 @@ export function ResizableSidebar({
     return defaultWidth
   }, [storageKey, defaultWidth, minWidth, maxWidth])
 
+  const loadCollapsed = useCallback((): boolean => {
+    if (storageKey && typeof localStorage !== 'undefined') {
+      try {
+        const v = localStorage.getItem(COLLAPSED_PREFIX + storageKey)
+        return v === '1'
+      } catch {
+        // ignore
+      }
+    }
+    return false
+  }, [storageKey])
+
   const [width, setWidth] = useState(loadWidth)
+  const [collapsed, setCollapsed] = useState(loadCollapsed)
+  const widthBeforeCollapse = useRef(width)
   const startXRef = useRef(0)
   const startWRef = useRef(width)
   const rafRef = useRef<number | null>(null)
@@ -61,6 +81,10 @@ export function ResizableSidebar({
   useEffect(() => {
     setWidth(loadWidth())
   }, [loadWidth])
+
+  useEffect(() => {
+    setCollapsed(loadCollapsed())
+  }, [loadCollapsed])
 
   const persistWidth = useCallback(
     (w: number) => {
@@ -74,6 +98,37 @@ export function ResizableSidebar({
     },
     [storageKey]
   )
+
+  const persistCollapsed = useCallback(
+    (c: boolean) => {
+      if (storageKey && typeof localStorage !== 'undefined') {
+        try {
+          localStorage.setItem(COLLAPSED_PREFIX + storageKey, c ? '1' : '0')
+        } catch {
+          // ignore
+        }
+      }
+    },
+    [storageKey]
+  )
+
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed((prev) => {
+      const next = !prev
+      if (next) {
+        widthBeforeCollapse.current = width
+      } else {
+        setWidth((w) => {
+          const restored = widthBeforeCollapse.current
+          const clamped = Math.min(maxWidth, Math.max(minWidth, restored))
+          persistWidth(clamped)
+          return clamped
+        })
+      }
+      persistCollapsed(next)
+      return next
+    })
+  }, [width, minWidth, maxWidth, persistWidth, persistCollapsed])
 
   const [dragging, setDragging] = useState(false)
 
@@ -115,7 +170,13 @@ export function ResizableSidebar({
     }
   }, [dragging, side, minWidth, maxWidth, persistWidth])
 
-  const resizeHandle = (
+  const CollapseIcon = side === 'left' ? PanelLeftClose : PanelRightClose
+  const ExpandIcon = side === 'left' ? PanelLeftOpen : PanelRightOpen
+
+  const currentWidth = collapsed ? COLLAPSED_WIDTH : width
+  const showResizeHandle = collapsible ? !collapsed : true
+
+  const resizeHandle = showResizeHandle ? (
     <div
       role="separator"
       aria-orientation="vertical"
@@ -132,10 +193,10 @@ export function ResizableSidebar({
         zIndex: 1
       }}
     />
-  )
+  ) : null
 
   const sidebarStyle: React.CSSProperties = {
-    width,
+    width: currentWidth,
     flexShrink: 0,
     minWidth: 0,
     position: 'relative',
@@ -149,9 +210,46 @@ export function ResizableSidebar({
     ...style
   }
 
+  if (collapsed && collapsible) {
+    return (
+      <Flexbox
+        className={className}
+        style={{
+          ...sidebarStyle,
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexDirection: 'column'
+        }}
+      >
+        <ActionIcon icon={ExpandIcon} size="small" title="展开侧边栏" onClick={toggleCollapsed} />
+      </Flexbox>
+    )
+  }
+
   return (
     <Flexbox className={className} style={sidebarStyle}>
-      {children}
+      {collapsible && (
+        <div
+          className="resizable-sidebar-collapse-bar"
+          style={{
+            flexShrink: 0,
+            display: 'flex',
+            justifyContent: side === 'left' ? 'flex-end' : 'flex-start',
+            padding: '4px 4px 4px 8px',
+            borderBottom: '1px solid var(--ant-color-border)'
+          }}
+        >
+          <ActionIcon
+            icon={CollapseIcon}
+            size="small"
+            title="收起侧边栏"
+            onClick={toggleCollapsed}
+          />
+        </div>
+      )}
+      <Flexbox flex={1} style={{ minHeight: 0, overflow: 'hidden', flexDirection: 'column' }}>
+        {children}
+      </Flexbox>
       {resizeHandle}
     </Flexbox>
   )

@@ -1,6 +1,7 @@
-import { Button, Checkbox, Form, Input } from '@lobehub/ui'
+import { Button, Checkbox, Form, Input, Segmented } from '@lobehub/ui'
 import { McpSettings } from '../components/McpSettings'
 import { AgentGeneralSettings } from '../components/AgentGeneralSettings'
+import { useClientSettings } from '../context/ClientSettingsContext'
 import { EVENT_TYPES, buildServerUrl, getEventLabel } from '@prizm/client-core'
 import type { EventType, PrizmConfig } from '@prizm/client-core'
 import { useEffect, useState } from 'react'
@@ -19,6 +20,7 @@ export default function SettingsPage() {
     setConfig
   } = usePrizmContext()
   const { logs, addLog, clearLogs } = useLogsContext()
+  const { sendWithEnter, setSendWithEnter } = useClientSettings()
 
   const [testing, setTesting] = useState(false)
   const [registering, setRegistering] = useState(false)
@@ -232,6 +234,25 @@ export default function SettingsPage() {
                 {registering ? '注册中...' : '注册客户端'}
               </Button>
             </div>
+          </Form.Item>
+        </Form>
+      </div>
+
+      <div className="settings-section">
+        <div className="settings-section-header">
+          <h2>对话输入</h2>
+          <p className="form-hint">Agent 对话输入框的发送快捷键</p>
+        </div>
+        <Form className="compact-form" layout="vertical">
+          <Form.Item label="发送消息">
+            <Segmented
+              value={sendWithEnter ? 'enter' : 'ctrl'}
+              onChange={(v) => setSendWithEnter(v === 'enter')}
+              options={[
+                { label: '回车发送（Shift+回车换行）', value: 'enter' },
+                { label: 'Ctrl+回车发送（回车换行）', value: 'ctrl' }
+              ]}
+            />
           </Form.Item>
         </Form>
       </div>

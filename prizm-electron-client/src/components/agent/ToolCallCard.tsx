@@ -1,6 +1,7 @@
 /**
  * 工具卡片 - 使用 Lobe UI Block/Collapse 宽卡片风格
  * 从 client-core 引入元数据与分发逻辑，UI 使用 @lobehub/ui
+ * 与文件相关的工具由 PrizmFileToolCards 注册自定义卡片（单击打开预览、下拉详情）
  */
 import { Block, Collapse, Flexbox, Icon, Skeleton } from '@lobehub/ui'
 import { FileText, Search, Wrench } from 'lucide-react'

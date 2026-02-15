@@ -256,7 +256,14 @@ export default function AgentPage() {
           onClick={(e) => e.stopPropagation()}
         />
       ) : (
-        s.title || '新会话'
+        <div className="agent-session-item">
+          <span className="agent-session-item-title">{s.title || '新会话'}</span>
+          {s.llmSummary?.trim() && (
+            <span className="agent-session-item-summary" title={s.llmSummary}>
+              {s.llmSummary.length > 50 ? `${s.llmSummary.slice(0, 50)}…` : s.llmSummary}
+            </span>
+          )}
+        </div>
       ),
     active: currentSession?.id === s.id,
     actions: (

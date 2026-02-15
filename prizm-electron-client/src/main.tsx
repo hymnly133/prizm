@@ -16,7 +16,11 @@ root.render(
       <ThemeProvider themeMode="auto">
         <App>
           <ToastHost position="bottom-right" duration={4000} />
-          <RootApp />
+          <div className="app-root__content">
+            <div className="app-root__content-inner">
+              <RootApp />
+            </div>
+          </div>
         </App>
       </ThemeProvider>
     </ConfigProvider>

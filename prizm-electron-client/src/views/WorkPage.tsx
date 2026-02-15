@@ -13,11 +13,15 @@ import { useScope } from '../hooks/useScope'
 import { useFileList } from '../hooks/useFileList'
 import { usePrizmContext } from '../context/PrizmContext'
 import { useLogsContext } from '../context/LogsContext'
+import { useWorkNavigation } from '../context/WorkNavigationContext'
 import type { FileKind, FileItem } from '../hooks/useFileList'
 import type { TodoItemStatus } from '@prizm/client-core'
 import type { SavePayload } from '../components/FileDetailView'
 import { FileText, ListTodo, StickyNote } from 'lucide-react'
 import { getKindLabel, STATUS_LABELS } from '../constants/todo'
+
+const EASE_SMOOTH = [0.33, 1, 0.68, 1] as const
+const EASE_OUT_SMOOTH = [0.16, 1, 0.3, 1] as const
 
 export default function WorkPage() {
   const { modal } = App.useApp()
@@ -25,6 +29,7 @@ export default function WorkPage() {
   const { addLog } = useLogsContext()
   const { currentScope, scopes, scopesLoading, getScopeLabel, setScope } = useScope()
   const { fileList, fileListLoading, refreshFileList } = useFileList(currentScope)
+  const { pendingWorkFile, consumePendingWorkFile } = useWorkNavigation()
 
   const [activeTab, setActiveTab] = useState('notes')
   const [categoryFilter, setCategoryFilter] = useState<Record<FileKind, boolean>>({
@@ -36,16 +41,17 @@ export default function WorkPage() {
     kind: FileKind
     id: string
   } | null>(null)
-  const [previewOpen, setPreviewOpen] = useState(false)
 
   useEffect(() => {
     setSelectedFile(null)
-    setPreviewOpen(false)
   }, [currentScope])
 
   useEffect(() => {
-    setPreviewOpen(!!selectedFile)
-  }, [selectedFile])
+    if (pendingWorkFile) {
+      setSelectedFile(pendingWorkFile)
+      consumePendingWorkFile()
+    }
+  }, [pendingWorkFile, consumePendingWorkFile])
 
   const filteredFileList = useMemo(() => {
     return fileList.filter((f) => categoryFilter[f.kind])
@@ -125,28 +131,34 @@ export default function WorkPage() {
     }
   }
 
+  async function doDeleteFile(file: FileItem) {
+    if (!manager) return
+    const http = manager.getHttpClient()
+    if (file.kind === 'note') {
+      await http.deleteNote(file.id, currentScope)
+    } else if (file.kind === 'todoList') {
+      await http.deleteTodoList(currentScope, file.id)
+    } else {
+      await http.deleteDocument(file.id, currentScope)
+    }
+    if (selectedFile?.kind === file.kind && selectedFile?.id === file.id) {
+      setSelectedFile(null)
+    }
+    await refreshFileList(currentScope, { silent: true })
+    addLog('已删除', 'success')
+  }
+
   async function onDeleteFile() {
     const f = selectedFileData
-    if (!f || !manager) return
-    const http = manager.getHttpClient()
+    if (!f) return
     try {
-      if (f.kind === 'note') {
-        await http.deleteNote(f.id, currentScope)
-      } else if (f.kind === 'todoList') {
-        await http.deleteTodoList(currentScope, f.id)
-      } else {
-        await http.deleteDocument(f.id, currentScope)
-      }
-      setSelectedFile(null)
-      setPreviewOpen(false)
-      await refreshFileList(currentScope, { silent: true })
-      addLog('已删除', 'success')
+      await doDeleteFile(f)
     } catch (e) {
       addLog(`删除失败: ${String(e)}`, 'error')
     }
   }
 
-  async function handleDeleteFile(file: FileItem) {
+  function handleDeleteFile(file: FileItem) {
     modal.confirm({
       title: '确认删除',
       content: `确定要删除「${file.title}」吗？`,
@@ -154,27 +166,17 @@ export default function WorkPage() {
       okType: 'danger',
       cancelText: '取消',
       onOk: async () => {
-        if (!manager) return
-        const http = manager.getHttpClient()
         try {
-          if (file.kind === 'note') {
-            await http.deleteNote(file.id, currentScope)
-          } else if (file.kind === 'todoList') {
-            await http.deleteTodoList(currentScope)
-          } else {
-            await http.deleteDocument(file.id, currentScope)
-          }
-          if (selectedFile?.kind === file.kind && selectedFile?.id === file.id) {
-            setSelectedFile(null)
-            setPreviewOpen(false)
-          }
-          await refreshFileList(currentScope, { silent: true })
-          addLog('已删除', 'success')
+          await doDeleteFile(file)
         } catch (e) {
           addLog(`删除失败: ${String(e)}`, 'error')
         }
       }
     })
+  }
+
+  function closePreview() {
+    setSelectedFile(null)
   }
 
   const refreshScope = () => refreshFileList(currentScope)
@@ -207,8 +209,8 @@ export default function WorkPage() {
         scale: 1,
         y: 0,
         transition: {
-          duration: shouldReduceMotion ? 0.1 : 0.25,
-          ease: 'easeOut' as const
+          duration: shouldReduceMotion ? 0.1 : 0.28,
+          ease: EASE_SMOOTH
         }
       },
       exit: {
@@ -216,8 +218,8 @@ export default function WorkPage() {
         scale: 0.96,
         ...(shouldReduceMotion ? {} : { y: -8 }),
         transition: {
-          duration: shouldReduceMotion ? 0.05 : 0.2,
-          ease: 'easeIn' as const
+          duration: shouldReduceMotion ? 0.05 : 0.36,
+          ease: EASE_OUT_SMOOTH
         }
       }
     }),
@@ -228,7 +230,7 @@ export default function WorkPage() {
     () =>
       shouldReduceMotion
         ? { layout: { duration: 0 } }
-        : { layout: { duration: 0.25, ease: 'easeOut' as const } },
+        : { layout: { duration: 0.32, ease: EASE_SMOOTH } },
     [shouldReduceMotion]
   )
 
@@ -282,9 +284,9 @@ export default function WorkPage() {
 
       <div className="work-page__content">
         {fileListLoading ? (
-          <div className="work-page__cards-grid work-page__cards-masonry">
+          <div className="work-page__cards-grid work-page__cards-grid--variable">
             {[1, 2, 3, 4, 5, 6].map((i) => (
-              <div key={i} className="work-page__card-item">
+              <div key={i} className="work-page__card-item work-page__card-item--skeleton">
                 <div className="data-card data-card--skeleton">
                   <Skeleton active paragraph={{ rows: 4 }} />
                 </div>
@@ -314,12 +316,12 @@ export default function WorkPage() {
             />
           </div>
         ) : (
-          <div className="work-page__cards-grid work-page__cards-masonry">
+          <div className="work-page__cards-grid work-page__cards-grid--variable">
             <AnimatePresence mode="popLayout" initial={false}>
               {filteredFileList.map((file) => (
                 <motion.div
                   key={`${file.kind}-${file.id}`}
-                  className="work-page__card-item"
+                  className={`work-page__card-item work-page__card-item--${file.kind}`}
                   layout
                   transition={layoutTransition}
                   variants={cardVariants}
@@ -342,22 +344,13 @@ export default function WorkPage() {
 
       <Modal
         destroyOnClose
-        open={previewOpen}
+        open={!!selectedFile}
         title={selectedFileData ? getKindLabel(selectedFileData.kind) : ''}
         width={800}
-        onCancel={() => {
-          setSelectedFile(null)
-          setPreviewOpen(false)
-        }}
+        onCancel={closePreview}
         footer={
           <Flexbox horizontal justify="flex-end">
-            <Button
-              type="primary"
-              onClick={() => {
-                setSelectedFile(null)
-                setPreviewOpen(false)
-              }}
-            >
+            <Button type="primary" onClick={closePreview}>
               关闭
             </Button>
           </Flexbox>

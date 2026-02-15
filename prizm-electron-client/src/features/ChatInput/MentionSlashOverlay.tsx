@@ -4,14 +4,14 @@
  */
 import { List, Tag } from '@lobehub/ui'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useChatInputStore } from './store'
+import { useChatInputStore, useStoreApi } from './store'
 import type { ScopeRefItem, SlashCommandItem } from './store/initialState'
 
 function kindToKey(kind: string): string {
   return kind === 'document' ? 'doc' : kind
 }
 
-/** 解析 @ 触发：返回 { trigger, query, replaceStart, replaceEnd } 或 null */
+/** 序列化格式：@(内容) 明确引用结束区域 */
 function parseAtTrigger(content: string): {
   trigger: '@'
   query: string
@@ -21,8 +21,12 @@ function parseAtTrigger(content: string): {
   const lastAt = content.lastIndexOf('@')
   if (lastAt < 0) return null
   const after = content.slice(lastAt + 1)
-  const spaceIdx = after.search(/\s/)
-  const query = spaceIdx >= 0 ? after.slice(0, spaceIdx) : after
+  if (/^\([^)]+\)/.test(after)) return null
+  const query = after.startsWith('(')
+    ? after.slice(1).split(')')[0] ?? ''
+    : after.search(/\s/) >= 0
+    ? after.slice(0, after.search(/\s/))
+    : after
   return {
     trigger: '@',
     query: query.toLowerCase().trim(),
@@ -31,7 +35,7 @@ function parseAtTrigger(content: string): {
   }
 }
 
-/** 解析 / 触发：返回 { trigger, query, replaceStart, replaceEnd } 或 null */
+/** 序列化格式：/(内容) 明确命令结束区域 */
 function parseSlashTrigger(content: string): {
   trigger: '/'
   query: string
@@ -41,17 +45,20 @@ function parseSlashTrigger(content: string): {
   const trimmed = content.trimStart()
   if (!trimmed.startsWith('/')) return null
   const after = trimmed.slice(1)
-  const spaceIdx = after.search(/\s/)
-  const query = spaceIdx >= 0 ? after.slice(0, spaceIdx).toLowerCase() : after.toLowerCase()
+  if (/^\([^)]+\)/.test(after)) return null
+  const query = after.startsWith('(')
+    ? (after.slice(1).split(')')[0] ?? '').toLowerCase()
+    : (after.search(/\s/) >= 0 ? after.slice(0, after.search(/\s/)) : after).toLowerCase()
   return {
     trigger: '/',
     query,
-    replaceStart: 0,
+    replaceStart: content.length - trimmed.length,
     replaceEnd: content.length
   }
 }
 
 const MentionSlashOverlay = memo(() => {
+  const storeApi = useStoreApi()
   const [markdownContent, editor, scopeItems, scopeSlashCommands, setDocument] = useChatInputStore(
     (s) => [
       s.markdownContent,
@@ -64,12 +71,13 @@ const MentionSlashOverlay = memo(() => {
 
   const [selectedIndex, setSelectedIndex] = useState(0)
   const overlayRef = useRef<HTMLDivElement>(null)
+  const scrollFromKeyboardRef = useRef(false)
+  const handlerRef = useRef<(e: KeyboardEvent) => void>(() => {})
 
   const parsed = useMemo(() => {
     const at = parseAtTrigger(markdownContent)
     if (at) return at
-    const slash = parseSlashTrigger(markdownContent)
-    return slash ?? null
+    return parseSlashTrigger(markdownContent) ?? null
   }, [markdownContent])
 
   const candidates = useMemo(() => {
@@ -108,23 +116,33 @@ const MentionSlashOverlay = memo(() => {
 
   const selectItem = useCallback(
     (index: number) => {
-      if (!parsed || !editor || index < 0 || index >= candidates.length) return
+      if (!parsed || index < 0 || index >= candidates.length) return
       const before = markdownContent.slice(0, parsed.replaceStart)
       const after = markdownContent.slice(parsed.replaceEnd)
       let replacement: string
+      let chipLabel: string
       if (isAt) {
         const item = candidates[index] as ScopeRefItem
         const key = kindToKey(item.kind)
-        replacement = `@${key}:${item.id} `
+        replacement = `@(${key}:${item.id})`
+        chipLabel = `@${key}:${item.id.slice(0, 8)}`
       } else {
         const cmd = candidates[index] as SlashCommandItem
-        replacement = `/${cmd.name} `
+        replacement = `/(${cmd.name})`
+        chipLabel = `/${cmd.name}`
       }
+      const apply = storeApi.getState().applyOverlayReplacement
+      if (apply) {
+        apply(parsed.replaceStart, parsed.replaceEnd, replacement, chipLabel)
+        setSelectedIndex(0)
+        return
+      }
+      if (!editor) return
       const newContent = before + replacement + after
       setDocument('markdown', newContent)
       setSelectedIndex(0)
     },
-    [parsed, editor, candidates, isAt, markdownContent, setDocument]
+    [parsed, editor, candidates, isAt, markdownContent, setDocument, storeApi]
   )
 
   const handleKeyDownGlobal = useCallback(
@@ -133,12 +151,14 @@ const MentionSlashOverlay = memo(() => {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
         e.stopPropagation()
+        scrollFromKeyboardRef.current = true
         setSelectedIndex((i) => Math.min(i + 1, candidates.length - 1))
         return
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault()
         e.stopPropagation()
+        scrollFromKeyboardRef.current = true
         setSelectedIndex((i) => Math.max(i - 1, 0))
         return
       }
@@ -154,16 +174,27 @@ const MentionSlashOverlay = memo(() => {
     },
     [visible, candidates.length, selectedIndex, selectItem]
   )
+  handlerRef.current = handleKeyDownGlobal
+
+  const stableOverlayHandler = useCallback((e: KeyboardEvent) => {
+    handlerRef.current?.(e)
+  }, [])
 
   useEffect(() => {
-    if (!visible) return
-    window.addEventListener('keydown', handleKeyDownGlobal, true)
-    return () => window.removeEventListener('keydown', handleKeyDownGlobal, true)
-  }, [visible, handleKeyDownGlobal])
+    if (visible) {
+      storeApi.getState().setOverlayKeyHandler(stableOverlayHandler)
+    } else {
+      storeApi.getState().setOverlayKeyHandler(null)
+    }
+    return () => {
+      storeApi.getState().setOverlayKeyHandler(null)
+    }
+  }, [visible, stableOverlayHandler, storeApi])
 
-  // 键盘切换候选项时，将当前选中项滚动到可视区域
+  // 仅键盘切换候选项时滚动到面板中间；鼠标悬停/点击不滚动
   useEffect(() => {
-    if (!visible || candidates.length === 0) return
+    if (!visible || candidates.length === 0 || !scrollFromKeyboardRef.current) return
+    scrollFromKeyboardRef.current = false
     const container = overlayRef.current
     if (!container) return
     const listRoot = container.firstElementChild
@@ -178,7 +209,15 @@ const MentionSlashOverlay = memo(() => {
     }
     if (item) {
       requestAnimationFrame(() => {
-        item!.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+        const el = item!
+        const containerHeight = container.clientHeight
+        const maxScroll = container.scrollHeight - containerHeight
+        if (maxScroll <= 0) return
+        const itemTop = el.offsetTop
+        const itemHeight = el.offsetHeight
+        const targetScrollTop = itemTop - containerHeight / 2 + itemHeight / 2
+        const clamped = Math.max(0, Math.min(maxScroll, targetScrollTop))
+        container.scrollTo({ top: clamped, behavior: 'smooth' })
       })
     }
   }, [selectedIndex, visible, candidates.length])

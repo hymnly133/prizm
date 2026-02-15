@@ -1,6 +1,7 @@
 import type { StateCreator } from 'zustand/vanilla'
 
 import type { PublicState, State } from './initialState'
+import type { OverlayReplacement } from './initialState'
 import { initialState } from './initialState'
 
 export interface Action {
@@ -8,9 +9,13 @@ export interface Action {
   getMarkdownContent: () => string
   handleSendButton: () => void
   handleStop: () => void
+  setApplyOverlayReplacement: (fn: OverlayReplacement | null) => void
   setDocument: (type: string, content: unknown, options?: Record<string, unknown>) => void
   setExpand: (expand: boolean) => void
+  setFocusBlockInput: (fn: (() => void) | null) => void
   setJSONState: (content: unknown) => void
+  setMarkdownContent: (content: string) => void
+  setOverlayKeyHandler: (handler: ((e: KeyboardEvent) => void) | null) => void
   setShowTypoBar: (show: boolean) => void
   updateMarkdownContent: () => void
 }
@@ -27,20 +32,20 @@ export const store: CreateStore = (publicState) => (set, get) => ({
     return get().editor?.getDocument('json')
   },
   getMarkdownContent: () => {
-    return String(get().editor?.getDocument('markdown') || '').trimEnd()
+    return get().markdownContent
   },
   handleSendButton: () => {
-    if (!get().editor) return
-
     const editor = get().editor
 
     const result = get().onSend?.({
-      clearContent: () => editor?.cleanDocument(),
-      editor: editor!,
+      clearContent: () => {
+        editor?.cleanDocument()
+        get().setMarkdownContent('')
+      },
+      editor: editor ?? null,
       getMarkdownContent: get().getMarkdownContent
     })
-    // 发送完成后重新聚焦输入框，避免 scrollIntoView 等导致失焦
-    const focusEditor = () => get().editor?.focus()
+    const focusEditor = () => get().editor?.focus() ?? get().focusBlockInput?.()
     if (result && typeof (result as Promise<unknown>)?.then === 'function') {
       ;(result as Promise<void>).then(focusEditor)
     } else {
@@ -55,11 +60,31 @@ export const store: CreateStore = (publicState) => (set, get) => ({
   },
 
   setDocument: (type, content, options) => {
-    get().editor?.setDocument(type, content, options)
+    const editor = get().editor
+    if (editor) {
+      editor.setDocument(type, content, options)
+      set({ markdownContent: String(editor.getDocument('markdown') || '').trimEnd() })
+    }
   },
 
   setExpand: (expand) => {
     set({ expand })
+  },
+
+  setMarkdownContent: (content) => {
+    set({ markdownContent: content })
+  },
+
+  setApplyOverlayReplacement: (fn: OverlayReplacement | null) => {
+    set({ applyOverlayReplacement: fn })
+  },
+
+  setFocusBlockInput: (fn: (() => void) | null) => {
+    set({ focusBlockInput: fn })
+  },
+
+  setOverlayKeyHandler: (handler) => {
+    set({ overlayKeyHandler: handler })
   },
 
   setJSONState: (content) => {
@@ -71,12 +96,11 @@ export const store: CreateStore = (publicState) => (set, get) => ({
   },
 
   updateMarkdownContent: () => {
-    const content = get().getMarkdownContent()
-
-    if (content === get().markdownContent) return
-
-    get().onMarkdownContentChange?.(content)
-
-    set({ markdownContent: content })
+    const fromEditor = get().editor
+      ? String(get().editor?.getDocument('markdown') || '').trimEnd()
+      : get().markdownContent
+    if (fromEditor === get().markdownContent) return
+    get().onMarkdownContentChange?.(fromEditor)
+    set({ markdownContent: fromEditor })
   }
 })

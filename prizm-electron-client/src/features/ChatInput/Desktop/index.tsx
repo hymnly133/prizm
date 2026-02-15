@@ -2,11 +2,11 @@ import { ChatInput, ChatInputActionBar } from '@lobehub/editor/react'
 import { Flexbox } from '@lobehub/ui'
 import { createStaticStyles, cx } from 'antd-style'
 import type { ReactNode } from 'react'
-import { memo, useEffect } from 'react'
+import { memo, useCallback, useEffect } from 'react'
 
-import { useChatInputStore } from '../store'
+import { useChatInputStore, useStoreApi } from '../store'
 import ActionBar from '../ActionBar'
-import InputEditor from '../InputEditor'
+import BlockInput from '../BlockInput'
 import MentionSlashOverlay from '../MentionSlashOverlay'
 import SendArea from '../SendArea'
 
@@ -44,6 +44,7 @@ interface DesktopChatInputProps {
 
 const DesktopChatInput = memo<DesktopChatInputProps>(
   ({ inputContainerProps, extenHeaderContent, onClear }) => {
+    const storeApi = useStoreApi()
     const [slashMenuRef, expand, editor, leftActions] = useChatInputStore((s) => [
       s.slashMenuRef,
       s.expand,
@@ -55,13 +56,24 @@ const DesktopChatInput = memo<DesktopChatInputProps>(
       if (editor) editor.focus()
     }, [editor])
 
+    const handleKeyDownCapture = useCallback(
+      (e: React.KeyboardEvent) => {
+        const fn = storeApi.getState().overlayKeyHandler
+        if (fn) fn(e.nativeEvent)
+      },
+      [storeApi]
+    )
+
     return (
       <Flexbox
         className={cx(styles.container, expand && styles.fullscreen)}
         gap={8}
         paddingBlock="0 16px"
       >
-        <div style={{ position: 'relative', width: '100%' }}>
+        <div
+          style={{ position: 'relative', width: '100%' }}
+          onKeyDownCapture={handleKeyDownCapture}
+        >
           <ChatInput
             data-testid="chat-input"
             defaultHeight={88}
@@ -81,7 +93,7 @@ const DesktopChatInput = memo<DesktopChatInputProps>(
             {...inputContainerProps}
             className={cx(expand && styles.inputFullscreen, inputContainerProps?.className)}
           >
-            <InputEditor />
+            <BlockInput />
           </ChatInput>
           <MentionSlashOverlay />
         </div>
