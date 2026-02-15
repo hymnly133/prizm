@@ -20,7 +20,6 @@ import type {
 } from './interfaces'
 import type {
   StickyNote,
-  StickyNoteGroup,
   CreateNotePayload,
   UpdateNotePayload,
   TodoList,
@@ -38,6 +37,7 @@ import type {
 } from '../types'
 import { scopeStore } from '../core/ScopeStore'
 import { genUniqueId } from '../id'
+import { deleteMemoriesByGroupId } from '../llm/EverMemService'
 import { getLLMProvider } from '../llm'
 import { scheduleDocumentSummary } from '../llm/documentSummaryService'
 import { getMcpClientManager } from '../mcp-client/McpClientManager'
@@ -73,9 +73,9 @@ export class DefaultStickyNotesAdapter implements IStickyNotesAdapter {
       id: genUniqueId(),
       content: payload.content ?? '',
       imageUrls: payload.imageUrls,
+      tags: payload.tags,
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      groupId: payload.groupId,
       fileRefs: payload.fileRefs
     }
     data.notes.push(note)
@@ -94,7 +94,7 @@ export class DefaultStickyNotesAdapter implements IStickyNotesAdapter {
       ...existing,
       ...(payload.content !== undefined && { content: payload.content }),
       ...(payload.imageUrls !== undefined && { imageUrls: payload.imageUrls }),
-      ...(payload.groupId !== undefined && { groupId: payload.groupId }),
+      ...(payload.tags !== undefined && { tags: payload.tags }),
       ...(payload.fileRefs !== undefined && { fileRefs: payload.fileRefs }),
       updatedAt: Date.now()
     }
@@ -111,44 +111,6 @@ export class DefaultStickyNotesAdapter implements IStickyNotesAdapter {
       data.notes.splice(idx, 1)
       scopeStore.saveScope(scope)
       log.info('Note deleted:', id, 'scope:', scope)
-    }
-  }
-
-  async getAllGroups(scope: string): Promise<StickyNoteGroup[]> {
-    const data = scopeStore.getScopeData(scope)
-    return [...data.groups]
-  }
-
-  async createGroup(scope: string, name: string): Promise<StickyNoteGroup> {
-    const data = scopeStore.getScopeData(scope)
-    const group: StickyNoteGroup = {
-      id: genUniqueId(),
-      name
-    }
-    data.groups.push(group)
-    scopeStore.saveScope(scope)
-    log.info('Group created:', group.id, 'scope:', scope)
-    return group
-  }
-
-  async updateGroup(scope: string, id: string, name: string): Promise<StickyNoteGroup> {
-    const data = scopeStore.getScopeData(scope)
-    const idx = data.groups.findIndex((g) => g.id === id)
-    if (idx < 0) throw new Error(`Group not found: ${id}`)
-
-    data.groups[idx] = { ...data.groups[idx], name }
-    scopeStore.saveScope(scope)
-    log.info('Group updated:', id, 'scope:', scope)
-    return data.groups[idx]
-  }
-
-  async deleteGroup(scope: string, id: string): Promise<void> {
-    const data = scopeStore.getScopeData(scope)
-    const idx = data.groups.findIndex((g) => g.id === id)
-    if (idx >= 0) {
-      data.groups.splice(idx, 1)
-      scopeStore.saveScope(scope)
-      log.info('Group deleted:', id, 'scope:', scope)
     }
   }
 }
@@ -543,6 +505,12 @@ export class DefaultAgentAdapter implements IAgentAdapter {
     if (idx >= 0) {
       data.agentSessions.splice(idx, 1)
       scopeStore.saveScope(scope)
+      scopeStore.deleteSessionDir(scope, id)
+      try {
+        await deleteMemoriesByGroupId(`${scope}:session:${id}`)
+      } catch (e) {
+        log.warn('Failed to delete session memories:', id, e)
+      }
       log.info('Agent session deleted:', id, 'scope:', scope)
     }
   }
@@ -704,6 +672,18 @@ export class DefaultAgentAdapter implements IAgentAdapter {
         }
         if (chunk.reasoning) yield { reasoning: chunk.reasoning }
         if (chunk.usage) lastUsage = chunk.usage
+        // LLM 流式生成阶段检测到工具名，立即通知客户端显示 preparing 卡片
+        if (chunk.toolCallPreparing) {
+          yield {
+            toolCall: {
+              id: chunk.toolCallPreparing.id,
+              name: chunk.toolCallPreparing.name,
+              arguments: '',
+              result: '',
+              status: 'preparing' as const
+            }
+          }
+        }
         if (chunk.done && chunk.toolCalls?.length) {
           toolCalls = chunk.toolCalls
         }
@@ -732,7 +712,7 @@ export class DefaultAgentAdapter implements IAgentAdapter {
 
       const manager = getMcpClientManager()
       for (const tc of toolCalls) {
-        // 执行前 yield running，便于 UI 提前显示「正在执行」
+        // running: 开始执行（preparing 已在 LLM 流式阶段由 toolCallPreparing 发出）
         yield {
           toolCall: {
             id: tc.id,

@@ -33,12 +33,12 @@ export function createNotesRoutes(router: Router, adapter?: IStickyNotesAdapter)
       if (!scope) return
       const notes = await adapter.getAllNotes(scope)
 
-      const { q, groupId } = req.query
+      const { q, tag } = req.query
       let filtered = notes
 
-      // 按分组过滤
-      if (typeof groupId === 'string' && groupId.length > 0) {
-        filtered = filtered.filter((n) => n.groupId === groupId)
+      // 按 tag 过滤
+      if (typeof tag === 'string' && tag.length > 0) {
+        filtered = filtered.filter((n) => n.tags && n.tags.includes(tag))
       }
 
       // 按内容关键字过滤
@@ -49,124 +49,6 @@ export function createNotesRoutes(router: Router, adapter?: IStickyNotesAdapter)
       res.json({ notes: filtered })
     } catch (error) {
       log.error('get all notes error:', error)
-      const { status, body } = toErrorResponse(error)
-      res.status(status).json(body)
-    }
-  })
-
-  // ========== 分组路由（必须在 /notes/:id 之前定义）==========
-
-  // GET /notes/groups - 获取所有分组，scope 必填 ?scope=xxx
-  router.get('/notes/groups', async (req: Request, res: Response) => {
-    try {
-      if (!adapter?.getAllGroups) {
-        return res.status(503).json({ error: 'Notes adapter not available' })
-      }
-
-      const scope = requireScopeForList(req, res)
-      if (!scope) return
-      const groups = await adapter.getAllGroups(scope)
-      res.json({ groups })
-    } catch (error) {
-      log.error('get all groups error:', error)
-      const { status, body } = toErrorResponse(error)
-      res.status(status).json(body)
-    }
-  })
-
-  // POST /notes/groups - 创建分组，scope 可选 body.scope，默认 default
-  router.post('/notes/groups', async (req: Request, res: Response) => {
-    try {
-      if (!adapter?.createGroup) {
-        return res.status(503).json({ error: 'Notes adapter not available' })
-      }
-
-      const { name } = req.body
-      if (!name) {
-        return res.status(400).json({ error: 'name is required' })
-      }
-
-      const scope = getScopeForCreate(req)
-      const group = await adapter.createGroup(scope, name)
-      res.status(201).json({ group })
-    } catch (error) {
-      log.error('create group error:', error)
-      const { status, body } = toErrorResponse(error)
-      res.status(status).json(body)
-    }
-  })
-
-  // PATCH /notes/groups/:id - 更新分组，scope 可选 query，未提供则跨 scope 查找
-  router.patch('/notes/groups/:id', async (req: Request, res: Response) => {
-    try {
-      if (!adapter?.updateGroup) {
-        return res.status(503).json({ error: 'Notes adapter not available' })
-      }
-      const a = adapter
-
-      const id = ensureStringParam(req.params.id)
-      const { name } = req.body
-
-      if (!name) {
-        return res.status(400).json({ error: 'name is required' })
-      }
-
-      const scopeHint = getScopeForReadById(req)
-      let scope: string
-      if (scopeHint) {
-        scope = scopeHint
-      } else {
-        if (!a.getAllGroups) {
-          return res.status(503).json({ error: 'Notes adapter not available' })
-        }
-        const found = await findAcrossScopes(req, async (s) => {
-          const groups = await a.getAllGroups!(s)
-          return groups.find((x) => x.id === id) ?? null
-        })
-        if (!found) {
-          return res.status(404).json({ error: 'Group not found' })
-        }
-        scope = found.scope
-      }
-      const group = await a.updateGroup!(scope, id, name)
-      res.json({ group })
-    } catch (error) {
-      log.error('update group error:', error)
-      const { status, body } = toErrorResponse(error)
-      res.status(status).json(body)
-    }
-  })
-
-  // DELETE /notes/groups/:id - 删除分组，scope 可选，未提供则跨 scope 查找
-  router.delete('/notes/groups/:id', async (req: Request, res: Response) => {
-    try {
-      if (!adapter?.deleteGroup) {
-        return res.status(503).json({ error: 'Notes adapter not available' })
-      }
-      const a = adapter
-
-      const id = ensureStringParam(req.params.id)
-      const scopeHint = getScopeForReadById(req)
-      let scope: string
-      if (scopeHint) {
-        scope = scopeHint
-      } else {
-        if (!a.getAllGroups) {
-          return res.status(503).json({ error: 'Notes adapter not available' })
-        }
-        const found = await findAcrossScopes(req, async (s) => {
-          const groups = await a.getAllGroups!(s)
-          return groups.find((x) => x.id === id) ?? null
-        })
-        if (!found) {
-          return res.status(404).json({ error: 'Group not found' })
-        }
-        scope = found.scope
-      }
-      await a.deleteGroup!(scope, id)
-      res.status(204).send()
-    } catch (error) {
-      log.error('delete group error:', error)
       const { status, body } = toErrorResponse(error)
       res.status(status).json(body)
     }

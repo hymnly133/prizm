@@ -11,8 +11,12 @@ import {
   isMemoryEnabled,
   getAllMemories,
   searchMemoriesWithOptions,
+  searchUserAndScopeMemories,
+  searchThreeLevelMemories,
   deleteMemory,
-  getRoundMemories
+  getRoundMemories,
+  listDedupLog,
+  undoDedupLog
 } from '../llm/EverMemService'
 import { RetrieveMethod, MemoryType } from '@prizm/evermemos'
 import { readUserTokenUsage } from '../core/UserStore'
@@ -22,6 +26,15 @@ const log = createLogger('MemoryRoutes')
 function getScopeFromQuery(req: Request): string {
   const s = req.query.scope
   return typeof s === 'string' && s.trim() ? s.trim() : DEFAULT_SCOPE
+}
+
+/** POST 请求可能把 scope 放在 body，优先从 body 取 */
+function getScopeFromRequest(req: Request, fromBody?: boolean): string {
+  if (fromBody && req.body && typeof req.body === 'object') {
+    const s = (req.body as { scope?: string }).scope
+    if (typeof s === 'string' && s.trim()) return s.trim()
+  }
+  return getScopeFromQuery(req)
 }
 
 export function createMemoryRoutes(router: Router): void {
@@ -52,7 +65,7 @@ export function createMemoryRoutes(router: Router): void {
       }
 
       const userId = req.prizmClient?.clientId ?? 'default'
-      const memories = await getAllMemories(userId)
+      const memories = await getAllMemories(userId, scope)
       res.json({ enabled: true, memories })
     } catch (error) {
       log.error('list memories error:', error)
@@ -64,7 +77,7 @@ export function createMemoryRoutes(router: Router): void {
   // POST /agent/memories/search - 搜索记忆（与内置工具、MCP 对齐；可选 method/use_rerank/limit/memory_types）
   router.post('/agent/memories/search', async (req: Request, res: Response) => {
     try {
-      const scope = getScopeFromQuery(req)
+      const scope = getScopeFromRequest(req, true)
       if (!hasScopeAccess(req, scope)) {
         return res.status(403).json({ error: 'scope access denied' })
       }
@@ -112,11 +125,56 @@ export function createMemoryRoutes(router: Router): void {
       const memories = await searchMemoriesWithOptions(
         query.trim(),
         userId,
+        scope,
         hasOptions ? options : undefined
       )
       res.json({ enabled: true, memories })
     } catch (error) {
       log.error('search memories error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // GET /agent/memories/three-level - 三层记忆状态（User/Scope/Session），供客户端可视化
+  router.get('/agent/memories/three-level', async (req: Request, res: Response) => {
+    try {
+      const scope = getScopeFromQuery(req)
+      if (!hasScopeAccess(req, scope)) {
+        return res.status(403).json({ error: 'scope access denied' })
+      }
+
+      if (!isMemoryEnabled()) {
+        return res.json({ enabled: false, user: [], scope: [], session: [] })
+      }
+
+      const sessionId =
+        typeof req.query.sessionId === 'string' && req.query.sessionId.trim()
+          ? req.query.sessionId.trim()
+          : undefined
+      const userId = req.prizmClient?.clientId ?? 'default'
+      const query = '用户偏好与工作区概况'
+
+      if (sessionId) {
+        const three = await searchThreeLevelMemories(query, userId, scope, sessionId, {
+          limit: 10
+        })
+        return res.json({
+          enabled: true,
+          user: three.user,
+          scope: three.scope,
+          session: three.session
+        })
+      }
+      const two = await searchUserAndScopeMemories(query, userId, scope, { limit: 10 })
+      return res.json({
+        enabled: true,
+        user: two.user,
+        scope: two.scope,
+        session: []
+      })
+    } catch (error) {
+      log.error('three-level memories error:', error)
       const { status, body } = toErrorResponse(error)
       res.status(status).json(body)
     }
@@ -140,7 +198,7 @@ export function createMemoryRoutes(router: Router): void {
       }
 
       const userId = req.prizmClient?.clientId ?? 'default'
-      const growth = await getRoundMemories(userId, messageId)
+      const growth = await getRoundMemories(userId, messageId, scope)
       res.json(growth)
     } catch (error) {
       log.error('get round memories error:', error)
@@ -166,7 +224,7 @@ export function createMemoryRoutes(router: Router): void {
         return res.status(400).json({ error: 'memory id is required' })
       }
 
-      const deleted = await deleteMemory(memoryId.trim())
+      const deleted = await deleteMemory(memoryId.trim(), scope)
       if (deleted) {
         res.status(204).send()
       } else {
@@ -174,6 +232,59 @@ export function createMemoryRoutes(router: Router): void {
       }
     } catch (error) {
       log.error('delete memory error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // GET /agent/memories/dedup-log - 去重日志列表
+  router.get('/agent/memories/dedup-log', async (req: Request, res: Response) => {
+    try {
+      const scope = getScopeFromQuery(req)
+      if (!hasScopeAccess(req, scope)) {
+        return res.status(403).json({ error: 'scope access denied' })
+      }
+
+      if (!isMemoryEnabled()) {
+        return res.json({ entries: [] })
+      }
+
+      const userId = req.prizmClient?.clientId ?? 'default'
+      const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : undefined
+      const entries = await listDedupLog(userId, scope, limit)
+      res.json({ entries })
+    } catch (error) {
+      log.error('list dedup log error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // POST /agent/memories/dedup-log/:id/undo - 回退去重
+  router.post('/agent/memories/dedup-log/:id/undo', async (req: Request, res: Response) => {
+    try {
+      const scope = getScopeFromRequest(req, true)
+      if (!hasScopeAccess(req, scope)) {
+        return res.status(403).json({ error: 'scope access denied' })
+      }
+
+      if (!isMemoryEnabled()) {
+        return res.status(400).json({ error: 'Memory module is not enabled' })
+      }
+
+      const dedupLogId = String(req.params.id ?? '').trim()
+      if (!dedupLogId) {
+        return res.status(400).json({ error: 'dedup log id is required' })
+      }
+
+      const restoredId = await undoDedupLog(dedupLogId, scope)
+      if (restoredId) {
+        res.json({ restored: true, restoredMemoryId: restoredId })
+      } else {
+        res.status(404).json({ error: 'Dedup log entry not found or already rolled back' })
+      }
+    } catch (error) {
+      log.error('undo dedup error:', error)
       const { status, body } = toErrorResponse(error)
       res.status(status).json(body)
     }

@@ -13,7 +13,7 @@ import {
   getScopeForReadById,
   hasScopeAccess
 } from '../scopeUtils'
-import { DEFAULT_SCOPE } from '../core/ScopeStore'
+import { scopeStore, DEFAULT_SCOPE } from '../core/ScopeStore'
 import { buildScopeContextSummary } from '../llm/scopeContext'
 import { buildSystemPrompt } from '../llm/systemPrompt'
 import { scheduleTurnSummary } from '../llm/conversationSummaryService'
@@ -32,16 +32,45 @@ import {
   searchUserAndScopeMemories,
   searchThreeLevelMemories,
   addMemoryInteraction,
-  addSessionMemoryFromRounds,
-  deleteMemoriesByGroupId
+  addSessionMemoryFromRounds
 } from '../llm/EverMemService'
 import { recordTokenUsage } from '../llm/tokenUsage'
+import {
+  appendSessionTokenUsage,
+  appendSessionActivities,
+  readSessionTokenUsage
+} from '../core/mdStore'
+import { genUniqueId } from '../id'
+import type { TokenUsageRecord } from '../types'
 
 const log = createLogger('Agent')
 
 function getScopeFromQuery(req: Request): string {
   const s = req.query.scope
   return typeof s === 'string' && s.trim() ? s.trim() : DEFAULT_SCOPE
+}
+
+/**
+ * 将 memoryGrowth 写回已持久化的 assistant 消息。
+ * appendMessage 在 addMemoryInteraction 之前调用，因此 memoryGrowth 需要事后补写。
+ */
+function persistMemoryGrowth(
+  scope: string,
+  sessionId: string,
+  messageId: string,
+  memoryGrowth: unknown
+): void {
+  try {
+    const data = scopeStore.getScopeData(scope)
+    const session = data.agentSessions.find((s) => s.id === sessionId)
+    if (!session) return
+    const msg = session.messages.find((m) => m.id === messageId)
+    if (!msg) return
+    ;(msg as unknown as Record<string, unknown>).memoryGrowth = memoryGrowth
+    scopeStore.saveScope(scope)
+  } catch (e) {
+    log.warn('Failed to persist memoryGrowth:', messageId, e)
+  }
 }
 
 /** 正在进行的 chat 流 AbortController 注册表，按 scope:sessionId 隔离 */
@@ -203,6 +232,91 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
     }
   })
 
+  // GET /agent/sessions/:id/stats - 会话级统计（token 总用量 + 该会话创建的记忆）
+  router.get('/agent/sessions/:id/stats', async (req: Request, res: Response) => {
+    try {
+      const id = ensureStringParam(req.params.id)
+      const scope = getScopeFromQuery(req)
+      if (!hasScopeAccess(req, scope)) {
+        return res.status(403).json({ error: 'scope access denied' })
+      }
+
+      // 1. Token 使用：从 session 级 token-usage.md 聚合
+      const scopeRoot = scopeStore.getScopeRootPath(scope)
+      const tokenRecords = readSessionTokenUsage(scopeRoot, id)
+      const tokenSummary = {
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+        totalTokens: 0,
+        rounds: tokenRecords.length,
+        byModel: {} as Record<
+          string,
+          { input: number; output: number; total: number; count: number }
+        >
+      }
+      for (const r of tokenRecords) {
+        tokenSummary.totalInputTokens += r.inputTokens
+        tokenSummary.totalOutputTokens += r.outputTokens
+        tokenSummary.totalTokens += r.totalTokens
+        const m = r.model || 'unknown'
+        if (!tokenSummary.byModel[m]) {
+          tokenSummary.byModel[m] = { input: 0, output: 0, total: 0, count: 0 }
+        }
+        tokenSummary.byModel[m].input += r.inputTokens
+        tokenSummary.byModel[m].output += r.outputTokens
+        tokenSummary.byModel[m].total += r.totalTokens
+        tokenSummary.byModel[m].count += 1
+      }
+
+      // 2. 记忆创建：从 messages 的 memoryGrowth 字段聚合
+      let memorySummary = {
+        totalCount: 0,
+        byType: {} as Record<string, number>,
+        memories: [] as Array<{
+          id: string
+          memory: string
+          memory_type?: string
+          messageId: string
+        }>
+      }
+      if (adapter?.getSession) {
+        const session = await adapter.getSession(scope, id)
+        if (session?.messages) {
+          for (const msg of session.messages) {
+            const mg = msg.memoryGrowth
+            if (mg && typeof mg === 'object' && mg.count > 0) {
+              memorySummary.totalCount += mg.count
+              for (const [type, cnt] of Object.entries(mg.byType)) {
+                memorySummary.byType[type] = (memorySummary.byType[type] ?? 0) + cnt
+              }
+              if (Array.isArray(mg.memories)) {
+                for (const mem of mg.memories) {
+                  memorySummary.memories.push({
+                    id: mem.id,
+                    memory: mem.memory,
+                    memory_type: mem.memory_type,
+                    messageId: mg.messageId
+                  })
+                }
+              }
+            }
+          }
+        }
+      }
+
+      res.json({
+        sessionId: id,
+        scope,
+        tokenUsage: tokenSummary,
+        memoryCreated: memorySummary
+      })
+    } catch (error) {
+      log.error('get session stats error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
   // GET /agent/sessions - 列出 scope 下会话
   router.get('/agent/sessions', async (req: Request, res: Response) => {
     try {
@@ -302,15 +416,6 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
       }
 
       await adapter.deleteSession(scope, id)
-
-      // 异步清除该 session 的记忆（group_id = scope:session:sessionId）
-      if (isMemoryEnabled()) {
-        const sessionGroupId = `${scope}:session:${id}`
-        deleteMemoriesByGroupId(sessionGroupId).catch((e) =>
-          log.warn('Failed to delete session memories:', sessionGroupId, e)
-        )
-      }
-
       res.status(204).send()
     } catch (error) {
       log.error('delete agent session error:', error)
@@ -446,6 +551,11 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         isMemoryEnabled() &&
         (trimmedContent.length >= 4 || (isFirstMessage && trimmedContent.length >= 1))
       const memoryQuery = trimmedContent.length >= 4 ? trimmedContent : '用户偏好与工作区概况'
+      let injectedMemoriesForClient: {
+        user: typeof import('@prizm/shared').MemoryItem[]
+        scope: typeof import('@prizm/shared').MemoryItem[]
+        session: typeof import('@prizm/shared').MemoryItem[]
+      } | null = null
 
       if (shouldInjectMemory) {
         try {
@@ -465,21 +575,26 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
           const sections: string[] = []
           if (userMem.length > 0) {
             sections.push(
-              '[User Memory]\n' + userMem.map((m) => `- ${truncateMem(m.memory)}`).join('\n')
+              '[用户画像与偏好]\n' + userMem.map((m) => `- ${truncateMem(m.memory)}`).join('\n')
             )
           }
           if (scopeMem.length > 0) {
             sections.push(
-              '[Scope Memory]\n' + scopeMem.map((m) => `- ${truncateMem(m.memory)}`).join('\n')
+              '[工作区记忆]\n' + scopeMem.map((m) => `- ${truncateMem(m.memory)}`).join('\n')
             )
           }
           if (sessionMem.length > 0) {
             sections.push(
-              '[Session Memory]\n' + sessionMem.map((m) => `- ${truncateMem(m.memory)}`).join('\n')
+              '[会话记忆]\n' + sessionMem.map((m) => `- ${truncateMem(m.memory)}`).join('\n')
             )
           }
 
           if (sections.length > 0) {
+            injectedMemoriesForClient = {
+              user: userMem,
+              scope: scopeMem,
+              session: sessionMem as typeof import('@prizm/shared').MemoryItem[]
+            }
             const memoryPrompt = sections.join('\n\n')
             const insertIdx =
               compressedThrough > 0 ? session.messages.filter((m) => m.role === 'system').length : 0
@@ -510,6 +625,16 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
       res.setHeader('Connection', 'keep-alive')
       res.setHeader('X-Accel-Buffering', 'no') // nginx 等代理不缓冲
       res.flushHeaders?.()
+
+      if (injectedMemoriesForClient) {
+        res.write(
+          `data: ${JSON.stringify({
+            type: 'memory_injected',
+            value: injectedMemoriesForClient
+          })}\n\n`
+        )
+        res.flush?.()
+      }
 
       // 客户端断开连接时也 abort
       res.on('close', () => {
@@ -555,6 +680,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         | undefined
       let usageSent = false
       let hasError = false
+      let chatCompletedAt = 0
       try {
         for await (const chunk of adapter.chat(scope, id, history, {
           model,
@@ -627,6 +753,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
           }
           if (chunk.done) {
             flushSegment()
+            chatCompletedAt = Date.now()
             const usedModel = typeof model === 'string' && model.trim() ? model.trim() : undefined
             const appendedMsg = await adapter.appendMessage(scope, id, {
               role: 'assistant',
@@ -651,6 +778,9 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
                   id,
                   appendedMsg.id
                 )
+                if (memoryGrowth) {
+                  persistMemoryGrowth(scope, id, appendedMsg.id, memoryGrowth)
+                }
               } catch (e) {
                 log.warn('Memory storage failed:', e)
               }
@@ -672,6 +802,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         // 被 abort 时：若已有部分内容，保存到 assistant 消息
         if (ac.signal.aborted && fullContent) {
           flushSegment()
+          chatCompletedAt = Date.now()
           const usedModel = typeof model === 'string' && model.trim() ? model.trim() : undefined
           const appendedMsg = await adapter.appendMessage(scope, id, {
             role: 'assistant',
@@ -695,6 +826,9 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
                 id,
                 appendedMsg.id
               )
+              if (memoryGrowth) {
+                persistMemoryGrowth(scope, id, appendedMsg.id, memoryGrowth)
+              }
             } catch (e) {
               log.warn('Memory storage failed:', e)
             }
@@ -731,6 +865,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
           }
         } else if (fullContent) {
           flushSegment()
+          chatCompletedAt = Date.now()
           const usedModel = typeof model === 'string' && model.trim() ? model.trim() : undefined
           const appendedMsg = await adapter.appendMessage(scope, id, {
             role: 'assistant',
@@ -754,6 +889,9 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
                 id,
                 appendedMsg.id
               )
+              if (memoryGrowth) {
+                persistMemoryGrowth(scope, id, appendedMsg.id, memoryGrowth)
+              }
             } catch (e) {
               log.warn('Memory storage failed:', e)
             }
@@ -779,6 +917,36 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         const usedModel = typeof model === 'string' && model.trim() ? model.trim() : undefined
         if (userId && lastUsage) {
           recordTokenUsage(userId, 'chat', lastUsage, usedModel)
+        }
+        if (chatCompletedAt && lastUsage) {
+          try {
+            const scopeRoot = scopeStore.getScopeRootPath(scope)
+            const record: TokenUsageRecord = {
+              id: genUniqueId(),
+              usageScope: 'chat',
+              timestamp: chatCompletedAt,
+              model: usedModel ?? '',
+              inputTokens: lastUsage.totalInputTokens ?? 0,
+              outputTokens: lastUsage.totalOutputTokens ?? 0,
+              totalTokens:
+                lastUsage.totalTokens ??
+                (lastUsage.totalInputTokens ?? 0) + (lastUsage.totalOutputTokens ?? 0)
+            }
+            appendSessionTokenUsage(scopeRoot, id, record)
+          } catch (e) {
+            log.warn('Failed to write session token usage:', id, e)
+          }
+          if (fullToolCalls.length > 0) {
+            try {
+              const activities = deriveScopeActivities(fullToolCalls, chatCompletedAt)
+              if (activities.length > 0) {
+                const scopeRoot = scopeStore.getScopeRootPath(scope)
+                appendSessionActivities(scopeRoot, id, activities)
+              }
+            } catch (e) {
+              log.warn('Failed to write session activities:', id, e)
+            }
+          }
         }
         if (!usageSent && lastUsage) {
           res.write(`data: ${JSON.stringify({ type: 'usage', value: lastUsage })}\n\n`)

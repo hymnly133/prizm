@@ -9,9 +9,9 @@ import type { ClientRecord } from '../types'
 import { createLogger } from '../logger'
 import { getConfig } from '../config'
 import { ONLINE_SCOPE } from '../core/ScopeStore'
+import { getClientsPath, getDataDir } from '../core/PathProviderCore'
 
 const log = createLogger('ClientRegistry')
-const CLIENTS_FILE = 'clients.json'
 
 function hashApiKey(apiKey: string): string {
   return crypto.createHash('sha256').update(apiKey, 'utf8').digest('hex')
@@ -40,8 +40,8 @@ export class ClientRegistry {
   private clients = new Map<string, ClientRecord>()
 
   constructor(dataDir?: string) {
-    const dir = dataDir ?? getConfig().dataDir
-    this.dataPath = path.join(dir, CLIENTS_FILE)
+    const dir = dataDir ? path.resolve(dataDir) : getDataDir()
+    this.dataPath = dataDir ? path.join(dir, 'clients.json') : getClientsPath()
     this.ensureDataDir(dir)
     this.load()
   }

@@ -10,6 +10,7 @@ import compression from 'compression'
 import cors from 'cors'
 import type { Server } from 'http'
 import { createLogger } from './logger'
+import { getSearchIndexDbPath } from './core/PathProviderCore'
 
 const log = createLogger('Server')
 import type { PrizmAdapters } from './adapters/interfaces'
@@ -34,6 +35,7 @@ import { createMemoryRoutes } from './routes/memory'
 import { mountMcpRoutes } from './mcp'
 import { WebSocketServer } from './websocket/WebSocketServer'
 import { initEverMemService } from './llm/EverMemService'
+import { migrateAppLevelStorage } from './core/migrate-scope-v2'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -127,7 +129,7 @@ export function createPrizmServer(
 
   // 挂载路由
   const router = express.Router()
-  const searchIndexDbPath = path.join(dataDir, 'evermemos.db')
+  const searchIndexDbPath = getSearchIndexDbPath(dataDir)
   const searchIndexStore = new SQLiteAdapter(searchIndexDbPath)
   const searchIndex = new SearchIndexService(searchIndexStore)
   searchIndex.setAdapters(adapters)
@@ -192,6 +194,11 @@ export function createPrizmServer(
           server = app.listen(port, host, async () => {
             isRunning = true
 
+            try {
+              migrateAppLevelStorage(dataDir)
+            } catch (e) {
+              log.warn('App-level migration failed:', e)
+            }
             try {
               await initEverMemService()
             } catch (e) {

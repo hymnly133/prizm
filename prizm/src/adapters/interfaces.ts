@@ -5,7 +5,6 @@
 
 import type {
   StickyNote,
-  StickyNoteGroup,
   CreateNotePayload,
   UpdateNotePayload,
   TodoList,
@@ -54,30 +53,6 @@ export interface IStickyNotesAdapter {
    * @param scope 数据 scope
    */
   deleteNote?(scope: string, id: string): Promise<void>
-
-  /**
-   * 获取所有分组
-   * @param scope 数据 scope
-   */
-  getAllGroups?(scope: string): Promise<StickyNoteGroup[]>
-
-  /**
-   * 创建分组
-   * @param scope 数据 scope
-   */
-  createGroup?(scope: string, name: string): Promise<StickyNoteGroup>
-
-  /**
-   * 更新分组
-   * @param scope 数据 scope
-   */
-  updateGroup?(scope: string, id: string, name: string): Promise<StickyNoteGroup>
-
-  /**
-   * 删除分组
-   * @param scope 数据 scope
-   */
-  deleteGroup?(scope: string, id: string): Promise<void>
 }
 
 // ============ Notification 适配器 ============
@@ -221,6 +196,8 @@ export interface LLMStreamChunk {
   usage?: MessageUsage
   /** 工具调用，流结束时若有则一并返回（LobeChat 模式） */
   toolCalls?: Array<{ id: string; name: string; arguments: string }>
+  /** LLM 流式生成阶段，一旦检测到工具名即发出，让 UI 提前显示 preparing 卡片 */
+  toolCallPreparing?: { id: string; name: string }
   /** 单次工具执行完成，用于 SSE 下发客户端展示 */
   toolCall?: ToolCallRecord
   /** 工具结果分块（大 result 时先流式下发，再发完整 toolCall） */
