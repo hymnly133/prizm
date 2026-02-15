@@ -6,7 +6,6 @@
 import type {
   NotificationPayload,
   StickyNote,
-  StickyNoteGroup,
   ClipboardItem,
   Document,
   PomodoroSession,
@@ -19,9 +18,6 @@ export const EVENT_TYPES = [
   'note:created',
   'note:updated',
   'note:deleted',
-  'group:created',
-  'group:updated',
-  'group:deleted',
   'todo_list:created',
   'todo_list:updated',
   'todo_list:deleted',
@@ -46,9 +42,6 @@ export const EVENT_TYPES_OBJ = {
   NOTE_CREATED: 'note:created',
   NOTE_UPDATED: 'note:updated',
   NOTE_DELETED: 'note:deleted',
-  GROUP_CREATED: 'group:created',
-  GROUP_UPDATED: 'group:updated',
-  GROUP_DELETED: 'group:deleted',
   TODO_LIST_CREATED: 'todo_list:created',
   TODO_LIST_UPDATED: 'todo_list:updated',
   TODO_LIST_DELETED: 'todo_list:deleted',
@@ -139,9 +132,6 @@ export interface EventPayloadMap {
   'note:created': Partial<StickyNote> & EventPayloadBase
   'note:updated': Partial<StickyNote> & EventPayloadBase
   'note:deleted': { id: string } & EventPayloadBase
-  'group:created': Partial<StickyNoteGroup> & EventPayloadBase
-  'group:updated': Partial<StickyNoteGroup> & EventPayloadBase
-  'group:deleted': { id: string } & EventPayloadBase
   'todo_list:created': import('./domain').TodoList & { listId: string } & EventPayloadBase
   'todo_list:updated': TodoListUpdatePayload
   'todo_list:deleted': TodoListDeletedPayload

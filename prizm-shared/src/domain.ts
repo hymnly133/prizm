@@ -12,28 +12,23 @@ export interface StickyNote {
   id: string
   content: string
   imageUrls?: string[]
+  tags?: string[]
   createdAt: number
   updatedAt: number
-  groupId?: string
   fileRefs?: StickyNoteFileRef[]
-}
-
-export interface StickyNoteGroup {
-  id: string
-  name: string
 }
 
 export interface CreateNotePayload {
   content?: string
   imageUrls?: string[]
-  groupId?: string
+  tags?: string[]
   fileRefs?: StickyNoteFileRef[]
 }
 
 export interface UpdateNotePayload {
   content?: string
   imageUrls?: string[]
-  groupId?: string
+  tags?: string[]
   fileRefs?: StickyNoteFileRef[]
 }
 
@@ -307,6 +302,35 @@ export interface MemoryItem {
   group_id?: string | null
   /** 记忆类型（列表接口返回） */
   memory_type?: string
+}
+
+// ============ Dedup Log ============
+
+/** 去重日志条目（API 返回结构） */
+export interface DedupLogEntry {
+  id: string
+  /** 被保留的记忆 ID */
+  kept_memory_id: string
+  /** 被保留的记忆内容 */
+  kept_memory_content: string | null
+  /** 被抑制（去重）的新记忆内容 */
+  new_memory_content: string
+  /** 被抑制的新记忆类型 */
+  new_memory_type: string
+  /** 被抑制的新记忆元数据 JSON */
+  new_memory_metadata: string | null
+  /** 向量距离 */
+  vector_distance: number | null
+  /** LLM 判断理由 */
+  llm_reasoning: string | null
+  /** 用户标识 */
+  user_id: string | null
+  /** 分区 */
+  group_id: string | null
+  /** 创建时间 ISO */
+  created_at: string
+  /** 是否已回退：0=否 1=是 */
+  rolled_back: number
 }
 
 // ============ Token Usage ============
