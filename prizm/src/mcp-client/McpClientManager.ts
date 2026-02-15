@@ -190,13 +190,13 @@ export class McpClientManager {
 
 		try {
 			const result = await entry.client.callTool({ name: toolName, arguments: args });
-			const content =
-				result.content?.map((c) =>
-					c.type === "text" ? { type: "text" as const, text: c.text } : { type: "text" as const, text: JSON.stringify(c) }
-				) ?? [];
+			const rawContent = Array.isArray(result.content) ? result.content : [];
+			const content = rawContent.map((c: { type: string; text?: string }) =>
+				c.type === "text" ? { type: "text" as const, text: c.text ?? "" } : { type: "text" as const, text: JSON.stringify(c) }
+			);
 			return {
 				content,
-				isError: result.isError,
+				isError: result.isError as boolean | undefined,
 			};
 		} catch (err) {
 			log.error("Tool call failed:", serverId, toolName, err);

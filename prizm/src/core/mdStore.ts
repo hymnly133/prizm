@@ -502,7 +502,7 @@ function parseAgentMessage(raw: unknown): AgentMessage | null {
     ...(r.usage && typeof r.usage === 'object' ? { usage: r.usage as AgentMessage['usage'] } : {}),
     ...(typeof r.reasoning === 'string' ? { reasoning: r.reasoning } : {}),
     ...(r.memoryGrowth && typeof r.memoryGrowth === 'object'
-      ? { memoryGrowth: r.memoryGrowth }
+      ? { memoryGrowth: r.memoryGrowth as AgentMessage['memoryGrowth'] }
       : {})
   }
   if (parts) {
@@ -714,7 +714,7 @@ export function readSessionActivities(
 export function appendSessionActivities(
   scopeRoot: string,
   sessionId: string,
-  activities: Array<Record<string, unknown>>
+  activities: Array<Record<string, unknown> | { [key: string]: unknown }>
 ): void {
   const existing = readSessionActivities(scopeRoot, sessionId)
   const merged = [...existing, ...activities]

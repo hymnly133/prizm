@@ -16,6 +16,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 import type { PrizmAdapters } from '../adapters/interfaces'
+import type { TodoItemStatus } from '../types'
 import type { WebSocketServer } from '../websocket/WebSocketServer'
 import { EVENT_TYPES } from '../websocket/types'
 import { ONLINE_SCOPE } from '../core/ScopeStore'
@@ -394,7 +395,7 @@ function createMcpServerWithTools(
     } else {
       if (updateItem !== undefined) {
         const updated = await adapter.updateTodoItem(scope, updateItem.id, {
-          status: updateItem.status,
+          status: updateItem.status as TodoItemStatus | undefined,
           title: updateItem.title,
           description: updateItem.description
         })
@@ -403,7 +404,7 @@ function createMcpServerWithTools(
       if (updateItems !== undefined && updateItems.length > 0) {
         for (const u of updateItems) {
           const updated = await adapter.updateTodoItem(scope, u.id, {
-            status: u.status,
+            status: u.status as TodoItemStatus | undefined,
             title: u.title,
             description: u.description
           })

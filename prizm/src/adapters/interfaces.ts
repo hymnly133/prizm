@@ -113,7 +113,11 @@ export interface ITodoListAdapter {
   deleteTodoItem(scope: string, itemId: string): Promise<TodoList | null>
 
   /** 全量替换指定 list 的 items */
-  replaceTodoItems(scope: string, listId: string, items: TodoItem[]): Promise<TodoList>
+  replaceTodoItems(
+    scope: string,
+    listId: string,
+    items: Array<Pick<TodoItem, 'id' | 'title' | 'description' | 'status'>>
+  ): Promise<TodoList>
 }
 
 // ============ 番茄钟适配器 ============
