@@ -13,16 +13,19 @@
   ],
   "scripts": {
     "install:all": "yarn install",
-    "build": "yarn workspace @prizm/server build && yarn workspace @prizm/electron-client build",
-    "build:server": "yarn workspace @prizm/server build",
+    "postinstall": "patch-package",
+    "build:evermemos": "yarn workspace @prizm/evermemos build",
+    "build": "yarn build:evermemos && yarn workspace @prizm/server build && yarn workspace @prizm/electron-client build",
+    "build:server": "yarn build:evermemos && yarn workspace @prizm/server build",
     "build:electron": "yarn workspace @prizm/electron-client build",
-    "dev:server": "yarn workspace @prizm/server dev",
-    "dev:electron": "yarn workspace @prizm/electron-client dev",
+    "dev:server": "yarn build:evermemos && yarn workspace @prizm/server dev",
+    "dev:electron": "yarn build:evermemos && yarn workspace @prizm/electron-client dev",
     "clean": "yarn workspace @prizm/server clean",
     "start": "yarn workspace @prizm/server start",
     "test": "yarn workspace @prizm/server test"
   },
   "devDependencies": {
+    "patch-package": "^8.0.1",
     "typescript": "^5.9.3"
   },
   "packageManager": "yarn@4.5.0",

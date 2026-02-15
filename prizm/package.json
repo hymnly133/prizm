@@ -21,7 +21,8 @@
     "test:example": "node dist/example.js",
     "test:scope": "node scripts/scope-test.mjs",
     "test:scope:client": "node scripts/scope-test-client.mjs",
-    "mcp:stdio": "node dist/mcp/stdio-bridge.js"
+    "mcp:stdio": "node dist/mcp/stdio-bridge.js",
+    "migrate:scope-v2": "node dist/core/migrate-scope-v2.js"
   },
   "keywords": [
     "prizm",
@@ -35,6 +36,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@prizm/evermemos": "workspace:*",
+    "better-sqlite3": "^12.6.2",
     "compression": "^1.8.1",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
