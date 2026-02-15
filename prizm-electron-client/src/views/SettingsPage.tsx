@@ -1,6 +1,7 @@
 import { Button, Checkbox, Form, Input, Segmented } from '@lobehub/ui'
 import { McpSettings } from '../components/McpSettings'
 import { AgentGeneralSettings } from '../components/AgentGeneralSettings'
+import { ScopeManagement } from '../components/ScopeManagement'
 import { useClientSettings } from '../context/ClientSettingsContext'
 import { EVENT_TYPES, buildServerUrl, getEventLabel } from '@prizm/client-core'
 import type { EventType, PrizmConfig } from '@prizm/client-core'
@@ -256,6 +257,10 @@ export default function SettingsPage() {
           </Form.Item>
         </Form>
       </div>
+
+      {config?.api_key && (
+        <ScopeManagement http={manager?.getHttpClient() ?? null} onLog={addLog} />
+      )}
 
       {config?.api_key && (
         <AgentGeneralSettings http={manager?.getHttpClient() ?? null} onLog={addLog} />

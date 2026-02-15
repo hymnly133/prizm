@@ -12,6 +12,7 @@ import type {
   MessagePart,
   MessagePartTool
 } from '@prizm/client-core'
+import type { MemoryItem } from '@prizm/shared'
 
 function tmpId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -31,6 +32,13 @@ export function useAgent(scope: string) {
 
   /** 乐观更新消息：发送时的 [userMsg, assistantMsg]，流式过程中原地更新 assistant */
   const [optimisticMessages, setOptimisticMessages] = useState<AgentMessage[]>([])
+
+  /** 本轮 chat 注入的记忆（SSE memory_injected 事件），供可视化 */
+  const [lastInjectedMemories, setLastInjectedMemories] = useState<{
+    user: MemoryItem[]
+    scope: MemoryItem[]
+    session: MemoryItem[]
+  } | null>(null)
 
   /** 当前流式请求的 AbortController */
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -179,6 +187,18 @@ export function useAgent(scope: string) {
           signal: ac.signal,
           model: selectedModel,
           onChunk: (chunk) => {
+            if (
+              chunk.type === 'memory_injected' &&
+              chunk.value &&
+              typeof chunk.value === 'object' &&
+              'user' in chunk.value &&
+              'scope' in chunk.value &&
+              'session' in chunk.value
+            ) {
+              setLastInjectedMemories(
+                chunk.value as { user: MemoryItem[]; scope: MemoryItem[]; session: MemoryItem[] }
+              )
+            }
             if (chunk.type === 'command_result' && typeof chunk.value === 'string') {
               commandResultContent = chunk.value
               setOptimisticMessages((prev) => {
@@ -460,6 +480,7 @@ export function useAgent(scope: string) {
     setCurrentSession,
     optimisticMessages,
     selectedModel,
-    setSelectedModel
+    setSelectedModel,
+    lastInjectedMemories
   }
 }

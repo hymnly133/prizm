@@ -39,7 +39,6 @@ export const store: CreateStore = (publicState) => (set, get) => ({
 
     const result = get().onSend?.({
       clearContent: () => {
-        editor?.cleanDocument()
         get().setMarkdownContent('')
       },
       editor: editor ?? null,

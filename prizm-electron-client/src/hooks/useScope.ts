@@ -49,6 +49,12 @@ export function useScope() {
     if (manager) void refreshScopes()
   }, [manager, refreshScopes])
 
+  useEffect(() => {
+    const handler = () => void refreshScopes()
+    window.addEventListener('prizm-scopes-changed', handler)
+    return () => window.removeEventListener('prizm-scopes-changed', handler)
+  }, [refreshScopes])
+
   return {
     currentScope,
     scopes,

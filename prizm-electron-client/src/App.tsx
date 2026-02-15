@@ -5,8 +5,10 @@ import { ClientSettingsProvider } from './context/ClientSettingsContext'
 import { LogsProvider, useLogsContext } from './context/LogsContext'
 import { PrizmProvider, usePrizmContext, SyncEventProvider } from './context/PrizmContext'
 import { WorkNavigationProvider } from './context/WorkNavigationContext'
+import { ChatWithFileProvider } from './context/ChatWithFileContext'
 import { setLastSyncEvent } from './events/syncEventStore'
 import { AppHeader } from './components/layout'
+import { QuickActionHandler } from './components/QuickActionHandler'
 import AgentPage from './views/AgentPage'
 import SettingsPage from './views/SettingsPage'
 import TestPage from './views/TestPage'
@@ -27,6 +29,7 @@ function AppContent() {
     'work'
   )
   const navigateToWork = useCallback(() => setActivePage('work'), [])
+  const navigateToAgent = useCallback(() => setActivePage('agent'), [])
 
   useEffect(() => {
     addLog('Prizm Electron 通知客户端启动', 'info')
@@ -116,21 +119,24 @@ function AppContent() {
         }
       />
       <WorkNavigationProvider onNavigateToWork={navigateToWork}>
-        <div className="app-main">
-          {activePage === 'work' && <WorkPage />}
-          {activePage === 'agent' && (
-            <SyncEventProvider>
-              <AgentPage />
-            </SyncEventProvider>
-          )}
-          {activePage === 'user' && <UserPage />}
-          {activePage === 'settings' && <SettingsPage />}
-          {activePage === 'test' && (
-            <SyncEventProvider>
-              <TestPage />
-            </SyncEventProvider>
-          )}
-        </div>
+        <ChatWithFileProvider onNavigateToAgent={navigateToAgent}>
+          <QuickActionHandler setActivePage={setActivePage} />
+          <div className="app-main">
+            {activePage === 'work' && <WorkPage />}
+            {activePage === 'agent' && (
+              <SyncEventProvider>
+                <AgentPage />
+              </SyncEventProvider>
+            )}
+            {activePage === 'user' && <UserPage />}
+            {activePage === 'settings' && <SettingsPage />}
+            {activePage === 'test' && (
+              <SyncEventProvider>
+                <TestPage />
+              </SyncEventProvider>
+            )}
+          </div>
+        </ChatWithFileProvider>
       </WorkNavigationProvider>
     </div>
   )

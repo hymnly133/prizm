@@ -4,7 +4,7 @@
  * 支持停止生成、错误提示、会话重命名
  * 输入框使用 @lobehub/editor ChatInput，悬浮面板样式
  */
-import { ActionIcon, Button, Empty, Flexbox, List, Markdown } from '@lobehub/ui'
+import { ActionIcon, Empty, Flexbox, List, Markdown } from '@lobehub/ui'
 import { ChatActionsBar as BaseChatActionsBar, ChatList, type ChatMessage } from '@lobehub/ui/chat'
 
 /** 过滤 createAt/updateAt 等非 DOM 属性，避免 React 警告 */
@@ -15,18 +15,44 @@ function ChatActionsBar(props: React.ComponentProps<typeof BaseChatActionsBar>) 
   }
   return <BaseChatActionsBar {...rest} />
 }
-import { Pencil, Plus, Trash2 } from 'lucide-react'
-import { useRef, useState, useMemo, useCallback } from 'react'
+import { LayoutDashboard, Pencil, Plus, Trash2 } from 'lucide-react'
+import { useRef, useState, useMemo, useCallback, useEffect } from 'react'
 import { usePrizmContext } from '../context/PrizmContext'
+import { useChatWithFile } from '../context/ChatWithFileContext'
 import { useAgent } from '../hooks/useAgent'
 import { useAgentScopeData } from '../hooks/useAgentScopeData'
 import { useScope } from '../hooks/useScope'
 import { MessageUsage } from '../components/MessageUsage'
 import { AgentRightSidebar } from '../components/AgentRightSidebar'
 import { ResizableSidebar } from '../components/layout'
-import { ChatInputProvider, DesktopChatInput, type ActionKeys } from '../features/ChatInput'
+import {
+  ChatInputProvider,
+  DesktopChatInput,
+  PendingChatPayloadApplicator,
+  useChatInputStore,
+  type ActionKeys
+} from '../features/ChatInput'
 import type { AgentMessage, MessagePart, MessagePartTool } from '@prizm/client-core'
 import { ToolCallCard, MemoryGrowthTag } from '../components/agent'
+import { AgentOverviewPanel } from '../components/agent/AgentOverviewPanel'
+
+/** Module-level cache for "new conversation" draft content, survives page switches */
+let _newConversationDraft = ''
+
+/** Restores cached draft content on mount. Must be a child of ChatInputProvider. */
+function DraftCacheRestorer() {
+  const setMarkdownContent = useChatInputStore((s) => s.setMarkdownContent)
+  const restoredRef = useRef(false)
+
+  useEffect(() => {
+    if (!restoredRef.current && _newConversationDraft) {
+      setMarkdownContent(_newConversationDraft)
+      restoredRef.current = true
+    }
+  }, [setMarkdownContent])
+
+  return null
+}
 
 /** 从消息得到按顺序的段落：有 parts 用 parts，否则用 content + toolCalls 推导（一段文本 + 工具在末尾） */
 function getMessageParts(m: AgentMessage): MessagePart[] {
@@ -153,6 +179,7 @@ function AssistantMessageExtra(props: ChatMessage) {
 
 export default function AgentPage() {
   const { currentScope } = useScope()
+  const { pendingPayload } = useChatWithFile()
   const { scopeItems, slashCommands } = useAgentScopeData(currentScope)
   const {
     sessions,
@@ -166,6 +193,7 @@ export default function AgentPage() {
     updateSession,
     sendMessage,
     stopGeneration,
+    setCurrentSession,
     optimisticMessages,
     selectedModel,
     setSelectedModel
@@ -173,7 +201,36 @@ export default function AgentPage() {
 
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
+  const [overviewMode, setOverviewMode] = useState(!currentSession)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const pendingHandledRef = useRef<string | null>(null)
+
+  /** Sync draft content to module-level cache for cross-page persistence */
+  const handleMarkdownContentChange = useCallback(
+    (content: string) => {
+      if (!currentSession || overviewMode) {
+        _newConversationDraft = content
+      }
+    },
+    [currentSession, overviewMode]
+  )
+
+  useEffect(() => {
+    if (!pendingPayload || loading) return
+    const filesKey = pendingPayload.files?.map((f) => `${f.kind}:${f.id}`).join(',') ?? ''
+    const key = `${filesKey}|${pendingPayload.text ?? ''}|${pendingPayload.sessionId ?? 'new'}`
+    if (pendingHandledRef.current === key) return
+    pendingHandledRef.current = key
+    setOverviewMode(false)
+    if (pendingPayload.sessionId) {
+      loadSession(pendingPayload.sessionId)
+    }
+    // No need to create session here - lazy creation on send handles it
+  }, [pendingPayload, loading, loadSession])
+
+  useEffect(() => {
+    if (!pendingPayload) pendingHandledRef.current = null
+  }, [pendingPayload])
 
   const handleSend = useCallback(
     async ({
@@ -187,22 +244,25 @@ export default function AgentPage() {
       if (!content || sending) return
 
       let session = currentSession
-      if (!session) {
+      if (!session || overviewMode) {
+        setOverviewMode(false)
         session = await createSession()
         if (!session) return
       }
 
-      clearContent() // 发送时立即清空输入框
+      _newConversationDraft = ''
+      clearContent()
       await sendMessage(content, session)
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     },
-    [currentSession, sending, createSession, sendMessage]
+    [currentSession, sending, createSession, sendMessage, overviewMode]
   )
 
-  /** 清空：创建新会话 */
-  const handleClear = useCallback(async () => {
-    await createSession()
-  }, [createSession])
+  /** 清空：切换到新对话准备态（不创建服务端会话） */
+  const handleClear = useCallback(() => {
+    setOverviewMode(false)
+    setCurrentSession(null)
+  }, [setCurrentSession])
 
   const leftActions: ActionKeys[] = ['fileUpload', 'clear']
 
@@ -241,6 +301,8 @@ export default function AgentPage() {
 
   const sessionListItems = sessions.map((s) => ({
     key: s.id,
+    className: editingSessionId === s.id ? 'agent-session-editing' : undefined,
+    classNames: { actions: 'agent-session-actions' },
     title:
       editingSessionId === s.id ? (
         <input
@@ -265,7 +327,6 @@ export default function AgentPage() {
           )}
         </div>
       ),
-    active: currentSession?.id === s.id,
     actions: (
       <>
         <ActionIcon
@@ -289,8 +350,11 @@ export default function AgentPage() {
         />
       </>
     ),
-    showAction: currentSession?.id === s.id,
-    onClick: () => loadSession(s.id)
+    showAction: true,
+    onClick: () => {
+      setOverviewMode(false)
+      loadSession(s.id)
+    }
   }))
 
   return (
@@ -299,15 +363,40 @@ export default function AgentPage() {
         <div className="agent-sidebar">
           <div className="agent-sidebar-header">
             <span className="agent-sidebar-title">会话</span>
-            <ActionIcon icon={Plus} title="新建会话" onClick={createSession} disabled={loading} />
+            <ActionIcon
+              icon={Plus}
+              title="新建会话"
+              onClick={() => {
+                setOverviewMode(false)
+                setCurrentSession(null)
+              }}
+              disabled={loading}
+            />
           </div>
           <div className="agent-sessions-list">
+            <div
+              className={`agent-overview-tab${overviewMode ? ' active' : ''}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => {
+                setOverviewMode(true)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') setOverviewMode(true)
+              }}
+            >
+              <LayoutDashboard size={14} />
+              <span>总览</span>
+            </div>
             {loading && sessions.length === 0 ? (
               <div className="agent-sessions-loading">加载中...</div>
             ) : sessions.length === 0 ? (
               <Empty title="暂无会话" description="点击 + 新建会话" />
             ) : (
-              <List activeKey={currentSession?.id} items={sessionListItems} />
+              <List
+                activeKey={overviewMode ? undefined : currentSession?.id}
+                items={sessionListItems}
+              />
             )}
           </div>
         </div>
@@ -315,124 +404,117 @@ export default function AgentPage() {
 
       <div className="agent-content">
         <div className="agent-main">
-          {currentSession ? (
-            <>
-              <div className="agent-messages">
-                <ChatList
-                  data={chatData}
-                  variant="bubble"
-                  showAvatar
-                  showTitle
-                  loadingId={loadingId}
-                  renderActions={{
-                    default: ChatActionsBar
-                  }}
-                  renderMessages={{
-                    default: ({ editableContent }) => editableContent,
-                    assistant: (props) => {
-                      const extra = props.extra as { parts?: MessagePart[] } | undefined
-                      const parts = extra?.parts
-                      if (Array.isArray(parts) && parts.length > 0) {
-                        return (
-                          <div className="assistant-message-by-parts">
-                            {parts.map((p, i) =>
-                              p.type === 'text' ? (
-                                <div key={i} className="assistant-part-text">
-                                  <Markdown>{p.content}</Markdown>
-                                </div>
-                              ) : (
-                                <ToolCallCard
-                                  key={p.id}
-                                  tc={{
-                                    id: p.id,
-                                    name: p.name,
-                                    arguments: p.arguments,
-                                    result: p.result,
-                                    isError: p.isError,
-                                    status: (p as MessagePartTool).status
-                                  }}
-                                />
-                              )
-                            )}
-                          </div>
-                        )
-                      }
+          {overviewMode ? (
+            <AgentOverviewPanel selectedModel={selectedModel} onModelChange={setSelectedModel} />
+          ) : currentSession ? (
+            <div className="agent-messages">
+              <ChatList
+                data={chatData}
+                variant="bubble"
+                showAvatar
+                showTitle
+                loadingId={loadingId}
+                renderActions={{
+                  default: ChatActionsBar
+                }}
+                renderMessages={{
+                  default: ({ editableContent }) => editableContent,
+                  assistant: (props) => {
+                    const extra = props.extra as { parts?: MessagePart[] } | undefined
+                    const parts = extra?.parts
+                    if (Array.isArray(parts) && parts.length > 0) {
                       return (
-                        (props as { editableContent?: React.ReactNode }).editableContent ?? null
+                        <div className="assistant-message-by-parts">
+                          {parts.map((p, i) =>
+                            p.type === 'text' ? (
+                              <div key={i} className="assistant-part-text">
+                                <Markdown>{p.content}</Markdown>
+                              </div>
+                            ) : (
+                              <ToolCallCard
+                                key={p.id}
+                                tc={{
+                                  id: p.id,
+                                  name: p.name,
+                                  arguments: p.arguments,
+                                  result: p.result,
+                                  isError: p.isError,
+                                  status: (p as MessagePartTool).status
+                                }}
+                              />
+                            )
+                          )}
+                        </div>
                       )
                     }
-                  }}
-                  renderMessagesExtra={{
-                    assistant: AssistantMessageExtra
-                  }}
-                />
-                <div ref={messagesEndRef} />
-              </div>
-
-              {error && <div className="agent-error-banner">{error}</div>}
-
-              <p className="agent-input-hint">
-                输入 <code>@</code> 引用便签/文档/待办（如 @note:id），输入 <code>/</code>{' '}
-                执行命令（如 /notes、/todos、/help）
-              </p>
-              <div className="agent-input-wrap agent-input-floating">
-                <ChatInputProvider
-                  leftActions={leftActions}
-                  rightActions={[]}
-                  scopeItems={scopeItems}
-                  scopeSlashCommands={slashCommands}
-                  sendButtonProps={{
-                    disabled: sending,
-                    generating: sending,
-                    onStop: ({ editor }) => {
-                      stopGeneration()
-                    },
-                    shape: 'round'
-                  }}
-                  onSend={handleSend}
-                  allowExpand
-                >
-                  <DesktopChatInput
-                    onClear={handleClear}
-                    inputContainerProps={{
-                      minHeight: 88,
-                      style: {
-                        borderRadius: 20,
-                        boxShadow: '0 12px 32px rgba(0,0,0,.04)'
-                      }
-                    }}
-                  />
-                </ChatInputProvider>
-              </div>
-            </>
+                    return (props as { editableContent?: React.ReactNode }).editableContent ?? null
+                  }
+                }}
+                renderMessagesExtra={{
+                  assistant: AssistantMessageExtra
+                }}
+              />
+              <div ref={messagesEndRef} />
+            </div>
           ) : (
             <div className="agent-empty">
               <Empty
-                title="选择或创建会话"
-                description={loading ? '加载中...' : '点击左侧 + 新建会话开始对话'}
-                action={
-                  !loading && sessions.length === 0 ? (
-                    <Button type="primary" onClick={createSession}>
-                      新建会话
-                    </Button>
-                  ) : undefined
-                }
+                title="新对话"
+                description={loading ? '加载中...' : '在下方输入开始对话，会话将自动创建'}
               />
             </div>
           )}
         </div>
+
+        {error && <div className="agent-error-banner">{error}</div>}
+
+        <div className="agent-input-wrap agent-input-floating">
+          <ChatInputProvider
+            leftActions={leftActions}
+            rightActions={[]}
+            scopeItems={scopeItems}
+            scopeSlashCommands={slashCommands}
+            sendButtonProps={{
+              disabled: sending,
+              generating: sending,
+              onStop: () => {
+                stopGeneration()
+              },
+              shape: 'round'
+            }}
+            onSend={handleSend}
+            onMarkdownContentChange={handleMarkdownContentChange}
+            allowExpand
+          >
+            <DraftCacheRestorer />
+            <PendingChatPayloadApplicator />
+            <DesktopChatInput
+              onClear={handleClear}
+              inputContainerProps={{
+                minHeight: 88,
+                style: {
+                  borderRadius: 20,
+                  boxShadow: '0 12px 32px rgba(0,0,0,.04)'
+                }
+              }}
+            />
+          </ChatInputProvider>
+        </div>
       </div>
 
-      <ResizableSidebar side="right" storageKey="agent-right" defaultWidth={280}>
-        <AgentRightSidebar
-          sending={sending}
-          error={error}
-          currentSession={currentSession}
-          optimisticMessages={optimisticMessages}
-          selectedModel={selectedModel}
-          onModelChange={setSelectedModel}
-        />
-      </ResizableSidebar>
+      {!overviewMode && (
+        <ResizableSidebar side="right" storageKey="agent-right" defaultWidth={280}>
+          <AgentRightSidebar
+            sending={sending}
+            error={error}
+            currentSession={currentSession}
+            optimisticMessages={optimisticMessages}
+            selectedModel={selectedModel}
+            onModelChange={setSelectedModel}
+            overviewMode={false}
+          />
+        </ResizableSidebar>
+      )}
     </section>
   )
 }

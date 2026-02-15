@@ -1,6 +1,10 @@
-export type { ActionKey, ActionKeys } from "./ActionBar/config";
-export { ChatInputProvider } from "./ChatInputProvider";
-export { default as DesktopChatInput } from "./Desktop";
-export type { ChatInputEditor } from "./hooks/useChatInputEditor";
-export { useChatInputEditor } from "./hooks/useChatInputEditor";
-export type { SendButtonHandler } from "./store/initialState";
+export type { ActionKey, ActionKeys } from './ActionBar/config'
+export { ChatInputProvider } from './ChatInputProvider'
+export { default as DesktopChatInput } from './Desktop'
+export { PendingChatFileApplicator } from './PendingChatFileApplicator'
+export { PendingChatTextApplicator } from './PendingChatTextApplicator'
+export { PendingChatPayloadApplicator } from './PendingChatPayloadApplicator'
+export type { ChatInputEditor } from './hooks/useChatInputEditor'
+export { useChatInputEditor } from './hooks/useChatInputEditor'
+export type { SendButtonHandler } from './store/initialState'
+export { useChatInputStore } from './store'

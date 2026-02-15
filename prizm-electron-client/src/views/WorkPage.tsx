@@ -1,7 +1,7 @@
 /**
  * WorkPage - 工作页：中间大卡片展示便签/任务/文档，现代交互
  */
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { ActionIcon, Button, Checkbox, Empty, Flexbox, Modal, Skeleton, toast } from '@lobehub/ui'
 import { App } from 'antd'
@@ -9,6 +9,7 @@ import ScopeSidebar from '../components/ui/ScopeSidebar'
 import SearchSection from '../components/SearchSection'
 import FileDetailView from '../components/FileDetailView'
 import DataCard from '../components/DataCard'
+import { CardHoverOverlay, type HoveredCardState } from '../components/DataCardHoverMenu'
 import { useScope } from '../hooks/useScope'
 import { useFileList } from '../hooks/useFileList'
 import { usePrizmContext } from '../context/PrizmContext'
@@ -41,17 +42,43 @@ export default function WorkPage() {
     kind: FileKind
     id: string
   } | null>(null)
+  const [hoveredCard, setHoveredCard] = useState<HoveredCardState | null>(null)
+  const hoverHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearHoverHideTimeout = useCallback(() => {
+    if (hoverHideTimeoutRef.current) {
+      clearTimeout(hoverHideTimeoutRef.current)
+      hoverHideTimeoutRef.current = null
+    }
+  }, [])
+
+  const scheduleHoverHide = useCallback(() => {
+    clearHoverHideTimeout()
+    hoverHideTimeoutRef.current = setTimeout(() => setHoveredCard(null), 200)
+  }, [clearHoverHideTimeout])
+
+  useEffect(() => {
+    return () => clearHoverHideTimeout()
+  }, [clearHoverHideTimeout])
 
   useEffect(() => {
     setSelectedFile(null)
   }, [currentScope])
 
   useEffect(() => {
-    if (pendingWorkFile) {
+    if (!pendingWorkFile) return
+    const { kind, id } = pendingWorkFile
+    const exists = fileList.some((f) => f.kind === kind && f.id === id)
+    if (exists) {
       setSelectedFile(pendingWorkFile)
       consumePendingWorkFile()
+    } else {
+      refreshFileList(currentScope, { silent: true }).then(() => {
+        setSelectedFile(pendingWorkFile)
+        consumePendingWorkFile()
+      })
     }
-  }, [pendingWorkFile, consumePendingWorkFile])
+  }, [pendingWorkFile, consumePendingWorkFile, fileList, currentScope, refreshFileList])
 
   const filteredFileList = useMemo(() => {
     return fileList.filter((f) => categoryFilter[f.kind])
@@ -316,29 +343,53 @@ export default function WorkPage() {
             />
           </div>
         ) : (
-          <div className="work-page__cards-grid work-page__cards-grid--variable">
-            <AnimatePresence mode="popLayout" initial={false}>
-              {filteredFileList.map((file) => (
-                <motion.div
-                  key={`${file.kind}-${file.id}`}
-                  className={`work-page__card-item work-page__card-item--${file.kind}`}
-                  layout
-                  transition={layoutTransition}
-                  variants={cardVariants}
-                  initial="enter"
-                  animate="animate"
-                  exit="exit"
-                  style={{ position: 'relative' }}
-                >
-                  <DataCard
-                    file={file}
-                    onClick={() => onSelectFile({ kind: file.kind, id: file.id })}
-                    onDelete={() => handleDeleteFile(file)}
-                  />
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          </div>
+          <CardHoverOverlay
+            hoveredCard={hoveredCard}
+            onClose={() => setHoveredCard(null)}
+            onMenuEnter={clearHoverHideTimeout}
+          >
+            <div className="work-page__cards-grid work-page__cards-grid--variable">
+              <AnimatePresence mode="popLayout" initial={false}>
+                {filteredFileList.map((file) => (
+                  <motion.div
+                    key={`${file.kind}-${file.id}`}
+                    className={`work-page__card-item work-page__card-item--${file.kind}`}
+                    layout
+                    transition={layoutTransition}
+                    variants={cardVariants}
+                    initial="enter"
+                    animate="animate"
+                    exit="exit"
+                    style={{ position: 'relative' }}
+                    onMouseEnter={(e) => {
+                      clearHoverHideTimeout()
+                      const rect = e.currentTarget.getBoundingClientRect()
+                      setHoveredCard({
+                        file,
+                        scope: currentScope,
+                        anchorRect: rect,
+                        mouseY: e.clientY
+                      })
+                    }}
+                    onMouseMove={(e) => {
+                      setHoveredCard((prev) => {
+                        if (!prev || prev.file !== file) return prev
+                        if (Math.abs(prev.mouseY - e.clientY) < 4) return prev
+                        return { ...prev, mouseY: e.clientY }
+                      })
+                    }}
+                    onMouseLeave={scheduleHoverHide}
+                  >
+                    <DataCard
+                      file={file}
+                      onClick={() => onSelectFile({ kind: file.kind, id: file.id })}
+                      onDelete={() => handleDeleteFile(file)}
+                    />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </div>
+          </CardHoverOverlay>
         )}
       </div>
 
