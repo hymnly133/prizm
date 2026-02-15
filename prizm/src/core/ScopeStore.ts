@@ -1,21 +1,18 @@
 /**
- * Prizm ScopeStore - 按 scope 隔离存储数据，支持持久化
- * 存储结构：.prizm-data/scopes/{scope}/ 目录下按类型分 .md 文件存储
- * 每个实体一个 .md 文件，YAML frontmatter 存元数据，body 存正文
+ * Prizm ScopeStore V2 - 基于 ScopeRegistry + 元数据驱动存储
+ * scope 根目录可为任意路径，.prizm/ 存放配置与系统数据
  */
 
 import fs from 'fs'
 import path from 'path'
 import { createLogger } from '../logger'
 import { genUniqueId } from '../id'
-
-const log = createLogger('ScopeStore')
-import { getConfig } from '../config'
+import { ScopeRegistry, scopeRegistry } from './ScopeRegistry'
+import { getPrizmDir } from './PathProviderCore'
 import * as mdStore from './mdStore'
 import { DEFAULT_SCOPE, ONLINE_SCOPE, BUILTIN_SCOPES } from '@prizm/shared'
 import type {
   StickyNote,
-  StickyNoteGroup,
   TodoList,
   TodoItem,
   TodoItemStatus,
@@ -26,62 +23,20 @@ import type {
   TokenUsageRecord
 } from '../types'
 
+const log = createLogger('ScopeStore')
+
 export { DEFAULT_SCOPE, ONLINE_SCOPE }
 
 export interface ScopeData {
-  /** 便签数据（沿用现有 StickyNote 结构） */
   notes: StickyNote[]
-  /** 便签分组 */
-  groups: StickyNoteGroup[]
-  /** TODO 列表（每个 scope 可有多个） */
   todoLists: TodoList[]
-  /** 番茄钟会话记录 */
   pomodoroSessions: PomodoroSession[]
-  /** 剪贴板历史记录 */
   clipboard: ClipboardItem[]
-  /** 文档（正式信息文档） */
   documents: Document[]
-  /** Agent 会话列表 */
   agentSessions: AgentSession[]
-  /** Token 使用记录 */
   tokenUsage: TokenUsageRecord[]
 }
 
-const SCOPES_DIR = 'scopes'
-
-function getDefaultDataDir(): string {
-  return getConfig().dataDir
-}
-
-function safeScopeDirname(scope: string): string {
-  return scope.replace(/[^a-zA-Z0-9_-]/g, '_') || 'default'
-}
-
-/** 将旧版 tasks 数组迁移为 TodoList */
-function migrateTasksToTodoList(tasks: unknown[]): TodoList {
-  const now = Date.now()
-  const items: TodoItem[] = tasks
-    .filter((t): t is { title?: string; description?: string } =>
-      Boolean(t && typeof t === 'object')
-    )
-    .map((t) => ({
-      id: genUniqueId(),
-      title: typeof t.title === 'string' ? t.title : '(无标题)',
-      ...(typeof t.description === 'string' && t.description && { description: t.description }),
-      status: 'todo' as TodoItemStatus,
-      createdAt: now,
-      updatedAt: now
-    }))
-  return {
-    id: genUniqueId(),
-    title: '待办',
-    items,
-    createdAt: now,
-    updatedAt: now
-  }
-}
-
-/** 数据迁移：补全 item 缺的 id、status */
 function migrateTodoListItems(list: TodoList): TodoList {
   const now = Date.now()
   const items = list.items.map((it) => {
@@ -105,7 +60,6 @@ function migrateTodoListItems(list: TodoList): TodoList {
 function createEmptyScopeData(): ScopeData {
   return {
     notes: [],
-    groups: [],
     todoLists: [],
     pomodoroSessions: [],
     clipboard: [],
@@ -117,160 +71,66 @@ function createEmptyScopeData(): ScopeData {
 
 export class ScopeStore {
   private store = new Map<string, ScopeData>()
-  private dataDir: string
+  private registry: ScopeRegistry
 
   constructor(dataDir?: string) {
-    this.dataDir = path.join(dataDir ?? getDefaultDataDir(), SCOPES_DIR)
-    this.ensureDataDir()
+    this.registry = dataDir ? new ScopeRegistry(dataDir) : scopeRegistry
+    this.ensureBuiltinScopes()
     this.loadAll()
   }
 
-  private ensureDataDir(): void {
-    if (!fs.existsSync(this.dataDir)) {
-      fs.mkdirSync(this.dataDir, { recursive: true })
+  private ensureBuiltinScopes(): void {
+    const dataDir = this.registry.getDataDir()
+    const scopesDir = path.join(dataDir, 'scopes')
+    if (!fs.existsSync(scopesDir)) {
+      fs.mkdirSync(scopesDir, { recursive: true })
+    }
+    for (const id of BUILTIN_SCOPES) {
+      const rootPath = path.join(scopesDir, id)
+      if (!fs.existsSync(rootPath)) {
+        fs.mkdirSync(rootPath, { recursive: true })
+      }
+      const prizmDir = getPrizmDir(rootPath)
+      if (!fs.existsSync(prizmDir)) {
+        this.registry.initScopeDir(id, rootPath, id === DEFAULT_SCOPE ? '默认工作区' : '实时上下文')
+      }
     }
   }
 
-  /** scope 对应的目录路径 */
-  private scopeDirPath(scope: string): string {
-    return path.join(this.dataDir, safeScopeDirname(scope))
+  getScopeRootPath(scopeId: string): string {
+    const root = this.registry.getScopeRootPath(scopeId)
+    if (root) return root
+    const dataDir = this.registry.getDataDir()
+    return path.join(dataDir, 'scopes', scopeId)
   }
 
-  /** 旧版单文件 JSON 路径（用于迁移） */
-  private legacyJsonPath(scope: string): string {
-    return path.join(this.dataDir, `${safeScopeDirname(scope)}.json`)
-  }
-
-  /** 从 JSON 解析 ScopeData */
-  private parseScopeData(raw: Partial<ScopeData>): ScopeData {
-    const todoLists: TodoList[] = (() => {
-      if (Array.isArray((raw as { todoLists?: TodoList[] }).todoLists)) {
-        return ((raw as { todoLists: TodoList[] }).todoLists as TodoList[]).map(
-          migrateTodoListItems
-        )
-      }
-      const list = (raw as { todoList?: TodoList | null }).todoList
-      if (list && typeof list === 'object') {
-        return [migrateTodoListItems(list as TodoList)]
-      }
-      if (
-        Array.isArray((raw as { tasks?: unknown[] }).tasks) &&
-        (raw as { tasks: unknown[] }).tasks.length > 0
-      ) {
-        return [migrateTodoListItems(migrateTasksToTodoList((raw as { tasks: unknown[] }).tasks))]
-      }
-      return []
-    })()
-    return {
-      notes: Array.isArray(raw.notes) ? raw.notes : [],
-      groups: Array.isArray(raw.groups) ? raw.groups : [],
-      todoLists,
-      pomodoroSessions: Array.isArray(raw.pomodoroSessions) ? raw.pomodoroSessions : [],
-      clipboard: Array.isArray(raw.clipboard) ? raw.clipboard : [],
-      documents: Array.isArray(raw.documents) ? raw.documents : [],
-      agentSessions: Array.isArray(raw.agentSessions) ? raw.agentSessions : [],
-      tokenUsage: Array.isArray(raw.tokenUsage) ? raw.tokenUsage : []
+  private loadScope(scopeId: string): void {
+    const rootPath = this.getScopeRootPath(scopeId)
+    const prizmDir = getPrizmDir(rootPath)
+    if (!fs.existsSync(rootPath)) return
+    if (!fs.existsSync(prizmDir)) {
+      this.registry.initScopeDir(scopeId, rootPath)
     }
-  }
-
-  /** 从 JSON 迁移到 MD 并保存 */
-  private migrateFromJson(scope: string, raw: Partial<ScopeData>): void {
-    const data = this.parseScopeData(raw)
-    this.store.set(scope, data)
-    this.saveScope(scope)
-    log.info('Migrated scope to MD storage:', scope)
-  }
-
-  /** 检测并执行从 JSON 的迁移（单文件或分文件目录） */
-  private tryMigrateFromJson(scope: string): boolean {
-    const legacySingle = this.legacyJsonPath(scope)
-    if (fs.existsSync(legacySingle)) {
-      try {
-        const content = fs.readFileSync(legacySingle, 'utf-8')
-        const raw = JSON.parse(content) as Partial<ScopeData>
-        this.migrateFromJson(scope, raw)
-        fs.unlinkSync(legacySingle)
-        return true
-      } catch (e) {
-        log.error('Failed to migrate from legacy JSON', scope, e)
-      }
-    }
-    const dirPath = this.scopeDirPath(scope)
-    const notesJson = path.join(dirPath, 'notes.json')
-    if (fs.existsSync(notesJson)) {
-      try {
-        const raw: Partial<ScopeData> = {}
-        const keys = [
-          'notes',
-          'groups',
-          'todoList',
-          'todoLists',
-          'pomodoroSessions',
-          'clipboard',
-          'documents',
-          'agentSessions'
-        ] as const
-        for (const k of keys) {
-          const fp = path.join(dirPath, `${k}.json`)
-          if (fs.existsSync(fp)) {
-            const content = fs.readFileSync(fp, 'utf-8')
-            ;(raw as Record<string, unknown>)[k] = JSON.parse(content)
-          }
-        }
-        this.migrateFromJson(scope, raw)
-        for (const k of keys) {
-          const fp = path.join(dirPath, `${k}.json`)
-          if (fs.existsSync(fp)) fs.unlinkSync(fp)
-        }
-        return true
-      } catch (e) {
-        log.error('Failed to migrate from JSON dir', scope, e)
-      }
-    }
-    return false
-  }
-
-  private loadScope(scope: string): void {
-    const dirPath = this.scopeDirPath(scope)
-
-    if (this.tryMigrateFromJson(scope)) return
-
-    if (!fs.existsSync(dirPath)) return
-
     try {
       const data: ScopeData = {
-        notes: mdStore.readNotes(dirPath),
-        groups: mdStore.readGroups(dirPath),
-        todoLists: mdStore.readTodoLists(dirPath),
-        pomodoroSessions: mdStore.readPomodoroSessions(dirPath),
-        clipboard: mdStore.readClipboard(dirPath),
-        documents: mdStore.readDocuments(dirPath),
-        agentSessions: mdStore.readAgentSessions(dirPath),
-        tokenUsage: mdStore.readTokenUsage(dirPath)
+        notes: mdStore.readNotes(rootPath),
+        todoLists: (mdStore.readTodoLists(rootPath) ?? []).map(migrateTodoListItems),
+        pomodoroSessions: mdStore.readPomodoroSessions(rootPath),
+        clipboard: mdStore.readClipboard(rootPath),
+        documents: mdStore.readDocuments(rootPath),
+        agentSessions: mdStore.readAgentSessions(rootPath),
+        tokenUsage: mdStore.readTokenUsage(rootPath)
       }
-      this.store.set(scope, data)
+      this.store.set(scopeId, data)
     } catch (e) {
-      log.error('Failed to load scope', scope, e)
+      log.error('Failed to load scope', scopeId, e)
     }
   }
 
   private loadAll(): void {
-    if (!fs.existsSync(this.dataDir)) {
-      for (const scope of BUILTIN_SCOPES) {
-        this.store.set(scope, createEmptyScopeData())
-      }
-      return
-    }
-    const entries = fs.readdirSync(this.dataDir, { withFileTypes: true })
-    for (const e of entries) {
-      if (e.isDirectory()) {
-        const scope = e.name === '_' ? DEFAULT_SCOPE : e.name
-        this.loadScope(scope)
-      } else if (e.isFile() && e.name.endsWith('.json')) {
-        const scope =
-          path.basename(e.name, '.json') === '_' ? DEFAULT_SCOPE : path.basename(e.name, '.json')
-        if (!this.store.has(scope)) this.loadScope(scope)
-      }
+    const list = this.registry.list()
+    for (const e of list) {
+      this.loadScope(e.id)
     }
     for (const scope of BUILTIN_SCOPES) {
       if (!this.store.has(scope)) {
@@ -280,86 +140,85 @@ export class ScopeStore {
     }
   }
 
-  /**
-   * 持久化指定 scope 到磁盘（MD 单文件格式）
-   */
   saveScope(scope: string): void {
     const data = this.store.get(scope)
     if (!data) return
-    const dirPath = this.scopeDirPath(scope)
+    const rootPath = this.getScopeRootPath(scope)
+    const prizmDir = getPrizmDir(rootPath)
     try {
-      if (!fs.existsSync(dirPath)) {
-        fs.mkdirSync(dirPath, { recursive: true })
+      if (!fs.existsSync(rootPath)) {
+        fs.mkdirSync(rootPath, { recursive: true })
       }
-      mdStore.writeNotes(dirPath, data.notes)
-      mdStore.writeGroups(dirPath, data.groups)
-      mdStore.writeTodoLists(dirPath, data.todoLists)
-      mdStore.writePomodoroSessions(dirPath, data.pomodoroSessions)
-      mdStore.writeClipboard(dirPath, data.clipboard)
-      mdStore.writeDocuments(dirPath, data.documents)
-      mdStore.writeAgentSessions(dirPath, data.agentSessions)
-      mdStore.writeTokenUsage(dirPath, data.tokenUsage)
+      if (!fs.existsSync(prizmDir)) {
+        this.registry.initScopeDir(scope, rootPath)
+      }
+      mdStore.writeNotes(rootPath, data.notes)
+      mdStore.writeTodoLists(rootPath, data.todoLists)
+      mdStore.writePomodoroSessions(rootPath, data.pomodoroSessions)
+      mdStore.writeClipboard(rootPath, data.clipboard)
+      mdStore.writeDocuments(rootPath, data.documents)
+      mdStore.writeAgentSessions(rootPath, data.agentSessions, scope)
+      mdStore.writeTokenUsage(rootPath, data.tokenUsage)
     } catch (e) {
       log.error('Failed to save scope', scope, e)
     }
   }
 
-  /**
-   * 获取 scope 数据，不存在则创建
-   */
   getScopeData(scope: string): ScopeData {
     let data = this.store.get(scope)
+    if (!data) {
+      const rootPath = this.getScopeRootPath(scope)
+      if (!fs.existsSync(rootPath)) {
+        fs.mkdirSync(rootPath, { recursive: true })
+        this.registry.initScopeDir(scope, rootPath)
+      }
+      this.loadScope(scope)
+      data = this.store.get(scope)
+    }
     if (!data) {
       data = createEmptyScopeData()
       this.store.set(scope, data)
       this.saveScope(scope)
       return data
     }
-
-    // 容错：老版本数据文件可能缺少新字段或字段被意外修改，这里补齐默认值
     if (!Array.isArray(data.notes)) data.notes = []
-    if (!Array.isArray(data.groups)) data.groups = []
-    if (!Array.isArray(data.todoLists)) {
-      const legacy = (data as { todoList?: TodoList | null }).todoList
-      data.todoLists = legacy ? [legacy] : []
-    }
+    if (!Array.isArray(data.todoLists)) data.todoLists = []
     if (!Array.isArray(data.pomodoroSessions)) data.pomodoroSessions = []
     if (!Array.isArray(data.clipboard)) data.clipboard = []
     if (!Array.isArray(data.documents)) data.documents = []
     if (!Array.isArray(data.agentSessions)) data.agentSessions = []
     if (!Array.isArray(data.tokenUsage)) data.tokenUsage = []
-
     return data
   }
 
-  /**
-   * 确保 scope 存在
-   */
   ensureScope(scope: string): ScopeData {
     return this.getScopeData(scope)
   }
 
-  /**
-   * 获取所有 scope 列表（含已持久化但未加载的）
-   * 内置 scope（default、online）始终包含
-   */
   getAllScopes(): string[] {
     const keys = new Set<string>(BUILTIN_SCOPES)
-    for (const k of this.store.keys()) {
-      keys.add(k)
+    for (const e of this.registry.list()) {
+      keys.add(e.id)
     }
-    if (fs.existsSync(this.dataDir)) {
-      for (const e of fs.readdirSync(this.dataDir, { withFileTypes: true })) {
-        if (e.isDirectory()) {
-          keys.add(e.name === '_' ? DEFAULT_SCOPE : e.name)
-        } else if (e.isFile() && e.name.endsWith('.json')) {
-          const base = path.basename(e.name, '.json')
-          keys.add(base === '_' ? DEFAULT_SCOPE : base)
-        }
-      }
-    }
-    const list = Array.from(keys).filter(Boolean)
-    return [...new Set(list)].sort()
+    return [...keys].filter(Boolean).sort()
+  }
+
+  registerScope(id: string, absPath: string, label?: string): void {
+    const resolved = path.resolve(absPath)
+    this.registry.register(id, resolved, label)
+    this.registry.initScopeDir(id, resolved, label)
+    this.loadScope(id)
+  }
+
+  unregisterScope(id: string): boolean {
+    const ok = this.registry.unregister(id)
+    if (ok) this.store.delete(id)
+    return ok
+  }
+
+  deleteSessionDir(scope: string, sessionId: string): void {
+    const rootPath = this.getScopeRootPath(scope)
+    mdStore.deleteSessionDir(rootPath, sessionId)
   }
 }
 

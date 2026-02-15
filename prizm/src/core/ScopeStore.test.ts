@@ -23,12 +23,12 @@ describe('ScopeStore', () => {
   it('getScopeData 返回空数据', () => {
     const data = store.getScopeData('default')
     expect(data.notes).toEqual([])
-    expect(data.groups).toEqual([])
     expect(data.todoLists).toEqual([])
     expect(data.pomodoroSessions).toEqual([])
     expect(data.clipboard).toEqual([])
     expect(data.documents).toEqual([])
     expect(data.agentSessions).toEqual([])
+    expect(data.tokenUsage).toEqual([])
   })
 
   it('getScopeData 新建 scope 并持久化', () => {
@@ -41,7 +41,8 @@ describe('ScopeStore', () => {
     })
     store.saveScope('test-scope')
 
-    const notesPath = path.join(tempDir, 'scopes', 'test-scope', 'notes', '1.md')
+    const scopeRoot = path.join(tempDir, 'scopes', 'test-scope')
+    const notesPath = path.join(scopeRoot, '1.md')
     expect(fs.existsSync(notesPath)).toBe(true)
     const content = fs.readFileSync(notesPath, 'utf-8')
     expect(content).toContain('hello')
@@ -59,12 +60,12 @@ describe('ScopeStore', () => {
     expect(scopes).toContain(DEFAULT_SCOPE)
   })
 
-  it('scope 名特殊字符被替换', () => {
+  it('scope 名特殊字符可创建嵌套目录', () => {
     store.getScopeData('foo/bar')
     store.saveScope('foo/bar')
-    const scopesDir = path.join(tempDir, 'scopes')
-    const entries = fs.readdirSync(scopesDir)
-    expect(entries.some((e) => e.includes('foo') && e.includes('bar'))).toBe(true)
+    const scopePath = path.join(tempDir, 'scopes', 'foo', 'bar')
+    expect(fs.existsSync(scopePath)).toBe(true)
+    expect(fs.existsSync(path.join(scopePath, '.prizm', 'scope.json'))).toBe(true)
   })
 
   it('agentSessions 持久化与加载', () => {
@@ -93,55 +94,48 @@ describe('ScopeStore', () => {
     expect(loaded.agentSessions[0].messages).toHaveLength(1)
   })
 
-  it('从旧版 JSON 迁移到 MD 单文件', () => {
+  it('从 prizm_type 用户文件加载便签', () => {
     const scopesDir = path.join(tempDir, 'scopes')
-    fs.mkdirSync(scopesDir, { recursive: true })
-    const legacyFile = path.join(scopesDir, 'migrate-scope.json')
+    const scopeDir = path.join(scopesDir, 'file-scope')
+    const prizmDir = path.join(scopeDir, '.prizm')
+    fs.mkdirSync(prizmDir, { recursive: true })
     fs.writeFileSync(
-      legacyFile,
+      path.join(prizmDir, 'scope.json'),
+      JSON.stringify({ id: 'file-scope', label: 'File Scope', settings: {} }),
+      'utf-8'
+    )
+    fs.writeFileSync(
+      path.join(scopeDir, 'n1.md'),
+      '---\nprizm_type: note\nid: n1\ncreatedAt: 1\nupdatedAt: 1\n---\nmigrated',
+      'utf-8'
+    )
+    const scopeRegistryPath = path.join(tempDir, 'scope-registry.json')
+    const fileScopePath = path.resolve(tempDir, 'scopes', 'file-scope')
+    fs.writeFileSync(
+      scopeRegistryPath,
       JSON.stringify({
-        notes: [{ id: 'n1', content: 'migrated', createdAt: 1, updatedAt: 1 }],
-        groups: [],
-        todoList: null,
-        pomodoroSessions: [],
-        clipboard: [],
-        documents: [],
-        agentSessions: []
+        version: 1,
+        scopes: {
+          default: {
+            path: 'scopes/default',
+            label: '默认',
+            builtin: true,
+            createdAt: 1
+          },
+          'file-scope': {
+            path: fileScopePath,
+            label: 'File Scope',
+            builtin: false,
+            createdAt: 1
+          }
+        }
       }),
       'utf-8'
     )
-
     const store2 = new ScopeStore(tempDir)
-    const data = store2.getScopeData('migrate-scope')
+    const data = store2.getScopeData('file-scope')
     expect(data.notes).toHaveLength(1)
     expect(data.notes[0].content).toBe('migrated')
-    expect(fs.existsSync(legacyFile)).toBe(false)
-    const mdPath = path.join(scopesDir, 'migrate-scope', 'notes', 'n1.md')
-    expect(fs.existsSync(mdPath)).toBe(true)
-    expect(fs.readFileSync(mdPath, 'utf-8')).toContain('migrated')
-  })
-
-  it('从 JSON 目录格式迁移到 MD', () => {
-    const scopesDir = path.join(tempDir, 'scopes')
-    const scopeDir = path.join(scopesDir, 'json-dir-scope')
-    fs.mkdirSync(scopeDir, { recursive: true })
-    fs.writeFileSync(
-      path.join(scopeDir, 'notes.json'),
-      JSON.stringify([{ id: 'j1', content: 'from json dir', createdAt: 1, updatedAt: 1 }]),
-      'utf-8'
-    )
-    fs.writeFileSync(path.join(scopeDir, 'groups.json'), '[]', 'utf-8')
-    fs.writeFileSync(path.join(scopeDir, 'todoList.json'), 'null', 'utf-8')
-    fs.writeFileSync(path.join(scopeDir, 'pomodoroSessions.json'), '[]', 'utf-8')
-    fs.writeFileSync(path.join(scopeDir, 'clipboard.json'), '[]', 'utf-8')
-    fs.writeFileSync(path.join(scopeDir, 'documents.json'), '[]', 'utf-8')
-    fs.writeFileSync(path.join(scopeDir, 'agentSessions.json'), '[]', 'utf-8')
-
-    const store2 = new ScopeStore(tempDir)
-    const data = store2.getScopeData('json-dir-scope')
-    expect(data.notes).toHaveLength(1)
-    expect(data.notes[0].content).toBe('from json dir')
-    expect(fs.existsSync(path.join(scopeDir, 'notes.json'))).toBe(false)
-    expect(fs.existsSync(path.join(scopeDir, 'notes', 'j1.md'))).toBe(true)
+    expect(data.notes[0].id).toBe('n1')
   })
 })
