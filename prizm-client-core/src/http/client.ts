@@ -15,9 +15,10 @@ import type {
   StreamChatOptions,
   StreamChatChunk,
   SearchResult,
-  TokenUsageRecord
+  TokenUsageRecord,
+  SessionStats
 } from '../types'
-import { MemoryItem } from '@prizm/shared'
+import type { MemoryItem, DedupLogEntry } from '@prizm/shared'
 
 export interface PrizmClientOptions {
   /**
@@ -159,28 +160,57 @@ export class PrizmClient {
   async listScopesWithInfo(): Promise<{
     scopes: string[]
     descriptions: Record<string, { label: string; description: string }>
+    scopeDetails?: Record<string, { path: string | null; label: string; builtin: boolean }>
   }> {
     const data = await this.request<{
       scopes: string[]
       descriptions?: Record<string, { label: string; description: string }>
+      scopeDetails?: Record<string, { path: string | null; label: string; builtin: boolean }>
     }>('/auth/scopes')
     return {
       scopes: data.scopes ?? [],
-      descriptions: data.descriptions ?? {}
+      descriptions: data.descriptions ?? {},
+      scopeDetails: data.scopeDetails
     }
+  }
+
+  /** 注册新 scope（绑定到文件夹） */
+  async registerScope(payload: {
+    id: string
+    path: string
+    label?: string
+  }): Promise<{ scope: { id: string; path: string; label: string } }> {
+    return this.request('/auth/scopes', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  }
+
+  /** 更新 scope 标签 */
+  async updateScope(
+    id: string,
+    payload: { label?: string }
+  ): Promise<{ scope: { id: string; path: string; label: string } }> {
+    return this.request(`/auth/scopes/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    })
+  }
+
+  /** 注销 scope（不删除文件夹） */
+  async unregisterScope(id: string): Promise<void> {
+    await this.request(`/auth/scopes/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    })
   }
 
   // ============ Notes / Sticky Notes ============
 
-  async listNotes(options?: {
-    q?: string
-    groupId?: string
-    scope?: string
-  }): Promise<StickyNote[]> {
+  async listNotes(options?: { q?: string; tag?: string; scope?: string }): Promise<StickyNote[]> {
     const scope = options?.scope ?? this.defaultScope
     const query: Record<string, string | undefined> = {
       q: options?.q,
-      groupId: options?.groupId,
+      tag: options?.tag,
       scope
     }
     const url = this.buildUrl('/notes', query)
@@ -205,7 +235,7 @@ export class PrizmClient {
   }
 
   async createNote(
-    payload: Partial<Pick<StickyNote, 'content' | 'imageUrls' | 'groupId' | 'fileRefs'>>,
+    payload: Partial<Pick<StickyNote, 'content' | 'imageUrls' | 'tags' | 'fileRefs'>>,
     scope?: string
   ): Promise<StickyNote> {
     const data = await this.request<{ note: StickyNote }>('/notes', {
@@ -218,7 +248,7 @@ export class PrizmClient {
 
   async updateNote(
     id: string,
-    payload: Partial<Pick<StickyNote, 'content' | 'imageUrls' | 'groupId' | 'fileRefs'>>,
+    payload: Partial<Pick<StickyNote, 'content' | 'imageUrls' | 'tags' | 'fileRefs'>>,
     scope?: string
   ): Promise<StickyNote> {
     const data = await this.request<{ note: StickyNote }>(`/notes/${encodeURIComponent(id)}`, {
@@ -769,6 +799,20 @@ export class PrizmClient {
     }
   }
 
+  /** 会话级统计：token 总用量 + 该会话创建的记忆汇总 */
+  async getAgentSessionStats(sessionId: string, scope?: string): Promise<SessionStats> {
+    const s = scope ?? this.defaultScope
+    const url = this.buildUrl(`/agent/sessions/${encodeURIComponent(sessionId)}/stats`, {
+      scope: s
+    })
+    const response = await fetch(url, { method: 'GET', headers: this.buildHeaders() })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
+    }
+    return (await response.json()) as SessionStats
+  }
+
   async listAgentSessions(scope?: string): Promise<AgentSession[]> {
     const s = scope ?? this.defaultScope
     const url = this.buildUrl('/agent/sessions', { scope: s })
@@ -990,6 +1034,29 @@ export class PrizmClient {
     })
   }
 
+  /** 三层记忆状态（User/Scope/Session），供可视化 */
+  async getThreeLevelMemories(
+    scope?: string,
+    sessionId?: string
+  ): Promise<{
+    enabled: boolean
+    user: MemoryItem[]
+    scope: MemoryItem[]
+    session: MemoryItem[]
+  }> {
+    const s = scope ?? this.defaultScope
+    const path =
+      sessionId != null && sessionId !== ''
+        ? `/agent/memories/three-level?sessionId=${encodeURIComponent(sessionId)}`
+        : '/agent/memories/three-level'
+    return this.request<{
+      enabled: boolean
+      user: MemoryItem[]
+      scope: MemoryItem[]
+      session: MemoryItem[]
+    }>(path, { method: 'GET', scope: s })
+  }
+
   /** 获取某轮对话的记忆增长（按 assistant 消息 ID，用于历史消息懒加载） */
   async getRoundMemories(
     messageId: string,
@@ -998,6 +1065,25 @@ export class PrizmClient {
     return this.request<import('@prizm/shared').RoundMemoryGrowth | null>(
       `/agent/memories/round/${encodeURIComponent(messageId)}`,
       { method: 'GET', scope }
+    )
+  }
+
+  /** 获取去重日志列表 */
+  async getDedupLog(scope?: string, limit?: number): Promise<{ entries: DedupLogEntry[] }> {
+    const s = scope ?? this.defaultScope
+    const path =
+      limit != null ? `/agent/memories/dedup-log?limit=${limit}` : '/agent/memories/dedup-log'
+    return this.request<{ entries: DedupLogEntry[] }>(path, { method: 'GET', scope: s })
+  }
+
+  /** 回退一次去重，恢复被抑制的记忆 */
+  async undoDedup(
+    dedupLogId: string,
+    scope?: string
+  ): Promise<{ restored: boolean; restoredMemoryId?: string }> {
+    return this.request<{ restored: boolean; restoredMemoryId?: string }>(
+      `/agent/memories/dedup-log/${encodeURIComponent(dedupLogId)}/undo`,
+      { method: 'POST', scope }
     )
   }
 

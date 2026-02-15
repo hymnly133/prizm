@@ -8,7 +8,6 @@ import type { MessageUsage } from '@prizm/shared'
 // 从 shared 重导出，供依赖 client-core 的包使用
 export type {
   StickyNote,
-  StickyNoteGroup,
   StickyNoteFileRef,
   CreateNotePayload,
   UpdateNotePayload,
@@ -53,7 +52,8 @@ export type {
   MemoryItem,
   RoundMemoryGrowth,
   TokenUsageRecord,
-  TokenUsageScope
+  TokenUsageScope,
+  DedupLogEntry
 } from '@prizm/shared'
 
 // ============ 客户端配置（仅 client-core） ============
@@ -172,10 +172,17 @@ export interface ToolResultChunkValue {
   chunk: string
 }
 
-/** SSE 流式 chunk：text / tool_result_chunk / tool_call / done / error */
+/** 记忆注入载荷：本轮 chat 注入的三层记忆 */
+export interface MemoryInjectedPayload {
+  user: import('@prizm/shared').MemoryItem[]
+  scope: import('@prizm/shared').MemoryItem[]
+  session: import('@prizm/shared').MemoryItem[]
+}
+
+/** SSE 流式 chunk：memory_injected / text / tool_result_chunk / tool_call / done / error */
 export interface StreamChatChunk {
   type: string
-  value?: string | ToolCallRecord | ToolResultChunkValue
+  value?: string | ToolCallRecord | ToolResultChunkValue | MemoryInjectedPayload
   model?: string
   usage?: MessageUsage
   /** 是否因用户停止而提前结束 */
@@ -199,6 +206,43 @@ export interface StreamChatOptions {
   onError?: (message: string) => void
   /** AbortSignal，用于前端主动取消流式请求 */
   signal?: AbortSignal
+}
+
+// ============ 会话级统计（仅 client-core） ============
+
+/** 会话 token 用量聚合 */
+export interface SessionTokenSummary {
+  totalInputTokens: number
+  totalOutputTokens: number
+  totalTokens: number
+  /** 对话轮次数 */
+  rounds: number
+  /** 按模型分组统计 */
+  byModel: Record<string, { input: number; output: number; total: number; count: number }>
+}
+
+/** 会话记忆创建聚合 */
+export interface SessionMemorySummary {
+  /** 本会话创建的记忆总数 */
+  totalCount: number
+  /** 按记忆类型统计 */
+  byType: Record<string, number>
+  /** 具体记忆列表 */
+  memories: Array<{
+    id: string
+    memory: string
+    memory_type?: string
+    /** 关联的 assistant 消息 ID */
+    messageId: string
+  }>
+}
+
+/** GET /agent/sessions/:id/stats 返回结构 */
+export interface SessionStats {
+  sessionId: string
+  scope: string
+  tokenUsage: SessionTokenSummary
+  memoryCreated: SessionMemorySummary
 }
 
 // ============ 统一搜索结果（仅 client-core） ============
