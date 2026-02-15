@@ -178,6 +178,8 @@ export interface AgentSession {
   messages: AgentMessage[]
   /** LLM 生成的对话摘要，用于压缩长对话上下文 */
   llmSummary?: string
+  /** 已压缩为 Session 记忆的轮次上界（滑动窗口 A/B 用） */
+  compressedThroughRound?: number
   createdAt: number
   updatedAt: number
 }
