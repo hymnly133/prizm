@@ -275,11 +275,11 @@ export interface IAgentAdapter {
 
   getMessages?(scope: string, sessionId: string): Promise<AgentMessage[]>
 
-  /** 更新会话（标题、对话摘要等） */
+  /** 更新会话（标题、对话摘要、压缩轮次等） */
   updateSession?(
     scope: string,
     id: string,
-    update: { title?: string; llmSummary?: string }
+    update: { title?: string; llmSummary?: string; compressedThroughRound?: number }
   ): Promise<AgentSession>
 
   /** 流式对话，返回 SSE 流 */

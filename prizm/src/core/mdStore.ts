@@ -614,7 +614,16 @@ export function readAgentSessions(dir: string): AgentSession[] {
       messages = d.messages.map(parseAgentMessage).filter((m): m is AgentMessage => m !== null)
     }
     messages.sort((a, b) => a.createdAt - b.createdAt)
-    sessions.push({ id, title, scope, messages, createdAt, updatedAt })
+    const llmSummary = typeof d.llmSummary === 'string' ? d.llmSummary : undefined
+    sessions.push({
+      id,
+      title,
+      scope,
+      messages,
+      createdAt,
+      updatedAt,
+      ...(llmSummary != null && { llmSummary })
+    })
   }
   return sessions.sort((a, b) => b.updatedAt - a.updatedAt)
 }
@@ -634,6 +643,7 @@ export function writeAgentSessions(dir: string, sessions: AgentSession[]): void 
       scope: s.scope,
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
+      ...(s.llmSummary != null && { llmSummary: s.llmSummary }),
       messages: s.messages.map((m) => ({
         id: m.id,
         role: m.role,

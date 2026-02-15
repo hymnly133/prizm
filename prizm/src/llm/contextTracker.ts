@@ -134,7 +134,7 @@ export function buildProvisionSummary(scope: string, sessionId: string): string 
   for (const p of state.provisions) {
     const tag = p.mode === 'full' ? '全量' : '摘要'
     const staleTag = p.stale ? ' [已过期]' : ''
-    lines.push(`- ${p.kind}:${p.itemId} (${tag}, ${p.charCount} 字)${staleTag}`)
+    lines.push(`- ${p.kind}:${p.itemId} (${tag})${staleTag}`)
   }
   const writeActivities = state.activities.filter(
     (a) => a.action === 'create' || a.action === 'update' || a.action === 'delete'

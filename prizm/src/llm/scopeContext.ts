@@ -13,7 +13,6 @@
 import { scopeStore } from '../core/ScopeStore'
 import type { ScopeData } from '../core/ScopeStore'
 import { getScopeStats } from './scopeItemRegistry'
-import { recordProvision } from './contextTracker'
 
 /** 单条内容最大字符数（摘要时） */
 const MAX_CONTENT_LEN = 100
@@ -46,12 +45,7 @@ function truncate(text: string, maxLen: number = MAX_CONTENT_LEN): string {
 /**
  * 构建便签区块：每条便签项全文（一般较短）
  */
-function buildNotesSection(
-  scope: string,
-  data: ScopeData,
-  maxItems: number,
-  sessionId?: string
-): string {
+function buildNotesSection(scope: string, data: ScopeData, maxItems: number): string {
   const { notes, groups } = data
   if (!notes.length) return ''
 
@@ -63,15 +57,6 @@ function buildNotesSection(
     const prefix = groupName ? `[${groupName}] ` : ''
     const content = (n.content ?? '').trim()
     lines.push(`- ${prefix}[id:${n.id}] ${content}`)
-    if (sessionId) {
-      recordProvision(scope, sessionId, {
-        itemId: n.id,
-        kind: 'note',
-        mode: 'full',
-        charCount: content.length,
-        version: n.updatedAt ?? 0
-      })
-    }
   }
   if (sorted.length > maxItems) {
     lines.push(`  …共 ${sorted.length} 条`)
@@ -82,12 +67,7 @@ function buildNotesSection(
 /**
  * 构建待办区块：遍历所有 list，全量
  */
-function buildTodoSection(
-  scope: string,
-  data: ScopeData,
-  maxItems: number,
-  sessionId?: string
-): string {
+function buildTodoSection(scope: string, data: ScopeData, maxItems: number): string {
   const lists = data.todoLists ?? []
   const allItems: Array<{
     item: { id: string; title: string; status: string; updatedAt?: number; description?: string }
@@ -112,17 +92,6 @@ function buildTodoSection(
       : ''
     const prefix = lists.length > 1 ? `[${listTitle}] ` : ''
     lines.push(`- ${status} ${prefix}[id:${it.id}] ${it.title}${desc}`)
-    if (sessionId) {
-      const charCount =
-        (it.title?.length ?? 0) + ((it as { description?: string }).description?.length ?? 0)
-      recordProvision(scope, sessionId, {
-        itemId: it.id,
-        kind: 'todo',
-        mode: 'full',
-        charCount,
-        version: (it.updatedAt as number) ?? 0
-      })
-    }
   }
   if (sorted.length > maxItems) {
     lines.push(`  …共 ${sorted.length} 项`)
@@ -133,12 +102,7 @@ function buildTodoSection(
 /**
  * 构建文档区块：短内容全文，长内容标题+摘要
  */
-function buildDocumentsSection(
-  scope: string,
-  data: ScopeData,
-  maxItems: number,
-  sessionId?: string
-): string {
+function buildDocumentsSection(scope: string, data: ScopeData, maxItems: number): string {
   const { documents } = data
   if (!documents.length) return ''
 
@@ -149,15 +113,6 @@ function buildDocumentsSection(
     const isShort = content.length < SHORT_THRESHOLD
     const desc = isShort ? content : d.llmSummary ?? truncate(content, MAX_CONTENT_LEN)
     lines.push(`- [id:${d.id}] ${d.title}: ${desc}`)
-    if (sessionId) {
-      recordProvision(scope, sessionId, {
-        itemId: d.id,
-        kind: 'document',
-        mode: isShort ? 'full' : 'summary',
-        charCount: isShort ? content.length : (d.llmSummary ?? content.slice(0, 150)).length,
-        version: d.updatedAt ?? 0
-      })
-    }
   }
   if (sorted.length > maxItems) {
     lines.push(`  …共 ${sorted.length} 篇`)
@@ -166,22 +121,29 @@ function buildDocumentsSection(
 }
 
 /**
- * 会话区块：仅数量或标题列表（具体数据 TODO）
+ * 会话区块：仅数量或标题列表
  */
 function buildSessionsSection(data: ScopeData): string {
   const sessions = data.agentSessions ?? []
   if (!sessions.length) return ''
 
-  const titles = sessions
-    .slice(0, 8)
-    .map((s) => s.title?.trim() || s.id)
-    .join('、')
+  const slice = sessions.slice(0, 8)
+  const titles = slice.map((s) => s.title?.trim() || s.id).join('、')
+  const allMeaningless = slice.every((s) => {
+    const t = (s.title ?? '').trim()
+    return !t || t === '新会话' || t === s.id
+  })
+
+  if (allMeaningless || !titles) {
+    return `## 会话\n共 ${sessions.length} 个会话`
+  }
   const tail = sessions.length > 8 ? ` …共 ${sessions.length} 个会话` : ''
-  return `## 会话\n${titles}${tail}（详情接口待实现）`
+  return `## 会话\n${titles}${tail}`
 }
 
 /**
  * 按优先级截断：超限时依次移除 notes → todo → documents → sessions
+ * @returns { text, truncated }
  */
 function truncateByPriority(
   notesSec: string,
@@ -189,18 +151,18 @@ function truncateByPriority(
   docsSec: string,
   sessionsSec: string,
   maxLen: number
-): string {
+): { text: string; truncated: boolean } {
   const parts = [sessionsSec, docsSec, todoSec, notesSec].filter(Boolean)
   let result = parts.join('\n\n')
-  if (result.length <= maxLen) return result
+  if (result.length <= maxLen) return { text: result, truncated: false }
 
   for (let i = parts.length - 1; i >= 0; i--) {
     const remaining = parts.slice(0, i).filter(Boolean).join('\n\n')
     if (remaining.length <= maxLen) {
-      return remaining + (i > 0 ? '\n\n...(已截断)' : '')
+      return { text: remaining, truncated: i > 0 }
     }
   }
-  return result.slice(0, maxLen) + '…'
+  return { text: result.slice(0, maxLen) + '…', truncated: true }
 }
 
 /**
@@ -208,21 +170,20 @@ function truncateByPriority(
  * @param scope - scope 标识
  * @param options.sessionId - 若提供则在本会话中记录各条提供状态（供 ContextTracker）
  */
-export function buildScopeContextSummary(scope: string, options?: { sessionId?: string }): string {
+export function buildScopeContextSummary(scope: string): string {
   const data = scopeStore.getScopeData(scope)
   const maxLen = getMaxSummaryLen()
-  const sessionId = options?.sessionId
 
-  const notesSection = buildNotesSection(scope, data, MAX_NOTES, sessionId)
-  const todoSection = buildTodoSection(scope, data, MAX_TODO_ITEMS, sessionId)
-  const docsSection = buildDocumentsSection(scope, data, MAX_DOCUMENTS, sessionId)
+  const notesSection = buildNotesSection(scope, data, MAX_NOTES)
+  const todoSection = buildTodoSection(scope, data, MAX_TODO_ITEMS)
+  const docsSection = buildDocumentsSection(scope, data, MAX_DOCUMENTS)
   const sessionsSection = buildSessionsSection(data)
 
   if (!notesSection && !todoSection && !docsSection && !sessionsSection) {
     return ''
   }
 
-  const summary = truncateByPriority(
+  const { text: summary, truncated } = truncateByPriority(
     notesSection,
     todoSection,
     docsSection,
@@ -231,6 +192,6 @@ export function buildScopeContextSummary(scope: string, options?: { sessionId?: 
   )
 
   const stats = getScopeStats(scope)
-  const statsLine = `\n--- ${stats.totalItems} 项`
+  const statsLine = `\n--- 共 ${stats.totalItems} 项${truncated ? '（部分已截断）' : ''}`
   return summary + statsLine
 }

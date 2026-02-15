@@ -13,7 +13,8 @@ import type {
   TavilySettings,
   AgentLLMSettings,
   DocumentSummarySettings,
-  ConversationSummarySettings
+  ConversationSummarySettings,
+  ContextWindowSettings
 } from './types'
 import type { McpServerConfig } from '../mcp-client/types'
 
@@ -190,6 +191,14 @@ export function getDocumentSummarySettings(): DocumentSummarySettings | null {
 export function getConversationSummarySettings(): ConversationSummarySettings | null {
   const s = loadRaw().agent?.conversationSummary
   return s ?? null
+}
+
+export function getContextWindowSettings(): ContextWindowSettings {
+  const a = loadRaw().agent?.contextWindow ?? {}
+  return {
+    fullContextTurns: Math.max(1, a.fullContextTurns ?? 4),
+    cachedContextTurns: Math.max(1, a.cachedContextTurns ?? 3)
+  }
 }
 
 export function updateAgentLLMSettings(update: Partial<AgentLLMSettings>): void {

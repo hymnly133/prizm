@@ -16,8 +16,8 @@ import {
 import { DEFAULT_SCOPE } from '../core/ScopeStore'
 import { buildScopeContextSummary } from '../llm/scopeContext'
 import { buildSystemPrompt } from '../llm/systemPrompt'
-import { scheduleConversationSummary } from '../llm/conversationSummaryService'
-import { getAgentLLMSettings } from '../settings/agentToolsStore'
+import { scheduleTurnSummary } from '../llm/conversationSummaryService'
+import { getAgentLLMSettings, getContextWindowSettings } from '../settings/agentToolsStore'
 import { listRefItems } from '../llm/scopeItemRegistry'
 import { listAtReferences } from '../llm/atReferenceRegistry'
 import { registerBuiltinAtReferences } from '../llm/atReferenceRegistry'
@@ -32,6 +32,7 @@ import {
   searchUserAndScopeMemories,
   searchThreeLevelMemories,
   addMemoryInteraction,
+  addSessionMemoryFromRounds,
   deleteMemoriesByGroupId
 } from '../llm/EverMemService'
 import { recordTokenUsage } from '../llm/tokenUsage'
@@ -347,7 +348,13 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         typeof bodyModel === 'string' && bodyModel.trim()
           ? bodyModel.trim()
           : agentSettings.defaultModel?.trim() || undefined
-      const { mcpEnabled, includeScopeContext } = req.body ?? {}
+      const {
+        mcpEnabled,
+        includeScopeContext,
+        fullContextTurns: bodyA,
+        cachedContextTurns: bodyB
+      } = req.body ?? {}
+      const ctxWin = getContextWindowSettings()
       const userId = req.prizmClient?.clientId ?? 'default'
 
       // 追加用户消息
@@ -355,6 +362,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         role: 'user',
         content: content.trim()
       })
+      scheduleTurnSummary(scope, id, content.trim(), userId)
 
       // Slash 命令：若为首位 / 且命中注册命令，执行后直接返回结果，不调用 LLM
       if (content.trim().startsWith('/')) {
@@ -377,78 +385,111 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         }
       }
 
-      // 构建消息历史
-      const history: Array<{ role: string; content: string }> = [
-        ...session.messages.map((m) => ({
-          role: m.role,
-          content: m.content
-        })),
-        { role: 'user' as const, content: content.trim() }
-      ]
+      // A/B 滑动窗口：A=完全上下文轮数，B=缓存轮数；满 A+B 时将最老 B 轮压缩为 Session 记忆
+      const fullContextTurns = Math.max(1, bodyA ?? ctxWin.fullContextTurns ?? 4)
+      const cachedContextTurns = Math.max(1, bodyB ?? ctxWin.cachedContextTurns ?? 3)
 
-      // 记忆注入策略：首条前仅 user/scope；每 n 轮注入 user+scope+session；其余轮不注入
+      const chatMessages = session.messages.filter(
+        (m) => m.role === 'user' || m.role === 'assistant'
+      )
+      const completeRounds = chatMessages.filter((m) => m.role === 'assistant').length
+      let compressedThrough = session.compressedThroughRound ?? 0
+
+      // 压缩：当未压缩区 (cache) 达到 A+B 轮时，将最老 B 轮压缩（每 B 轮一批）
+      const uncompressedRounds = completeRounds - compressedThrough
+      const shouldCompress = uncompressedRounds >= fullContextTurns + cachedContextTurns
+
+      if (shouldCompress && adapter?.updateSession) {
+        const toCompress = cachedContextTurns
+        const startIdx = 2 * compressedThrough
+        const endIdx = 2 * (compressedThrough + toCompress)
+        const slice = chatMessages.slice(startIdx, endIdx)
+        if (slice.length >= 2) {
+          try {
+            await addSessionMemoryFromRounds(
+              slice.map((m) => ({ role: m.role, content: m.content })),
+              userId,
+              scope,
+              id
+            )
+            compressedThrough = compressedThrough + toCompress
+            await adapter.updateSession(scope, id, { compressedThroughRound: compressedThrough })
+          } catch (e) {
+            log.warn('Session memory compression failed:', e)
+          }
+        }
+      }
+
+      // 构建消息历史：未达 A+B 时全量；达到后为 [压缩块 Session 记忆] + [所有未压缩 raw（cache）] + [current user]
+      const currentUserMsg = { role: 'user' as const, content: content.trim() }
+      let history: Array<{ role: string; content: string }>
+
+      if (completeRounds < fullContextTurns + cachedContextTurns) {
+        history = [
+          ...session.messages.map((m) => ({ role: m.role, content: m.content })),
+          currentUserMsg
+        ]
+      } else {
+        const systemMsgs = session.messages.filter((m) => m.role === 'system')
+        const systemPrefix =
+          systemMsgs.length > 0 ? systemMsgs.map((m) => ({ role: m.role, content: m.content })) : []
+        const cacheRaw = chatMessages
+          .slice(2 * compressedThrough)
+          .map((m) => ({ role: m.role, content: m.content }))
+        history = [...systemPrefix, ...cacheRaw, currentUserMsg]
+      }
+
+      // 每轮注入 User/Scope 记忆；Session 仅在有压缩内容时注入
       const trimmedContent = content.trim()
       const isFirstMessage = session.messages.length === 0
-      const userTurnCount = session.messages.filter((m) => m.role === 'user').length
-      const memoryInjectTurnInterval =
-        typeof process.env.PRIZM_MEMORY_INJECT_TURN_INTERVAL !== 'undefined'
-          ? Math.max(1, parseInt(process.env.PRIZM_MEMORY_INJECT_TURN_INTERVAL, 10) || 3)
-          : 3
-      const isThresholdTurn = isFirstMessage || (userTurnCount + 1) % memoryInjectTurnInterval === 0
       const shouldInjectMemory =
         isMemoryEnabled() &&
-        isThresholdTurn &&
         (trimmedContent.length >= 4 || (isFirstMessage && trimmedContent.length >= 1))
       const memoryQuery = trimmedContent.length >= 4 ? trimmedContent : '用户偏好与工作区概况'
 
       if (shouldInjectMemory) {
         try {
           const maxCharsPerMemory = 80
-          const truncate = (s: string) =>
+          const truncateMem = (s: string) =>
             s.length <= maxCharsPerMemory ? s : s.slice(0, maxCharsPerMemory) + '…'
 
-          let userMem: { memory: string }[] = []
-          let scopeMem: { memory: string }[] = []
+          const two = await searchUserAndScopeMemories(memoryQuery, userId, scope)
+          let userMem = two.user
+          let scopeMem = two.scope
           let sessionMem: { memory: string }[] = []
-
-          if (isFirstMessage) {
-            const two = await searchUserAndScopeMemories(memoryQuery, userId, scope)
-            userMem = two.user
-            scopeMem = two.scope
-          } else {
+          if (compressedThrough > 0) {
             const three = await searchThreeLevelMemories(memoryQuery, userId, scope, id)
-            userMem = three.user
-            scopeMem = three.scope
             sessionMem = three.session
           }
 
           const sections: string[] = []
           if (userMem.length > 0) {
             sections.push(
-              '[User Memory]\n' + userMem.map((m) => `- ${truncate(m.memory)}`).join('\n')
+              '[User Memory]\n' + userMem.map((m) => `- ${truncateMem(m.memory)}`).join('\n')
             )
           }
           if (scopeMem.length > 0) {
             sections.push(
-              '[Scope Memory]\n' + scopeMem.map((m) => `- ${truncate(m.memory)}`).join('\n')
+              '[Scope Memory]\n' + scopeMem.map((m) => `- ${truncateMem(m.memory)}`).join('\n')
             )
           }
           if (sessionMem.length > 0) {
             sections.push(
-              '[Session Memory]\n' + sessionMem.map((m) => `- ${truncate(m.memory)}`).join('\n')
+              '[Session Memory]\n' + sessionMem.map((m) => `- ${truncateMem(m.memory)}`).join('\n')
             )
           }
 
           if (sections.length > 0) {
-            const memoryPrompt = sections.join('\n\n') + '\n\n请自然使用上述记忆，勿复述。'
-            history.splice(history.length - 1, 0, { role: 'system', content: memoryPrompt })
+            const memoryPrompt = sections.join('\n\n')
+            const insertIdx =
+              compressedThrough > 0 ? session.messages.filter((m) => m.role === 'system').length : 0
+            history.splice(insertIdx, 0, { role: 'system', content: memoryPrompt })
             log.info(
-              'Injected memories: user=%d, scope=%d, session=%d (first=%s, turn=%d)',
+              'Injected memories: user=%d, scope=%d, session=%d (compressedThrough=%d)',
               userMem.length,
               scopeMem.length,
               sessionMem.length,
-              isFirstMessage,
-              userTurnCount + 1
+              compressedThrough
             )
           }
         } catch (memErr) {
@@ -596,7 +637,6 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
               ...(fullToolCalls.length > 0 && { toolCalls: fullToolCalls }),
               ...(parts.length > 0 && { parts })
             })
-            scheduleConversationSummary(scope, id, userId)
 
             let memoryGrowth = null
             if (isMemoryEnabled() && fullContent) {
@@ -642,7 +682,6 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
             ...(fullToolCalls.length > 0 && { toolCalls: fullToolCalls }),
             ...(parts.length > 0 && { parts })
           })
-          scheduleConversationSummary(scope, id, userId)
           let memoryGrowth = null
           if (isMemoryEnabled() && fullContent) {
             try {
@@ -702,7 +741,6 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
             ...(fullToolCalls.length > 0 && { toolCalls: fullToolCalls }),
             ...(parts.length > 0 && { parts })
           })
-          scheduleConversationSummary(scope, id, userId)
           let memoryGrowth = null
           if (isMemoryEnabled() && fullContent) {
             try {

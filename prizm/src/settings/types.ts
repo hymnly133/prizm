@@ -25,25 +25,33 @@ export interface DocumentSummarySettings {
   model?: string
 }
 
-/** 对话摘要：每 N 次对话生成会话摘要，用于压缩上下文 */
+/** 对话摘要：根据用户输入生成动宾短语，用于会话列表标题 */
 export interface ConversationSummarySettings {
   enabled?: boolean
-  /** 每 N 轮 user+assistant 对话后生成摘要，默认 10 */
-  interval?: number
   /** 使用的模型 ID，空则用默认 provider 默认模型 */
   model?: string
 }
 
-/** Agent LLM 相关设置（文档摘要、对话摘要、默认模型、记忆） */
+/** 上下文窗口 A/B 压缩：完全上下文轮数 A、缓存轮数 B，满 A+B 时将最老 B 轮压缩为 Session 记忆 */
+export interface ContextWindowSettings {
+  /** 完全上下文轮数（最新 A 轮保持原始发送） */
+  fullContextTurns?: number
+  /** 缓存轮数（每 B 轮压缩为一段 Session 记忆） */
+  cachedContextTurns?: number
+}
+
+/** Agent LLM 相关设置（文档摘要、对话摘要、默认模型、记忆、上下文窗口） */
 export interface AgentLLMSettings {
   /** 文档摘要配置 */
   documentSummary?: DocumentSummarySettings
-  /** 对话摘要配置 */
+  /** 对话摘要配置（会话列表标题） */
   conversationSummary?: ConversationSummarySettings
   /** 默认对话模型，客户端可覆盖 */
   defaultModel?: string
   /** 记忆模块配置 */
   memory?: MemorySettings
+  /** 上下文窗口 A/B 压缩配置 */
+  contextWindow?: ContextWindowSettings
 }
 
 /** 内置工具集合（可扩展） */

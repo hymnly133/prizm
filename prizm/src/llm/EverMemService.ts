@@ -125,6 +125,11 @@ export async function initEverMemService() {
   log.info('EverMemService initialized')
 }
 
+/** 供 E2E 测试用：返回与记忆抽取同款的 LLM 适配器（使用 getLLMProvider，即默认 MiMo/智谱/OpenAI） */
+export function createMemoryExtractionLLMAdapter(): ICompletionProvider {
+  return new PrizmLLMAdapter()
+}
+
 export function getMemoryManager(): MemoryManager {
   if (!_memoryManager) throw new Error('EverMemService not initialized')
   return _memoryManager
@@ -166,7 +171,8 @@ export async function addMemoryInteraction(
       userId,
       scope,
       sessionId,
-      roundMessageId
+      roundMessageId,
+      skipSessionExtraction: true
     }
     const memcell: MemCell = {
       original_data: messages,
@@ -190,6 +196,46 @@ export async function addMemoryInteraction(
       memory_type: c.type
     }))
     return { messageId: roundMessageId, count: created.length, byType, memories }
+  } finally {
+    _tokenUserId = null
+  }
+}
+
+/**
+ * 将指定轮次的对话批量抽取为 Session 层记忆（仅 EventLog）
+ * 用于 A/B 滑动窗口压缩：将最老 B 轮对话抽取为记忆后，不再发送原始上下文
+ */
+export async function addSessionMemoryFromRounds(
+  messages: Array<{ role: string; content: string }>,
+  userId: string,
+  scope: string,
+  sessionId: string
+): Promise<void> {
+  if (!messages.length) return
+  const manager = getMemoryManager()
+  _tokenUserId = userId
+  try {
+    const routing: MemoryRoutingContext = {
+      userId,
+      scope,
+      sessionId,
+      sessionOnly: true
+    }
+    const memcell: MemCell = {
+      original_data: messages,
+      timestamp: new Date().toISOString(),
+      type: RawDataType.CONVERSATION,
+      user_id: userId,
+      deleted: false,
+      scene: 'assistant'
+    }
+    await manager.processMemCell(memcell, routing)
+    log.info(
+      'Session memory extracted from rounds, scope=%s session=%s msgs=%d',
+      scope,
+      sessionId,
+      messages.length
+    )
   } finally {
     _tokenUserId = null
   }

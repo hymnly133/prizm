@@ -1,6 +1,6 @@
 /**
- * 对话 LLM 摘要服务
- * 每 N 轮对话后异步生成会话摘要，用于压缩长对话上下文
+ * 对话摘要服务：仅根据用户本条输入生成动宾短语摘要（单条记录，每轮覆盖）
+ * 在用户发送时即触发，用于左侧列表展示
  * 配置来自 agent-tools.agent.conversationSummary
  */
 
@@ -12,35 +12,20 @@ import { recordTokenUsage } from './tokenUsage'
 
 const log = createLogger('ConversationSummary')
 
-const DEFAULT_INTERVAL = 10
-
-function countTurns(messages: Array<{ role: string }>): number {
-  let turns = 0
-  let lastWasUser = false
-  for (const m of messages) {
-    if (m.role === 'user') {
-      lastWasUser = true
-    } else if (m.role === 'assistant' && lastWasUser) {
-      turns++
-      lastWasUser = false
-    }
-  }
-  return turns
-}
-
 /**
- * 异步生成对话摘要并更新会话
- * @param userId 可选，用于 token 记录；无则记到 anonymous
+ * 仅根据用户输入生成动宾短语摘要并覆盖写入会话的 llmSummary
+ * 在用户发送消息时调用，与助手回复并行
  */
-export function scheduleConversationSummary(
+export function scheduleTurnSummary(
   scope: string,
   sessionId: string,
+  userContent: string,
   userId?: string
 ): void {
   const settings = getConversationSummarySettings()
   if (settings?.enabled === false) return
+  if (!userContent.trim()) return
 
-  const interval = settings?.interval ?? DEFAULT_INTERVAL
   const model = settings?.model?.trim() || undefined
 
   void (async () => {
@@ -49,36 +34,19 @@ export function scheduleConversationSummary(
       | undefined
     try {
       const data = scopeStore.getScopeData(scope)
-      const session = data.agentSessions.find((s) => s.id === sessionId)
-      if (!session) {
-        log.warn('Session not found for summary:', sessionId, 'scope:', scope)
+      const idx = data.agentSessions.findIndex((s) => s.id === sessionId)
+      if (idx < 0) {
+        log.warn('Session not found for turn summary:', sessionId, 'scope:', scope)
         return
       }
 
-      const turns = countTurns(session.messages)
-      if (turns < interval || turns % interval !== 0) {
-        log.debug('Conversation turns not at interval:', turns, 'interval:', interval)
-        return
-      }
-
-      const recent = session.messages.slice(-(interval * 2))
-      const text = recent
-        .map((m) => `[${m.role}]: ${(m as { content?: string }).content ?? ''}`)
-        .join('\n')
-      if (!text.trim()) {
-        log.debug('No content to summarize')
-        return
-      }
-
+      const text = userContent.slice(0, 2000)
       const provider = getLLMProvider()
-      const prompt = `请用 3-5 句话概括以下对话的核心内容与结论，直接输出摘要，不要加引号或前缀：\n\n${text.slice(
-        0,
-        6000
-      )}`
+      const prompt = `根据用户下面这条输入，用「动宾短语」概括其意图或主题。只输出一个短语，不要完整句子、不要句号或引号。示例：查询天气、创建待办、总结文档、询问用法。10 字以内。\n\n用户输入：\n${text}`
 
       let llmContent = ''
       for await (const chunk of provider.chat([{ role: 'user', content: prompt }], {
-        temperature: 0.3,
+        temperature: 0.2,
         model
       })) {
         if (chunk.text) llmContent += chunk.text
@@ -86,21 +54,21 @@ export function scheduleConversationSummary(
         if (chunk.done) break
       }
 
-      const summary = llmContent.trim()
+      const summary = llmContent
+        .trim()
+        .replace(/[。"」]$/, '')
+        .slice(0, 20)
       if (!summary) {
-        log.warn('LLM returned empty conversation summary for:', sessionId)
+        log.warn('LLM returned empty turn summary for:', sessionId)
         return
       }
 
-      const idx = data.agentSessions.findIndex((s) => s.id === sessionId)
-      if (idx < 0) return
-      const existing = data.agentSessions[idx].llmSummary ?? ''
-      data.agentSessions[idx].llmSummary = existing ? `${existing}\n\n---\n${summary}` : summary
+      data.agentSessions[idx].llmSummary = summary
       data.agentSessions[idx].updatedAt = Date.now()
       scopeStore.saveScope(scope)
-      log.info('Conversation summary generated:', sessionId, 'scope:', scope)
+      log.debug('Turn summary updated:', sessionId, 'scope:', scope)
     } catch (err) {
-      log.error('Conversation summary failed:', sessionId, 'scope:', scope, err)
+      log.error('Turn summary failed:', sessionId, 'scope:', scope, err)
     } finally {
       if (lastUsage) {
         recordTokenUsage(userId ?? 'anonymous', 'conversation_summary', lastUsage, model)

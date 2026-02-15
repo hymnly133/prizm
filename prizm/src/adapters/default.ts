@@ -550,7 +550,7 @@ export class DefaultAgentAdapter implements IAgentAdapter {
   async updateSession(
     scope: string,
     id: string,
-    update: { title?: string; llmSummary?: string }
+    update: { title?: string; llmSummary?: string; compressedThroughRound?: number }
   ): Promise<AgentSession> {
     const data = scopeStore.getScopeData(scope)
     const session = data.agentSessions.find((s) => s.id === id)
@@ -561,6 +561,9 @@ export class DefaultAgentAdapter implements IAgentAdapter {
     }
     if (update.llmSummary !== undefined) {
       session.llmSummary = update.llmSummary
+    }
+    if (update.compressedThroughRound !== undefined) {
+      session.compressedThroughRound = update.compressedThroughRound
     }
     session.updatedAt = Date.now()
     scopeStore.saveScope(scope)

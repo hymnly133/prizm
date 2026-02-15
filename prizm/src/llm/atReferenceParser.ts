@@ -3,7 +3,6 @@
  */
 
 import { getAtReference } from './atReferenceRegistry'
-import { recordProvision } from './contextTracker'
 import type { ScopeRefKind } from './scopeItemRegistry'
 
 /** 匹配 @key:id 或 @key: id，key 可为字母、数字、中文等 */
@@ -75,16 +74,6 @@ export async function resolveAtRefs(
     lines.push(`### @${ref.key}:${ref.id} (${detail.title})`)
     lines.push(detail.content?.trim() || '(空)')
     lines.push('')
-
-    if (sessionId) {
-      recordProvision(scope, sessionId, {
-        itemId: ref.id,
-        kind,
-        mode: 'full',
-        charCount: (detail.content ?? '').length,
-        version: detail.updatedAt ?? 0
-      })
-    }
   }
 
   const injectedPrefix = lines.length

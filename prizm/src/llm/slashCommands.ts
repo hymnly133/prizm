@@ -3,7 +3,6 @@
  */
 
 import { listRefItems, getScopeRefItem, getScopeStats, searchScopeItems } from './scopeItemRegistry'
-import { buildProvisionSummary } from './contextTracker'
 import {
   registerSlashCommand,
   parseSlashMessage,
@@ -67,9 +66,14 @@ async function runSearch(options: SlashCommandRunOptions): Promise<string> {
 async function runContext(options: SlashCommandRunOptions): Promise<string> {
   const { scope, sessionId } = options
   if (!sessionId) return '当前无会话上下文。'
-  const summary = buildProvisionSummary(scope, sessionId)
-  if (!summary) return '本会话尚未引用或提供任何工作区项。'
-  return summary
+  const { getSessionContext } = await import('./contextTracker')
+  const state = getSessionContext(scope, sessionId)
+  const activities = state?.activities ?? []
+  if (!activities.length) return '本会话内暂无工具操作记录。'
+  return activities
+    .filter((a) => a.action === 'create' || a.action === 'update' || a.action === 'delete')
+    .map((a) => `${a.action} ${a.itemKind ?? ''}:${a.itemId ?? '?'}`)
+    .join('\n')
 }
 
 async function runHelp(options: SlashCommandRunOptions): Promise<string> {
