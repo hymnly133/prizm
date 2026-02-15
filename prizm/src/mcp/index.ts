@@ -21,7 +21,7 @@ import { EVENT_TYPES } from '../websocket/types'
 import { ONLINE_SCOPE } from '../core/ScopeStore'
 import { getConfig } from '../config'
 import { parseTodoItemsFromInput } from '../utils/todoItems'
-import { isMemoryEnabled, getAllMemories, searchMemories } from '../llm/EverMemService'
+import { isMemoryEnabled, getAllMemories, searchMemoriesWithOptions } from '../llm/EverMemService'
 
 function createMcpServerWithTools(
   adapters: PrizmAdapters,
@@ -67,17 +67,18 @@ function createMcpServerWithTools(
     {
       description: '在 Prizm 中创建便签',
       inputSchema: z.object({
-        content: z.string().describe('便签内容')
+        content: z.string().describe('便签内容'),
+        tags: z.array(z.string()).optional().describe('标签列表')
       })
     },
-    async ({ content }) => {
+    async ({ content, tags }) => {
       if (!adapters.notes?.createNote) {
         return {
           content: [{ type: 'text' as const, text: 'Notes adapter not available' }],
           isError: true
         }
       }
-      const note = await adapters.notes.createNote(scope, { content })
+      const note = await adapters.notes.createNote(scope, { content, tags })
       return {
         content: [
           {
@@ -114,7 +115,7 @@ function createMcpServerWithTools(
                 id: note.id,
                 content: note.content,
                 imageUrls: note.imageUrls,
-                groupId: note.groupId,
+                tags: note.tags,
                 createdAt: note.createdAt,
                 updatedAt: note.updatedAt
               },
@@ -134,19 +135,19 @@ function createMcpServerWithTools(
       inputSchema: z.object({
         id: z.string().describe('便签 ID'),
         content: z.string().optional().describe('便签内容'),
-        groupId: z.string().optional().describe('分组 ID')
+        tags: z.array(z.string()).optional().describe('标签列表')
       })
     },
-    async ({ id, content, groupId }) => {
+    async ({ id, content, tags }) => {
       if (!adapters.notes?.updateNote) {
         return {
           content: [{ type: 'text' as const, text: 'Notes adapter not available' }],
           isError: true
         }
       }
-      const payload: { content?: string; groupId?: string } = {}
+      const payload: { content?: string; tags?: string[] } = {}
       if (content !== undefined) payload.content = content
-      if (groupId !== undefined) payload.groupId = groupId
+      if (tags !== undefined) payload.tags = tags
       const note = await adapters.notes.updateNote(scope, id, payload)
       return {
         content: [
@@ -796,7 +797,7 @@ function createMcpServerWithTools(
           isError: false
         }
       }
-      const memories = await getAllMemories(scope)
+      const memories = await getAllMemories('default', scope)
       return {
         content: [
           {
@@ -847,7 +848,7 @@ function createMcpServerWithTools(
           isError: true
         }
       }
-      const memories = await searchMemories(q, scope)
+      const memories = await searchMemoriesWithOptions(q, 'default', scope)
       return {
         content: [
           {

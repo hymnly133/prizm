@@ -7,13 +7,12 @@ import fs from 'fs'
 import path from 'path'
 import MiniSearch from 'minisearch'
 import type { PrizmAdapters } from '../adapters/interfaces'
-import { getConfig } from '../config'
+import { scopeStore } from '../core/ScopeStore'
+import { getSearchIndexPath } from '../core/PathProvider'
 import { createLogger } from '../logger'
 import { parseKeywords } from './keywordSearch'
 
 const log = createLogger('SearchIndex')
-const SCOPES_DIR = 'scopes'
-const SEARCH_INDEX_FILENAME = 'search-index.json'
 
 /** 搜索索引持久化接口，可由 SQLite 等实现（复用现有依赖） */
 export interface ISearchIndexStore {
@@ -22,13 +21,9 @@ export interface ISearchIndexStore {
   deleteSearchIndex(scope: string): Promise<void>
 }
 
-function safeScopeDirname(scope: string): string {
-  return scope.replace(/[^a-zA-Z0-9_-]/g, '_') || 'default'
-}
-
 function getIndexFilePath(scope: string): string {
-  const dataDir = getConfig().dataDir
-  return path.join(dataDir, SCOPES_DIR, safeScopeDirname(scope), SEARCH_INDEX_FILENAME)
+  const scopeRoot = scopeStore.getScopeRootPath(scope)
+  return getSearchIndexPath(scopeRoot)
 }
 
 export type SearchResultKind = 'note' | 'document' | 'clipboard' | 'todoList'

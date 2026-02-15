@@ -53,12 +53,7 @@ export type { SMTCPayload } from '@prizm/shared'
 export interface NotePayload {
   id: string
   content: string
-  groupId?: string
-}
-
-export interface GroupPayload {
-  id: string
-  name: string
+  tags?: string[]
 }
 
 // ============ WebSocket 配置（Server 专用） ============

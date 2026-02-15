@@ -5,7 +5,6 @@
 
 import type {
   StickyNote,
-  StickyNoteGroup,
   StickyNoteFileRef,
   CreateNotePayload,
   UpdateNotePayload,
@@ -41,7 +40,6 @@ import type {
 // 重导出，供 routes、adapters 等使用
 export type {
   StickyNote,
-  StickyNoteGroup,
   StickyNoteFileRef,
   CreateNotePayload,
   UpdateNotePayload,

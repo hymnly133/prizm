@@ -13,7 +13,6 @@ export type { PrizmConfig } from './config'
 // Export types
 export type {
   StickyNote,
-  StickyNoteGroup,
   StickyNoteFileRef,
   CreateNotePayload,
   UpdateNotePayload,

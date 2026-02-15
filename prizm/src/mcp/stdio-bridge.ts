@@ -92,12 +92,17 @@ function createStdioServer(): McpServer {
     'prizm_create_note',
     {
       description: '在 Prizm 中创建便签',
-      inputSchema: z.object({ content: z.string() })
+      inputSchema: z.object({
+        content: z.string(),
+        tags: z.array(z.string()).optional().describe('标签列表')
+      })
     },
-    async ({ content }) => {
+    async ({ content, tags }) => {
+      const payload: Record<string, unknown> = { content }
+      if (tags?.length) payload.tags = tags
       const data = (await fetchPrizm('/notes', {
         method: 'POST',
-        body: JSON.stringify({ content })
+        body: JSON.stringify(payload)
       })) as { note: { id: string } }
       return {
         content: [
@@ -145,13 +150,13 @@ function createStdioServer(): McpServer {
       inputSchema: z.object({
         id: z.string().describe('便签 ID'),
         content: z.string().optional().describe('便签内容'),
-        groupId: z.string().optional().describe('分组 ID')
+        tags: z.array(z.string()).optional().describe('标签列表')
       })
     },
-    async ({ id, content, groupId }) => {
+    async ({ id, content, tags }) => {
       const payload: Record<string, unknown> = {}
       if (content !== undefined) payload.content = content
-      if (groupId !== undefined) payload.groupId = groupId
+      if (tags !== undefined) payload.tags = tags
       const data = (await fetchPrizm(`/notes/${id}`, {
         method: 'PATCH',
         body: JSON.stringify(payload)

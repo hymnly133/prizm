@@ -5,7 +5,6 @@
 
 import type {
   StickyNote,
-  StickyNoteGroup,
   StickyNoteFileRef,
   CreateNotePayload,
   UpdateNotePayload,
@@ -23,7 +22,6 @@ import type {
 
 export type {
   StickyNote,
-  StickyNoteGroup,
   StickyNoteFileRef,
   CreateNotePayload,
   UpdateNotePayload,
@@ -133,24 +131,6 @@ export const updateNote = (id: string, payload: UpdateNotePayload, scope?: strin
   })
 export const deleteNote = (id: string, scope?: string) =>
   request<void>(`/notes/${id}`, { method: 'DELETE', scope })
-
-// Notes Groups（支持 scope）
-export const getGroups = (scope?: string) =>
-  request<{ groups: StickyNoteGroup[] }>('/notes/groups', { scope })
-export const createGroup = (name: string, scope?: string) =>
-  request<{ group: StickyNoteGroup }>('/notes/groups', {
-    method: 'POST',
-    body: JSON.stringify({ name }),
-    scope
-  })
-export const updateGroup = (id: string, name: string, scope?: string) =>
-  request<{ group: StickyNoteGroup }>(`/notes/groups/${id}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ name }),
-    scope
-  })
-export const deleteGroup = (id: string, scope?: string) =>
-  request<void>(`/notes/groups/${id}`, { method: 'DELETE', scope })
 
 // Notify
 export const sendNotify = (title: string, body?: string) =>

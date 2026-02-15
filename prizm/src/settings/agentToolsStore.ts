@@ -5,9 +5,8 @@
  */
 
 import fs from 'fs'
-import path from 'path'
 import { createLogger } from '../logger'
-import { getConfig } from '../config'
+import { getAgentToolsPath, getMcpServersPath, ensureDataDir } from '../core/PathProviderCore'
 import type {
   AgentToolsSettings,
   TavilySettings,
@@ -19,22 +18,13 @@ import type {
 import type { McpServerConfig } from '../mcp-client/types'
 
 const log = createLogger('AgentToolsStore')
-const FILE_NAME = 'agent-tools.json'
-const LEGACY_FILE = 'mcp-servers.json'
 
 function getFilePath(): string {
-  return path.join(getConfig().dataDir, FILE_NAME)
+  return getAgentToolsPath()
 }
 
 function getLegacyFilePath(): string {
-  return path.join(getConfig().dataDir, LEGACY_FILE)
-}
-
-function ensureDataDir(): void {
-  const dir = getConfig().dataDir
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true })
-  }
+  return getMcpServersPath()
 }
 
 function migrateFromLegacy(): AgentToolsSettings | null {
