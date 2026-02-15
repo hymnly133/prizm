@@ -17,9 +17,7 @@ export class ForesightExtractor extends BaseExtractor {
     if (!inputText) return null
 
     const timestamp = memcell.timestamp || new Date().toISOString()
-    const prompt = FORESIGHT_GENERATION_PROMPT.replace('{{USER_ID}}', memcell.user_id || 'unknown')
-      .replace('{{USER_NAME}}', 'User') // Ideally fetch user name
-      .replace('{{CONVERSATION_TEXT}}', inputText)
+    const prompt = FORESIGHT_GENERATION_PROMPT.replace('{{CONVERSATION_TEXT}}', inputText)
 
     try {
       const response = await this.llmProvider.generate({

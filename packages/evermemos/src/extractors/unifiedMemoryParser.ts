@@ -106,33 +106,40 @@ export function parseUnifiedMemoryText(text: string): UnifiedExtractionResult | 
   const profileBody = sections.get('PROFILE')
   if (profileBody) {
     const kv = parseSectionKeyValues(profileBody)
-    const userId = getFirst(kv, 'USER_ID')
-    if (userId) {
-      const record: Record<string, unknown> = {
-        user_id: userId,
-        user_name: getFirst(kv, 'USER_NAME'),
-        hard_skills: getFirst(kv, 'HARD_SKILLS')
-          ?.split(',')
-          .map((s) => s.trim())
-          .filter(Boolean),
-        soft_skills: getFirst(kv, 'SOFT_SKILLS')
-          ?.split(',')
-          .map((s) => s.trim())
-          .filter(Boolean),
-        output_reasoning: getFirst(kv, 'OUTPUT_REASONING'),
-        work_responsibility: getFirst(kv, 'WORK_RESPONSIBILITY')
-          ?.split(',')
-          .map((s) => s.trim())
-          .filter(Boolean),
-        interests: getFirst(kv, 'INTERESTS')
-          ?.split(',')
-          .map((s) => s.trim())
-          .filter(Boolean),
-        tendency: getFirst(kv, 'TENDENCY')
-          ?.split(',')
-          .map((s) => s.trim())
-          .filter(Boolean)
-      }
+    const record: Record<string, unknown> = {
+      user_name: getFirst(kv, 'USER_NAME'),
+      summary: getFirst(kv, 'SUMMARY'),
+      // 兼容旧格式 OUTPUT_REASONING（新 prompt 使用 SUMMARY）
+      output_reasoning: getFirst(kv, 'OUTPUT_REASONING') ?? getFirst(kv, 'SUMMARY'),
+      hard_skills: getFirst(kv, 'HARD_SKILLS')
+        ?.split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+      soft_skills: getFirst(kv, 'SOFT_SKILLS')
+        ?.split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+      work_responsibility: getFirst(kv, 'WORK_RESPONSIBILITY')
+        ?.split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+      interests: getFirst(kv, 'INTERESTS')
+        ?.split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+      tendency: getFirst(kv, 'TENDENCY')
+        ?.split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    }
+    // 兼容旧格式：如果有 USER_ID 也记录下来
+    const legacyUserId = getFirst(kv, 'USER_ID')
+    if (legacyUserId) record.user_id = legacyUserId
+    // 只要有任意有效字段即视为有效 profile
+    const hasContent = Object.values(record).some(
+      (v) => v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && v.length === 0)
+    )
+    if (hasContent) {
       result.profile = { user_profiles: [record] }
     }
   }

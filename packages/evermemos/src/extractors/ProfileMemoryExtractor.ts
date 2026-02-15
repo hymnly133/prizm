@@ -70,95 +70,82 @@ export class ProfileMemoryExtractor extends BaseExtractor {
       const part2Data = parseJSON(part2Response)
       const part3Data = parseJSON(part3Response)
 
-      const profilesMap = new Map<string, Partial<ProfileMemory>>()
+      // 单用户：所有 Part 的结果合并到同一份 profile
+      const merged: Partial<ProfileMemory> = { user_id: memcell.user_id }
 
-      // Helper to merge data
       const mergeProfile = (p: any) => {
-        if (!p.user_id) return
-        if (!profilesMap.has(p.user_id)) profilesMap.set(p.user_id, { user_id: p.user_id })
-        const profile = profilesMap.get(p.user_id)!
+        if (p.user_name) merged.user_name = p.user_name
+        if (p.output_reasoning) merged.output_reasoning = p.output_reasoning
 
-        // Merge simple fields
-        if (p.user_name) profile.user_name = p.user_name
-        if (p.output_reasoning) profile.output_reasoning = p.output_reasoning
+        if (p.working_habit_preference) merged.working_habit_preference = p.working_habit_preference
+        if (p.hard_skills) merged.hard_skills = p.hard_skills
+        if (p.soft_skills) merged.soft_skills = p.soft_skills
+        if (p.personality) merged.personality = p.personality
+        if (p.way_of_decision_making) merged.way_of_decision_making = p.way_of_decision_making
 
-        // Merge arrays / complex fields
-        if (p.working_habit_preference)
-          profile.working_habit_preference = p.working_habit_preference
-        if (p.hard_skills) profile.hard_skills = p.hard_skills
-        if (p.soft_skills) profile.soft_skills = p.soft_skills
-        if (p.personality) profile.personality = p.personality
-        if (p.way_of_decision_making) profile.way_of_decision_making = p.way_of_decision_making
+        if (p.role_responsibility) merged.work_responsibility = p.role_responsibility
+        if (p.projects_participated) merged.projects_participated = p.projects_participated
+        if (p.opinion_tendency) merged.tendency = p.opinion_tendency
 
-        // Part 2 fields
-        if (p.role_responsibility) profile.work_responsibility = p.role_responsibility
-        if (p.projects_participated) profile.projects_participated = p.projects_participated
-        if (p.opinion_tendency) profile.tendency = p.opinion_tendency
-
-        // Part 3 fields
-        if (p.interests) profile.interests = p.interests
-        if (p.tendency) profile.tendency = p.tendency // Overwrite or merge? Usually overwrite latest is fine for delta
-        if (p.motivation_system) profile.motivation_system = p.motivation_system
-        if (p.fear_system) profile.fear_system = p.fear_system
-        if (p.value_system) profile.value_system = p.value_system
-        if (p.humor_use) profile.humor_use = p.humor_use
-        if (p.colloquialism) profile.colloquialism = p.colloquialism
+        if (p.interests) merged.interests = p.interests
+        if (p.tendency) merged.tendency = p.tendency
+        if (p.motivation_system) merged.motivation_system = p.motivation_system
+        if (p.fear_system) merged.fear_system = p.fear_system
+        if (p.value_system) merged.value_system = p.value_system
+        if (p.humor_use) merged.humor_use = p.humor_use
+        if (p.colloquialism) merged.colloquialism = p.colloquialism
       }
 
-      // Process Part 1
-      if (part1Data && Array.isArray(part1Data.user_profiles)) {
-        part1Data.user_profiles.forEach(mergeProfile)
-      }
-
-      // Process Part 2
-      if (part2Data && Array.isArray(part2Data.user_profiles)) {
-        part2Data.user_profiles.forEach(mergeProfile)
-      }
-
-      // Process Part 3
-      if (part3Data && Array.isArray(part3Data.user_profiles)) {
-        part3Data.user_profiles.forEach(mergeProfile)
-      }
-
-      const results: ProfileMemory[] = []
-      const timestamp = memcell.timestamp || new Date().toISOString()
-
-      for (const profilePartial of profilesMap.values()) {
-        if (!profilePartial.user_id) continue
-
-        const profile: ProfileMemory = {
-          id: uuidv4(),
-          memory_type: MemoryType.PROFILE,
-          user_id: profilePartial.user_id,
-          group_id: memcell.group_id,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          timestamp: timestamp,
-          deleted: false,
-          content: 'Profile update for ' + (profilePartial.user_name || profilePartial.user_id),
-
-          user_name: profilePartial.user_name,
-          hard_skills: profilePartial.hard_skills,
-          soft_skills: profilePartial.soft_skills,
-          output_reasoning: profilePartial.output_reasoning,
-          way_of_decision_making: profilePartial.way_of_decision_making,
-          personality: profilePartial.personality,
-          projects_participated: profilePartial.projects_participated as ProjectInfo[],
-          user_goal: profilePartial.user_goal,
-          work_responsibility: profilePartial.work_responsibility,
-          working_habit_preference: profilePartial.working_habit_preference,
-          interests: profilePartial.interests,
-          tendency: profilePartial.tendency,
-          motivation_system: profilePartial.motivation_system,
-          fear_system: profilePartial.fear_system,
-          value_system: profilePartial.value_system,
-          humor_use: profilePartial.humor_use,
-          colloquialism: profilePartial.colloquialism
+      // 合并三个 Part 的抽取结果
+      for (const data of [part1Data, part2Data, part3Data]) {
+        if (data?.user_profiles && Array.isArray(data.user_profiles)) {
+          data.user_profiles.forEach(mergeProfile)
         }
-        results.push(profile)
       }
 
-      return results as unknown as T[]
+      // 至少有一个有效字段才产出结果
+      const hasContent = Object.entries(merged).some(
+        ([k, v]) => k !== 'user_id' && v !== undefined && v !== null
+      )
+      if (!hasContent) return null
+
+      const timestamp = memcell.timestamp || new Date().toISOString()
+      const content = merged.output_reasoning
+        ? String(merged.output_reasoning)
+        : merged.user_name
+        ? `用户称呼: ${merged.user_name}`
+        : '用户画像更新'
+
+      const profile: ProfileMemory = {
+        id: uuidv4(),
+        memory_type: MemoryType.PROFILE,
+        user_id: memcell.user_id,
+        group_id: memcell.group_id,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        timestamp,
+        deleted: false,
+        content,
+        user_name: merged.user_name,
+        hard_skills: merged.hard_skills,
+        soft_skills: merged.soft_skills,
+        output_reasoning: merged.output_reasoning,
+        way_of_decision_making: merged.way_of_decision_making,
+        personality: merged.personality,
+        projects_participated: merged.projects_participated as ProjectInfo[],
+        user_goal: merged.user_goal,
+        work_responsibility: merged.work_responsibility,
+        working_habit_preference: merged.working_habit_preference,
+        interests: merged.interests,
+        tendency: merged.tendency,
+        motivation_system: merged.motivation_system,
+        fear_system: merged.fear_system,
+        value_system: merged.value_system,
+        humor_use: merged.humor_use,
+        colloquialism: merged.colloquialism
+      }
+
+      return [profile] as unknown as T[]
     } catch (e) {
       console.error('Error extracting profile:', e)
       return null

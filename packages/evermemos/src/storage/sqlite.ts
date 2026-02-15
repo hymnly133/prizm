@@ -34,6 +34,24 @@ export class SQLiteAdapter implements RelationalStoreAdapter {
         by_id_blob TEXT NOT NULL,
         updated_at TEXT DEFAULT CURRENT_TIMESTAMP
       );
+
+      CREATE TABLE IF NOT EXISTS dedup_log (
+        id TEXT PRIMARY KEY,
+        kept_memory_id TEXT NOT NULL,
+        new_memory_content TEXT NOT NULL,
+        new_memory_type TEXT NOT NULL,
+        new_memory_metadata TEXT,
+        kept_memory_content TEXT,
+        vector_distance REAL,
+        llm_reasoning TEXT,
+        user_id TEXT,
+        group_id TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        rolled_back INTEGER DEFAULT 0
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_dedup_log_kept ON dedup_log(kept_memory_id);
+      CREATE INDEX IF NOT EXISTS idx_dedup_log_user ON dedup_log(user_id);
     `)
   }
 
