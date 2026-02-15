@@ -56,12 +56,15 @@ function getData(scope: string): ScopeData {
   return scopeStore.getScopeData(scope)
 }
 
-function noteToRefItem(
-  n: { id: string; content: string; updatedAt: number; groupId?: string },
-  groupName?: string
-): ScopeRefItem {
+function noteToRefItem(n: {
+  id: string
+  content: string
+  updatedAt: number
+  tags?: string[]
+}): ScopeRefItem {
   const content = (n.content ?? '').trim()
   const charCount = content.length
+  const tagsOrStatus = n.tags?.length ? n.tags.join(', ') : undefined
   return {
     id: n.id,
     kind: 'note',
@@ -69,7 +72,7 @@ function noteToRefItem(
     charCount,
     isShort: charCount < SHORT_CONTENT_THRESHOLD,
     updatedAt: n.updatedAt ?? 0,
-    groupOrStatus: groupName
+    groupOrStatus: tagsOrStatus
   }
 }
 
@@ -188,11 +191,10 @@ export function listTopLevel(scope: string): ScopeTopLevelItem[] {
 export function listRefItems(scope: string, kind?: ScopeRefKind): ScopeRefItem[] {
   const data = getData(scope)
   const out: ScopeRefItem[] = []
-  const groupMap = new Map(data.groups.map((g) => [g.id, g.name]))
 
   if (!kind || kind === 'note') {
     for (const n of data.notes) {
-      out.push(noteToRefItem(n, n.groupId ? groupMap.get(n.groupId) : undefined))
+      out.push(noteToRefItem(n))
     }
   }
   if (!kind || kind === 'todo') {
@@ -220,13 +222,12 @@ export function getScopeRefItem(
   id: string
 ): ScopeRefItemDetail | null {
   const data = getData(scope)
-  const groupMap = new Map(data.groups.map((g) => [g.id, g.name]))
 
   if (kind === 'note') {
     const n = data.notes.find((x) => x.id === id)
     if (!n) return null
     const content = (n.content ?? '').trim()
-    const base = noteToRefItem(n, n.groupId ? groupMap.get(n.groupId) : undefined)
+    const base = noteToRefItem(n)
     return { ...base, content, summary: undefined }
   }
 
@@ -300,8 +301,6 @@ export function searchScopeItems(scope: string, query: string): ScopeRefItem[] {
   if (!query?.trim()) return listRefItems(scope)
   const q = query.trim().toLowerCase()
   const candidates = listRefItems(scope)
-  const data = getData(scope)
-  const groupMap = new Map(data.groups.map((g) => [g.id, g.name]))
   const matched = new Set<string>()
 
   for (const ref of candidates) {

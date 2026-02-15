@@ -11,13 +11,16 @@ import { scheduleDocumentSummary } from './documentSummaryService'
 import { listRefItems, getScopeRefItem, getScopeStats, searchScopeItems } from './scopeItemRegistry'
 import { recordActivity } from './contextTracker'
 import type { ScopeActivityItemKind, ScopeActivityAction } from '@prizm/shared'
-import { isMemoryEnabled, getAllMemories, searchMemories } from './EverMemService'
+import { isMemoryEnabled, getAllMemories, searchMemoriesWithOptions } from './EverMemService'
 
 function tool(
   name: string,
   description: string,
   parameters: {
-    properties: Record<string, { type: string; description?: string; enum?: string[] }>
+    properties: Record<
+      string,
+      { type: string; description?: string; enum?: string[]; items?: { type: string } }
+    >
     required?: string[]
   }
 ): LLMTool {
@@ -51,15 +54,23 @@ export function getBuiltinTools(): LLMTool[] {
     tool('prizm_create_note', '创建一条便签。', {
       properties: {
         content: { type: 'string', description: '便签内容' },
-        groupId: { type: 'string', description: '可选分组 ID' }
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '可选标签列表'
+        }
       },
       required: ['content']
     }),
-    tool('prizm_update_note', '更新便签内容或分组。', {
+    tool('prizm_update_note', '更新便签内容或标签。', {
       properties: {
         noteId: { type: 'string', description: '便签 ID' },
         content: { type: 'string', description: '新内容' },
-        groupId: { type: 'string', description: '新分组 ID' }
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '新标签列表'
+        }
       },
       required: ['noteId']
     }),
@@ -213,14 +224,16 @@ export async function executeBuiltinTool(
 
       case 'prizm_create_note': {
         const content = typeof args.content === 'string' ? args.content : ''
-        const groupId = typeof args.groupId === 'string' ? args.groupId : undefined
+        const tags = Array.isArray(args.tags)
+          ? (args.tags as string[]).filter((t): t is string => typeof t === 'string')
+          : undefined
         const now = Date.now()
         const note = {
           id: genUniqueId(),
           content,
+          tags,
           createdAt: now,
-          updatedAt: now,
-          groupId
+          updatedAt: now
         }
         data.notes.push(note)
         scopeStore.saveScope(scope)
@@ -233,8 +246,10 @@ export async function executeBuiltinTool(
         const idx = data.notes.findIndex((n) => n.id === noteId)
         if (idx < 0) return { text: `便签不存在: ${noteId}`, isError: true }
         if (typeof args.content === 'string') data.notes[idx].content = args.content
-        if (args.groupId !== undefined)
-          data.notes[idx].groupId = typeof args.groupId === 'string' ? args.groupId : undefined
+        if (args.tags !== undefined)
+          data.notes[idx].tags = Array.isArray(args.tags)
+            ? (args.tags as string[]).filter((t): t is string => typeof t === 'string')
+            : undefined
         data.notes[idx].updatedAt = Date.now()
         scopeStore.saveScope(scope)
         record(noteId, 'note', 'update')
@@ -439,7 +454,7 @@ export async function executeBuiltinTool(
       case 'prizm_list_memories': {
         if (!isMemoryEnabled()) return { text: '记忆模块未启用。', isError: true }
         const memUserId = userId ?? 'default'
-        const memories = await getAllMemories(memUserId)
+        const memories = await getAllMemories(memUserId, scope)
         if (!memories.length) return { text: '当前无记忆条目。' }
         const lines = memories
           .slice(0, 50)
@@ -457,7 +472,7 @@ export async function executeBuiltinTool(
         const searchQuery = typeof args.query === 'string' ? args.query.trim() : ''
         if (!searchQuery) return { text: '请提供搜索关键词。', isError: true }
         const memSearchUserId = userId ?? 'default'
-        const memories = await searchMemories(searchQuery, memSearchUserId)
+        const memories = await searchMemoriesWithOptions(searchQuery, memSearchUserId, scope)
         if (!memories.length) return { text: '未找到相关记忆。' }
         const lines = memories.map((m) => `- ${m.memory}`)
         return { text: lines.join('\n') }

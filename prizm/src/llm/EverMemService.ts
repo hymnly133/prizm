@@ -12,23 +12,47 @@ import {
   DefaultQueryExpansionProvider,
   MemoryRoutingContext
 } from '@prizm/evermemos'
-import path from 'path'
-import fs from 'fs'
 import { createLogger } from '../logger'
-import { getConfig } from '../config'
+import {
+  ensureMemoryDir,
+  getUserMemoryDbPath,
+  getUserMemoryVecPath,
+  getScopeMemoryDbPath,
+  getScopeMemoryVecPath,
+  ensureScopeMemoryDir
+} from '../core/PathProviderCore'
+import { scopeStore } from '../core/ScopeStore'
+import { appendSessionMemories } from '../core/mdStore'
+import { createCompositeStorageAdapter } from './CompositeStorageAdapter'
 import { getLLMProvider } from '../llm/index'
 import { CompletionRequest, ICompletionProvider } from '@prizm/evermemos'
 import { recordTokenUsage } from './tokenUsage'
-import { scopeStore } from '../core/ScopeStore'
 import type { MemoryItem, RoundMemoryGrowth } from '@prizm/shared'
+import type { DedupLogEntry } from '@prizm/evermemos'
 
 const log = createLogger('EverMemService')
 
-let _memoryManager: MemoryManager | null = null
-let _retrievalManager: RetrievalManager | null = null
+/** 用户级 Manager（PROFILE 记忆） */
+let _userManagers: { memory: MemoryManager; retrieval: RetrievalManager } | null = null
+
+/**
+ * Scope 级 Manager 缓存：
+ * - memory: composite storage，写入时按 group_id 路由（PROFILE→userDB，其余→scopeDB）
+ * - scopeOnlyMemory: scope-only storage，用于直接查询 scope DB（listing/round 等不含 group_id 的读操作）
+ * - retrieval: scope-only storage，用于向量检索
+ */
+interface ScopeManagerSet {
+  memory: MemoryManager
+  scopeOnlyMemory: MemoryManager
+  retrieval: RetrievalManager
+}
+const _scopeManagers = new Map<string, ScopeManagerSet>()
 
 /** 当前请求的 token 记录用 userId，由 addMemoryInteraction 设置 */
 let _tokenUserId: string | null = null
+
+/** 仅测试用：注入后所有 retrieval（含 scope）均使用此 mock */
+let _testRetrievalOverride: RetrievalManager | null = null
 
 // Adapter for Prizm LLM Provider to EverMemOS LLM Provider
 class PrizmLLMAdapter implements ICompletionProvider {
@@ -92,37 +116,98 @@ class PrizmLLMAdapter implements ICompletionProvider {
 }
 
 export async function initEverMemService() {
-  const cfg = getConfig()
-  const dbPath = path.join(cfg.dataDir, 'evermemos.db')
-  const vectorDbPath = path.join(cfg.dataDir, 'evermemos_vec')
+  ensureMemoryDir()
+  const userDbPath = getUserMemoryDbPath()
+  const userVecPath = getUserMemoryVecPath()
 
-  // Ensure directories exist
-  if (!fs.existsSync(cfg.dataDir)) {
-    fs.mkdirSync(cfg.dataDir, { recursive: true })
-  }
-
-  const sqliteAdapter = new SQLiteAdapter(dbPath)
-  const lancedbAdapter = new LanceDBAdapter(vectorDbPath)
-
-  const storage: StorageAdapter = {
-    relational: sqliteAdapter,
-    vector: lancedbAdapter
+  const userSqlite = new SQLiteAdapter(userDbPath)
+  const userLancedb = new LanceDBAdapter(userVecPath)
+  const userStorage: StorageAdapter = {
+    relational: userSqlite,
+    vector: userLancedb
   }
 
   const llmProvider = new PrizmLLMAdapter()
   const unifiedExtractor = new UnifiedExtractor(llmProvider)
-  _memoryManager = new MemoryManager(storage, {
+  const userMemory = new MemoryManager(userStorage, {
     unifiedExtractor,
     embeddingProvider: llmProvider
   })
-  // 使用统一抽取时不注册分类型 extractor，避免 1+6=7 次调用
-
   const queryExpansionProvider = new DefaultQueryExpansionProvider(llmProvider)
-  _retrievalManager = new RetrievalManager(storage, llmProvider, {
+  const userRetrieval = new RetrievalManager(userStorage, llmProvider, {
     queryExpansionProvider
   })
 
-  log.info('EverMemService initialized')
+  _userManagers = { memory: userMemory, retrieval: userRetrieval }
+  log.info('EverMemService initialized (user-level)')
+}
+
+function getUserManagers(): { memory: MemoryManager; retrieval: RetrievalManager } {
+  if (!_userManagers) throw new Error('EverMemService not initialized')
+  return _userManagers
+}
+
+function getScopeManagers(scope: string): ScopeManagerSet {
+  if (_testRetrievalOverride) {
+    let m = _scopeManagers.get(`__test__${scope}`)
+    if (!m) {
+      m = {
+        memory: {} as MemoryManager,
+        scopeOnlyMemory: {} as MemoryManager,
+        retrieval: _testRetrievalOverride
+      }
+      _scopeManagers.set(`__test__${scope}`, m)
+    }
+    return m
+  }
+  let m = _scopeManagers.get(scope)
+  if (m) return m
+
+  const scopeRoot = scopeStore.getScopeRootPath(scope)
+  if (!scopeRoot) throw new Error(`Scope not found: ${scope}`)
+
+  ensureScopeMemoryDir(scopeRoot)
+  const scopeDbPath = getScopeMemoryDbPath(scopeRoot)
+  const scopeVecPath = getScopeMemoryVecPath(scopeRoot)
+
+  const scopeSqlite = new SQLiteAdapter(scopeDbPath)
+  const scopeLancedb = new LanceDBAdapter(scopeVecPath)
+  const scopeStorage: StorageAdapter = {
+    relational: scopeSqlite,
+    vector: scopeLancedb
+  }
+
+  const userStorage: StorageAdapter = {
+    relational: new SQLiteAdapter(getUserMemoryDbPath()),
+    vector: new LanceDBAdapter(getUserMemoryVecPath())
+  }
+  const compositeStorage = createCompositeStorageAdapter(userStorage, scopeStorage)
+
+  const llmProvider = new PrizmLLMAdapter()
+  const unifiedExtractor = new UnifiedExtractor(llmProvider)
+
+  // composite: 写入按 group_id 路由（PROFILE→userDB，其余→scopeDB）
+  const memory = new MemoryManager(compositeStorage, {
+    unifiedExtractor,
+    embeddingProvider: llmProvider,
+    llmProvider
+  })
+
+  // scope-only: 直接查询 scope DB，用于 listing/round 等不含 group_id 的读操作
+  const scopeOnlyMemory = new MemoryManager(scopeStorage, {
+    unifiedExtractor,
+    embeddingProvider: llmProvider,
+    llmProvider
+  })
+
+  const queryExpansionProvider = new DefaultQueryExpansionProvider(llmProvider)
+  const retrieval = new RetrievalManager(scopeStorage, llmProvider, {
+    queryExpansionProvider
+  })
+
+  m = { memory, scopeOnlyMemory, retrieval }
+  _scopeManagers.set(scope, m)
+  return m
 }
 
 /** 供 E2E 测试用：返回与记忆抽取同款的 LLM 适配器（使用 getLLMProvider，即默认 MiMo/智谱/OpenAI） */
@@ -130,22 +215,39 @@ export function createMemoryExtractionLLMAdapter(): ICompletionProvider {
   return new PrizmLLMAdapter()
 }
 
+/** 返回用户级 MemoryManager（兼容旧用法，新代码应使用 getUserManagers） */
 export function getMemoryManager(): MemoryManager {
-  if (!_memoryManager) throw new Error('EverMemService not initialized')
-  return _memoryManager
+  return getUserManagers().memory
 }
 
+/** 返回用户级 RetrievalManager（兼容旧用法） */
 export function getRetrievalManager(): RetrievalManager {
-  if (!_retrievalManager) throw new Error('EverMemService not initialized')
-  return _retrievalManager
+  return getUserManagers().retrieval
 }
 
 /**
- * 仅用于测试：注入 mock RetrievalManager，避免未 init 时抛错
+ * 仅用于测试：注入 mock retrieval，user 与 scope 检索均使用此 mock
  */
 export function setRetrievalManagerForTest(manager: RetrievalManager | null): void {
   if (process.env.NODE_ENV !== 'test') return
-  _retrievalManager = manager
+  _testRetrievalOverride = manager
+  if (manager) {
+    try {
+      _userManagers = {
+        memory: getUserManagers().memory,
+        retrieval: manager
+      }
+    } catch {
+      _userManagers = {
+        memory: {} as MemoryManager,
+        retrieval: manager
+      }
+    }
+  } else {
+    _userManagers = null
+    _testRetrievalOverride = null
+    _scopeManagers.clear()
+  }
 }
 
 /**
@@ -164,7 +266,7 @@ export async function addMemoryInteraction(
   sessionId?: string,
   roundMessageId?: string
 ): Promise<RoundMemoryGrowth | null> {
-  const manager = getMemoryManager()
+  const manager = getScopeManagers(scope).memory
   _tokenUserId = userId
   try {
     const routing: MemoryRoutingContext = {
@@ -195,6 +297,21 @@ export async function addMemoryInteraction(
       group_id: c.group_id,
       memory_type: c.type
     }))
+    if (sessionId) {
+      const sessionGroupPrefix = `${scope}:session:${sessionId}`
+      const sessionMemories = created.filter(
+        (c) => c.group_id === sessionGroupPrefix || c.group_id?.startsWith(sessionGroupPrefix)
+      )
+      if (sessionMemories.length > 0) {
+        try {
+          const scopeRoot = scopeStore.getScopeRootPath(scope)
+          const content = sessionMemories.map((c) => `- ${c.content}`).join('\n')
+          appendSessionMemories(scopeRoot, sessionId, content)
+        } catch (e) {
+          log.warn('Failed to append session memories snapshot:', sessionId, e)
+        }
+      }
+    }
     return { messageId: roundMessageId, count: created.length, byType, memories }
   } finally {
     _tokenUserId = null
@@ -212,7 +329,7 @@ export async function addSessionMemoryFromRounds(
   sessionId: string
 ): Promise<void> {
   if (!messages.length) return
-  const manager = getMemoryManager()
+  const manager = getScopeManagers(scope).memory
   _tokenUserId = userId
   try {
     const routing: MemoryRoutingContext = {
@@ -229,7 +346,16 @@ export async function addSessionMemoryFromRounds(
       deleted: false,
       scene: 'assistant'
     }
-    await manager.processMemCell(memcell, routing)
+    const created = await manager.processMemCell(memcell, routing)
+    if (created.length > 0) {
+      try {
+        const scopeRoot = scopeStore.getScopeRootPath(scope)
+        const content = created.map((c) => `- ${c.content}`).join('\n')
+        appendSessionMemories(scopeRoot, sessionId, content)
+      } catch (e) {
+        log.warn('Failed to append session memories snapshot:', sessionId, e)
+      }
+    }
     log.info(
       'Session memory extracted from rounds, scope=%s session=%s msgs=%d',
       scope,
@@ -252,7 +378,7 @@ export async function addDocumentToMemory(
   scope: string,
   documentId: string
 ): Promise<void> {
-  const manager = getMemoryManager()
+  const manager = getScopeManagers(scope).memory
   _tokenUserId = userId
   try {
     const data = scopeStore.getScopeData(scope)
@@ -312,7 +438,7 @@ export async function searchUserMemories(
   userId: string,
   options?: MemorySearchOptions
 ): Promise<MemoryItem[]> {
-  return doSearch(query, userId, undefined, {
+  return doSearchWithManager(getUserManagers().retrieval, query, userId, undefined, {
     ...options,
     memory_types: options?.memory_types ?? [MemoryType.PROFILE]
   })
@@ -330,13 +456,13 @@ export async function searchScopeMemories(
 ): Promise<MemoryItem[]> {
   // scope 层检索：scope 本身 + scope:docs
   // 用 scope 作为 group_id，RetrievalManager 按 group_id 过滤
+  const retrieval = getScopeManagers(scope).retrieval
   const defaultTypes = [MemoryType.EPISODIC_MEMORY, MemoryType.FORESIGHT]
-  const scopeResults = await doSearch(query, userId, scope, {
+  const scopeResults = await doSearchWithManager(retrieval, query, userId, scope, {
     ...options,
     memory_types: options?.memory_types ?? defaultTypes
   })
-  // 额外检索文档记忆
-  const docResults = await doSearch(query, userId, `${scope}:docs`, {
+  const docResults = await doSearchWithManager(retrieval, query, userId, `${scope}:docs`, {
     ...options,
     memory_types: options?.memory_types ?? [MemoryType.EPISODIC_MEMORY, MemoryType.EVENT_LOG],
     limit: options?.limit ?? 10
@@ -359,7 +485,7 @@ export async function searchSessionMemories(
   options?: MemorySearchOptions
 ): Promise<MemoryItem[]> {
   const groupId = `${scope}:session:${sessionId}`
-  return doSearch(query, userId, groupId, {
+  return doSearchWithManager(getScopeManagers(scope).retrieval, query, userId, groupId, {
     ...options,
     memory_types: options?.memory_types ?? [MemoryType.EVENT_LOG]
   })
@@ -369,15 +495,38 @@ export async function searchSessionMemories(
  * 兼容旧接口：搜索所有记忆（不区分层级）
  */
 export async function searchMemories(query: string, userId: string): Promise<MemoryItem[]> {
-  return doSearch(query, userId)
+  return doSearchWithManager(getUserManagers().retrieval, query, userId)
 }
 
+/**
+ * 搜索记忆（面板/API 用）。传入 scope 时合并用户层 + scope 层结果
+ */
 export async function searchMemoriesWithOptions(
   query: string,
   userId: string,
+  scope?: string,
   options?: MemorySearchOptions
 ): Promise<MemoryItem[]> {
-  return doSearch(query, userId, undefined, options)
+  const userResults = await doSearchWithManager(
+    getUserManagers().retrieval,
+    query,
+    userId,
+    undefined,
+    options
+  )
+  if (!scope) return userResults
+  try {
+    const scopeResults = await doSearchWithManager(
+      getScopeManagers(scope).retrieval,
+      query,
+      userId,
+      undefined,
+      options
+    )
+    return mergeAndDedup([...userResults, ...scopeResults])
+  } catch {
+    return userResults
+  }
 }
 
 /** 自动注入用：每层条数上限，控制 token */
@@ -433,14 +582,14 @@ export async function searchThreeLevelMemories(
 }
 
 /** 内部通用检索函数 */
-async function doSearch(
+async function doSearchWithManager(
+  retrieval: RetrievalManager,
   query: string,
   userId: string,
   groupId?: string,
   options?: MemorySearchOptions
 ): Promise<MemoryItem[]> {
-  const manager = getRetrievalManager()
-  const results = await manager.retrieve({
+  const results = await retrieval.retrieve({
     query,
     user_id: userId,
     group_id: groupId,
@@ -477,51 +626,92 @@ function mergeAndDedup(items: MemoryItem[]): MemoryItem[] {
   return result
 }
 
-export async function getAllMemories(userId: string): Promise<MemoryItem[]> {
-  const manager = getMemoryManager()
-  const rows = await manager.listMemories(userId)
-  return rows.map(
-    (r: {
-      id: string
-      content?: string
-      user_id?: string
-      group_id?: string | null
-      type?: string
-      created_at?: string
-      updated_at?: string
-      metadata?: unknown
-    }) => ({
-      id: r.id,
-      memory: r.content ?? '',
-      user_id: r.user_id,
-      group_id: r.group_id ?? undefined,
-      memory_type: r.type,
-      created_at: r.created_at,
-      updated_at: r.updated_at,
-      metadata: typeof r.metadata === 'string' ? undefined : (r.metadata as Record<string, unknown>)
-    })
-  )
+/** DB 行去重（按 id），保持原有排序 */
+function deduplicateRows(rows: any[]): any[] {
+  const seen = new Set<string>()
+  return rows.filter((r) => {
+    if (seen.has(r.id)) return false
+    seen.add(r.id)
+    return true
+  })
 }
 
-export async function deleteMemory(id: string): Promise<boolean> {
-  const manager = getMemoryManager()
-  return manager.deleteMemory(id)
+/** 将 DB 行映射为 API 返回的 MemoryItem */
+function mapRowToMemoryItem(r: {
+  id: string
+  content?: string
+  user_id?: string
+  group_id?: string | null
+  type?: string
+  created_at?: string
+  updated_at?: string
+  metadata?: unknown
+}): MemoryItem {
+  return {
+    id: r.id,
+    memory: r.content ?? '',
+    user_id: r.user_id,
+    group_id: r.group_id ?? undefined,
+    memory_type: r.type,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+    metadata: typeof r.metadata === 'string' ? undefined : (r.metadata as Record<string, unknown>)
+  }
+}
+
+export async function getAllMemories(userId: string, scope?: string): Promise<MemoryItem[]> {
+  // User DB: PROFILE 记忆（group_id IS NULL）
+  const userRows = await getUserManagers().memory.listMemories(userId)
+  let rows = userRows
+  if (scope) {
+    try {
+      // Scope DB: EPISODIC / FORESIGHT / EVENT_LOG 记忆
+      // 使用 scopeOnlyMemory 直接查询 scope DB，避免 composite adapter 路由问题
+      const scopeRows = await getScopeManagers(scope).scopeOnlyMemory.listMemories(userId)
+      rows = [...userRows, ...scopeRows]
+    } catch {
+      // scope not found, use user only
+    }
+  }
+  return deduplicateRows(rows).map(mapRowToMemoryItem)
+}
+
+export async function deleteMemory(id: string, scope?: string): Promise<boolean> {
+  let ok = await getUserManagers().memory.deleteMemory(id)
+  if (ok) return true
+  if (scope) {
+    try {
+      ok = await getScopeManagers(scope).memory.deleteMemory(id)
+    } catch {
+      // scope not found
+    }
+  } else {
+    for (const [, m] of _scopeManagers) {
+      ok = await m.memory.deleteMemory(id)
+      if (ok) return true
+    }
+  }
+  return ok
 }
 
 /**
  * 按 group_id 批量删除记忆（用于 session 生命周期管理）
  */
 export async function deleteMemoriesByGroupId(groupId: string): Promise<number> {
-  const manager = getMemoryManager()
-  return manager.deleteMemoriesByGroupId(groupId)
+  if (groupId === null || groupId === undefined || groupId === '') {
+    return getUserManagers().memory.deleteMemoriesByGroupId(groupId as any)
+  }
+  const scope = groupId.split(':')[0]
+  return getScopeManagers(scope).memory.deleteMemoriesByGroupId(groupId)
 }
 
 /**
  * 按 group_id 前缀批量删除（用于 scope 生命周期管理）
  */
 export async function deleteMemoriesByGroupPrefix(groupPrefix: string): Promise<number> {
-  const manager = getMemoryManager()
-  return manager.deleteMemoriesByGroupPrefix(groupPrefix)
+  if (!groupPrefix || groupPrefix === '') return 0
+  const scope = groupPrefix.split(':')[0]
+  return getScopeManagers(scope).memory.deleteMemoriesByGroupPrefix(groupPrefix)
 }
 
 export function isMemoryEnabled(): boolean {
@@ -530,13 +720,32 @@ export function isMemoryEnabled(): boolean {
 
 /**
  * 按 round_message_id 获取该轮对话的记忆增长（用于历史消息懒加载）
+ * @param scope 可选，提供时优先查 scope DB（session 记忆在此）
  */
 export async function getRoundMemories(
   userId: string,
-  messageId: string
+  messageId: string,
+  scope?: string
 ): Promise<RoundMemoryGrowth | null> {
-  const manager = getMemoryManager()
-  const rows = await manager.listMemoriesByRoundMessageId(userId, messageId)
+  let rows: any[] = []
+  try {
+    rows = await getUserManagers().memory.listMemoriesByRoundMessageId(userId, messageId)
+  } catch {
+    // ignore
+  }
+  if (scope) {
+    try {
+      // 使用 scopeOnlyMemory 直接查询 scope DB，避免 composite adapter 路由问题
+      const scopeRows = await getScopeManagers(scope).scopeOnlyMemory.listMemoriesByRoundMessageId(
+        userId,
+        messageId
+      )
+      rows = [...rows, ...scopeRows]
+    } catch {
+      // ignore
+    }
+  }
+  rows = deduplicateRows(rows)
   if (rows.length === 0) return null
   const byType: Record<string, number> = {}
   const memories: MemoryItem[] = rows.map(
@@ -553,4 +762,37 @@ export async function getRoundMemories(
     }
   )
   return { messageId, count: rows.length, byType, memories }
+}
+
+// ==================== 去重日志 API ====================
+
+/**
+ * 获取去重日志列表（scope 级）。
+ * 使用 scopeOnlyMemory 直接查询 scope DB。
+ */
+export async function listDedupLog(
+  userId: string,
+  scope: string,
+  limit?: number
+): Promise<DedupLogEntry[]> {
+  try {
+    return await getScopeManagers(scope).scopeOnlyMemory.listDedupLog(userId, limit)
+  } catch (e) {
+    log.error('listDedupLog error:', e)
+    return []
+  }
+}
+
+/**
+ * 回退一次去重：恢复被抑制的记忆。
+ * 使用 scopeOnlyMemory（去重数据都在 scope DB 中）。
+ * @returns 恢复的记忆 id，或 null 表示失败
+ */
+export async function undoDedupLog(dedupLogId: string, scope: string): Promise<string | null> {
+  try {
+    return await getScopeManagers(scope).scopeOnlyMemory.undoDedup(dedupLogId)
+  } catch (e) {
+    log.error('undoDedupLog error:', e)
+    return null
+  }
 }

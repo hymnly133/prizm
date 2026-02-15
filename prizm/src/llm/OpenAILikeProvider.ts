@@ -28,7 +28,7 @@ function mapMessageToApi(m: LLMChatMessage): Record<string, unknown> {
       tool_calls: m.tool_calls
     }
   }
-  if (m.role === 'tool') {
+  if (m.role === 'tool' && 'tool_call_id' in m) {
     return { role: 'tool', tool_call_id: m.tool_call_id, content: m.content }
   }
   return { role: m.role, content: m.content }
@@ -99,6 +99,7 @@ export class OpenAILikeLLMProvider implements ILLMProvider {
     let buffer = ''
     let accumulated: AccumulatedMessage = createInitialAccumulator()
     let lastUsage: MessageUsage | undefined = undefined
+    const announcedToolIndices = new Set<number>()
 
     try {
       while (true) {
@@ -152,6 +153,14 @@ export class OpenAILikeLLMProvider implements ILLMProvider {
                 if (delta.content) yield { text: delta.content }
                 const reasoning = delta.reasoning_content ?? delta.reasoning
                 if (reasoning) yield { reasoning }
+                // 一旦检测到新 tool call 的 name，立即通知，让 UI 在参数流式生成期间就显示 preparing
+                for (let i = 0; i < accumulated.toolCalls.length; i++) {
+                  const tc = accumulated.toolCalls[i]
+                  if (tc.id && tc.name && !announcedToolIndices.has(i)) {
+                    announcedToolIndices.add(i)
+                    yield { toolCallPreparing: { id: tc.id, name: tc.name } }
+                  }
+                }
               }
               if (choice?.finish_reason) {
                 const usage = lastUsage ?? parseUsageFromChunk(parsed)

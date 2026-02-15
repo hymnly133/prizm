@@ -46,15 +46,13 @@ function truncate(text: string, maxLen: number = MAX_CONTENT_LEN): string {
  * 构建便签区块：每条便签项全文（一般较短）
  */
 function buildNotesSection(scope: string, data: ScopeData, maxItems: number): string {
-  const { notes, groups } = data
+  const { notes } = data
   if (!notes.length) return ''
 
-  const groupMap = new Map(groups.map((g) => [g.id, g.name]))
   const sorted = [...notes].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
   const lines: string[] = []
   for (const n of sorted.slice(0, maxItems)) {
-    const groupName = n.groupId ? groupMap.get(n.groupId) : null
-    const prefix = groupName ? `[${groupName}] ` : ''
+    const prefix = n.tags?.length ? `[${n.tags.join(', ')}] ` : ''
     const content = (n.content ?? '').trim()
     lines.push(`- ${prefix}[id:${n.id}] ${content}`)
   }
@@ -80,10 +78,7 @@ function buildTodoSection(scope: string, data: ScopeData, maxItems: number): str
   }
   if (!allItems.length) return ''
 
-  const sorted = [...allItems].sort((a, b) => {
-    const order = { todo: 0, doing: 1, done: 2 }
-    return (order[a.item.status] ?? 0) - (order[b.item.status] ?? 0)
-  })
+  const sorted = [...allItems].sort((a, b) => (b.item.updatedAt ?? 0) - (a.item.updatedAt ?? 0))
   const lines: string[] = []
   for (const { item: it, listTitle } of sorted.slice(0, maxItems)) {
     const status = it.status === 'done' ? '✓' : it.status === 'doing' ? '◐' : '○'
@@ -127,7 +122,8 @@ function buildSessionsSection(data: ScopeData): string {
   const sessions = data.agentSessions ?? []
   if (!sessions.length) return ''
 
-  const slice = sessions.slice(0, 8)
+  const sorted = [...sessions].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+  const slice = sorted.slice(0, 8)
   const titles = slice.map((s) => s.title?.trim() || s.id).join('、')
   const allMeaningless = slice.every((s) => {
     const t = (s.title ?? '').trim()
@@ -135,9 +131,9 @@ function buildSessionsSection(data: ScopeData): string {
   })
 
   if (allMeaningless || !titles) {
-    return `## 会话\n共 ${sessions.length} 个会话`
+    return `## 会话\n共 ${sorted.length} 个会话`
   }
-  const tail = sessions.length > 8 ? ` …共 ${sessions.length} 个会话` : ''
+  const tail = sorted.length > 8 ? ` …共 ${sorted.length} 个会话` : ''
   return `## 会话\n${titles}${tail}`
 }
 
