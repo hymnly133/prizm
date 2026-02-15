@@ -190,6 +190,10 @@ export interface StreamChatOptions {
   model?: string
   /** 是否注入 scope 上下文，默认 true */
   includeScopeContext?: boolean
+  /** 完全上下文轮数 A（可选，覆盖服务端设置） */
+  fullContextTurns?: number
+  /** 缓存轮数 B（可选，覆盖服务端设置） */
+  cachedContextTurns?: number
   onChunk?: (chunk: StreamChatChunk) => void
   /** 流式错误回调 */
   onError?: (message: string) => void

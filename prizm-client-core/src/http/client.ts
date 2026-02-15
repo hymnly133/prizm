@@ -867,7 +867,9 @@ export class PrizmClient {
       body: JSON.stringify({
         content,
         model: options?.model,
-        includeScopeContext: options?.includeScopeContext
+        includeScopeContext: options?.includeScopeContext,
+        fullContextTurns: options?.fullContextTurns,
+        cachedContextTurns: options?.cachedContextTurns
       }),
       signal: options?.signal
     })
@@ -1107,12 +1109,19 @@ export interface ConversationSummarySettings {
   model?: string
 }
 
+/** 上下文窗口 A/B 压缩配置 */
+export interface ContextWindowSettings {
+  fullContextTurns?: number
+  cachedContextTurns?: number
+}
+
 /** Agent LLM 设置 */
 export interface AgentLLMSettings {
   documentSummary?: DocumentSummarySettings
   conversationSummary?: ConversationSummarySettings
   defaultModel?: string
   memory?: MemorySettings
+  contextWindow?: ContextWindowSettings
 }
 
 /** 记忆模块设置 */
