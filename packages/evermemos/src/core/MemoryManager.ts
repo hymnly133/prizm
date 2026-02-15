@@ -110,17 +110,24 @@ export class MemoryManager {
     memcell: MemCell,
     routing?: MemoryRoutingContext
   ): Promise<void> {
+    const sessionOnly = routing?.sessionOnly === true
+    const skipSession = routing?.skipSessionExtraction === true
+
     const tasks: Promise<void>[] = []
-    if ((isAssistant || isDocument) && this.extractors.has(MemoryType.EPISODIC_MEMORY)) {
+    if (
+      !sessionOnly &&
+      (isAssistant || isDocument) &&
+      this.extractors.has(MemoryType.EPISODIC_MEMORY)
+    ) {
       tasks.push(this.extractAndSave(MemoryType.EPISODIC_MEMORY, memcell, routing))
     }
-    if (isAssistant && this.extractors.has(MemoryType.FORESIGHT)) {
+    if (!sessionOnly && isAssistant && this.extractors.has(MemoryType.FORESIGHT)) {
       tasks.push(this.extractAndSave(MemoryType.FORESIGHT, memcell, routing))
     }
-    if ((isAssistant || isDocument) && this.extractors.has(MemoryType.EVENT_LOG)) {
+    if (!skipSession && (isAssistant || isDocument) && this.extractors.has(MemoryType.EVENT_LOG)) {
       tasks.push(this.extractAndSave(MemoryType.EVENT_LOG, memcell, routing))
     }
-    if (isAssistant && this.extractors.has(MemoryType.PROFILE)) {
+    if (!sessionOnly && isAssistant && this.extractors.has(MemoryType.PROFILE)) {
       tasks.push(this.extractAndSave(MemoryType.PROFILE, memcell, routing))
     }
     await Promise.all(tasks)
@@ -135,10 +142,12 @@ export class MemoryManager {
     const timestamp = memcell.timestamp || new Date().toISOString()
     const now = new Date().toISOString()
     const isAssistantScene = memcell.scene !== 'group' && memcell.scene !== 'document'
+    const sessionOnly = routing?.sessionOnly === true
+    const skipSession = routing?.skipSessionExtraction === true
 
     const roundMsgId = routing?.roundMessageId
 
-    if (result.episode?.content) {
+    if (!sessionOnly && result.episode?.content) {
       const id = uuidv4()
       const content = result.episode.content
       const summary = result.episode.summary || content.slice(0, 200)
@@ -183,7 +192,7 @@ export class MemoryManager {
       this.pushCreated(id, content, MemoryType.EPISODIC_MEMORY, groupId)
     }
 
-    if (result.event_log?.atomic_fact?.length) {
+    if (!skipSession && result.event_log?.atomic_fact?.length) {
       const groupId =
         memcell.scene === 'document'
           ? `${routing!.scope}:docs`
@@ -235,7 +244,7 @@ export class MemoryManager {
       }
     }
 
-    if (isAssistantScene && result.foresight?.length) {
+    if (!sessionOnly && isAssistantScene && result.foresight?.length) {
       const groupId = routing?.scope
       const limited = result.foresight.slice(0, 10)
       for (const item of limited) {
@@ -283,7 +292,7 @@ export class MemoryManager {
       }
     }
 
-    if (isAssistantScene && result.profile?.user_profiles?.length) {
+    if (!sessionOnly && isAssistantScene && result.profile?.user_profiles?.length) {
       for (const p of result.profile.user_profiles) {
         if (!p.user_id) continue
         const id = uuidv4()

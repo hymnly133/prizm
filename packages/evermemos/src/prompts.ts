@@ -1,65 +1,58 @@
 export const EVENT_LOG_PROMPT =
-  'You are an AI assistant that extracts atomic event logs from text.\n' +
-  'Input Text:\n' +
-  '{{INPUT_TEXT}}\n\n' +
-  'Current Time: {{TIME}}\n\n' +
-  'Task:\n' +
-  'Extract atomic events from the input text. Each event should have a specific time and a list of atomic facts.\n' +
-  'Return a JSON object with the following structure:\n' +
+  '你是一个从文本中抽取原子化事件日志的助手。\n\n' +
+  '输入文本：\n{{INPUT_TEXT}}\n\n' +
+  '当前时间：{{TIME}}\n\n' +
+  '任务：从输入文本中抽取原子事件。每个事件需包含具体时间和原子事实列表。\n' +
+  '返回如下结构的 JSON 对象（键名保持英文）：\n' +
   '{\n' +
   '  "event_log": {\n' +
-  '    "time": "YYYY-MM-DD string",\n' +
+  '    "time": "YYYY-MM-DD",\n' +
   '    "atomic_fact": [\n' +
-  '      "fact 1",\n' +
-  '      "fact 2"\n' +
+  '      "事实1",\n' +
+  '      "事实2"\n' +
   '    ]\n' +
   '  }\n' +
   '}\n' +
-  'If no events are found, return empty atomic_fact list.\n'
+  '若未发现事件，则 atomic_fact 返回空数组。\n'
 
 export const FORESIGHT_GENERATION_PROMPT =
-  'You are an AI assistant that predicts potential future impacts (foresights) based on a conversation.\n' +
-  'User ID: {{USER_ID}}\n' +
-  'User Name: {{USER_NAME}}\n\n' +
-  'Conversation:\n' +
-  '{{CONVERSATION_TEXT}}\n\n' +
-  'Task:\n' +
-  'Analyze the conversation and predict up to 10 potential future impacts or relevant information for the user.\n' +
-  'Return a JSON array of objects with the following structure:\n' +
+  '你是一个根据对话预测潜在未来影响（前瞻）的助手。\n\n' +
+  '用户 ID：{{USER_ID}}\n' +
+  '用户名称：{{USER_NAME}}\n\n' +
+  '对话内容：\n{{CONVERSATION_TEXT}}\n\n' +
+  '任务：分析对话并预测最多 10 条与用户相关的潜在未来影响或信息。\n' +
+  '返回如下结构的 JSON 数组（键名保持英文）：\n' +
   '[\n' +
   '  {\n' +
-  '    "content": "Description of the foresight",\n' +
-  '    "evidence": "Quote from conversation supporting this",\n' +
+  '    "content": "前瞻描述",\n' +
+  '    "evidence": "支撑该条的前文引用",\n' +
   '    "start_time": "YYYY-MM-DD",\n' +
-  '    "end_time": "YYYY-MM-DD (optional)",\n' +
-  '    "duration_days": 1 (optional)\n' +
+  '    "end_time": "YYYY-MM-DD（可选）",\n' +
+  '    "duration_days": 1（可选）\n' +
   '  }\n' +
   ']\n'
 
 export const EPISODE_MEMORY_PROMPT =
-  'You are an AI assistant that summarizes a conversation into an episodic memory.\n' +
-  'Input Text:\n' +
-  '{{INPUT_TEXT}}\n\n' +
-  'Current Time: {{TIME}}\n\n' +
-  'Task:\n' +
-  'Summarize the conversation, extracting key information, keywords, and a concise summary.\n' +
-  'Return a JSON object:\n' +
+  '你是一个将对话归纳为情景记忆的助手。\n\n' +
+  '输入文本：\n{{INPUT_TEXT}}\n\n' +
+  '当前时间：{{TIME}}\n\n' +
+  '任务：概括对话，抽取关键信息、关键词和一句摘要。\n' +
+  '返回如下 JSON 对象（键名保持英文）：\n' +
   '{\n' +
-  '  "title": "Episode Title",\n' +
-  '  "content": "Full detailed summary",\n' +
-  '  "summary": "Brief summary (one sentence)",\n' +
-  '  "keywords": ["tag1", "tag2"]\n' +
+  '  "title": "情景标题",\n' +
+  '  "content": "完整详细摘要",\n' +
+  '  "summary": "一句话简要摘要",\n' +
+  '  "keywords": ["标签1", "标签2"]\n' +
   '}\n'
 
 export const PROFILE_PART1_PROMPT =
-  'You are a personal profile extraction expert.\n\n' +
+  '你是个人画像抽取专家。\n\n' +
   '<input>\n' +
-  '- conversation_transcript:\n' +
-  '{{CONVERSATION_TEXT}}\n' +
-  '- participants_current_profiles: {{EXISTING_PROFILES}}\n' +
+  '- 对话内容 conversation_transcript：\n{{CONVERSATION_TEXT}}\n' +
+  '- 参与者当前画像 participants_current_profiles：{{EXISTING_PROFILES}}\n' +
   '</input>\n\n' +
   '<output_format>\n' +
-  'You MUST output a single JSON object with the top-level key "user_profiles".\n\n' +
+  '你必须输出单个 JSON 对象，顶层键为 "user_profiles"。键名保持英文。\n\n' +
   '```json\n' +
   '{\n' +
   '  "user_profiles": [\n' +
@@ -87,20 +80,16 @@ export const PROFILE_PART1_PROMPT =
   '}\n' +
   '```\n' +
   '</output_format>\n\n' +
-  'Rules:\n' +
-  '1. Only extract explicit information.\n' +
-  '2. Maintain existing profile data unless contradicted.\n' +
-  '3. Output valid JSON.\n'
+  '规则：1. 仅抽取显式信息。2. 除非被推翻否则保留现有画像。3. 输出合法 JSON。\n'
 
 export const PROFILE_PART2_PROMPT =
-  'You are a project experience extraction expert.\n\n' +
+  '你是项目经历抽取专家。\n\n' +
   '<input>\n' +
-  '- conversation_transcript:\n' +
-  '{{CONVERSATION_TEXT}}\n' +
-  '- participants_current_profiles: {{EXISTING_PROFILES}}\n' +
+  '- 对话内容 conversation_transcript：\n{{CONVERSATION_TEXT}}\n' +
+  '- 参与者当前画像 participants_current_profiles：{{EXISTING_PROFILES}}\n' +
   '</input>\n\n' +
   '<output_format>\n' +
-  'You MUST output a single JSON object with the top-level key "user_profiles".\n\n' +
+  '你必须输出单个 JSON 对象，顶层键为 "user_profiles"。键名保持英文。\n\n' +
   '```json\n' +
   '{\n' +
   '  "user_profiles": [\n' +
@@ -139,14 +128,13 @@ export const PROFILE_PART2_PROMPT =
   '</output_format>\n'
 
 export const PROFILE_PART3_PROMPT =
-  'You are a personal profile extraction expert focused on deep psychological traits and extended attributes.\n' +
+  '你是专注深层心理特质与扩展属性的个人画像抽取专家。\n\n' +
   '<input>\n' +
-  '- conversation_transcript:\n' +
-  '{{CONVERSATION_TEXT}}\n' +
-  '- participants_current_profiles: {{EXISTING_PROFILES}}\n' +
+  '- 对话内容 conversation_transcript：\n{{CONVERSATION_TEXT}}\n' +
+  '- 参与者当前画像 participants_current_profiles：{{EXISTING_PROFILES}}\n' +
   '</input>\n\n' +
   '<output_format>\n' +
-  'You MUST output a single JSON object with the top-level key "user_profiles".\n\n' +
+  '你必须输出单个 JSON 对象，顶层键为 "user_profiles"。键名保持英文。\n\n' +
   '```json\n' +
   '{\n' +
   '  "user_profiles": [\n' +
@@ -183,17 +171,33 @@ export const PROFILE_PART3_PROMPT =
   '```\n' +
   '</output_format>\n'
 
-/** 单次调用完成 episode / event_log / foresight / profile 抽取，使用分段文本格式（非 JSON） */
+/** 单次调用完成 episode / event_log / foresight / profile 抽取，使用分段文本格式（非 JSON）。与分类型抽取语义等价；小节标题与键名必须保持英文以便解析。 */
 export const UNIFIED_MEMORY_EXTRACTION_PROMPT =
-  'Extract memory from the conversation. Current time: {{TIME}}\n\nConversation:\n{{INPUT_TEXT}}\n\n' +
-  'Output in the following format. Use only these section headers and key prefixes. Skip a section if nothing to extract.\n\n' +
-  '## EPISODE\nCONTENT: <full summary in one line>\nSUMMARY: <one sentence>\nKEYWORDS: k1, k2\n\n' +
-  '## EVENT_LOG\nTIME: YYYY-MM-DD\nFACT: <atomic fact one>\nFACT: <atomic fact two>\n\n' +
-  '## FORESIGHT\nCONTENT: <item description>\nSTART: YYYY-MM-DD\nEND: YYYY-MM-DD\n---\nCONTENT: <next item>\n\n' +
-  '## PROFILE\nUSER_ID: <id>\nUSER_NAME: <name>\nHARD_SKILLS: a, b\nSOFT_SKILLS: c\n\n' +
-  'Rules: One line per CONTENT/SUMMARY/FACT. At most 10 FACT lines, 5 FORESIGHT items (separate with ---). Profile only if user traits appear.'
+  '你是记忆抽取专家，从对话中一次性完成四类抽取：情景记忆、事件日志、前瞻、用户画像。当前时间：{{TIME}}\n\n' +
+  '<input>\n对话内容：\n{{INPUT_TEXT}}\n</input>\n\n' +
+  '<format_convention>\n' +
+  '1. 小节标题：仅使用以下四者之一单独占一行，不可翻译或改写：## EPISODE、## EVENT_LOG、## FORESIGHT、## PROFILE。无内容的小节整节省略。\n' +
+  '2. 键值行：每行一条，格式为「英文键名: 值」。键名与值之间用英文冒号+空格分隔；值可含中文或冒号，但整条不换行。\n' +
+  '3. FORESIGHT 多条之间用单独一行「---」分隔；不要在 CONTENT 或 EVIDENCE 的正文中写入「---」。\n' +
+  '</format_convention>\n\n' +
+  '<output_format>\n' +
+  '## EPISODE\n（与情景记忆抽取一致：完整详细摘要、一句话摘要、关键词）\n' +
+  'CONTENT: <完整详细摘要，一行>\nSUMMARY: <一句话简要摘要>\nKEYWORDS: k1, k2\n\n' +
+  '## EVENT_LOG\n（与事件日志抽取一致：具体时间 + 原子事实列表；原子事实为可验证、不可再分的单一事实）\n' +
+  'TIME: YYYY-MM-DD\nFACT: <原子事实一>\nFACT: <原子事实二>\n\n' +
+  '## FORESIGHT\n（与前瞻抽取一致：潜在未来影响或与用户相关的预测；每条含描述与证据）\n' +
+  'CONTENT: <前瞻描述>\nSTART: YYYY-MM-DD\nEND: YYYY-MM-DD\nEVIDENCE: <支撑该条的前文引用>\n---\nCONTENT: <下一条>\n\n' +
+  '## PROFILE\n（与个人画像抽取一致：仅显式信息；核心字段与分类型 Part1/2 等价）\n' +
+  'USER_ID: <id>\nUSER_NAME: <name>\nHARD_SKILLS: a, b\nSOFT_SKILLS: c\nOUTPUT_REASONING: <本段画像抽取理由>\nWORK_RESPONSIBILITY: <角色职责>\nINTERESTS: <兴趣>\nTENDENCY: <观点倾向>\n' +
+  '</output_format>\n\n' +
+  '<rules>\n' +
+  '1. 键名必须为上述英文（CONTENT/SUMMARY/KEYWORDS/TIME/FACT/START/END/EVIDENCE/USER_ID/USER_NAME/HARD_SKILLS/SOFT_SKILLS/OUTPUT_REASONING/WORK_RESPONSIBILITY/INTERESTS/TENDENCY）。\n' +
+  '2. EVENT_LOG：FACT 最多 10 条；无事件则省略 ## EVENT_LOG。\n' +
+  '3. FORESIGHT：最多 10 条，条与条之间用单独一行 --- 分隔；每条尽量写 EVIDENCE。\n' +
+  '4. PROFILE：仅当有明确用户身份、技能、偏好等显式信息时填写；无则省略。\n' +
+  '</rules>'
 
 /** Agentic 检索用：将用户 query 扩展为 2～3 条子查询（不同表述或子问题） */
 export const QUERY_EXPANSION_PROMPT =
-  'Given the following user question, generate 2 to 3 alternative phrasings or sub-questions that could help retrieve relevant information from a memory store. ' +
-  'Return ONLY a JSON array of strings, no other text. Example: ["question 1", "question 2"].\nUser question: {{QUERY}}'
+  '针对下列用户问题，生成 2～3 种不同表述或子问题，用于从记忆库中检索相关信息。' +
+  '仅返回 JSON 字符串数组，不要其他文字。示例：["问题1", "问题2"]。\n用户问题：{{QUERY}}'

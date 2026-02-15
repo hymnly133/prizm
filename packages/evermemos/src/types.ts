@@ -68,6 +68,10 @@ export interface MemoryRoutingContext {
   sessionId?: string
   /** 关联的 assistant 消息 ID，用于按轮次查询记忆增长 */
   roundMessageId?: string
+  /** 跳过 Session 层抽取（每轮只抽 User/Scope，不抽 Session） */
+  skipSessionExtraction?: boolean
+  /** 仅抽取 Session 层（批量压缩时用，只抽 EventLog 到 session） */
+  sessionOnly?: boolean
 }
 
 export const MemCellSchema = BaseMemorySchema.extend({

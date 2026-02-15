@@ -88,7 +88,7 @@ export function parseUnifiedMemoryText(text: string): UnifiedExtractionResult | 
       .map((b) => b.trim())
       .filter(Boolean)
     const items: UnifiedExtractionResult['foresight'] = []
-    for (const block of blocks.slice(0, 5)) {
+    for (const block of blocks.slice(0, 10)) {
       const kv = parseSectionKeyValues(block)
       const content = getFirst(kv, 'CONTENT')
       if (content) {
