@@ -53,6 +53,7 @@ main_1.default.transports.file.resolvePathFn = () => {
 /** 全局状态 */
 let mainWindow = null;
 let notificationWindow = null;
+let quickPanelWindow = null;
 let tray = null;
 let isQuitting = false;
 let trayEnabled = true;
@@ -436,6 +437,142 @@ function registerGlobalShortcuts() {
         main_1.default.warn('[Electron] Failed to register global shortcut:', accelerator);
     }
 }
+/** 快捷面板：双击 Ctrl 触发 */
+const DOUBLE_TAP_MS = 350;
+let lastCtrlUpAt = 0;
+let ctrlDownWithoutOtherKeys = true;
+let uiohookStarted = false;
+async function getSelectedTextAsync() {
+    const prev = electron_1.clipboard.readText();
+    electron_1.clipboard.writeText('');
+    try {
+        const { uIOhook, UiohookKey } = require('uiohook-napi');
+        uIOhook.keyTap(UiohookKey.C, [UiohookKey.LeftCtrl]);
+    }
+    catch (e) {
+        main_1.default.warn('[Electron] uiohook keyTap failed:', e);
+    }
+    await new Promise((r) => setTimeout(r, 150));
+    const text = electron_1.clipboard.readText().trim();
+    electron_1.clipboard.writeText(prev);
+    return text;
+}
+function showQuickPanel() {
+    const win = createQuickPanelWindow();
+    if (!win || win.isDestroyed())
+        return;
+    const cursor = electron_1.screen.getCursorScreenPoint();
+    const display = electron_1.screen.getDisplayNearestPoint(cursor);
+    const bounds = display.bounds;
+    const [w, h] = win.getSize();
+    let x = cursor.x - Math.round(w / 2);
+    let y = cursor.y + 16;
+    x = Math.max(bounds.x, Math.min(x, bounds.x + bounds.width - w));
+    y = Math.max(bounds.y, Math.min(y, bounds.y + bounds.height - h));
+    win.setPosition(x, y);
+    getSelectedTextAsync()
+        .then((selectedText) => {
+        if (quickPanelWindow && !quickPanelWindow.isDestroyed()) {
+            quickPanelWindow.webContents.send('show-quick-panel', { selectedText: selectedText || '' });
+            quickPanelWindow.show();
+            quickPanelWindow.focus();
+        }
+    })
+        .catch((err) => {
+        main_1.default.warn('[Electron] getSelectedText failed:', err);
+        if (quickPanelWindow && !quickPanelWindow.isDestroyed()) {
+            quickPanelWindow.webContents.send('show-quick-panel', { selectedText: '' });
+            quickPanelWindow.show();
+            quickPanelWindow.focus();
+        }
+    });
+}
+function createQuickPanelWindow() {
+    if (quickPanelWindow && !quickPanelWindow.isDestroyed()) {
+        return quickPanelWindow;
+    }
+    const isDev = !electron_1.app.isPackaged;
+    quickPanelWindow = new electron_1.BrowserWindow({
+        width: 320,
+        height: 280,
+        frame: false,
+        transparent: true,
+        backgroundColor: '#00000000',
+        resizable: false,
+        skipTaskbar: true,
+        alwaysOnTop: true,
+        focusable: true,
+        show: false,
+        webPreferences: {
+            preload: path.join(__dirname, 'quickpanel-preload.js'),
+            contextIsolation: true,
+            nodeIntegration: false
+        }
+    });
+    if (isDev) {
+        quickPanelWindow.loadURL('http://localhost:5183/quickpanel.html');
+    }
+    else {
+        quickPanelWindow.loadFile(path.join(__dirname, '..', 'dist', 'quickpanel.html'));
+    }
+    quickPanelWindow.setAlwaysOnTop(true, 'pop-up-menu');
+    quickPanelWindow.on('blur', () => {
+        quickPanelWindow?.hide();
+    });
+    quickPanelWindow.on('closed', () => {
+        quickPanelWindow = null;
+    });
+    quickPanelWindow.webContents.setWindowOpenHandler(({ url }) => {
+        electron_1.shell.openExternal(url);
+        return { action: 'deny' };
+    });
+    return quickPanelWindow;
+}
+function registerQuickPanelDoubleTap() {
+    try {
+        const { uIOhook, UiohookKey } = require('uiohook-napi');
+        uIOhook.on('keydown', (e) => {
+            const ctrl = UiohookKey.LeftCtrl ?? 29;
+            const rightCtrl = UiohookKey.RightCtrl ?? 361;
+            if (e.keycode !== ctrl && e.keycode !== rightCtrl) {
+                ctrlDownWithoutOtherKeys = false;
+            }
+        });
+        uIOhook.on('keyup', (e) => {
+            const ctrl = UiohookKey.LeftCtrl ?? 29;
+            const rightCtrl = UiohookKey.RightCtrl ?? 361;
+            if (e.keycode === ctrl || e.keycode === rightCtrl) {
+                const now = Date.now();
+                if (ctrlDownWithoutOtherKeys && now - lastCtrlUpAt < DOUBLE_TAP_MS) {
+                    lastCtrlUpAt = 0;
+                    showQuickPanel();
+                }
+                else {
+                    lastCtrlUpAt = now;
+                }
+                ctrlDownWithoutOtherKeys = true;
+            }
+        });
+        uIOhook.start();
+        uiohookStarted = true;
+        main_1.default.info('[Electron] Quick panel double-tap Ctrl registered');
+    }
+    catch (e) {
+        main_1.default.warn('[Electron] uiohook-napi not available, quick panel disabled:', e);
+    }
+}
+function stopQuickPanelHook() {
+    if (!uiohookStarted)
+        return;
+    try {
+        const { uIOhook } = require('uiohook-napi');
+        uIOhook.stop();
+        uiohookStarted = false;
+    }
+    catch {
+        // ignore
+    }
+}
 /** 剪贴板同步状态 */
 let clipboardSyncInterval = null;
 let lastClipboardText = '';
@@ -593,6 +730,33 @@ function registerIpcHandlers() {
             main_1.default.info(message);
         return true;
     });
+    electron_1.ipcMain.handle('select_folder', async () => {
+        const opts = {
+            properties: ['openDirectory'],
+            title: '选择工作区文件夹'
+        };
+        const result = mainWindow
+            ? await electron_1.dialog.showOpenDialog(mainWindow, opts)
+            : await electron_1.dialog.showOpenDialog(opts);
+        if (result.canceled || !result.filePaths.length)
+            return null;
+        return result.filePaths[0];
+    });
+    electron_1.ipcMain.on('quick-panel-action', (_event, payload) => {
+        if (quickPanelWindow && !quickPanelWindow.isDestroyed()) {
+            quickPanelWindow.hide();
+        }
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.show();
+            mainWindow.focus();
+            mainWindow.webContents.send('execute-quick-action', payload);
+        }
+    });
+    electron_1.ipcMain.on('quick-panel-hide', () => {
+        if (quickPanelWindow && !quickPanelWindow.isDestroyed()) {
+            quickPanelWindow.hide();
+        }
+    });
 }
 electron_1.app
     .whenReady()
@@ -600,10 +764,12 @@ electron_1.app
     await loadTraySettings();
     registerIpcHandlers();
     createMainWindow();
+    createQuickPanelWindow();
     if (trayEnabled) {
         createTray();
     }
     registerGlobalShortcuts();
+    registerQuickPanelDoubleTap();
     electron_1.app.on('activate', () => {
         if (electron_1.BrowserWindow.getAllWindows().length === 0) {
             createMainWindow();
@@ -628,5 +794,6 @@ electron_1.app.on('before-quit', () => {
 });
 electron_1.app.on('will-quit', () => {
     electron_1.globalShortcut.unregisterAll();
+    stopQuickPanelHook();
 });
 //# sourceMappingURL=main.js.map

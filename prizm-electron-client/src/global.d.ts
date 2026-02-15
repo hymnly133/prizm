@@ -32,6 +32,15 @@ declare global {
         }) => void
       ): () => void
       logFromRenderer(message: string, type: string): Promise<boolean>
+      selectFolder(): Promise<string | null>
+      onExecuteQuickAction(
+        callback: (payload: { action: string; selectedText: string }) => void
+      ): () => void
+    }
+    quickPanelApi?: {
+      onShow(callback: (data: { selectedText: string }) => void): () => void
+      executeAction(action: string, selectedText: string): void
+      hidePanel(): void
     }
   }
 }

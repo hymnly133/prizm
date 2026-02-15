@@ -79,5 +79,18 @@ contextBridge.exposeInMainWorld('prizm', {
 
   logFromRenderer(message: string, type: string) {
     return ipcRenderer.invoke('log_from_renderer', { message, type })
+  },
+
+  selectFolder() {
+    return ipcRenderer.invoke('select_folder')
+  },
+
+  onExecuteQuickAction(callback: (payload: { action: string; selectedText: string }) => void) {
+    const handler = (_: unknown, payload: { action: string; selectedText: string }) =>
+      callback(payload)
+    ipcRenderer.on('execute-quick-action', handler)
+    return () => {
+      ipcRenderer.removeListener('execute-quick-action', handler)
+    }
   }
 })

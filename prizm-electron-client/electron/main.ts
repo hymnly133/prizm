@@ -8,7 +8,8 @@ import {
   Menu,
   globalShortcut,
   nativeImage,
-  clipboard
+  clipboard,
+  dialog
 } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'
@@ -29,6 +30,7 @@ log.transports.file.resolvePathFn = () => {
 /** 全局状态 */
 let mainWindow: BrowserWindow | null = null
 let notificationWindow: BrowserWindow | null = null
+let quickPanelWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let isQuitting = false
 let trayEnabled = true
@@ -493,6 +495,141 @@ function registerGlobalShortcuts(): void {
   }
 }
 
+/** 快捷面板：双击 Ctrl 触发 */
+const DOUBLE_TAP_MS = 350
+let lastCtrlUpAt = 0
+let ctrlDownWithoutOtherKeys = true
+let uiohookStarted = false
+
+async function getSelectedTextAsync(): Promise<string> {
+  const prev = clipboard.readText()
+  clipboard.writeText('')
+  try {
+    const { uIOhook, UiohookKey } = require('uiohook-napi')
+    uIOhook.keyTap(UiohookKey.C, [UiohookKey.LeftCtrl])
+  } catch (e) {
+    log.warn('[Electron] uiohook keyTap failed:', e)
+  }
+  await new Promise((r) => setTimeout(r, 150))
+  const text = clipboard.readText().trim()
+  clipboard.writeText(prev)
+  return text
+}
+
+function showQuickPanel(): void {
+  const win = createQuickPanelWindow()
+  if (!win || win.isDestroyed()) return
+  const cursor = screen.getCursorScreenPoint()
+  const display = screen.getDisplayNearestPoint(cursor)
+  const bounds = display.bounds
+  const [w, h] = win.getSize()
+  let x = cursor.x - Math.round(w / 2)
+  let y = cursor.y + 16
+  x = Math.max(bounds.x, Math.min(x, bounds.x + bounds.width - w))
+  y = Math.max(bounds.y, Math.min(y, bounds.y + bounds.height - h))
+  win.setPosition(x, y)
+  getSelectedTextAsync()
+    .then((selectedText) => {
+      if (quickPanelWindow && !quickPanelWindow.isDestroyed()) {
+        quickPanelWindow.webContents.send('show-quick-panel', { selectedText: selectedText || '' })
+        quickPanelWindow.show()
+        quickPanelWindow.focus()
+      }
+    })
+    .catch((err) => {
+      log.warn('[Electron] getSelectedText failed:', err)
+      if (quickPanelWindow && !quickPanelWindow.isDestroyed()) {
+        quickPanelWindow.webContents.send('show-quick-panel', { selectedText: '' })
+        quickPanelWindow.show()
+        quickPanelWindow.focus()
+      }
+    })
+}
+
+function createQuickPanelWindow(): BrowserWindow | null {
+  if (quickPanelWindow && !quickPanelWindow.isDestroyed()) {
+    return quickPanelWindow
+  }
+  const isDev = !app.isPackaged
+  quickPanelWindow = new BrowserWindow({
+    width: 320,
+    height: 280,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    resizable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    focusable: true,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'quickpanel-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  })
+  if (isDev) {
+    quickPanelWindow.loadURL('http://localhost:5183/quickpanel.html')
+  } else {
+    quickPanelWindow.loadFile(path.join(__dirname, '..', 'dist', 'quickpanel.html'))
+  }
+  quickPanelWindow.setAlwaysOnTop(true, 'pop-up-menu')
+  quickPanelWindow.on('blur', () => {
+    quickPanelWindow?.hide()
+  })
+  quickPanelWindow.on('closed', () => {
+    quickPanelWindow = null
+  })
+  quickPanelWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url)
+    return { action: 'deny' }
+  })
+  return quickPanelWindow
+}
+
+function registerQuickPanelDoubleTap(): void {
+  try {
+    const { uIOhook, UiohookKey } = require('uiohook-napi')
+    uIOhook.on('keydown', (e: { keycode: number }) => {
+      const ctrl = UiohookKey.LeftCtrl ?? 29
+      const rightCtrl = UiohookKey.RightCtrl ?? 361
+      if (e.keycode !== ctrl && e.keycode !== rightCtrl) {
+        ctrlDownWithoutOtherKeys = false
+      }
+    })
+    uIOhook.on('keyup', (e: { keycode: number }) => {
+      const ctrl = UiohookKey.LeftCtrl ?? 29
+      const rightCtrl = UiohookKey.RightCtrl ?? 361
+      if (e.keycode === ctrl || e.keycode === rightCtrl) {
+        const now = Date.now()
+        if (ctrlDownWithoutOtherKeys && now - lastCtrlUpAt < DOUBLE_TAP_MS) {
+          lastCtrlUpAt = 0
+          showQuickPanel()
+        } else {
+          lastCtrlUpAt = now
+        }
+        ctrlDownWithoutOtherKeys = true
+      }
+    })
+    uIOhook.start()
+    uiohookStarted = true
+    log.info('[Electron] Quick panel double-tap Ctrl registered')
+  } catch (e) {
+    log.warn('[Electron] uiohook-napi not available, quick panel disabled:', e)
+  }
+}
+
+function stopQuickPanelHook(): void {
+  if (!uiohookStarted) return
+  try {
+    const { uIOhook } = require('uiohook-napi')
+    uIOhook.stop()
+    uiohookStarted = false
+  } catch {
+    // ignore
+  }
+}
+
 /** 剪贴板同步状态 */
 let clipboardSyncInterval: ReturnType<typeof setInterval> | null = null
 let lastClipboardText = ''
@@ -692,6 +829,35 @@ function registerIpcHandlers(): void {
     else log.info(message)
     return true
   })
+
+  ipcMain.handle('select_folder', async () => {
+    const opts = {
+      properties: ['openDirectory' as const],
+      title: '选择工作区文件夹'
+    }
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, opts)
+      : await dialog.showOpenDialog(opts)
+    if (result.canceled || !result.filePaths.length) return null
+    return result.filePaths[0]
+  })
+
+  ipcMain.on('quick-panel-action', (_event, payload: { action: string; selectedText: string }) => {
+    if (quickPanelWindow && !quickPanelWindow.isDestroyed()) {
+      quickPanelWindow.hide()
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show()
+      mainWindow.focus()
+      mainWindow.webContents.send('execute-quick-action', payload)
+    }
+  })
+
+  ipcMain.on('quick-panel-hide', () => {
+    if (quickPanelWindow && !quickPanelWindow.isDestroyed()) {
+      quickPanelWindow.hide()
+    }
+  })
 }
 
 app
@@ -700,10 +866,12 @@ app
     await loadTraySettings()
     registerIpcHandlers()
     createMainWindow()
+    createQuickPanelWindow()
     if (trayEnabled) {
       createTray()
     }
     registerGlobalShortcuts()
+    registerQuickPanelDoubleTap()
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
@@ -731,4 +899,5 @@ app.on('before-quit', () => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll()
+  stopQuickPanelHook()
 })

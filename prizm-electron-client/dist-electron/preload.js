@@ -58,6 +58,16 @@ electron_1.contextBridge.exposeInMainWorld('prizm', {
     },
     logFromRenderer(message, type) {
         return electron_1.ipcRenderer.invoke('log_from_renderer', { message, type });
+    },
+    selectFolder() {
+        return electron_1.ipcRenderer.invoke('select_folder');
+    },
+    onExecuteQuickAction(callback) {
+        const handler = (_, payload) => callback(payload);
+        electron_1.ipcRenderer.on('execute-quick-action', handler);
+        return () => {
+            electron_1.ipcRenderer.removeListener('execute-quick-action', handler);
+        };
     }
 });
 //# sourceMappingURL=preload.js.map

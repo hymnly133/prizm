@@ -1,0 +1,19 @@
+import { contextBridge, ipcRenderer } from 'electron'
+
+contextBridge.exposeInMainWorld('quickPanelApi', {
+  onShow(callback: (data: { selectedText: string }) => void) {
+    const handler = (_: unknown, data: { selectedText: string }) => callback(data)
+    ipcRenderer.on('show-quick-panel', handler)
+    return () => {
+      ipcRenderer.removeListener('show-quick-panel', handler)
+    }
+  },
+
+  executeAction(action: string, selectedText: string) {
+    ipcRenderer.send('quick-panel-action', { action, selectedText })
+  },
+
+  hidePanel() {
+    ipcRenderer.send('quick-panel-hide')
+  }
+})
