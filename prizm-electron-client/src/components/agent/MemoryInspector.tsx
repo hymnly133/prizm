@@ -4,19 +4,21 @@ import {
   Empty,
   Popconfirm,
   Tag,
+  Tabs,
   message,
   Input,
   Collapse,
   Select,
   InputNumber,
-  Checkbox
+  Checkbox,
+  Tooltip
 } from 'antd'
-import { Brain, Trash2, Search } from 'lucide-react'
+import { Brain, Trash2, Search, Undo2, History } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { usePrizmContext } from '../../context/PrizmContext'
 import { useScope } from '../../hooks/useScope'
-import type { MemoryItem } from '@prizm/client-core'
+import type { MemoryItem, DedupLogEntry } from '@prizm/client-core'
 import { createStyles } from 'antd-style'
 
 type SearchMethod = 'keyword' | 'vector' | 'hybrid' | 'rrf' | 'agentic'
@@ -259,18 +261,71 @@ const useStyles = createStyles(({ css, token }) => ({
     font-size: 12px;
     font-weight: 500;
     color: ${token.colorTextTertiary};
+  `,
+  dedupItem: css`
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 14px;
+    background: ${token.colorFillQuaternary};
+    border-radius: ${token.borderRadius}px;
+    transition: background 0.2s;
+    flex-shrink: 0;
+
+    &:hover {
+      background: ${token.colorFillTertiary};
+    }
+  `,
+  dedupHeader: css`
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+  `,
+  dedupMemoryPair: css`
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 13px;
+    line-height: 1.5;
+  `,
+  dedupLabel: css`
+    font-size: 11px;
+    font-weight: 600;
+    color: ${token.colorTextSecondary};
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  `,
+  dedupContent: css`
+    color: ${token.colorText};
+    word-break: break-word;
+    white-space: pre-wrap;
+    padding-left: 8px;
+    border-left: 2px solid ${token.colorBorderSecondary};
+  `,
+  dedupMeta: css`
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 12px;
+    color: ${token.colorTextDescription};
+    align-items: center;
   `
 }))
 
 export function MemoryInspector() {
   const { styles } = useStyles()
   const [open, setOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState<'memories' | 'dedup'>('memories')
   const [loading, setLoading] = useState(false)
   const [memories, setMemories] = useState<MemoryItem[]>([])
   const [query, setQuery] = useState('')
   const [searchMethod, setSearchMethod] = useState<SearchMethod>('hybrid')
   const [searchLimit, setSearchLimit] = useState<number>(20)
   const [useRerank, setUseRerank] = useState(false)
+  const [dedupEntries, setDedupEntries] = useState<DedupLogEntry[]>([])
+  const [dedupLoading, setDedupLoading] = useState(false)
+  const [undoingId, setUndoingId] = useState<string | null>(null)
   const { manager } = usePrizmContext()
   const { currentScope } = useScope()
   const http = manager?.getHttpClient()
@@ -324,7 +379,7 @@ export function MemoryInspector() {
 
   useEffect(() => {
     if (open) void loadMemories('')
-  }, [open])
+  }, [open, currentScope, loadMemories])
 
   const handleDelete = async (id: string) => {
     if (!http) return
@@ -336,6 +391,43 @@ export function MemoryInspector() {
       message.error(String(e))
     }
   }
+
+  const loadDedupLog = useCallback(async () => {
+    if (!http) return
+    setDedupLoading(true)
+    try {
+      const res = await http.getDedupLog(currentScope, 50)
+      setDedupEntries(res.entries ?? [])
+    } catch (e) {
+      message.error(String(e))
+      setDedupEntries([])
+    } finally {
+      setDedupLoading(false)
+    }
+  }, [http, currentScope])
+
+  const handleUndo = async (dedupLogId: string) => {
+    if (!http) return
+    setUndoingId(dedupLogId)
+    try {
+      const res = await http.undoDedup(dedupLogId, currentScope)
+      if (res.restored) {
+        message.success('已恢复被去重的记忆')
+        void loadDedupLog()
+        void loadMemories()
+      } else {
+        message.warning('回退失败：可能已回退过或记录不存在')
+      }
+    } catch (e) {
+      message.error(String(e))
+    } finally {
+      setUndoingId(null)
+    }
+  }
+
+  useEffect(() => {
+    if (open && activeTab === 'dedup') void loadDedupLog()
+  }, [open, activeTab, currentScope, loadDedupLog])
 
   return (
     <>
@@ -364,194 +456,309 @@ export function MemoryInspector() {
         footer={null}
         width={800}
       >
-        <div className={styles.container}>
-          <div className={styles.querySection}>
-            <div className={styles.queryRow}>
-              <Input
-                className={styles.queryInput}
-                placeholder="输入关键词或描述进行记忆查询（留空则列出全部）"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onPressEnter={() => handleManualQuery()}
-                allowClear
-              />
-              <Button
-                type="primary"
-                icon={<Search size={14} />}
-                loading={loading}
-                onClick={handleManualQuery}
-              >
-                查询
-              </Button>
-              <Button onClick={handleRefreshAll} loading={loading} disabled={loading}>
-                刷新全部
-              </Button>
-            </div>
-            <Collapse
-              ghost
-              size="small"
-              items={[
-                {
-                  key: 'advanced',
-                  label: '高级选项',
-                  children: (
-                    <div className={styles.advancedRow}>
-                      <span className={styles.advancedLabel}>检索方式</span>
-                      <Select<SearchMethod>
-                        size="small"
-                        value={searchMethod}
-                        onChange={setSearchMethod}
-                        style={{ width: 120 }}
-                        options={[
-                          { value: 'keyword', label: '关键词' },
-                          { value: 'vector', label: '向量' },
-                          { value: 'hybrid', label: '混合(默认)' },
-                          { value: 'rrf', label: 'RRF' },
-                          { value: 'agentic', label: 'Agentic' }
-                        ]}
+        <Tabs
+          activeKey={activeTab}
+          onChange={(k) => setActiveTab(k as 'memories' | 'dedup')}
+          items={[
+            {
+              key: 'memories',
+              label: (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Brain size={14} /> 记忆列表
+                </span>
+              ),
+              children: (
+                <div className={styles.container}>
+                  <div className={styles.querySection}>
+                    <div className={styles.queryRow}>
+                      <Input
+                        className={styles.queryInput}
+                        placeholder="输入关键词或描述进行记忆查询（留空则列出全部）"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        onPressEnter={() => handleManualQuery()}
+                        allowClear
                       />
-                      <span className={styles.advancedLabel}>条数</span>
-                      <InputNumber
-                        size="small"
-                        min={1}
-                        max={100}
-                        value={searchLimit}
-                        onChange={(v) => v != null && setSearchLimit(v)}
-                        style={{ width: 72 }}
-                      />
-                      <Checkbox
-                        checked={useRerank}
-                        onChange={(e) => setUseRerank(e.target.checked)}
+                      <Button
+                        type="primary"
+                        icon={<Search size={14} />}
+                        loading={loading}
+                        onClick={handleManualQuery}
                       >
-                        精排
-                      </Checkbox>
+                        查询
+                      </Button>
+                      <Button onClick={handleRefreshAll} loading={loading} disabled={loading}>
+                        刷新全部
+                      </Button>
                     </div>
-                  )
-                }
-              ]}
-            />
-          </div>
-
-          <div className={styles.partition}>
-            {loading ? (
-              <div className={styles.empty}>加载中...</div>
-            ) : memories.length === 0 ? (
-              <div className={styles.empty}>
-                <Empty description="暂无记忆" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-              </div>
-            ) : (
-              (() => {
-                const {
-                  user: userList,
-                  scope: scopeList,
-                  session: sessionList
-                } = partitionMemories(memories, currentScope)
-
-                const renderItem = (item: MemoryItemWithGroup) => (
-                  <div key={item.id} className={styles.item}>
-                    <div style={{ flex: 1 }}>
-                      <div className={styles.content}>{item.memory}</div>
-                      <div className={styles.meta}>
-                        <span title={item.created_at}>
-                          {item.created_at
-                            ? new Date(item.created_at).toLocaleString()
-                            : '未知时间'}
-                        </span>
-                        {item.score != null && (
-                          <Tag bordered={false}>相似度: {Number(item.score).toFixed(2)}</Tag>
-                        )}
-                      </div>
-                    </div>
-                    <div className={styles.actions}>
-                      <Popconfirm
-                        title="确定删除这条记忆吗？"
-                        onConfirm={() => handleDelete(item.id)}
-                        okText="删除"
-                        cancelText="取消"
-                      >
-                        <ActionIcon icon={Trash2} size="small" title="删除" />
-                      </Popconfirm>
-                    </div>
-                  </div>
-                )
-
-                const renderSubList = (
-                  subs: { key: string; label: string; list: MemoryItemWithGroup[] }[]
-                ) =>
-                  subs.length === 0 ? (
-                    <div className={styles.emptySection}>暂无</div>
-                  ) : (
                     <Collapse
                       ghost
                       size="small"
-                      defaultActiveKey={subs.map((s) => s.key)}
-                      className={styles.subCollapse}
-                      items={subs.map((sub) => ({
-                        key: sub.key,
-                        label: (
-                          <span className={styles.subCategoryHeader}>
-                            {sub.label}（{sub.list.length}）
-                          </span>
-                        ),
-                        children: (
-                          <div className={styles.partitionList}>
-                            {sub.list.map((item) => renderItem(item))}
+                      items={[
+                        {
+                          key: 'advanced',
+                          label: '高级选项',
+                          children: (
+                            <div className={styles.advancedRow}>
+                              <span className={styles.advancedLabel}>检索方式</span>
+                              <Select<SearchMethod>
+                                size="small"
+                                value={searchMethod}
+                                onChange={setSearchMethod}
+                                style={{ width: 120 }}
+                                options={[
+                                  { value: 'keyword', label: '关键词' },
+                                  { value: 'vector', label: '向量' },
+                                  { value: 'hybrid', label: '混合(默认)' },
+                                  { value: 'rrf', label: 'RRF' },
+                                  { value: 'agentic', label: 'Agentic' }
+                                ]}
+                              />
+                              <span className={styles.advancedLabel}>条数</span>
+                              <InputNumber
+                                size="small"
+                                min={1}
+                                max={100}
+                                value={searchLimit}
+                                onChange={(v) => v != null && setSearchLimit(v)}
+                                style={{ width: 72 }}
+                              />
+                              <Checkbox
+                                checked={useRerank}
+                                onChange={(e) => setUseRerank(e.target.checked)}
+                              >
+                                精排
+                              </Checkbox>
+                            </div>
+                          )
+                        }
+                      ]}
+                    />
+                  </div>
+
+                  <div className={styles.partition}>
+                    {loading ? (
+                      <div className={styles.empty}>加载中...</div>
+                    ) : memories.length === 0 ? (
+                      <div className={styles.empty}>
+                        <Empty description="暂无记忆" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                      </div>
+                    ) : (
+                      (() => {
+                        const {
+                          user: userList,
+                          scope: scopeList,
+                          session: sessionList
+                        } = partitionMemories(memories, currentScope)
+
+                        const renderItem = (item: MemoryItemWithGroup) => (
+                          <div key={item.id} className={styles.item}>
+                            <div style={{ flex: 1 }}>
+                              <div className={styles.content}>{item.memory}</div>
+                              <div className={styles.meta}>
+                                <span title={item.created_at}>
+                                  {item.created_at
+                                    ? new Date(item.created_at).toLocaleString()
+                                    : '未知时间'}
+                                </span>
+                                {item.score != null && (
+                                  <Tag bordered={false}>
+                                    相似度: {Number(item.score).toFixed(2)}
+                                  </Tag>
+                                )}
+                              </div>
+                            </div>
+                            <div className={styles.actions}>
+                              <Popconfirm
+                                title="确定删除这条记忆吗？"
+                                onConfirm={() => handleDelete(item.id)}
+                                okText="删除"
+                                cancelText="取消"
+                              >
+                                <ActionIcon icon={Trash2} size="small" title="删除" />
+                              </Popconfirm>
+                            </div>
                           </div>
                         )
-                      }))}
-                    />
-                  )
 
-                const userSubs = subdivideUser(userList)
-                const scopeSubs = subdivideScope(scopeList, currentScope)
-                const sessionSubs = subdivideSession(sessionList, currentScope)
+                        const renderSubList = (
+                          subs: { key: string; label: string; list: MemoryItemWithGroup[] }[]
+                        ) =>
+                          subs.length === 0 ? (
+                            <div className={styles.emptySection}>暂无</div>
+                          ) : (
+                            <Collapse
+                              ghost
+                              size="small"
+                              defaultActiveKey={subs.map((s) => s.key)}
+                              className={styles.subCollapse}
+                              items={subs.map((sub) => ({
+                                key: sub.key,
+                                label: (
+                                  <span className={styles.subCategoryHeader}>
+                                    {sub.label}（{sub.list.length}）
+                                  </span>
+                                ),
+                                children: (
+                                  <div className={styles.partitionList}>
+                                    {sub.list.map((item) => renderItem(item))}
+                                  </div>
+                                )
+                              }))}
+                            />
+                          )
 
-                const mainItems: { key: string; label: ReactNode; children: ReactNode }[] = [
-                  {
-                    key: 'user',
-                    label: `${PARTITION_LABELS.user}（${userList.length}）`,
-                    children:
-                      userList.length === 0 ? (
-                        <div className={styles.emptySection}>暂无</div>
-                      ) : (
-                        renderSubList(userSubs)
-                      )
-                  },
-                  {
-                    key: 'scope',
-                    label: `${PARTITION_LABELS.scope}（${scopeList.length}）`,
-                    children:
-                      scopeList.length === 0 ? (
-                        <div className={styles.emptySection}>暂无</div>
-                      ) : (
-                        renderSubList(scopeSubs)
-                      )
-                  },
-                  {
-                    key: 'session',
-                    label: `${PARTITION_LABELS.session}（${sessionList.length}）`,
-                    children:
-                      sessionList.length === 0 ? (
-                        <div className={styles.emptySection}>暂无</div>
-                      ) : (
-                        renderSubList(sessionSubs)
-                      )
-                  }
-                ]
+                        const userSubs = subdivideUser(userList)
+                        const scopeSubs = subdivideScope(scopeList, currentScope)
+                        const sessionSubs = subdivideSession(sessionList, currentScope)
 
-                return (
-                  <Collapse
-                    defaultActiveKey={['user', 'scope', 'session']}
-                    ghost
-                    size="small"
-                    items={mainItems}
-                    className={styles.subCollapse}
-                  />
-                )
-              })()
-            )}
-          </div>
-        </div>
+                        const mainItems: {
+                          key: string
+                          label: ReactNode
+                          children: ReactNode
+                        }[] = [
+                          {
+                            key: 'user',
+                            label: `${PARTITION_LABELS.user}（${userList.length}）`,
+                            children:
+                              userList.length === 0 ? (
+                                <div className={styles.emptySection}>暂无</div>
+                              ) : (
+                                renderSubList(userSubs)
+                              )
+                          },
+                          {
+                            key: 'scope',
+                            label: `${PARTITION_LABELS.scope}（${scopeList.length}）`,
+                            children:
+                              scopeList.length === 0 ? (
+                                <div className={styles.emptySection}>暂无</div>
+                              ) : (
+                                renderSubList(scopeSubs)
+                              )
+                          },
+                          {
+                            key: 'session',
+                            label: `${PARTITION_LABELS.session}（${sessionList.length}）`,
+                            children:
+                              sessionList.length === 0 ? (
+                                <div className={styles.emptySection}>暂无</div>
+                              ) : (
+                                renderSubList(sessionSubs)
+                              )
+                          }
+                        ]
+
+                        return (
+                          <Collapse
+                            defaultActiveKey={['user', 'scope', 'session']}
+                            ghost
+                            size="small"
+                            items={mainItems}
+                            className={styles.subCollapse}
+                          />
+                        )
+                      })()
+                    )}
+                  </div>
+                </div>
+              )
+            },
+            {
+              key: 'dedup',
+              label: (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <History size={14} /> 去重日志
+                  {dedupEntries.length > 0 && (
+                    <Tag bordered={false} color="orange" style={{ marginLeft: 2 }}>
+                      {dedupEntries.length}
+                    </Tag>
+                  )}
+                </span>
+              ),
+              children: (
+                <div className={styles.container}>
+                  <div className={styles.header}>
+                    <span style={{ fontSize: 13, color: 'var(--ant-color-text-secondary)' }}>
+                      当记忆被判定为重复时，系统会抑制新记忆并保留已有记忆。你可以在此查看并回退。
+                    </span>
+                    <Button size="small" onClick={() => void loadDedupLog()} loading={dedupLoading}>
+                      刷新
+                    </Button>
+                  </div>
+
+                  <div className={styles.partition}>
+                    {dedupLoading ? (
+                      <div className={styles.empty}>加载中...</div>
+                    ) : dedupEntries.length === 0 ? (
+                      <div className={styles.empty}>
+                        <Empty description="暂无去重记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                      </div>
+                    ) : (
+                      dedupEntries.map((entry) => (
+                        <div key={entry.id} className={styles.dedupItem}>
+                          <div className={styles.dedupHeader}>
+                            <div className={styles.dedupMemoryPair}>
+                              <div>
+                                <span className={styles.dedupLabel}>已保留</span>
+                                <div className={styles.dedupContent}>
+                                  {entry.kept_memory_content || '(内容不可用)'}
+                                </div>
+                              </div>
+                              <div>
+                                <span className={styles.dedupLabel}>被抑制（新）</span>
+                                <div className={styles.dedupContent}>
+                                  {entry.new_memory_content}
+                                </div>
+                              </div>
+                            </div>
+                            <div className={styles.actions}>
+                              <Popconfirm
+                                title="恢复被抑制的记忆？"
+                                description="这将重新插入被去重的记忆到记忆库中。"
+                                onConfirm={() => handleUndo(entry.id)}
+                                okText="恢复"
+                                cancelText="取消"
+                              >
+                                <Tooltip title="恢复被抑制的记忆">
+                                  <ActionIcon
+                                    icon={Undo2}
+                                    size="small"
+                                    loading={undoingId === entry.id}
+                                  />
+                                </Tooltip>
+                              </Popconfirm>
+                            </div>
+                          </div>
+                          <div className={styles.dedupMeta}>
+                            <Tag bordered={false} color="blue">
+                              {entry.new_memory_type}
+                            </Tag>
+                            {entry.vector_distance != null && (
+                              <span>向量距离: {Number(entry.vector_distance).toFixed(3)}</span>
+                            )}
+                            {entry.llm_reasoning && (
+                              <Tooltip title={entry.llm_reasoning}>
+                                <Tag bordered={false} color="purple" style={{ cursor: 'help' }}>
+                                  LLM 判定
+                                </Tag>
+                              </Tooltip>
+                            )}
+                            <span>
+                              {entry.created_at
+                                ? new Date(entry.created_at).toLocaleString()
+                                : '未知时间'}
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )
+            }
+          ]}
+        />
       </Modal>
     </>
   )

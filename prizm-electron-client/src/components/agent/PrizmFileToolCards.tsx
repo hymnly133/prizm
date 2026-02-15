@@ -1,31 +1,55 @@
 /**
- * 与文件相关的 Prizm 工具自定义卡片
- * 单击标题打开工作区预览，下拉保留显示工具详情
- * 通过 registerToolRender 注册，ToolCallCard 会优先使用此处注册的渲染
+ * 文件相关 Prizm 工具的自定义卡片
+ * 通过 registerToolRender 注册，ToolCallCard 优先使用注册的渲染器
+ * 完成状态卡片提供明确的「打开」按钮，支持 preparing → running → done 三阶段
  */
-import { Block, Collapse, Flexbox, Icon, Skeleton } from '@lobehub/ui'
-import { FileText } from 'lucide-react'
+import { Flexbox, Icon, Tag } from '@lobehub/ui'
+import {
+  AlertCircle,
+  CheckSquare,
+  ChevronDown,
+  ExternalLink,
+  FileText,
+  Loader2,
+  StickyNote,
+  type LucideIcon
+} from 'lucide-react'
+import { useState } from 'react'
 import type { ToolCallRecord } from '@prizm/client-core'
 import { getToolDisplayName, getToolMetadata, registerToolRender } from '@prizm/client-core'
 import type { FileKind } from '../../hooks/useFileList'
 import { useWorkNavigation } from '../../context/WorkNavigationContext'
 
+/* ── 分类图标/色（与 ToolCallCard 的全局映射一致） ── */
+const KIND_META: Record<string, { icon: LucideIcon; color: string }> = {
+  note: { icon: StickyNote, color: '#f59e0b' },
+  document: { icon: FileText, color: '#3b82f6' },
+  todo: { icon: CheckSquare, color: '#10b981' }
+}
+
+function getIconAndColor(toolName: string): { icon: LucideIcon; color: string } {
+  const meta = getToolMetadata(toolName)
+  if (meta?.category && KIND_META[meta.category]) return KIND_META[meta.category]
+  return { icon: FileText, color: '#3b82f6' }
+}
+
+/* ── 从参数提取摘要 ── */
 function parseArgsSummary(argsStr: string): string {
   try {
     const obj = JSON.parse(argsStr || '{}') as Record<string, unknown>
-    const parts: string[] = []
-    if (obj.documentId) parts.push(`文档: ${String(obj.documentId).slice(0, 12)}…`)
-    else if (obj.noteId) parts.push(`便签: ${String(obj.noteId).slice(0, 12)}…`)
-    else if (obj.todoListId) parts.push(`待办列表: ${String(obj.todoListId).slice(0, 12)}…`)
-    else if (obj.todoId) parts.push(`待办: ${String(obj.todoId).slice(0, 12)}…`)
-    else if (obj.title) parts.push(`标题: ${String(obj.title).slice(0, 20)}…`)
-    else if (obj.content) parts.push(`内容: ${String(obj.content).slice(0, 30)}…`)
-    return parts.join(' ')
+    if (obj.title) return String(obj.title).slice(0, 30)
+    if (obj.content) return String(obj.content).slice(0, 40)
+    if (obj.documentId) return `文档 ${String(obj.documentId).slice(0, 12)}…`
+    if (obj.noteId) return `便签 ${String(obj.noteId).slice(0, 12)}…`
+    if (obj.todoId) return `待办 ${String(obj.todoId).slice(0, 12)}…`
+    if (obj.todoListId) return `待办列表 ${String(obj.todoListId).slice(0, 12)}…`
+    return ''
   } catch {
     return ''
   }
 }
 
+/* ── 从参数解析文件引用 ── */
 function parseFileRef(argsStr: string): { kind: FileKind; id: string } | null {
   try {
     const obj = JSON.parse(argsStr || '{}') as Record<string, unknown>
@@ -40,159 +64,160 @@ function parseFileRef(argsStr: string): { kind: FileKind; id: string } | null {
   }
 }
 
+/* ── Done 状态的展开/折叠卡片 ── */
+function FileToolCardDone({
+  tc,
+  displayName,
+  CategoryIcon,
+  accentColor,
+  argsSummary,
+  isError,
+  fileRef,
+  onOpenFile
+}: {
+  tc: ToolCallRecord
+  displayName: string
+  CategoryIcon: LucideIcon
+  accentColor: string
+  argsSummary: string
+  isError: boolean
+  fileRef: { kind: FileKind; id: string } | null
+  onOpenFile: (kind: FileKind, id: string) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <div className={`tool-card${isError ? ' tool-card--error' : ''}`} data-status="done">
+      <div className="tool-card__indicator" style={{ background: accentColor }} />
+      <div
+        className="tool-card__header"
+        role="button"
+        tabIndex={0}
+        onClick={() => setExpanded((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            setExpanded((v) => !v)
+          }
+        }}
+      >
+        <Flexbox gap={8} horizontal align="center" style={{ width: '100%' }}>
+          <div className="tool-card__icon-wrap" style={{ '--tc-accent': accentColor } as never}>
+            <Icon icon={isError ? AlertCircle : CategoryIcon} size={15} />
+          </div>
+          <Flexbox flex={1} gap={2} style={{ minWidth: 0 }}>
+            <Flexbox horizontal align="center" gap={6}>
+              <span className="tool-card__name">{displayName}</span>
+              {isError && (
+                <Tag size="small" color="error">
+                  失败
+                </Tag>
+              )}
+            </Flexbox>
+            {argsSummary && <span className="tool-card__desc">{argsSummary}</span>}
+          </Flexbox>
+          {fileRef && (
+            <button
+              className="tool-card__open-btn"
+              title="在工作区中打开"
+              onClick={(e) => {
+                e.stopPropagation()
+                onOpenFile(fileRef.kind, fileRef.id)
+              }}
+            >
+              <ExternalLink size={12} />
+              <span>打开</span>
+            </button>
+          )}
+          <ChevronDown
+            size={14}
+            className={`tool-card__chevron${expanded ? ' tool-card__chevron--open' : ''}`}
+          />
+        </Flexbox>
+      </div>
+      {expanded && (
+        <div className="tool-card__body">
+          {tc.arguments && tc.arguments !== '{}' && (
+            <div>
+              <div className="tool-card__section-label">参数</div>
+              <pre className="tool-card__pre">{tc.arguments}</pre>
+            </div>
+          )}
+          <div>
+            <div className="tool-card__section-label">{isError ? '错误信息' : '结果'}</div>
+            <pre className={`tool-card__pre${isError ? ' tool-card__pre--error' : ''}`}>
+              {tc.result || '(无返回)'}
+            </pre>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── 主组件：文件工具自定义卡片 ── */
 function PrizmFileToolCard({ tc }: { tc: ToolCallRecord }) {
   const status = tc.status ?? 'done'
   const displayName = getToolDisplayName(tc.name)
-  const meta = getToolMetadata(tc.name)
+  const { icon: CategoryIcon, color: accentColor } = getIconAndColor(tc.name)
   const argsSummary = parseArgsSummary(tc.arguments)
-  const fileRef = status === 'done' ? parseFileRef(tc.arguments) : null
+  const isError = !!tc.isError
   const { openFileAtWork } = useWorkNavigation()
+  const fileRef = status === 'done' && !isError ? parseFileRef(tc.arguments) : null
 
   if (status === 'preparing') {
     return (
-      <Block variant="filled" shadow>
-        <Flexbox gap={8} horizontal align="center">
-          <Icon icon={FileText} size={18} />
-          <Flexbox flex={1} gap={4}>
-            <span style={{ fontWeight: 600 }}>{displayName}</span>
-            <Skeleton paragraph={false} title={{ width: 120 }} active />
+      <div className="tool-card" data-status="preparing">
+        <div className="tool-card__indicator" style={{ background: accentColor }} />
+        <Flexbox gap={8} horizontal align="center" style={{ padding: '10px 14px' }}>
+          <div className="tool-card__icon-wrap" style={{ '--tc-accent': accentColor } as never}>
+            <Icon icon={CategoryIcon} size={15} />
+          </div>
+          <Flexbox flex={1} gap={2}>
+            <span className="tool-card__name">{displayName}</span>
+            <span className="tool-card__status-text">准备调用…</span>
           </Flexbox>
+          <Loader2 size={14} className="tool-card__spinner" />
         </Flexbox>
-      </Block>
+      </div>
     )
   }
 
   if (status === 'running') {
     return (
-      <Block variant="filled" shadow>
-        <Flexbox gap={8} horizontal align="center">
-          <Icon icon={FileText} size={18} />
-          <Flexbox flex={1} gap={4}>
-            <span style={{ fontWeight: 600 }}>{displayName}</span>
-            {argsSummary && (
-              <span style={{ fontSize: 12, color: 'var(--color-text-description)' }}>
-                {argsSummary}
-              </span>
-            )}
-            <Skeleton paragraph={false} title={{ width: 80 }} active />
+      <div className="tool-card" data-status="running">
+        <div className="tool-card__indicator" style={{ background: accentColor }} />
+        <Flexbox gap={8} horizontal align="center" style={{ padding: '10px 14px' }}>
+          <div className="tool-card__icon-wrap" style={{ '--tc-accent': accentColor } as never}>
+            <Icon icon={CategoryIcon} size={15} />
+          </div>
+          <Flexbox flex={1} gap={2}>
+            <span className="tool-card__name">{displayName}</span>
+            {argsSummary && <span className="tool-card__desc">{argsSummary}</span>}
+            <span className="tool-card__status-text">执行中…</span>
           </Flexbox>
+          <Loader2 size={14} className="tool-card__spinner" />
         </Flexbox>
-      </Block>
+      </div>
     )
   }
 
-  const desc = [argsSummary, tc.isError && '失败'].filter(Boolean).join(' · ') || undefined
-  const label =
-    fileRef != null ? (
-      <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-        <span
-          style={{ flex: 1, cursor: 'pointer' }}
-          title="单击在工作区中打开"
-          onClick={(e) => {
-            e.stopPropagation()
-            openFileAtWork(fileRef.kind, fileRef.id)
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault()
-              e.stopPropagation()
-              openFileAtWork(fileRef.kind, fileRef.id)
-            }
-          }}
-          role="button"
-          tabIndex={0}
-          className="tool-call-card__file-header"
-        >
-          {displayName}
-          {desc ? ` · ${desc}` : ''}
-        </span>
-      </div>
-    ) : (
-      displayName
-    )
-
   return (
-    <Block variant="filled" shadow>
-      <Collapse
-        variant="filled"
-        items={[
-          {
-            label,
-            icon: FileText,
-            desc: fileRef == null ? desc : undefined,
-            children: (
-              <Flexbox gap={12} style={{ marginTop: 8 }}>
-                {tc.arguments && (
-                  <div>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        color: 'var(--color-text-description)',
-                        marginBottom: 4
-                      }}
-                    >
-                      参数
-                    </div>
-                    <pre
-                      style={{
-                        margin: 0,
-                        padding: 8,
-                        fontSize: 12,
-                        background: 'var(--color-fill-quaternary)',
-                        borderRadius: 6,
-                        overflow: 'auto'
-                      }}
-                    >
-                      {tc.arguments || '{}'}
-                    </pre>
-                  </div>
-                )}
-                <div>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      color: 'var(--color-text-description)',
-                      marginBottom: 4
-                    }}
-                  >
-                    结果
-                  </div>
-                  <pre
-                    style={{
-                      margin: 0,
-                      padding: 8,
-                      fontSize: 12,
-                      background: 'var(--color-fill-quaternary)',
-                      borderRadius: 6,
-                      overflow: 'auto',
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word'
-                    }}
-                  >
-                    {tc.result}
-                  </pre>
-                </div>
-                {meta?.docUrl && (
-                  <a
-                    href={meta.docUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ fontSize: 12 }}
-                  >
-                    查看文档
-                  </a>
-                )}
-              </Flexbox>
-            )
-          }
-        ]}
-      />
-    </Block>
+    <FileToolCardDone
+      tc={tc}
+      displayName={displayName}
+      CategoryIcon={CategoryIcon}
+      accentColor={isError ? 'var(--ant-color-error)' : accentColor}
+      argsSummary={argsSummary}
+      isError={isError}
+      fileRef={fileRef}
+      onOpenFile={openFileAtWork}
+    />
   )
 }
 
+/* ── 注册：这些文件相关工具使用自定义卡片 ── */
 const FILE_RELATED_PRIZM_TOOLS = [
-  'prizm_get_document',
   'prizm_get_document_content',
   'prizm_update_document',
   'prizm_delete_document',
@@ -206,10 +231,6 @@ const FILE_RELATED_PRIZM_TOOLS = [
   'prizm_update_todo_list'
 ] as const
 
-function registerAll() {
-  for (const name of FILE_RELATED_PRIZM_TOOLS) {
-    registerToolRender(name, (props) => <PrizmFileToolCard tc={props.tc} />)
-  }
+for (const name of FILE_RELATED_PRIZM_TOOLS) {
+  registerToolRender(name, (props) => <PrizmFileToolCard tc={props.tc} />)
 }
-
-registerAll()
