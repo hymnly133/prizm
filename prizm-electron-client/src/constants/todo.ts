@@ -28,10 +28,11 @@ export function getKindLabel(kind: FileKind): string {
   }
 }
 
-/** 搜索结果类型标签（含 clipboard） */
-export type SearchResultKind = 'note' | 'todoList' | 'clipboard' | 'document'
+/** 搜索结果类型标签（与 @prizm/client-core SearchResultKind 一致） */
+export type SearchResultKind = 'document' | 'clipboard' | 'todoList' | 'file'
 
 export function getSearchResultKindLabel(kind: SearchResultKind): string {
   if (kind === 'clipboard') return '剪贴板'
+  if (kind === 'file') return '文件'
   return getKindLabel(kind as FileKind)
 }

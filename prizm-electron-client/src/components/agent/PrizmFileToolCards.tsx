@@ -9,9 +9,12 @@ import {
   CheckSquare,
   ChevronDown,
   ExternalLink,
+  File,
+  FilePen,
   FileText,
+  FileX,
+  FolderOpen,
   Loader2,
-  StickyNote,
   type LucideIcon
 } from 'lucide-react'
 import { useState } from 'react'
@@ -22,12 +25,23 @@ import { useWorkNavigation } from '../../context/WorkNavigationContext'
 
 /* ── 分类图标/色（与 ToolCallCard 的全局映射一致） ── */
 const KIND_META: Record<string, { icon: LucideIcon; color: string }> = {
-  note: { icon: StickyNote, color: '#f59e0b' },
+  file: { icon: FileText, color: '#3b82f6' },
   document: { icon: FileText, color: '#3b82f6' },
   todo: { icon: CheckSquare, color: '#10b981' }
 }
 
+/* ── 文件工具专属图标（按操作类型） ── */
+const FILE_TOOL_ICONS: Record<string, LucideIcon> = {
+  prizm_file_list: FolderOpen,
+  prizm_file_read: FileText,
+  prizm_file_write: FilePen,
+  prizm_file_move: File,
+  prizm_file_delete: FileX
+}
+
 function getIconAndColor(toolName: string): { icon: LucideIcon; color: string } {
+  if (FILE_TOOL_ICONS[toolName])
+    return { icon: FILE_TOOL_ICONS[toolName], color: KIND_META.file.color }
   const meta = getToolMetadata(toolName)
   if (meta?.category && KIND_META[meta.category]) return KIND_META[meta.category]
   return { icon: FileText, color: '#3b82f6' }
@@ -37,10 +51,11 @@ function getIconAndColor(toolName: string): { icon: LucideIcon; color: string } 
 function parseArgsSummary(argsStr: string): string {
   try {
     const obj = JSON.parse(argsStr || '{}') as Record<string, unknown>
+    if (obj.path) return String(obj.path).slice(0, 40)
+    if (obj.from && obj.to) return `${String(obj.from).slice(0, 20)} → ${String(obj.to).slice(0, 20)}`
     if (obj.title) return String(obj.title).slice(0, 30)
     if (obj.content) return String(obj.content).slice(0, 40)
     if (obj.documentId) return `文档 ${String(obj.documentId).slice(0, 12)}…`
-    if (obj.noteId) return `便签 ${String(obj.noteId).slice(0, 12)}…`
     if (obj.todoId) return `待办 ${String(obj.todoId).slice(0, 12)}…`
     if (obj.todoListId) return `待办列表 ${String(obj.todoListId).slice(0, 12)}…`
     return ''
@@ -49,24 +64,20 @@ function parseArgsSummary(argsStr: string): string {
   }
 }
 
-/* ── 从参数（或 result）解析文件引用 ── */
+/* ── 从参数（或 result）解析文件引用（document/todoList 可打开预览，file 工具用 path 暂无打开） ── */
 function parseFileRef(argsStr: string, resultStr?: string): { kind: FileKind; id: string } | null {
   try {
     const obj = JSON.parse(argsStr || '{}') as Record<string, unknown>
     if (obj.documentId && typeof obj.documentId === 'string')
       return { kind: 'document', id: obj.documentId }
-    if (obj.noteId && typeof obj.noteId === 'string') return { kind: 'note', id: obj.noteId }
     if (obj.todoListId && typeof obj.todoListId === 'string')
       return { kind: 'todoList', id: obj.todoListId }
   } catch {
     /* ignore */
   }
-  // 回退：从 result 文本解析 ID（如 prizm_create_document 返回 "已创建文档 abc123"）
   if (resultStr) {
     const docMatch = resultStr.match(/已创建文档\s+(\S+)/)
     if (docMatch?.[1]) return { kind: 'document', id: docMatch[1] }
-    const noteMatch = resultStr.match(/已创建便签\s+(\S+)/)
-    if (noteMatch?.[1]) return { kind: 'note', id: noteMatch[1] }
   }
   return null
 }

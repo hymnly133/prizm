@@ -11,10 +11,10 @@ import {
   Clipboard,
   ExternalLink,
   FileText,
+  FolderOpen,
   Globe,
   Loader2,
   Search,
-  StickyNote,
   Wrench,
   Bell,
   ChevronDown,
@@ -32,7 +32,7 @@ export interface ToolCallCardProps {
 
 /* ── 工具分类 → 图标 ── */
 const CATEGORY_ICONS: Record<string, LucideIcon> = {
-  note: StickyNote,
+  file: FolderOpen,
   document: FileText,
   todo: CheckSquare,
   clipboard: Clipboard,
@@ -44,7 +44,7 @@ const CATEGORY_ICONS: Record<string, LucideIcon> = {
 
 /* ── 工具分类 → 强调色 ── */
 const CATEGORY_COLORS: Record<string, string> = {
-  note: '#f59e0b',
+  file: '#3b82f6',
   document: '#3b82f6',
   todo: '#10b981',
   clipboard: '#8b5cf6',
@@ -69,16 +69,12 @@ function getCategoryColor(toolName: string): string {
   return '#94a3b8'
 }
 
-/* ── 可打开预览的文件相关工具 ── */
+/* ── 可打开预览的文件相关工具（document/todo 有 id，file 工具用 path 暂无） ── */
 const FILE_TOOLS = new Set([
   'prizm_create_document',
   'prizm_get_document_content',
   'prizm_update_document',
   'prizm_delete_document',
-  'prizm_read_note',
-  'prizm_get_note',
-  'prizm_update_note',
-  'prizm_delete_note',
   'prizm_read_todo',
   'prizm_update_todo',
   'prizm_delete_todo',
@@ -91,7 +87,6 @@ function parseFileRef(argsStr: string, resultStr?: string): { kind: FileKind; id
     const obj = JSON.parse(argsStr || '{}') as Record<string, unknown>
     if (obj.documentId && typeof obj.documentId === 'string')
       return { kind: 'document', id: obj.documentId }
-    if (obj.noteId && typeof obj.noteId === 'string') return { kind: 'note', id: obj.noteId }
     if (obj.todoListId && typeof obj.todoListId === 'string')
       return { kind: 'todoList', id: obj.todoListId }
   } catch {
@@ -100,8 +95,6 @@ function parseFileRef(argsStr: string, resultStr?: string): { kind: FileKind; id
   if (resultStr) {
     const docMatch = resultStr.match(/已创建文档\s+(\S+)/)
     if (docMatch?.[1]) return { kind: 'document', id: docMatch[1] }
-    const noteMatch = resultStr.match(/已创建便签\s+(\S+)/)
-    if (noteMatch?.[1]) return { kind: 'note', id: noteMatch[1] }
   }
   return null
 }
@@ -111,10 +104,11 @@ function parseArgsSummary(argsStr: string): string {
   try {
     const obj = JSON.parse(argsStr || '{}') as Record<string, unknown>
     if (obj.query) return `搜索: ${String(obj.query).slice(0, 30)}`
+    if (obj.path) return String(obj.path).slice(0, 40)
+    if (obj.from && obj.to) return `${String(obj.from).slice(0, 20)} → ${String(obj.to).slice(0, 20)}`
     if (obj.title) return String(obj.title).slice(0, 30)
     if (obj.content) return String(obj.content).slice(0, 40)
     if (obj.documentId) return `文档 ${String(obj.documentId).slice(0, 12)}…`
-    if (obj.noteId) return `便签 ${String(obj.noteId).slice(0, 12)}…`
     if (obj.todoId) return `待办 ${String(obj.todoId).slice(0, 12)}…`
     if (obj.todoListId) return `待办列表 ${String(obj.todoListId).slice(0, 12)}…`
     return ''

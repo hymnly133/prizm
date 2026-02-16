@@ -230,7 +230,14 @@ function createMainWindow(): BrowserWindow {
     minWidth: 400,
     minHeight: 500,
     resizable: true,
-    titleBarStyle: 'default',
+    titleBarStyle: 'hidden',
+    ...(process.platform === 'win32' && {
+      titleBarOverlay: {
+        color: '#00000000',
+        symbolColor: '#888888',
+        height: 36
+      }
+    }),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -842,6 +849,20 @@ function registerIpcHandlers(): void {
     return result.filePaths[0]
   })
 
+  ipcMain.handle('get_platform', () => {
+    return process.platform
+  })
+
+  ipcMain.handle(
+    'set_titlebar_overlay',
+    (_event, options: { color?: string; symbolColor?: string; height?: number }) => {
+      if (mainWindow && !mainWindow.isDestroyed() && process.platform === 'win32') {
+        mainWindow.setTitleBarOverlay(options)
+      }
+      return true
+    }
+  )
+
   ipcMain.on('quick-panel-action', (_event, payload: { action: string; selectedText: string }) => {
     if (quickPanelWindow && !quickPanelWindow.isDestroyed()) {
       quickPanelWindow.hide()
@@ -863,6 +884,9 @@ function registerIpcHandlers(): void {
 app
   .whenReady()
   .then(async () => {
+    // 移除默认菜单栏（Windows/Linux 上显示为 File/Edit/View... 栏）
+    Menu.setApplicationMenu(null)
+
     await loadTraySettings()
     registerIpcHandlers()
     createMainWindow()

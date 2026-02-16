@@ -15,11 +15,11 @@ const Placeholder = memo(() => {
       <span>从任何想法开始</span>
       <span className="chat-input-placeholder-sep">·</span>
       <span>
-        <code>@</code> 引用便签/文档/待办
+        <code>@</code> 引用文档/待办
       </span>
       <span className="chat-input-placeholder-sep">·</span>
       <span>
-        <code>/</code> 命令（notes、todos、help…）
+        <code>/</code> 命令（docs、todos、help…）
       </span>
       <span className="chat-input-placeholder-sep">·</span>
       <span>Enter 发送，Shift+Enter 换行</span>

@@ -3,7 +3,17 @@
  */
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { ActionIcon, Button, Checkbox, Empty, Flexbox, Modal, Skeleton, toast } from '@lobehub/ui'
+import {
+  ActionIcon,
+  Button,
+  Checkbox,
+  Empty,
+  Flexbox,
+  Markdown,
+  Modal,
+  Skeleton,
+  toast
+} from '@lobehub/ui'
 import { App } from 'antd'
 import ScopeSidebar from '../components/ui/ScopeSidebar'
 import SearchSection from '../components/SearchSection'
@@ -18,8 +28,13 @@ import { useWorkNavigation } from '../context/WorkNavigationContext'
 import type { FileKind, FileItem } from '../hooks/useFileList'
 import type { TodoItemStatus } from '@prizm/client-core'
 import type { SavePayload } from '../components/FileDetailView'
-import { FileText, ListTodo, StickyNote } from 'lucide-react'
+import { FileText, FolderTree, LayoutGrid, ListTodo } from 'lucide-react'
 import { getKindLabel, STATUS_LABELS } from '../constants/todo'
+import { WorkFolderView } from '../components/WorkFolderView'
+import { WorkspaceFoldersSection } from '../components/WorkspaceFoldersSection'
+import type { TreeNode } from '../hooks/useFileTree'
+
+const VIEW_MODE_KEY = 'prizm-work-view-mode'
 
 const EASE_SMOOTH = [0.33, 1, 0.68, 1] as const
 const EASE_OUT_SMOOTH = [0.16, 1, 0.3, 1] as const
@@ -32,7 +47,15 @@ export default function WorkPage() {
   const { fileList, fileListLoading, refreshFileList } = useFileList(currentScope)
   const { pendingWorkFile, consumePendingWorkFile } = useWorkNavigation()
 
-  const [activeTab, setActiveTab] = useState('notes')
+  const [activeTab, setActiveTab] = useState('files')
+  const [viewMode, setViewMode] = useState<'flat' | 'folder'>(() => {
+    try {
+      const saved = localStorage.getItem(VIEW_MODE_KEY)
+      return saved === 'folder' ? 'folder' : 'flat'
+    } catch {
+      return 'flat'
+    }
+  })
   const [categoryFilter, setCategoryFilter] = useState<Record<FileKind, boolean>>({
     note: true,
     todoList: true,
@@ -41,6 +64,12 @@ export default function WorkPage() {
   const [selectedFile, setSelectedFile] = useState<{
     kind: FileKind
     id: string
+  } | null>(null)
+  const [genericFilePreview, setGenericFilePreview] = useState<{
+    path: string
+    name: string
+    content?: string
+    loading?: boolean
   } | null>(null)
   const [hoveredCard, setHoveredCard] = useState<HoveredCardState | null>(null)
   const hoverHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -63,7 +92,31 @@ export default function WorkPage() {
 
   useEffect(() => {
     setSelectedFile(null)
+    setGenericFilePreview(null)
   }, [currentScope])
+
+  useEffect(() => {
+    if (!genericFilePreview || genericFilePreview.content !== undefined) return
+    const http = manager?.getHttpClient()
+    if (!http) return
+    setGenericFilePreview((prev) => prev && { ...prev, loading: true })
+    http
+      .fileRead(genericFilePreview.path, currentScope)
+      .then((result) => {
+        setGenericFilePreview((prev) =>
+          prev && prev.path === genericFilePreview.path
+            ? { ...prev, content: result.content, loading: false }
+            : prev
+        )
+      })
+      .catch(() => {
+        setGenericFilePreview((prev) =>
+          prev && prev.path === genericFilePreview.path
+            ? { ...prev, content: '(无法读取文件内容)', loading: false }
+            : prev
+        )
+      })
+  }, [genericFilePreview, manager, currentScope])
 
   useEffect(() => {
     if (!pendingWorkFile) return
@@ -98,12 +151,12 @@ export default function WorkPage() {
     const http = manager?.getHttpClient()
     if (!http) return
     try {
-      const note = await http.createNote({ content: '' }, currentScope)
+      const doc = await http.createDocument({ title: '未命名', content: '' }, currentScope)
       await refreshFileList(currentScope, { silent: true })
-      setSelectedFile({ kind: 'note', id: note.id })
-      addLog('已创建便签', 'success')
+      setSelectedFile({ kind: 'document', id: doc.id })
+      addLog('已创建文档', 'success')
     } catch (e) {
-      addLog(`创建便签失败: ${String(e)}`, 'error')
+      addLog(`创建文档失败: ${String(e)}`, 'error')
     }
   }
 
@@ -138,9 +191,7 @@ export default function WorkPage() {
     const http = manager?.getHttpClient()
     if (!http || !f) return
     try {
-      if (payload.kind === 'note') {
-        await http.updateNote(f.id, { content: payload.content }, currentScope)
-      } else if (payload.kind === 'document') {
+      if (payload.kind === 'document') {
         await http.updateDocument(
           f.id,
           { title: payload.title, content: payload.content },
@@ -161,9 +212,7 @@ export default function WorkPage() {
   async function doDeleteFile(file: FileItem) {
     if (!manager) return
     const http = manager.getHttpClient()
-    if (file.kind === 'note') {
-      await http.deleteNote(file.id, currentScope)
-    } else if (file.kind === 'todoList') {
+    if (file.kind === 'todoList') {
       await http.deleteTodoList(currentScope, file.id)
     } else {
       await http.deleteDocument(file.id, currentScope)
@@ -205,6 +254,28 @@ export default function WorkPage() {
   function closePreview() {
     setSelectedFile(null)
   }
+
+  const handleViewModeChange = useCallback((mode: 'flat' | 'folder') => {
+    setViewMode(mode)
+    try {
+      localStorage.setItem(VIEW_MODE_KEY, mode)
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  const handleFolderNodeClick = useCallback((node: TreeNode) => {
+    if (node.prizmId && node.prizmType) {
+      const kind: FileKind = node.prizmType === 'todo_list' ? 'todoList' : 'document'
+      setSelectedFile({ kind, id: node.prizmId })
+    } else {
+      setGenericFilePreview({ path: node.id, name: node.name })
+    }
+  }, [])
+
+  const handleNavigateToFolder = useCallback(() => {
+    handleViewModeChange('folder')
+  }, [handleViewModeChange])
 
   const refreshScope = () => refreshFileList(currentScope)
   const shouldReduceMotion = useReducedMotion()
@@ -267,12 +338,6 @@ export default function WorkPage() {
         <div className="work-page__toolbar-left">
           <div className="work-page__category-filter">
             <Checkbox
-              checked={categoryFilter.note}
-              onChange={(checked) => setCategoryFilter((f) => ({ ...f, note: checked }))}
-            >
-              便签
-            </Checkbox>
-            <Checkbox
               checked={categoryFilter.todoList}
               onChange={(checked) => setCategoryFilter((f) => ({ ...f, todoList: checked }))}
             >
@@ -282,7 +347,7 @@ export default function WorkPage() {
               checked={categoryFilter.document}
               onChange={(checked) => setCategoryFilter((f) => ({ ...f, document: checked }))}
             >
-              文档
+              文件
             </Checkbox>
           </div>
           <ScopeSidebar
@@ -296,100 +361,123 @@ export default function WorkPage() {
             activeTab={activeTab}
             scope={currentScope}
             onActiveTabChange={setActiveTab}
-            onRefreshNotes={refreshScope}
+            onRefreshFiles={refreshScope}
             onRefreshTasks={refreshScope}
             onRefreshClipboard={() => {}}
             onSelectFile={onSelectFile}
           />
         </div>
         <div className="work-page__toolbar-actions">
-          <ActionIcon icon={StickyNote} title="新建便签" onClick={onAddNote} size="large" />
           <ActionIcon icon={ListTodo} title="新建待办" onClick={onAddTodo} size="large" />
           <ActionIcon icon={FileText} title="新建文档" onClick={onAddDocument} size="large" />
+          <span className="work-page__toolbar-divider" />
+          <ActionIcon
+            icon={LayoutGrid}
+            title="平铺视图"
+            size="large"
+            className={viewMode === 'flat' ? 'work-page__view-toggle--active' : ''}
+            onClick={() => handleViewModeChange('flat')}
+          />
+          <ActionIcon
+            icon={FolderTree}
+            title="文件夹视图"
+            size="large"
+            className={viewMode === 'folder' ? 'work-page__view-toggle--active' : ''}
+            onClick={() => handleViewModeChange('folder')}
+          />
         </div>
       </div>
 
       <div className="work-page__content">
-        {fileListLoading ? (
-          <div className="work-page__cards-grid work-page__cards-grid--variable">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <div key={i} className="work-page__card-item work-page__card-item--skeleton">
-                <div className="data-card data-card--skeleton">
-                  <Skeleton active paragraph={{ rows: 4 }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : filteredFileList.length === 0 ? (
-          <div className="work-page__empty">
-            <Empty
-              description={
-                fileList.length === 0
-                  ? '暂无内容，创建便签或文档开始工作'
-                  : '没有符合条件的项，勾选上方类别筛选'
-              }
-              imageSize={80}
-              action={
-                fileList.length === 0 ? (
-                  <div className="work-page__empty-actions">
-                    <Button type="primary" onClick={onAddNote}>
-                      新建便签
-                    </Button>
-                    <Button onClick={onAddTodo}>新建待办</Button>
-                    <Button onClick={onAddDocument}>新建文档</Button>
+        {viewMode === 'flat' ? (
+          <>
+            {fileListLoading ? (
+              <div className="work-page__cards-grid work-page__cards-grid--variable">
+                {[1, 2, 3, 4, 5, 6].map((i) => (
+                  <div key={i} className="work-page__card-item work-page__card-item--skeleton">
+                    <div className="data-card data-card--skeleton">
+                      <Skeleton active paragraph={{ rows: 4 }} />
+                    </div>
                   </div>
-                ) : undefined
-              }
-            />
-          </div>
-        ) : (
-          <CardHoverOverlay
-            hoveredCard={hoveredCard}
-            onClose={() => setHoveredCard(null)}
-            onMenuEnter={clearHoverHideTimeout}
-          >
-            <div className="work-page__cards-grid work-page__cards-grid--variable">
-              <AnimatePresence mode="popLayout" initial={false}>
-                {filteredFileList.map((file) => (
-                  <motion.div
-                    key={`${file.kind}-${file.id}`}
-                    className={`work-page__card-item work-page__card-item--${file.kind}`}
-                    layout
-                    transition={layoutTransition}
-                    variants={cardVariants}
-                    initial="enter"
-                    animate="animate"
-                    exit="exit"
-                    style={{ position: 'relative' }}
-                    onMouseEnter={(e) => {
-                      clearHoverHideTimeout()
-                      const rect = e.currentTarget.getBoundingClientRect()
-                      setHoveredCard({
-                        file,
-                        scope: currentScope,
-                        anchorRect: rect,
-                        mouseY: e.clientY
-                      })
-                    }}
-                    onMouseMove={(e) => {
-                      setHoveredCard((prev) => {
-                        if (!prev || prev.file !== file) return prev
-                        if (Math.abs(prev.mouseY - e.clientY) < 4) return prev
-                        return { ...prev, mouseY: e.clientY }
-                      })
-                    }}
-                    onMouseLeave={scheduleHoverHide}
-                  >
-                    <DataCard
-                      file={file}
-                      onClick={() => onSelectFile({ kind: file.kind, id: file.id })}
-                      onDelete={() => handleDeleteFile(file)}
-                    />
-                  </motion.div>
                 ))}
-              </AnimatePresence>
-            </div>
-          </CardHoverOverlay>
+              </div>
+            ) : filteredFileList.length === 0 ? (
+              <div className="work-page__empty">
+                <Empty
+                  description={
+                    fileList.length === 0
+                      ? '暂无内容，创建文档或待办开始工作'
+                      : '没有符合条件的项，勾选上方类别筛选'
+                  }
+                  imageSize={80}
+                  action={
+                    fileList.length === 0 ? (
+                      <div className="work-page__empty-actions">
+                        <Button type="primary" onClick={onAddDocument}>
+                          新建文档
+                        </Button>
+                        <Button onClick={onAddTodo}>新建待办</Button>
+                      </div>
+                    ) : undefined
+                  }
+                />
+              </div>
+            ) : (
+              <CardHoverOverlay
+                hoveredCard={hoveredCard}
+                onClose={() => setHoveredCard(null)}
+                onMenuEnter={clearHoverHideTimeout}
+              >
+                <div className="work-page__cards-grid work-page__cards-grid--variable">
+                  <AnimatePresence mode="popLayout" initial={false}>
+                    {filteredFileList.map((file) => (
+                      <motion.div
+                        key={`${file.kind}-${file.id}`}
+                        className={`work-page__card-item work-page__card-item--${file.kind}`}
+                        layout
+                        transition={layoutTransition}
+                        variants={cardVariants}
+                        initial="enter"
+                        animate="animate"
+                        exit="exit"
+                        style={{ position: 'relative' }}
+                        onMouseEnter={(e) => {
+                          clearHoverHideTimeout()
+                          const rect = e.currentTarget.getBoundingClientRect()
+                          setHoveredCard({
+                            file,
+                            scope: currentScope,
+                            anchorRect: rect,
+                            mouseY: e.clientY
+                          })
+                        }}
+                        onMouseMove={(e) => {
+                          setHoveredCard((prev) => {
+                            if (!prev || prev.file !== file) return prev
+                            if (Math.abs(prev.mouseY - e.clientY) < 4) return prev
+                            return { ...prev, mouseY: e.clientY }
+                          })
+                        }}
+                        onMouseLeave={scheduleHoverHide}
+                      >
+                        <DataCard
+                          file={file}
+                          onClick={() => onSelectFile({ kind: file.kind, id: file.id })}
+                          onDelete={() => handleDeleteFile(file)}
+                        />
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                </div>
+              </CardHoverOverlay>
+            )}
+            <WorkspaceFoldersSection
+              scope={currentScope}
+              onNavigateToFolder={handleNavigateToFolder}
+            />
+          </>
+        ) : (
+          <WorkFolderView scope={currentScope} onSelectFile={handleFolderNodeClick} />
         )}
       </div>
 
@@ -416,6 +504,45 @@ export default function WorkPage() {
               onSave={onSaveFile}
               onTodoItemStatus={selectedFileData.kind === 'todoList' ? onTodoItemStatus : undefined}
             />
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        destroyOnClose
+        open={!!genericFilePreview}
+        title={genericFilePreview?.name ?? '文件预览'}
+        width={800}
+        onCancel={() => setGenericFilePreview(null)}
+        footer={
+          <Flexbox horizontal justify="flex-end">
+            <Button type="primary" onClick={() => setGenericFilePreview(null)}>
+              关闭
+            </Button>
+          </Flexbox>
+        }
+      >
+        {genericFilePreview && (
+          <div style={{ paddingTop: 16, maxHeight: '80vh', overflowY: 'auto' }}>
+            {genericFilePreview.loading ? (
+              <div style={{ padding: 24, textAlign: 'center', opacity: 0.5 }}>加载中…</div>
+            ) : genericFilePreview.name.endsWith('.md') ? (
+              <Markdown>{genericFilePreview.content ?? '(空)'}</Markdown>
+            ) : (
+              <pre
+                style={{
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  fontSize: 13,
+                  lineHeight: 1.6,
+                  padding: 8,
+                  background: 'var(--ant-color-fill-quaternary)',
+                  borderRadius: 8
+                }}
+              >
+                {genericFilePreview.content ?? '(空)'}
+              </pre>
+            )}
           </div>
         )}
       </Modal>

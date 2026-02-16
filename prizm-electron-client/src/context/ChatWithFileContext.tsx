@@ -17,7 +17,7 @@ export interface ChatWithPayload {
   text?: string
   /** 引用文件列表（支持多个） */
   files?: ChatFileRef[]
-  /** 命令列表（如 /notes, /help） */
+  /** 命令列表（如 /docs, /help） */
   commands?: string[]
   /** 指定会话 ID（省略则新建） */
   sessionId?: string

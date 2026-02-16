@@ -260,6 +260,30 @@ const BlockInput = memo(() => {
     [overlayKeyHandler, handleSendButton, sendWithEnter]
   )
 
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      const text = e.dataTransfer.getData('text/plain')
+      if (text.startsWith('@file:')) {
+        e.preventDefault()
+        e.stopPropagation()
+        const root = rootRef.current
+        if (root) {
+          root.focus()
+          document.execCommand('insertText', false, text + ' ')
+          syncToStore()
+        }
+      }
+    },
+    [syncToStore]
+  )
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes('text/plain')) {
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'copy'
+    }
+  }, [])
+
   return (
     <div
       ref={rootRef}
@@ -272,6 +296,8 @@ const BlockInput = memo(() => {
       onInput={handleInput}
       onPaste={handlePaste}
       onKeyDown={handleKeyDown}
+      onDrop={handleDrop}
+      onDragOver={handleDragOver}
       style={{
         minHeight: 46,
         padding: '8px 12px',

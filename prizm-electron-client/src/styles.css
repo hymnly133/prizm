@@ -1,5 +1,14 @@
 /* 使用 Lobe UI / Ant Design 设计 token（通过 theme.cssVar 注入的 CSS 变量） */
 
+/* ═══ 自定义标题栏：窗口拖拽与平台适配 ═══ */
+.app-titlebar-drag {
+  -webkit-app-region: drag;
+}
+.app-titlebar-nodrag {
+  -webkit-app-region: no-drag;
+}
+/* 平台 overlay 留白已移至 AppHeader 组件内联样式（避免内联 style 覆盖 CSS 的优先级问题） */
+
 /* 固定骨架：仅用受控 class，不通配、不碰 portal
  * .app-root：根容器占高
  * .app-root__content：固定铺满视口，与 ant-app 下 portal 同级互不影响
@@ -220,30 +229,59 @@
   font-style: italic;
 }
 
-/* App header（由 Layout 提供，此处定义内容样式） */
-.app-header-inner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  height: 100%;
-  padding: 0 16px;
-}
-.app-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.app-brand h1 {
-  font-size: 20px;
+/* ═══ 标题栏品牌名 ═══ */
+.app-brand-name {
+  font-size: 14px;
   font-weight: 700;
   color: var(--ant-color-text);
   letter-spacing: -0.02em;
+  line-height: 1;
+  user-select: none;
 }
-.app-nav {
+
+/* ═══ 连接状态指示点 ═══ */
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-dot--connected {
+  background: var(--ant-color-success);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ant-color-success) 20%, transparent);
+}
+.status-dot--connecting {
+  background: var(--ant-color-primary);
+  animation: status-pulse 1.5s ease-in-out infinite;
+}
+.status-dot--disconnected {
+  background: var(--ant-color-warning);
+}
+.status-dot--error {
+  background: var(--ant-color-error);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ant-color-error) 20%, transparent);
+}
+@keyframes status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.75);
+  }
+}
+
+/* ═══ 页面 keep-alive 容器 ═══ */
+.page-keep-alive {
   display: flex;
-  gap: 4px;
+  flex-direction: column;
 }
+.page-keep-alive--hidden {
+  display: none !important;
+}
+
 /* app-main 的 overflow 已在 .app-layout-wrap 块中定义 */
 
 /* Work page */
@@ -400,6 +438,105 @@
   gap: 12px;
   margin-top: 16px;
 }
+
+/* ── 视图切换器 ── */
+.work-page__toolbar-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--ant-color-border);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+.work-page__view-toggle--active {
+  color: var(--ant-color-primary) !important;
+  background: var(--ant-color-primary-bg) !important;
+}
+
+/* ── 工作区文件夹面板（平铺视图底部） ── */
+.workspace-folders-section {
+  margin-top: 16px;
+  border-top: 1px solid var(--ant-color-border-secondary);
+  padding-top: 4px;
+}
+.workspace-folders-section__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ant-color-text-secondary);
+  transition: color 0.15s;
+}
+.workspace-folders-section__header:hover {
+  color: var(--ant-color-text);
+}
+.workspace-folders-section__title {
+  flex: 1;
+}
+.workspace-folders-section__count {
+  font-size: 11px;
+  color: var(--ant-color-text-quaternary);
+  font-weight: 400;
+}
+.workspace-folders-section__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 0 8px;
+}
+.workspace-folders-section__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--ant-color-text);
+  background: var(--ant-color-fill-quaternary);
+  transition: background 0.15s, color 0.15s;
+  user-select: none;
+}
+.workspace-folders-section__item:hover {
+  background: var(--ant-color-fill-tertiary);
+}
+.workspace-folders-section__item--file {
+  color: var(--ant-color-text-secondary);
+  cursor: default;
+}
+.workspace-folders-section__item--file:hover {
+  background: var(--ant-color-fill-quaternary);
+}
+.workspace-folders-section__item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+.workspace-folders-section__item-count {
+  font-size: 11px;
+  color: var(--ant-color-text-quaternary);
+  flex-shrink: 0;
+}
+
+/* ── 文件夹视图 ── */
+.work-folder-view {
+  height: 100%;
+}
+.work-folder-view .react-arborist {
+  font-size: 13px;
+}
+.work-folder-view .react-arborist [role='treeitem'] {
+  outline: none;
+}
+.work-page--cards .work-page__content:has(.work-folder-view) {
+  padding: 0;
+  overflow: hidden;
+}
+
 .scope-selector {
   flex-shrink: 0;
 }
@@ -1632,6 +1769,15 @@
   opacity: 1;
   pointer-events: auto;
 }
+
+/* ── 文件树面板样式 ── */
+.agent-sidebar .react-arborist {
+  font-size: 12px;
+}
+.agent-sidebar .react-arborist [role='treeitem'] {
+  outline: none;
+}
+
 .agent-main {
   flex: 1;
   min-height: 0;

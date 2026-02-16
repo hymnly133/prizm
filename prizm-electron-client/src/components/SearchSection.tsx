@@ -11,17 +11,17 @@ interface SearchSectionProps {
   activeTab: string
   scope?: string
   onActiveTabChange: (value: string) => void
-  onRefreshNotes: () => void
+  onRefreshFiles: () => void
   onRefreshTasks: () => void
   onRefreshClipboard: () => void
-  onSelectFile?: (payload: { kind: 'note' | 'todoList' | 'document'; id: string }) => void
+  onSelectFile?: (payload: { kind: 'todoList' | 'document'; id: string }) => void
 }
 
 export default function SearchSection({
   activeTab,
   scope = 'default',
   onActiveTabChange,
-  onRefreshNotes,
+  onRefreshFiles,
   onRefreshTasks,
   onRefreshClipboard,
   onSelectFile
@@ -98,17 +98,13 @@ export default function SearchSection({
     setShowResults(false)
     setResults([])
 
-    if (r.kind === 'note') {
-      onActiveTabChange('notes')
-      onRefreshNotes()
-      onSelectFile?.({ kind: 'note', id: r.id })
-    } else if (r.kind === 'todoList') {
-      onActiveTabChange('notes')
+    if (r.kind === 'todoList') {
+      onActiveTabChange('files')
       onRefreshTasks()
       onSelectFile?.({ kind: 'todoList', id: r.id })
-    } else if (r.kind === 'document') {
-      onActiveTabChange('notes')
-      onRefreshNotes()
+    } else if (r.kind === 'document' || r.kind === 'file') {
+      onActiveTabChange('files')
+      onRefreshFiles()
       onSelectFile?.({ kind: 'document', id: r.id })
     } else if (r.kind === 'clipboard' && r.raw && typeof r.raw === 'object' && 'content' in r.raw) {
       const content = (r.raw as { content?: string }).content
@@ -137,13 +133,13 @@ export default function SearchSection({
     setShowResults(false)
     setResults([])
     try {
-      const note = await http.createNote({ content }, scope)
-      addLog('已创建便签', 'success')
-      onActiveTabChange('notes')
-      onRefreshNotes()
-      onSelectFile?.({ kind: 'note', id: note.id })
+      const doc = await http.createDocument({ title: content.slice(0, 50) || '未命名', content }, scope)
+      addLog('已创建文档', 'success')
+      onActiveTabChange('files')
+      onRefreshFiles()
+      onSelectFile?.({ kind: 'document', id: doc.id })
     } catch (err) {
-      addLog(`创建便签失败: ${String(err)}`, 'error')
+      addLog(`创建文档失败: ${String(err)}`, 'error')
     }
   }
 
@@ -184,7 +180,7 @@ export default function SearchSection({
           ref={inputRef}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="搜索便签、任务、剪贴板... (Ctrl+K)"
+          placeholder="搜索文档、任务、剪贴板... (Ctrl+K)"
           aria-label="全局搜索"
           aria-expanded={showResults}
           aria-controls="search-results"

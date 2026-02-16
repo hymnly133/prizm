@@ -4,7 +4,7 @@
  * 支持停止生成、错误提示、会话重命名
  * 输入框使用 @lobehub/editor ChatInput，悬浮面板样式
  */
-import { ActionIcon, Empty, Flexbox, List, Markdown, Tag } from '@lobehub/ui'
+import { ActionIcon, Empty, Flexbox, List, Markdown, Segmented, Tag } from '@lobehub/ui'
 import { ChatActionsBar as BaseChatActionsBar, ChatList, type ChatMessage } from '@lobehub/ui/chat'
 
 /** 过滤 createAt/updateAt 等非 DOM 属性，避免 React 警告 */
@@ -15,7 +15,8 @@ function ChatActionsBar(props: React.ComponentProps<typeof BaseChatActionsBar>) 
   }
   return <BaseChatActionsBar {...rest} />
 }
-import { LayoutDashboard, Plus, Trash2, X } from 'lucide-react'
+import { FolderTree, LayoutDashboard, MessageSquare, Plus, Trash2, X } from 'lucide-react'
+import { FileTreePanel } from '../components/agent/FileTreePanel'
 import { useRef, useState, useMemo, useCallback, useEffect } from 'react'
 import { usePrizmContext } from '../context/PrizmContext'
 import { useChatWithFile } from '../context/ChatWithFileContext'
@@ -36,7 +37,7 @@ import {
   type ActionKeys
 } from '../features/ChatInput'
 import type { AgentMessage, MessagePart, MessagePartTool } from '@prizm/client-core'
-import type { StickyNote, Document as PrizmDocument, TodoList } from '@prizm/client-core'
+import type { Document as PrizmDocument, TodoList } from '@prizm/client-core'
 import { ToolCallCard, MemoryGrowthTag } from '../components/agent'
 import { AgentOverviewPanel } from '../components/agent/AgentOverviewPanel'
 
@@ -70,15 +71,16 @@ function FilePreviewPanel({
 
     const fetchFile = async () => {
       try {
-        if (fileRef.kind === 'document') {
+        if (fileRef.kind === 'document' || fileRef.kind === 'note') {
           const doc = await http.getDocument(fileRef.id, scope)
-          setTitle((doc as PrizmDocument).title || '无标题文档')
-          setContent((doc as PrizmDocument).content ?? '')
-        } else if (fileRef.kind === 'note') {
-          const note = await http.getNote(fileRef.id, scope)
-          const firstLine = ((note as StickyNote).content || '').split('\n')[0]?.trim()
-          setTitle(firstLine || '便签')
-          setContent((note as StickyNote).content || '')
+          const titleStr = (doc as PrizmDocument).title
+          const contentStr = (doc as PrizmDocument).content ?? ''
+          setTitle(
+            fileRef.kind === 'note'
+              ? contentStr.split('\n')[0]?.trim() || '便签'
+              : titleStr || '无标题文档'
+          )
+          setContent(contentStr)
         } else if (fileRef.kind === 'todoList') {
           const list = await http.getTodoList(scope, fileRef.id)
           if (list) {
@@ -305,6 +307,7 @@ export default function AgentPage({ hidden }: { hidden?: boolean }) {
 
   const [overviewMode, setOverviewMode] = useState(!currentSession)
   const [previewFile, setPreviewFile] = useState<{ kind: FileKind; id: string } | null>(null)
+  const [sidebarTab, setSidebarTab] = useState<'context' | 'files'>('context')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const pendingHandledRef = useRef<string | null>(null)
 
@@ -599,15 +602,39 @@ export default function AgentPage({ hidden }: { hidden?: boolean }) {
                 onClose={() => setPreviewFile(null)}
               />
             ) : (
-              <AgentRightSidebar
-                sending={sending}
-                error={error}
-                currentSession={currentSession}
-                optimisticMessages={optimisticMessages}
-                selectedModel={selectedModel}
-                onModelChange={setSelectedModel}
-                overviewMode={false}
-              />
+              <Flexbox style={{ height: '100%', overflow: 'hidden' }} gap={0}>
+                <div style={{ padding: '8px 8px 4px', flexShrink: 0 }}>
+                  <Segmented
+                    block
+                    size="small"
+                    value={sidebarTab}
+                    onChange={(v) => setSidebarTab(v as 'context' | 'files')}
+                    options={[
+                      { label: '上下文', value: 'context', icon: <MessageSquare size={12} /> },
+                      { label: '文件', value: 'files', icon: <FolderTree size={12} /> }
+                    ]}
+                  />
+                </div>
+                {sidebarTab === 'context' ? (
+                  <AgentRightSidebar
+                    sending={sending}
+                    error={error}
+                    currentSession={currentSession}
+                    optimisticMessages={optimisticMessages}
+                    selectedModel={selectedModel}
+                    onModelChange={setSelectedModel}
+                    overviewMode={false}
+                  />
+                ) : (
+                  <FileTreePanel
+                    scope={currentScope}
+                    sessionId={currentSession?.id}
+                    onPreviewFile={(relativePath) => {
+                      setPreviewFile({ kind: 'document', id: relativePath })
+                    }}
+                  />
+                )}
+              </Flexbox>
             )}
           </ResizableSidebar>
         )}

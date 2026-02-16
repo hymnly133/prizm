@@ -5,19 +5,17 @@ import { memo } from 'react'
 import { Button, Markdown, Tag } from '@lobehub/ui'
 import { Icon } from '@lobehub/ui'
 import type { FileItem } from '../hooks/useFileList'
-import type { StickyNote, TodoList, Document } from '@prizm/client-core'
-import { FileText, ListTodo, StickyNote as StickyNoteIcon } from 'lucide-react'
+import type { TodoList, Document } from '@prizm/client-core'
+import { FileText, ListTodo } from 'lucide-react'
 import { getKindLabel } from '../constants/todo'
 import TodoListPreview from './todo/TodoListPreview'
 
 function getKindIcon(kind: FileItem['kind']) {
   switch (kind) {
-    case 'note':
-      return StickyNoteIcon
     case 'todoList':
       return ListTodo
     case 'document':
-      return FileText
+    case 'note':
     default:
       return FileText
   }
@@ -59,15 +57,6 @@ function DataCard({ file, onClick, onDelete, onDone }: DataCardProps) {
       </div>
 
       <div className="data-card__body">
-        {file.kind === 'note' && (
-          <div className="data-card__preview">
-            <Markdown>
-              {((file.raw as StickyNote).content || '(空)')
-                .slice(0, 200)
-                .concat(((file.raw as StickyNote).content || '').length > 200 ? '…' : '')}
-            </Markdown>
-          </div>
-        )}
         {file.kind === 'document' && (
           <>
             <h3 className="data-card__title">{(file.raw as Document).title || '无标题'}</h3>

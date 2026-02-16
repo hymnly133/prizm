@@ -5,7 +5,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { usePrizmContext } from '../context/PrizmContext'
 import { subscribeSyncEvents, type SyncEventPayload } from '../events/syncEventEmitter'
-import type { StickyNote, TodoList, Document, TodoItem } from '@prizm/client-core'
+import type { TodoList, Document, TodoItem } from '@prizm/client-core'
 
 const SYNC_INCREMENTAL_DEBOUNCE_MS = 100
 const SYNC_FULL_REFRESH_DEBOUNCE_MS = 400
@@ -17,12 +17,7 @@ export interface FileItem {
   id: string
   title: string
   updatedAt: number
-  raw: StickyNote | TodoList | Document
-}
-
-function noteToTitle(n: StickyNote): string {
-  const firstLine = (n.content || '').split('\n')[0]?.trim()
-  return firstLine || '(无标题)'
+  raw: TodoList | Document
 }
 
 function docToTitle(d: Document): string {
@@ -31,21 +26,10 @@ function docToTitle(d: Document): string {
 
 function isFileSyncEvent(eventType: string): boolean {
   return (
-    eventType.startsWith('note:') ||
     eventType.startsWith('todo_list:') ||
     eventType.startsWith('todo_item:') ||
     eventType.startsWith('document:')
   )
-}
-
-function toFileItem(note: StickyNote): FileItem {
-  return {
-    kind: 'note',
-    id: note.id,
-    title: noteToTitle(note),
-    updatedAt: note.updatedAt,
-    raw: note
-  }
 }
 
 function todoToFileItem(todoList: TodoList): FileItem {
@@ -84,14 +68,12 @@ export function useFileList(scope: string) {
       if (!http) return
       if (!options?.silent) setFileListLoading(true)
       try {
-        const [notes, todoLists, documents] = await Promise.all([
-          http.listNotes({ scope: s }),
+        const [todoLists, documents] = await Promise.all([
           http.getTodoLists(s),
           http.listDocuments({ scope: s })
         ])
 
         const items: FileItem[] = [
-          ...notes.map(toFileItem),
           ...todoLists.map(todoToFileItem),
           ...documents.map(docToFileItem)
         ]
@@ -114,7 +96,6 @@ export function useFileList(scope: string) {
       if (!http) return
 
       const toDelete = new Set<string>()
-      const toFetchNote = new Set<string>()
       const toFetchDoc = new Set<string>()
       let fetchTodoList = false
       let removeTodoList = false
@@ -127,10 +108,7 @@ export function useFileList(scope: string) {
 
         const id = payload?.id
 
-        if (eventType === 'note:deleted' && id) toDelete.add(`note:${id}`)
-        else if (eventType === 'document:deleted' && id) toDelete.add(`document:${id}`)
-        else if ((eventType === 'note:created' || eventType === 'note:updated') && id)
-          toFetchNote.add(id)
+        if (eventType === 'document:deleted' && id) toDelete.add(`document:${id}`)
         else if ((eventType === 'document:created' || eventType === 'document:updated') && id)
           toFetchDoc.add(id)
         else if (eventType === 'todo_list:deleted' && payload?.deleted === true) {
@@ -152,8 +130,7 @@ export function useFileList(scope: string) {
 
       for (const k of toDelete) {
         const [kind, id] = k.split(':')
-        if (kind === 'note') toFetchNote.delete(id)
-        else if (kind === 'document') toFetchDoc.delete(id)
+        if (kind === 'document') toFetchDoc.delete(id)
       }
 
       needTodoListFetchRef.current = false
@@ -253,14 +230,6 @@ export function useFileList(scope: string) {
       if (needTodoListFetchRef.current) fetchTodoList = true
 
       const fetches: Promise<FileItem | FileItem[] | null>[] = []
-      for (const id of toFetchNote) {
-        fetches.push(
-          http
-            .getNote(id, s)
-            .then(toFileItem)
-            .catch(() => null)
-        )
-      }
       for (const id of toFetchDoc) {
         fetches.push(
           http

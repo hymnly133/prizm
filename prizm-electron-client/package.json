@@ -22,6 +22,7 @@
     "marked": "^17.0.2",
     "motion": "^12.34.0",
     "react": "^19.2.4",
+    "react-arborist": "^3.4.3",
     "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0",
     "remark": "^15.0.1",

@@ -24,7 +24,6 @@ export default function TestPage() {
     ok: boolean
     msg: string
   } | null>(null)
-  const [mockNote, setMockNote] = useState('测试便签内容')
   const [mockTask, setMockTask] = useState('测试任务')
   const [mockClipboard, setMockClipboard] = useState('测试剪贴板内容')
   const [mockResult, setMockResult] = useState<{
@@ -56,24 +55,6 @@ export default function TestPage() {
       const msg = e instanceof Error ? e.message : String(e)
       setServerNotifResult({ ok: false, msg })
       addLog(`服务器通知失败: ${msg}`, 'error')
-    }
-  }
-
-  async function mockCreateNote() {
-    if (!mockNote.trim() || !manager) return
-    setMockResult(null)
-    try {
-      const http = manager.getHttpClient()
-      await http.createNote({ content: mockNote.trim() })
-      setLastSyncEvent('note:created')
-      setMockResult({ ok: true, msg: '已创建便签，便签 Tab 将刷新' })
-      addLog('已创建测试便签', 'success')
-    } catch (e) {
-      setMockResult({
-        ok: false,
-        msg: e instanceof Error ? e.message : String(e)
-      })
-      addLog(`创建便签失败: ${String(e)}`, 'error')
     }
   }
 
@@ -204,17 +185,6 @@ export default function TestPage() {
           <div className="test-action">
             <Input
               {...inputProps}
-              value={mockNote}
-              onChange={(e) => setMockNote(e.target.value)}
-              placeholder="便签内容"
-            />
-            <Button onClick={mockCreateNote} disabled={!mockNote.trim() || !manager}>
-              创建便签
-            </Button>
-          </div>
-          <div className="test-action">
-            <Input
-              {...inputProps}
               value={mockTask}
               onChange={(e) => setMockTask(e.target.value)}
               placeholder="TODO 项标题"
@@ -252,7 +222,6 @@ export default function TestPage() {
           <p className="form-hint">强制触发各 Tab 列表刷新（用于测试数据同步）</p>
         </div>
         <div className="config-actions">
-          <Button onClick={() => triggerRefresh('note:created')}>刷新便签</Button>
           <Button onClick={() => triggerRefresh('todo_list:updated')}>刷新 TODO</Button>
           <Button onClick={() => triggerRefresh('clipboard:itemAdded')}>刷新剪贴板</Button>
         </div>

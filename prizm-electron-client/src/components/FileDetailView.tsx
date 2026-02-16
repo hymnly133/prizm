@@ -18,12 +18,11 @@ import {
   toast
 } from '@lobehub/ui'
 import type { FileItem } from '../hooks/useFileList'
-import type { StickyNote, TodoList, Document, TodoItem, TodoItemStatus } from '@prizm/client-core'
+import type { TodoList, Document, TodoItem, TodoItemStatus } from '@prizm/client-core'
 import { getKindLabel, STATUS_OPTIONS } from '../constants/todo'
 import { Plus, Trash2 } from 'lucide-react'
 
 export type SavePayload =
-  | { kind: 'note'; content: string }
   | { kind: 'document'; title: string; content: string }
   | { kind: 'todoList'; title: string; items: TodoItem[] }
 
@@ -45,8 +44,6 @@ export default function FileDetailView({
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  // 便签
-  const [noteContent, setNoteContent] = useState('')
   // 文档
   const [docTitle, setDocTitle] = useState('')
   const [docContent, setDocContent] = useState('')
@@ -58,9 +55,7 @@ export default function FileDetailView({
   useEffect(() => {
     if (file) {
       setEditing(false)
-      if (file.kind === 'note') {
-        setNoteContent((file.raw as StickyNote).content || '')
-      } else if (file.kind === 'document') {
+      if (file.kind === 'document') {
         const d = file.raw as Document
         setDocTitle(d.title || '')
         setDocContent(d.content ?? '')
@@ -74,8 +69,7 @@ export default function FileDetailView({
 
   useEffect(() => {
     if (editing && file) {
-      if (file.kind === 'note') setNoteContent((file.raw as StickyNote).content || '')
-      else if (file.kind === 'document') {
+      if (file.kind === 'document') {
         const d = file.raw as Document
         setDocTitle(d.title || '')
         setDocContent(d.content ?? '')
@@ -122,9 +116,7 @@ export default function FileDetailView({
     if (!onSave || !file) return
     setSaving(true)
     try {
-      if (file.kind === 'note') {
-        await onSave({ kind: 'note', content: noteContent })
-      } else if (file.kind === 'document') {
+      if (file.kind === 'document') {
         const title = docTitle.trim()
         if (!title) {
           toast.error('标题不能为空')
@@ -190,17 +182,6 @@ export default function FileDetailView({
       <div className="file-detail-body">
         {editing ? (
           <div className="file-detail-edit">
-            {file.kind === 'note' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <TextArea
-                  value={noteContent}
-                  onChange={(e) => setNoteContent(e.target.value)}
-                  placeholder="便签内容..."
-                  rows={6}
-                  autoSize={{ minRows: 6, maxRows: 12 }}
-                />
-              </div>
-            )}
             {file.kind === 'document' && (
               <Flexbox gap={16} style={{ flexDirection: 'column' }}>
                 <div>
@@ -226,13 +207,6 @@ export default function FileDetailView({
           </div>
         ) : (
           <>
-            {file.kind === 'note' && (
-              <div className="note-detail">
-                <div className="md-preview-wrap">
-                  <Markdown>{(file.raw as StickyNote).content || '(空)'}</Markdown>
-                </div>
-              </div>
-            )}
             {file.kind === 'document' && (
               <div className="document-detail">
                 <h2 className="document-title">{(file.raw as Document).title || '无标题'}</h2>

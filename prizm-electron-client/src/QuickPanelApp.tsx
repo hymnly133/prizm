@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { FilePlus, MessageSquare, StickyNote, Sparkles } from 'lucide-react'
+import { FilePlus, MessageSquare, FileText, Sparkles } from 'lucide-react'
 
 export type QuickPanelAction =
-  | 'create-note'
+  | 'create-document'
   | 'chat-with-text'
-  | 'create-note-with-text'
-  | 'ai-organize-to-note'
+  | 'create-document-with-text'
+  | 'ai-organize-to-document'
 
 interface QuickPanelItem {
   id: QuickPanelAction
@@ -14,13 +14,13 @@ interface QuickPanelItem {
 }
 
 const BASE_ITEMS: QuickPanelItem[] = [
-  { id: 'create-note', label: '新建便签', icon: <FilePlus size={18} /> }
+  { id: 'create-document', label: '新建文档', icon: <FilePlus size={18} /> }
 ]
 
 const TEXT_ITEMS: QuickPanelItem[] = [
   { id: 'chat-with-text', label: '和 AI 聊聊', icon: <MessageSquare size={18} /> },
-  { id: 'create-note-with-text', label: '添加到便签', icon: <StickyNote size={18} /> },
-  { id: 'ai-organize-to-note', label: 'AI 整理到便签', icon: <Sparkles size={18} /> }
+  { id: 'create-document-with-text', label: '添加到文档', icon: <FileText size={18} /> },
+  { id: 'ai-organize-to-document', label: 'AI 整理到文档', icon: <Sparkles size={18} /> }
 ]
 
 declare global {

@@ -40,6 +40,12 @@ declare global {
       onExecuteQuickAction(
         callback: (payload: { action: string; selectedText: string }) => void
       ): () => void
+      getPlatform(): Promise<string>
+      setTitleBarOverlay(options: {
+        color?: string
+        symbolColor?: string
+        height?: number
+      }): Promise<boolean>
     }
     quickPanelApi?: {
       onShow(callback: (data: { selectedText: string }) => void): () => void

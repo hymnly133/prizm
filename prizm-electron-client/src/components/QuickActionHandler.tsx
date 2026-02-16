@@ -20,33 +20,36 @@ export function QuickActionHandler({
     const unsub = window.prizm.onExecuteQuickAction(async ({ action, selectedText }) => {
       const http = manager?.getHttpClient()
       switch (action) {
-        case 'create-note': {
+        case 'create-document': {
           if (!http) {
             addLog('未连接服务器', 'error')
             return
           }
           try {
-            const note = await http.createNote({ content: '' }, currentScope)
-            openFileAtWork('note', note.id)
+            const doc = await http.createDocument({ title: '未命名文档', content: '' }, currentScope)
+            openFileAtWork('document', doc.id)
             setActivePage('work')
-            addLog('已创建便签', 'success')
+            addLog('已创建文档', 'success')
           } catch (e) {
-            addLog(`创建便签失败: ${String(e)}`, 'error')
+            addLog(`创建文档失败: ${String(e)}`, 'error')
           }
           break
         }
-        case 'create-note-with-text': {
+        case 'create-document-with-text': {
           if (!http) {
             addLog('未连接服务器', 'error')
             return
           }
           try {
-            const note = await http.createNote({ content: selectedText }, currentScope)
-            openFileAtWork('note', note.id)
+            const doc = await http.createDocument(
+              { title: selectedText.slice(0, 50) || '未命名', content: selectedText },
+              currentScope
+            )
+            openFileAtWork('document', doc.id)
             setActivePage('work')
-            addLog('已添加到便签', 'success')
+            addLog('已添加到文档', 'success')
           } catch (e) {
-            addLog(`创建便签失败: ${String(e)}`, 'error')
+            addLog(`创建文档失败: ${String(e)}`, 'error')
           }
           break
         }
@@ -54,8 +57,8 @@ export function QuickActionHandler({
           chatWith({ text: selectedText })
           break
         }
-        case 'ai-organize-to-note': {
-          chatWith({ text: '请将以下内容整理为便签并保存：\n\n' + selectedText })
+        case 'ai-organize-to-document': {
+          chatWith({ text: '请将以下内容整理为文档并保存：\n\n' + selectedText })
           break
         }
         default:

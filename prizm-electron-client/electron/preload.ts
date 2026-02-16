@@ -92,5 +92,13 @@ contextBridge.exposeInMainWorld('prizm', {
     return () => {
       ipcRenderer.removeListener('execute-quick-action', handler)
     }
+  },
+
+  getPlatform() {
+    return ipcRenderer.invoke('get_platform') as Promise<string>
+  },
+
+  setTitleBarOverlay(options: { color?: string; symbolColor?: string; height?: number }) {
+    return ipcRenderer.invoke('set_titlebar_overlay', options)
   }
 })
