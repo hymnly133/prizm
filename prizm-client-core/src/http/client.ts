@@ -871,7 +871,7 @@ export class PrizmClient {
 
   async updateAgentSession(
     id: string,
-    update: { title?: string },
+    update: { llmSummary?: string },
     scope?: string
   ): Promise<AgentSession> {
     const s = scope ?? this.defaultScope
@@ -1034,27 +1034,14 @@ export class PrizmClient {
     })
   }
 
-  /** 三层记忆状态（User/Scope/Session），供可视化 */
-  async getThreeLevelMemories(
-    scope?: string,
-    sessionId?: string
-  ): Promise<{
-    enabled: boolean
-    user: MemoryItem[]
-    scope: MemoryItem[]
-    session: MemoryItem[]
-  }> {
-    const s = scope ?? this.defaultScope
-    const path =
-      sessionId != null && sessionId !== ''
-        ? `/agent/memories/three-level?sessionId=${encodeURIComponent(sessionId)}`
-        : '/agent/memories/three-level'
-    return this.request<{
-      enabled: boolean
-      user: MemoryItem[]
-      scope: MemoryItem[]
-      session: MemoryItem[]
-    }>(path, { method: 'GET', scope: s })
+  /** 各层记忆总数（直接 COUNT，不依赖语义搜索） */
+  async getMemoryCounts(
+    scope?: string
+  ): Promise<{ enabled: boolean; userCount: number; scopeCount: number }> {
+    return this.request<{ enabled: boolean; userCount: number; scopeCount: number }>(
+      '/agent/memories/counts',
+      { method: 'GET', scope: scope ?? this.defaultScope }
+    )
   }
 
   /** 获取某轮对话的记忆增长（按 assistant 消息 ID，用于历史消息懒加载） */

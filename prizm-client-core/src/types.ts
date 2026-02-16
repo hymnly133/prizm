@@ -3,7 +3,7 @@
  * 领域类型、Auth 类型、WebSocket 消息类型从 @prizm/shared 导入
  */
 
-import type { MessageUsage } from '@prizm/shared'
+import type { MessageUsage, TokenUsageScope } from '@prizm/shared'
 
 // 从 shared 重导出，供依赖 client-core 的包使用
 export type {
@@ -219,6 +219,10 @@ export interface SessionTokenSummary {
   rounds: number
   /** 按模型分组统计 */
   byModel: Record<string, { input: number; output: number; total: number; count: number }>
+  /** 按功能分类统计 */
+  byScope?: Partial<
+    Record<TokenUsageScope, { input: number; output: number; total: number; count: number }>
+  >
 }
 
 /** 会话记忆创建聚合 */
