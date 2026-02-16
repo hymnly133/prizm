@@ -1095,6 +1095,10 @@ export class PrizmClient {
     return this.request<{ provider: string; models: AvailableModel[] }>('/settings/agent-models')
   }
 
+  async getAvailableShells(): Promise<{ shells: ShellInfo[] }> {
+    return this.request<{ shells: ShellInfo[] }>('/settings/available-shells')
+  }
+
   async getAgentTools(): Promise<AgentToolsSettings> {
     return this.request<AgentToolsSettings>('/settings/agent-tools')
   }
@@ -1113,6 +1117,298 @@ export class PrizmClient {
       method: 'PUT',
       body: JSON.stringify(update)
     })
+  }
+
+  // ============ 自定义命令 ============
+
+  async listCustomCommands(): Promise<{ commands: unknown[] }> {
+    return this.request<{ commands: unknown[] }>('/commands')
+  }
+
+  async createCustomCommand(cmd: {
+    id: string
+    name?: string
+    description?: string
+    mode?: 'prompt' | 'action'
+    content: string
+    aliases?: string[]
+  }): Promise<unknown> {
+    return this.request('/commands', {
+      method: 'POST',
+      body: JSON.stringify(cmd)
+    })
+  }
+
+  async updateCustomCommand(id: string, update: Record<string, unknown>): Promise<unknown> {
+    return this.request(`/commands/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(update)
+    })
+  }
+
+  async deleteCustomCommand(id: string): Promise<void> {
+    await this.request<void>(`/commands/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    })
+  }
+
+  async importCommands(
+    source: 'cursor' | 'claude-code',
+    path?: string
+  ): Promise<{
+    imported: number
+    commands: unknown[]
+  }> {
+    return this.request('/commands/import', {
+      method: 'POST',
+      body: JSON.stringify({ source, path })
+    })
+  }
+
+  // ============ Skills ============
+
+  async listSkills(): Promise<{ skills: unknown[] }> {
+    return this.request<{ skills: unknown[] }>('/skills')
+  }
+
+  async getSkill(name: string): Promise<unknown> {
+    return this.request(`/skills/${encodeURIComponent(name)}`)
+  }
+
+  async createSkill(skill: {
+    name: string
+    description: string
+    body: string
+    license?: string
+    metadata?: Record<string, string>
+  }): Promise<unknown> {
+    return this.request('/skills', {
+      method: 'POST',
+      body: JSON.stringify(skill)
+    })
+  }
+
+  async deleteSkill(name: string): Promise<void> {
+    await this.request<void>(`/skills/${encodeURIComponent(name)}`, {
+      method: 'DELETE'
+    })
+  }
+
+  async importSkills(
+    source: 'claude-code' | 'github',
+    path?: string
+  ): Promise<{
+    imported: number
+    skills: unknown[]
+  }> {
+    return this.request('/skills/import', {
+      method: 'POST',
+      body: JSON.stringify({ source, path })
+    })
+  }
+
+  async importMcpConfig(
+    source: 'cursor' | 'claude-code' | 'vscode',
+    path?: string
+  ): Promise<{
+    imported: number
+    skipped: string[]
+    servers: unknown[]
+  }> {
+    return this.request('/mcp/import', {
+      method: 'POST',
+      body: JSON.stringify({ source, path })
+    })
+  }
+
+  async discoverMcpConfigs(): Promise<{
+    sources: Array<{ source: string; path: string; serverCount: number }>
+  }> {
+    return this.request('/mcp/discover')
+  }
+
+  async getAgentCapabilities(): Promise<{
+    builtinTools: unknown[]
+    slashCommands: unknown[]
+    customCommands: unknown[]
+    skills: unknown[]
+    rules: unknown[]
+  }> {
+    return this.request('/agent/capabilities')
+  }
+
+  // ============ 终端管理 ============
+
+  /** 创建终端 */
+  async createTerminal(
+    sessionId: string,
+    opts?: { shell?: string; cwd?: string; cols?: number; rows?: number; title?: string },
+    scope?: string
+  ): Promise<TerminalSessionInfo> {
+    const s = scope ?? this.defaultScope
+    const url = this.buildUrl(`/agent/sessions/${encodeURIComponent(sessionId)}/terminals`, {
+      scope: s
+    })
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: this.buildHeaders(),
+      body: JSON.stringify(opts ?? {})
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status}: ${text || 'Failed to create terminal'}`)
+    }
+    const data = (await response.json()) as { terminal: TerminalSessionInfo }
+    return data.terminal
+  }
+
+  /** 列出 Session 下所有终端 + exec worker 状态 */
+  async listTerminals(sessionId: string, scope?: string): Promise<TerminalSessionInfo[]> {
+    const s = scope ?? this.defaultScope
+    const url = this.buildUrl(`/agent/sessions/${encodeURIComponent(sessionId)}/terminals`, {
+      scope: s
+    })
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: this.buildHeaders()
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status}: ${text || 'Failed to list terminals'}`)
+    }
+    const data = (await response.json()) as {
+      terminals: TerminalSessionInfo[]
+      execWorker?: ExecWorkerInfo | null
+    }
+    return data.terminals
+  }
+
+  /** 列出终端 + exec workers（完整返回） */
+  async listTerminalsWithExec(
+    sessionId: string,
+    scope?: string
+  ): Promise<{ terminals: TerminalSessionInfo[]; execWorkers: ExecWorkerInfo[] }> {
+    const s = scope ?? this.defaultScope
+    const url = this.buildUrl(`/agent/sessions/${encodeURIComponent(sessionId)}/terminals`, {
+      scope: s
+    })
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: this.buildHeaders()
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status}: ${text || 'Failed to list terminals'}`)
+    }
+    const data = (await response.json()) as {
+      terminals: TerminalSessionInfo[]
+      execWorkers?: ExecWorkerInfo[]
+    }
+    return { terminals: data.terminals, execWorkers: data.execWorkers ?? [] }
+  }
+
+  /** 获取 exec 命令历史 */
+  async getExecHistory(
+    sessionId: string,
+    limit?: number,
+    scope?: string
+  ): Promise<{ records: ExecRecordInfo[]; execWorkers: ExecWorkerInfo[] }> {
+    const s = scope ?? this.defaultScope
+    const params: Record<string, string> = { scope: s }
+    if (limit) params.limit = String(limit)
+    const url = this.buildUrl(
+      `/agent/sessions/${encodeURIComponent(sessionId)}/exec-history`,
+      params
+    )
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: this.buildHeaders()
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status}: ${text || 'Failed to get exec history'}`)
+    }
+    const data = (await response.json()) as {
+      records: ExecRecordInfo[]
+      execWorkers?: ExecWorkerInfo[]
+    }
+    return { records: data.records, execWorkers: data.execWorkers ?? [] }
+  }
+
+  /** 获取终端详情 + 最近输出 */
+  async getTerminalDetail(
+    sessionId: string,
+    terminalId: string,
+    scope?: string
+  ): Promise<{ terminal: TerminalSessionInfo; recentOutput: string }> {
+    const s = scope ?? this.defaultScope
+    const url = this.buildUrl(
+      `/agent/sessions/${encodeURIComponent(sessionId)}/terminals/${encodeURIComponent(
+        terminalId
+      )}`,
+      { scope: s }
+    )
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: this.buildHeaders()
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status}: ${text || 'Failed to get terminal detail'}`)
+    }
+    return response.json() as Promise<{ terminal: TerminalSessionInfo; recentOutput: string }>
+  }
+
+  /** 调整终端尺寸 */
+  async resizeTerminal(
+    sessionId: string,
+    terminalId: string,
+    cols: number,
+    rows: number,
+    scope?: string
+  ): Promise<void> {
+    const s = scope ?? this.defaultScope
+    const url = this.buildUrl(
+      `/agent/sessions/${encodeURIComponent(sessionId)}/terminals/${encodeURIComponent(
+        terminalId
+      )}/resize`,
+      { scope: s }
+    )
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: this.buildHeaders(),
+      body: JSON.stringify({ cols, rows })
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status}: ${text || 'Failed to resize terminal'}`)
+    }
+  }
+
+  /** 杀死终端 */
+  async killTerminal(sessionId: string, terminalId: string, scope?: string): Promise<void> {
+    const s = scope ?? this.defaultScope
+    const url = this.buildUrl(
+      `/agent/sessions/${encodeURIComponent(sessionId)}/terminals/${encodeURIComponent(
+        terminalId
+      )}`,
+      { scope: s }
+    )
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: this.buildHeaders()
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status}: ${text || 'Failed to kill terminal'}`)
+    }
+  }
+
+  /** 获取终端 WebSocket URL（供 TerminalConnection 使用） */
+  getTerminalWsUrl(): string {
+    const wsUrl = this.baseUrl.replace(/^http/, 'ws')
+    const apiKeyParam = this.apiKey ? `?apiKey=${encodeURIComponent(this.apiKey)}` : ''
+    return `${wsUrl}/ws/terminal${apiKeyParam}`
   }
 }
 
@@ -1178,12 +1474,74 @@ export interface MemorySettings {
   model?: string
 }
 
+/** 终端会话信息（客户端视图） */
+export interface TerminalSessionInfo {
+  id: string
+  agentSessionId: string
+  scope: string
+  sessionType: 'exec' | 'interactive'
+  shell: string
+  cwd: string
+  cols: number
+  rows: number
+  pid: number
+  title?: string
+  status: 'running' | 'exited'
+  exitCode?: number
+  signal?: number
+  createdAt: number
+  lastActivityAt: number
+}
+
+/** 终端设置 */
+export interface TerminalSettings {
+  defaultShell?: string
+}
+
 /** Agent 工具统一设置 */
 export interface AgentToolsSettings {
   builtin?: { tavily?: TavilySettings }
   agent?: AgentLLMSettings
   mcpServers?: McpServerConfig[]
+  terminal?: TerminalSettings
   updatedAt?: number
+}
+
+/** 可用 Shell 信息 */
+export interface ShellInfo {
+  path: string
+  label: string
+  isDefault: boolean
+}
+
+/** 工作区类型 */
+export type ExecWorkspaceType = 'main' | 'session'
+
+/** Exec Worker 状态信息 */
+export interface ExecWorkerInfo {
+  agentSessionId: string
+  workspaceType: ExecWorkspaceType
+  shell: string
+  cwd: string
+  pid: number
+  busy: boolean
+  exited: boolean
+  createdAt: number
+  lastActivityAt: number
+  commandCount: number
+}
+
+/** Exec 命令执行记录 */
+export interface ExecRecordInfo {
+  id: string
+  agentSessionId: string
+  workspaceType: ExecWorkspaceType
+  command: string
+  output: string
+  exitCode: number
+  timedOut: boolean
+  startedAt: number
+  finishedAt: number
 }
 
 /** 可用模型项 */

@@ -86,6 +86,21 @@ const FALLBACK_METADATA: Record<string, ToolMetadata> = {
     description: '在互联网上搜索实时信息',
     category: 'external',
     docUrl: 'https://tavily.com'
+  },
+  prizm_terminal_execute: {
+    name: 'prizm_terminal_execute',
+    displayName: '执行命令',
+    category: 'terminal'
+  },
+  prizm_terminal_spawn: {
+    name: 'prizm_terminal_spawn',
+    displayName: '创建终端',
+    category: 'terminal'
+  },
+  prizm_terminal_send_keys: {
+    name: 'prizm_terminal_send_keys',
+    displayName: '终端输入',
+    category: 'terminal'
   }
 }
 

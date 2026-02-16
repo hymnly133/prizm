@@ -4,3 +4,11 @@ export * from './http/client'
 export * from './utils'
 export * from './manager'
 export * from './agent'
+export { TerminalConnection } from './terminal/TerminalConnection'
+export type {
+  TerminalEventType,
+  TerminalOutputEvent,
+  TerminalExitEvent,
+  TerminalTitleEvent,
+  TerminalErrorEvent
+} from './terminal/TerminalConnection'
