@@ -26,7 +26,7 @@ const TOKEN_USAGE_FILE = 'token_usage.md'
 
 const AGENT_SESSIONS_DIR = 'agent-sessions'
 const CLIPBOARD_DIR = 'clipboard'
-const POMODORO_DIR = 'pomodoro'
+const SESSION_WORKSPACE_DIR = 'workspace'
 
 const EVERMEMOS_DB = 'evermemos.db'
 const EVERMEMOS_VEC = 'evermemos_vec'
@@ -80,8 +80,9 @@ export function getClipboardDir(scopeRoot: string): string {
   return path.join(getPrizmDir(scopeRoot), CLIPBOARD_DIR)
 }
 
+/** @deprecated 番茄钟已移除，仅用于迁移清理 */
 export function getPomodoroDir(scopeRoot: string): string {
-  return path.join(getPrizmDir(scopeRoot), POMODORO_DIR)
+  return path.join(getPrizmDir(scopeRoot), 'pomodoro')
 }
 
 export function getScopeRegistryPath(): string {
@@ -175,6 +176,11 @@ export function getSessionActivitiesPath(scopeRoot: string, sessionId: string): 
 /** {sessionDir}/memories.md */
 export function getSessionMemoriesPath(scopeRoot: string, sessionId: string): string {
   return path.join(getSessionDir(scopeRoot, sessionId), MEMORIES_MD)
+}
+
+/** {sessionDir}/workspace/ - 会话临时工作区 */
+export function getSessionWorkspaceDir(scopeRoot: string, sessionId: string): string {
+  return path.join(getSessionDir(scopeRoot, sessionId), SESSION_WORKSPACE_DIR)
 }
 
 /** .prizm-data/search-index.db（搜索索引 SQLite，与 memory 分离） */

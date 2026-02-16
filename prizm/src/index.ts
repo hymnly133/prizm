@@ -14,8 +14,6 @@ export type { PrizmConfig } from './config'
 export type {
   StickyNote,
   StickyNoteFileRef,
-  CreateNotePayload,
-  UpdateNotePayload,
   Document,
   CreateDocumentPayload,
   UpdateDocumentPayload,
@@ -24,7 +22,6 @@ export type {
 
 // Export adapter interfaces
 export type {
-  IStickyNotesAdapter,
   INotificationAdapter,
   IDocumentsAdapter,
   PrizmAdapters
@@ -32,7 +29,6 @@ export type {
 
 // Export default adapters
 export {
-  DefaultStickyNotesAdapter,
   DefaultNotificationAdapter,
   DefaultDocumentsAdapter,
   createDefaultAdapters

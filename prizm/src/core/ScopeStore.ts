@@ -1,6 +1,7 @@
 /**
- * Prizm ScopeStore V2 - 基于 ScopeRegistry + 元数据驱动存储
+ * Prizm ScopeStore V3 - 双层架构
  * scope 根目录可为任意路径，.prizm/ 存放配置与系统数据
+ * 移除 notes/pomodoroSessions，保留 documents/todoLists/clipboard/agentSessions/tokenUsage
  */
 
 import fs from 'fs'
@@ -9,14 +10,13 @@ import { createLogger } from '../logger'
 import { genUniqueId } from '../id'
 import { ScopeRegistry, scopeRegistry } from './ScopeRegistry'
 import { getPrizmDir } from './PathProviderCore'
+import { migrateToV3 } from './migrate-v3'
 import * as mdStore from './mdStore'
 import { DEFAULT_SCOPE, ONLINE_SCOPE, BUILTIN_SCOPES } from '@prizm/shared'
 import type {
-  StickyNote,
   TodoList,
   TodoItem,
   TodoItemStatus,
-  PomodoroSession,
   ClipboardItem,
   Document,
   AgentSession,
@@ -28,9 +28,7 @@ const log = createLogger('ScopeStore')
 export { DEFAULT_SCOPE, ONLINE_SCOPE }
 
 export interface ScopeData {
-  notes: StickyNote[]
   todoLists: TodoList[]
-  pomodoroSessions: PomodoroSession[]
   clipboard: ClipboardItem[]
   documents: Document[]
   agentSessions: AgentSession[]
@@ -59,9 +57,7 @@ function migrateTodoListItems(list: TodoList): TodoList {
 
 function createEmptyScopeData(): ScopeData {
   return {
-    notes: [],
     todoLists: [],
-    pomodoroSessions: [],
     clipboard: [],
     documents: [],
     agentSessions: [],
@@ -111,11 +107,10 @@ export class ScopeStore {
     if (!fs.existsSync(prizmDir)) {
       this.registry.initScopeDir(scopeId, rootPath)
     }
+    migrateToV3(rootPath)
     try {
       const data: ScopeData = {
-        notes: mdStore.readNotes(rootPath),
         todoLists: (mdStore.readTodoLists(rootPath) ?? []).map(migrateTodoListItems),
-        pomodoroSessions: mdStore.readPomodoroSessions(rootPath),
         clipboard: mdStore.readClipboard(rootPath),
         documents: mdStore.readDocuments(rootPath),
         agentSessions: mdStore.readAgentSessions(rootPath),
@@ -152,9 +147,7 @@ export class ScopeStore {
       if (!fs.existsSync(prizmDir)) {
         this.registry.initScopeDir(scope, rootPath)
       }
-      mdStore.writeNotes(rootPath, data.notes)
       mdStore.writeTodoLists(rootPath, data.todoLists)
-      mdStore.writePomodoroSessions(rootPath, data.pomodoroSessions)
       mdStore.writeClipboard(rootPath, data.clipboard)
       mdStore.writeDocuments(rootPath, data.documents)
       mdStore.writeAgentSessions(rootPath, data.agentSessions, scope)
@@ -181,9 +174,7 @@ export class ScopeStore {
       this.saveScope(scope)
       return data
     }
-    if (!Array.isArray(data.notes)) data.notes = []
     if (!Array.isArray(data.todoLists)) data.todoLists = []
-    if (!Array.isArray(data.pomodoroSessions)) data.pomodoroSessions = []
     if (!Array.isArray(data.clipboard)) data.clipboard = []
     if (!Array.isArray(data.documents)) data.documents = []
     if (!Array.isArray(data.agentSessions)) data.agentSessions = []
@@ -219,6 +210,11 @@ export class ScopeStore {
   deleteSessionDir(scope: string, sessionId: string): void {
     const rootPath = this.getScopeRootPath(scope)
     mdStore.deleteSessionDir(rootPath, sessionId)
+  }
+
+  /** Reload scope data from disk */
+  reloadScope(scope: string): void {
+    this.loadScope(scope)
   }
 }
 

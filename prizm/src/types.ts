@@ -6,8 +6,6 @@
 import type {
   StickyNote,
   StickyNoteFileRef,
-  CreateNotePayload,
-  UpdateNotePayload,
   TodoList,
   TodoItem,
   TodoItemStatus,
@@ -34,20 +32,23 @@ import type {
   ScopeActivityAction,
   ScopeActivityItemKind,
   TokenUsageRecord,
-  TokenUsageScope
+  TokenUsageScope,
+  FileEntry,
+  FileReadResult
 } from '@prizm/shared'
 
 // 重导出，供 routes、adapters 等使用
 export type {
+  /** @deprecated 已合并到 Document，仅用于迁移 */
   StickyNote,
+  /** @deprecated 已合并到 Document，仅用于迁移 */
   StickyNoteFileRef,
-  CreateNotePayload,
-  UpdateNotePayload,
   TodoList,
   TodoItem,
   TodoItemStatus,
   CreateTodoItemPayload,
   UpdateTodoItemPayload,
+  /** @deprecated 番茄钟已移除，仅用于迁移 */
   PomodoroSession,
   ClipboardItem,
   ClipboardItemType,
@@ -69,7 +70,9 @@ export type {
   ScopeActivityAction,
   ScopeActivityItemKind,
   TokenUsageRecord,
-  TokenUsageScope
+  TokenUsageScope,
+  FileEntry,
+  FileReadResult
 }
 
 // ============ Scope 与 Auth 类型（Server 专用） ============
