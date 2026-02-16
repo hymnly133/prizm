@@ -168,7 +168,6 @@ export interface AgentMessage {
 
 export interface AgentSession {
   id: string
-  title?: string
   scope: string
   messages: AgentMessage[]
   /** LLM 生成的对话摘要，用于压缩长对话上下文 */

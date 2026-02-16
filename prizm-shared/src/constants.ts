@@ -10,3 +10,9 @@ export const ONLINE_SCOPE = 'online'
 
 /** 内置 scope 列表 */
 export const BUILTIN_SCOPES = [DEFAULT_SCOPE, ONLINE_SCOPE] as const
+
+/**
+ * 记忆系统统一 userId。
+ * 记忆不按客户端隔离，所有客户端共享同一份记忆数据。
+ */
+export const MEMORY_USER_ID = 'default'
