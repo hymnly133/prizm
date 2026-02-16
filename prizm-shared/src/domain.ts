@@ -130,8 +130,8 @@ export interface MessageUsage {
   totalOutputTokens?: number
 }
 
-/** 工具调用状态：preparing=参数填写中 running=执行中 done=已完成 */
-export type ToolCallStatus = 'preparing' | 'running' | 'done'
+/** 工具调用状态：preparing=参数填写中 running=执行中 awaiting_interact=等待用户交互 done=已完成 */
+export type ToolCallStatus = 'preparing' | 'running' | 'awaiting_interact' | 'done'
 
 /** 单条工具调用（与 client-core ToolCallRecord 对齐，用于 parts） */
 export interface MessagePartTool {
@@ -173,8 +173,20 @@ export interface AgentSession {
   llmSummary?: string
   /** 已压缩为 Session 记忆的轮次上界（滑动窗口 A/B 用） */
   compressedThroughRound?: number
+  /** 用户授权的外部文件/文件夹路径列表（仅当前会话有效） */
+  grantedPaths?: string[]
   createdAt: number
   updatedAt: number
+}
+
+// ============ 文件路径引用 ============
+
+/** 文件路径引用（通用的文件引用，可以是工作区内或外部文件） */
+export interface FilePathRef {
+  /** 文件绝对路径 */
+  path: string
+  /** 显示名称（文件名） */
+  name: string
 }
 
 // ============ 通用文件系统（Layer 0） ============
@@ -350,8 +362,10 @@ export interface DedupLogEntry {
   new_memory_type: string
   /** 被抑制的新记忆元数据 JSON */
   new_memory_metadata: string | null
-  /** 向量距离 */
+  /** 向量距离（L2），-1 表示未使用向量匹配 */
   vector_distance: number | null
+  /** 文本相似度分数 (0~1)，-1 表示未使用文本匹配 */
+  text_similarity: number | null
   /** LLM 判断理由 */
   llm_reasoning: string | null
   /** 用户标识 */
