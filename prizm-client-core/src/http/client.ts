@@ -867,6 +867,66 @@ export class PrizmClient {
   }
 
   /**
+   * 为指定会话授权外部文件路径
+   */
+  async grantSessionPaths(
+    sessionId: string,
+    paths: string[],
+    scope?: string
+  ): Promise<{ grantedPaths: string[] }> {
+    const s = scope ?? this.defaultScope
+    const url = this.buildUrl(`/agent/sessions/${encodeURIComponent(sessionId)}/grant-paths`, {
+      scope: s
+    })
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: this.buildHeaders(),
+      body: JSON.stringify({ paths })
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
+    }
+    const data = (await response.json()) as { grantedPaths: string[] }
+    return data
+  }
+
+  /**
+   * 响应工具交互请求（approve/deny）
+   * 用于 human-in-the-loop 场景：工具执行需要用户确认时，SSE 流暂停等待此响应
+   */
+  async respondToInteract(
+    sessionId: string,
+    requestId: string,
+    approved: boolean,
+    options?: { paths?: string[]; scope?: string }
+  ): Promise<{ requestId: string; approved: boolean; grantedPaths: string[] }> {
+    const s = options?.scope ?? this.defaultScope
+    const url = this.buildUrl(
+      `/agent/sessions/${encodeURIComponent(sessionId)}/interact-response`,
+      { scope: s }
+    )
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: this.buildHeaders(),
+      body: JSON.stringify({
+        requestId,
+        approved,
+        ...(options?.paths && { paths: options.paths })
+      })
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
+    }
+    return (await response.json()) as {
+      requestId: string
+      approved: boolean
+      grantedPaths: string[]
+    }
+  }
+
+  /**
    * 流式对话，消费 SSE 并逐块回调
    * 支持 signal 取消和 onError 错误回调
    */
@@ -888,7 +948,8 @@ export class PrizmClient {
         model: options?.model,
         includeScopeContext: options?.includeScopeContext,
         fullContextTurns: options?.fullContextTurns,
-        cachedContextTurns: options?.cachedContextTurns
+        cachedContextTurns: options?.cachedContextTurns,
+        fileRefs: options?.fileRefs
       }),
       signal: options?.signal
     })
@@ -918,6 +979,15 @@ export class PrizmClient {
         buffer = lines.pop() ?? ''
 
         for (const line of lines) {
+          // SSE 心跳注释行：服务端在 LLM 长时间生成工具参数时每 3 秒发送
+          if (line.startsWith(': heartbeat')) {
+            try {
+              options?.onChunk?.({ type: 'heartbeat' })
+            } catch {
+              // 忽略心跳处理错误
+            }
+            continue
+          }
           if (line.startsWith('data: ')) {
             const data = line.slice(6)
             try {
@@ -927,12 +997,22 @@ export class PrizmClient {
                   typeof parsed.value === 'string' ? parsed.value : 'Unknown error'
                 )
               }
-              options?.onChunk?.(parsed)
+              try {
+                options?.onChunk?.(parsed)
+              } catch (chunkErr) {
+                console.error('[streamChat] onChunk handler error:', chunkErr, 'chunk:', parsed)
+              }
               if (parsed.type === 'text' && typeof parsed.value === 'string') {
                 fullContent += parsed.value
               }
+              // tool_call 事件后让出事件循环，确保 React 能在 preparing / running / done
+              // 状态之间独立渲染。否则同一 TCP 读取块中的多个 tool_call 事件会被 React 18
+              // 批处理合并，用户永远看不到中间的 preparing 卡片。
+              if (parsed.type === 'tool_call') {
+                await new Promise<void>((r) => setTimeout(r, 0))
+              }
             } catch {
-              // 忽略解析错误
+              // JSON 解析错误可以忽略
             }
           }
         }

@@ -142,8 +142,8 @@ export type WebSocketEventHandler<T extends WebSocketEventType> = (
 
 // ============ Agent 流式对话（仅 client-core） ============
 
-/** 工具调用状态：preparing=参数填写中 running=执行中 done=已完成 */
-export type ToolCallStatus = 'preparing' | 'running' | 'done'
+/** 工具调用状态：preparing=参数填写中 running=执行中 awaiting_interact=等待用户交互 done=已完成 */
+export type ToolCallStatus = 'preparing' | 'running' | 'awaiting_interact' | 'done'
 
 /** 工具调用记录（SSE tool_call 事件） */
 export interface ToolCallRecord {
@@ -179,10 +179,27 @@ export interface MemoryInjectedPayload {
   session: import('@prizm/shared').MemoryItem[]
 }
 
-/** SSE 流式 chunk：memory_injected / text / tool_result_chunk / tool_call / done / error */
+/** 交互请求载荷：工具执行需要用户确认时发送 */
+export interface InteractRequestPayload {
+  /** 唯一请求 ID，用于回传交互结果 */
+  requestId: string
+  /** 关联的工具调用 ID */
+  toolCallId: string
+  /** 工具名称 */
+  toolName: string
+  /** 需要授权的路径列表 */
+  paths: string[]
+}
+
+/** SSE 流式 chunk：memory_injected / text / tool_result_chunk / tool_call / interact_request / done / error */
 export interface StreamChatChunk {
   type: string
-  value?: string | ToolCallRecord | ToolResultChunkValue | MemoryInjectedPayload
+  value?:
+    | string
+    | ToolCallRecord
+    | ToolResultChunkValue
+    | MemoryInjectedPayload
+    | InteractRequestPayload
   model?: string
   usage?: MessageUsage
   /** 是否因用户停止而提前结束 */
@@ -201,6 +218,8 @@ export interface StreamChatOptions {
   fullContextTurns?: number
   /** 缓存轮数 B（可选，覆盖服务端设置） */
   cachedContextTurns?: number
+  /** 文件路径引用，通过路径引用文件以便 agent 访问 */
+  fileRefs?: import('@prizm/shared').FilePathRef[]
   onChunk?: (chunk: StreamChatChunk) => void
   /** 流式错误回调 */
   onError?: (message: string) => void
