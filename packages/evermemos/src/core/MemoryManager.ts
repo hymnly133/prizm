@@ -131,7 +131,8 @@ export class MemoryManager {
   /** 需要语义去重的记忆类型 */
   private static readonly DEDUP_TYPES = new Set([
     MemoryType.EPISODIC_MEMORY,
-    MemoryType.FORESIGHT
+    MemoryType.FORESIGHT,
+    MemoryType.PROFILE
   ])
 
   /** L2 距离阈值：低于此值进入去重流程（cosine sim ≈ 0.90） */
@@ -149,27 +150,46 @@ export class MemoryManager {
     userId: string | undefined,
     newMemorySnapshot?: Record<string, unknown>
   ): Promise<string | null> {
-    if (!MemoryManager.DEDUP_TYPES.has(type)) return null
-    if (!embedding || embedding.length === 0) return null
+    if (!MemoryManager.DEDUP_TYPES.has(type)) {
+      console.log(`[Dedup] Skipped: type=${type} not in DEDUP_TYPES`)
+      return null
+    }
+    if (!embedding || embedding.length === 0) {
+      console.log(
+        `[Dedup] Skipped: no embedding for type=${type}, content="${newContent.slice(0, 60)}"`
+      )
+      return null
+    }
+
+    console.log(`[Dedup] Checking type=${type}, content="${newContent.slice(0, 80)}"`)
 
     // 1. 向量搜索候选
     const candidate = await this.findDedupCandidate(type, embedding, groupId, userId)
-    if (!candidate) return null
+    if (!candidate) {
+      console.log(`[Dedup] No candidate found, will insert new memory`)
+      return null
+    }
 
     // 2. LLM 二次确认（若配置了 llmProvider）
     let reasoning = `vector-only (distance=${candidate.distance.toFixed(3)})`
     if (this.llmProvider) {
       try {
-        const llmResult = await this.confirmDedupWithLLM(
-          candidate.existingContent,
-          newContent
-        )
-        if (!llmResult.isDuplicate) return null
+        const llmResult = await this.confirmDedupWithLLM(candidate.existingContent, newContent)
+        if (!llmResult.isDuplicate) {
+          console.log(`[Dedup] LLM says DIFF: ${llmResult.reasoning}`)
+          return null
+        }
         reasoning = llmResult.reasoning
       } catch (e) {
-        console.warn('Dedup LLM confirmation failed, falling back to vector-only:', e)
+        console.warn('[Dedup] LLM confirmation failed, falling back to vector-only:', e)
       }
     }
+
+    console.log(
+      `[Dedup] ✓ Deduped! kept="${candidate.existingContent.slice(0, 60)}" (id=${
+        candidate.existingId
+      }), suppressed="${newContent.slice(0, 60)}", reason="${reasoning}"`
+    )
 
     // 3. 记录去重日志（支持回退）
     await this.logDedupRecord({
@@ -204,6 +224,17 @@ export class MemoryManager {
       const filter = filterParts.length > 0 ? filterParts.join(' AND ') : undefined
 
       const results = await this.storage.vector.search(type, embedding, 1, filter)
+      if (results.length > 0 && results[0]._distance !== undefined) {
+        console.log(
+          `[Dedup] Vector search for ${type}: top1 distance=${results[0]._distance.toFixed(
+            4
+          )}, threshold=${MemoryManager.DEDUP_L2_THRESHOLD}, id=${results[0].id}, content="${
+            (results[0].content as string)?.slice(0, 60) ?? ''
+          }"`
+        )
+      } else {
+        console.log(`[Dedup] Vector search for ${type}: no results (filter=${filter ?? 'none'})`)
+      }
       if (
         results.length > 0 &&
         results[0]._distance !== undefined &&
@@ -219,7 +250,8 @@ export class MemoryManager {
         }
       }
       return null
-    } catch {
+    } catch (e) {
+      console.warn(`[Dedup] Vector search failed for ${type}:`, e)
       return null
     }
   }
@@ -229,9 +261,10 @@ export class MemoryManager {
     existingContent: string,
     newContent: string
   ): Promise<{ isDuplicate: boolean; reasoning: string }> {
-    const prompt = DEDUP_CONFIRM_PROMPT
-      .replace('{{EXISTING}}', existingContent.slice(0, 500))
-      .replace('{{NEW}}', newContent.slice(0, 500))
+    const prompt = DEDUP_CONFIRM_PROMPT.replace(
+      '{{EXISTING}}',
+      existingContent.slice(0, 500)
+    ).replace('{{NEW}}', newContent.slice(0, 500))
 
     const response = await this.llmProvider!.generate({
       prompt,
@@ -262,9 +295,7 @@ export class MemoryManager {
         kept_memory_id: info.keptMemoryId,
         new_memory_content: info.newMemoryContent,
         new_memory_type: info.newMemoryType,
-        new_memory_metadata: info.newMemoryMetadata
-          ? JSON.stringify(info.newMemoryMetadata)
-          : null,
+        new_memory_metadata: info.newMemoryMetadata ? JSON.stringify(info.newMemoryMetadata) : null,
         kept_memory_content: info.keptMemoryContent,
         vector_distance: info.vectorDistance,
         llm_reasoning: info.llmReasoning,
@@ -442,7 +473,12 @@ export class MemoryManager {
 
       // 语义去重：向量匹配 + LLM 二次确认
       const dedupId = await this.tryDedup(
-        MemoryType.EPISODIC_MEMORY, embedding, content, groupId, userId, memory
+        MemoryType.EPISODIC_MEMORY,
+        embedding,
+        content,
+        groupId,
+        userId,
+        memory
       )
       if (!dedupId) {
         await this.storage.relational.insert('memories', {
@@ -456,7 +492,9 @@ export class MemoryManager {
           metadata: JSON.stringify(memory)
         })
         if (embedding?.length) {
-          await this.storage.vector.add(MemoryType.EPISODIC_MEMORY, [toVectorRow(memory, embedding)])
+          await this.storage.vector.add(MemoryType.EPISODIC_MEMORY, [
+            toVectorRow(memory, embedding)
+          ])
         }
         this.pushCreated(id, content, MemoryType.EPISODIC_MEMORY, groupId)
       }
@@ -549,7 +587,12 @@ export class MemoryManager {
 
         // 语义去重：向量匹配 + LLM 二次确认
         const dedupId = await this.tryDedup(
-          MemoryType.FORESIGHT, embedding, item.content, groupId, userId, memory
+          MemoryType.FORESIGHT,
+          embedding,
+          item.content,
+          groupId,
+          userId,
+          memory
         )
         if (dedupId) continue
 
@@ -575,8 +618,18 @@ export class MemoryManager {
         const id = uuidv4()
         const content = this.buildProfileContent(p)
         if (!content) continue
+
+        // 为 PROFILE 生成 embedding 以支持语义去重
+        let embedding: number[] | undefined
+        try {
+          embedding = await this.embeddingProvider!.getEmbedding(content)
+        } catch (e) {
+          console.warn('Profile embedding failed:', e)
+        }
+
+        // 语义去重：向量匹配 + LLM 二次确认
         const { user_id: _llmUserId, ...profileData } = p as Record<string, unknown>
-        const memory = {
+        const memory: Record<string, unknown> = {
           ...profileData,
           id,
           memory_type: MemoryType.PROFILE,
@@ -586,8 +639,19 @@ export class MemoryManager {
           updated_at: now,
           timestamp,
           deleted: false,
-          content
+          content,
+          embedding
         }
+        const dedupId = await this.tryDedup(
+          MemoryType.PROFILE,
+          embedding,
+          content,
+          undefined,
+          userId,
+          memory
+        )
+        if (dedupId) continue
+
         await this.storage.relational.insert('memories', {
           id,
           type: MemoryType.PROFILE,
@@ -601,6 +665,9 @@ export class MemoryManager {
             ...(roundMsgId && { round_message_id: roundMsgId })
           })
         })
+        if (embedding?.length) {
+          await this.storage.vector.add(MemoryType.PROFILE, [toVectorRow(memory, embedding)])
+        }
         this.pushCreated(id, content, MemoryType.PROFILE, null)
       }
     }
@@ -672,8 +739,11 @@ export class MemoryManager {
           // 语义去重（仅对 Episode/Foresight，需要 embedding）
           if (memory.embedding?.length) {
             const dedupId = await this.tryDedup(
-              type, memory.embedding, contentStr,
-              memory.group_id, memory.user_id,
+              type,
+              memory.embedding,
+              contentStr,
+              memory.group_id,
+              memory.user_id,
               memory as Record<string, unknown>
             )
             if (dedupId) continue

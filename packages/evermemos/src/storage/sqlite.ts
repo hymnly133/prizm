@@ -59,7 +59,10 @@ export class SQLiteAdapter implements RelationalStoreAdapter {
   async getSearchIndex(
     scope: string
   ): Promise<{ miniSearchBlob: string; byIdBlob: string } | null> {
-    const row = await this.get(SQLiteAdapter.SEARCH_INDEX_TABLE, scope)
+    const stmt = this.db.prepare(
+      `SELECT * FROM ${SQLiteAdapter.SEARCH_INDEX_TABLE} WHERE scope = ?`
+    )
+    const row = stmt.get(scope) as Record<string, unknown> | undefined
     if (!row || typeof row.mini_search_blob !== 'string' || typeof row.by_id_blob !== 'string') {
       return null
     }
@@ -69,26 +72,21 @@ export class SQLiteAdapter implements RelationalStoreAdapter {
   /** 写入搜索索引 */
   async setSearchIndex(scope: string, miniSearchBlob: string, byIdBlob: string): Promise<void> {
     const updatedAt = new Date().toISOString()
-    const existing = await this.get(SQLiteAdapter.SEARCH_INDEX_TABLE, scope)
-    if (existing) {
-      await this.update(SQLiteAdapter.SEARCH_INDEX_TABLE, scope, {
-        mini_search_blob: miniSearchBlob,
-        by_id_blob: byIdBlob,
-        updated_at: updatedAt
-      })
-    } else {
-      await this.insert(SQLiteAdapter.SEARCH_INDEX_TABLE, {
-        scope,
-        mini_search_blob: miniSearchBlob,
-        by_id_blob: byIdBlob,
-        updated_at: updatedAt
-      })
-    }
+    const stmt = this.db.prepare(`
+      INSERT INTO ${SQLiteAdapter.SEARCH_INDEX_TABLE} (scope, mini_search_blob, by_id_blob, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(scope) DO UPDATE SET
+        mini_search_blob = excluded.mini_search_blob,
+        by_id_blob = excluded.by_id_blob,
+        updated_at = excluded.updated_at
+    `)
+    stmt.run(scope, miniSearchBlob, byIdBlob, updatedAt)
   }
 
   /** 删除某 scope 的搜索索引缓存 */
   async deleteSearchIndex(scope: string): Promise<void> {
-    await this.delete(SQLiteAdapter.SEARCH_INDEX_TABLE, scope)
+    const stmt = this.db.prepare(`DELETE FROM ${SQLiteAdapter.SEARCH_INDEX_TABLE} WHERE scope = ?`)
+    stmt.run(scope)
   }
 
   async get(table: string, id: string): Promise<any> {

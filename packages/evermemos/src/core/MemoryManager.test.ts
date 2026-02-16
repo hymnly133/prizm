@@ -542,6 +542,138 @@ describe('MemoryManager', () => {
       expect(inserts.filter((i) => i.item.type === MemoryType.EPISODIC_MEMORY)).toHaveLength(1)
     })
 
+    it('should dedup PROFILE when vector match + LLM confirms SAME', async () => {
+      const { storage, inserts, updates, setVectorSearchResults } = createMockStorage()
+      setVectorSearchResults([
+        { id: 'existing-profile-1', content: '用户希望被称为老大', _distance: 0.08 }
+      ])
+
+      const llm = createMockLLMProvider('SAME 两条都描述用户希望被称为老大')
+      const embeddingProvider = { getEmbedding: async () => [0.1, 0.2, 0.3] }
+      const mockUnifiedExtractor = {
+        extractAll: async () => ({
+          profile: {
+            user_profiles: [{ summary: '用户希望被称呼为"老大"' }]
+          }
+        })
+      } as any
+
+      const manager = new MemoryManager(storage, {
+        llmProvider: llm,
+        unifiedExtractor: mockUnifiedExtractor,
+        embeddingProvider
+      })
+
+      const memcell: MemCell = {
+        original_data: [
+          { role: 'user', content: '叫我老大' },
+          { role: 'assistant', content: '好的，老大！' }
+        ],
+        type: RawDataType.CONVERSATION,
+        user_id: 'user1',
+        deleted: false,
+        scene: 'assistant'
+      }
+
+      const created = await manager.processMemCell(memcell, { userId: 'user1', scope: 'online' })
+
+      // PROFILE should NOT be inserted (deduped)
+      expect(inserts.filter((i) => i.item.type === MemoryType.PROFILE)).toHaveLength(0)
+      // Existing memory touched
+      expect(
+        updates.filter((u) => u.table === 'memories' && u.id === 'existing-profile-1')
+      ).toHaveLength(1)
+      // Dedup log written
+      const dedupLogs = inserts.filter((i) => i.table === 'dedup_log')
+      expect(dedupLogs).toHaveLength(1)
+      expect(dedupLogs[0].item.kept_memory_id).toBe('existing-profile-1')
+      expect(dedupLogs[0].item.new_memory_type).toBe(MemoryType.PROFILE)
+      // Not reported as created
+      expect(created.filter((c) => c.type === MemoryType.PROFILE)).toHaveLength(0)
+    })
+
+    it('should insert PROFILE when no vector match (first profile)', async () => {
+      const { storage, inserts, setVectorSearchResults } = createMockStorage()
+      setVectorSearchResults([])
+
+      const embeddingProvider = { getEmbedding: async () => [0.1, 0.2, 0.3] }
+      const mockUnifiedExtractor = {
+        extractAll: async () => ({
+          profile: {
+            user_profiles: [{ summary: '用户喜欢周杰伦的音乐' }]
+          }
+        })
+      } as any
+
+      const manager = new MemoryManager(storage, {
+        unifiedExtractor: mockUnifiedExtractor,
+        embeddingProvider
+      })
+
+      const memcell: MemCell = {
+        original_data: [
+          { role: 'user', content: '我很喜欢周杰伦' },
+          { role: 'assistant', content: '我也很喜欢！' }
+        ],
+        type: RawDataType.CONVERSATION,
+        user_id: 'user1',
+        deleted: false,
+        scene: 'assistant'
+      }
+
+      const created = await manager.processMemCell(memcell, { userId: 'user1', scope: 'online' })
+
+      // PROFILE should be inserted
+      const profileInserts = inserts.filter((i) => i.item.type === MemoryType.PROFILE)
+      expect(profileInserts).toHaveLength(1)
+      expect(profileInserts[0].item.content).toBe('用户喜欢周杰伦的音乐')
+      // Reported as created
+      expect(created.filter((c) => c.type === MemoryType.PROFILE)).toHaveLength(1)
+    })
+
+    it('should NOT dedup PROFILE when LLM says DIFF', async () => {
+      const { storage, inserts, setVectorSearchResults } = createMockStorage()
+      setVectorSearchResults([
+        { id: 'existing-profile-2', content: '用户希望被称为老大', _distance: 0.3 }
+      ])
+
+      const llm = createMockLLMProvider('DIFF 新记忆是关于用户的音乐偏好，与称呼无关')
+      const embeddingProvider = { getEmbedding: async () => [0.4, 0.5, 0.6] }
+      const mockUnifiedExtractor = {
+        extractAll: async () => ({
+          profile: {
+            user_profiles: [{ summary: '用户喜欢听摇滚乐' }]
+          }
+        })
+      } as any
+
+      const manager = new MemoryManager(storage, {
+        llmProvider: llm,
+        unifiedExtractor: mockUnifiedExtractor,
+        embeddingProvider
+      })
+
+      const memcell: MemCell = {
+        original_data: [
+          { role: 'user', content: '我喜欢听摇滚乐' },
+          { role: 'assistant', content: '不错的品味！' }
+        ],
+        type: RawDataType.CONVERSATION,
+        user_id: 'user1',
+        deleted: false,
+        scene: 'assistant'
+      }
+
+      const created = await manager.processMemCell(memcell, { userId: 'user1', scope: 'online' })
+
+      // PROFILE should be inserted (LLM rejected dedup)
+      expect(inserts.filter((i) => i.item.type === MemoryType.PROFILE)).toHaveLength(1)
+      // No dedup log
+      expect(inserts.filter((i) => i.table === 'dedup_log')).toHaveLength(0)
+      // Reported as created
+      expect(created.filter((c) => c.type === MemoryType.PROFILE)).toHaveLength(1)
+    })
+
     it('should handle LLM error gracefully and fallback to vector-only', async () => {
       const { storage, inserts, setVectorSearchResults } = createMockStorage()
       setVectorSearchResults([{ id: 'existing-ep-4', content: 'existing', _distance: 0.1 }])
