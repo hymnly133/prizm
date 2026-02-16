@@ -106,41 +106,51 @@ export function parseUnifiedMemoryText(text: string): UnifiedExtractionResult | 
   const profileBody = sections.get('PROFILE')
   if (profileBody) {
     const kv = parseSectionKeyValues(profileBody)
-    const record: Record<string, unknown> = {
-      user_name: getFirst(kv, 'USER_NAME'),
-      summary: getFirst(kv, 'SUMMARY'),
-      // 兼容旧格式 OUTPUT_REASONING（新 prompt 使用 SUMMARY）
-      output_reasoning: getFirst(kv, 'OUTPUT_REASONING') ?? getFirst(kv, 'SUMMARY'),
-      hard_skills: getFirst(kv, 'HARD_SKILLS')
-        ?.split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
-      soft_skills: getFirst(kv, 'SOFT_SKILLS')
-        ?.split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
-      work_responsibility: getFirst(kv, 'WORK_RESPONSIBILITY')
-        ?.split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
-      interests: getFirst(kv, 'INTERESTS')
-        ?.split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
-      tendency: getFirst(kv, 'TENDENCY')
-        ?.split(',')
-        .map((s) => s.trim())
-        .filter(Boolean)
-    }
-    // 兼容旧格式：如果有 USER_ID 也记录下来
-    const legacyUserId = getFirst(kv, 'USER_ID')
-    if (legacyUserId) record.user_id = legacyUserId
-    // 只要有任意有效字段即视为有效 profile
-    const hasContent = Object.values(record).some(
-      (v) => v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && v.length === 0)
-    )
-    if (hasContent) {
-      result.profile = { user_profiles: [record] }
+    const userName = getFirst(kv, 'USER_NAME')
+    const items = getAll(kv, 'ITEM').filter(Boolean)
+
+    // 新格式：每条 ITEM 生成一个独立的 profile 记录（原子化描述）
+    // USER_NAME 不再单独处理，称呼偏好作为普通 ITEM 由 LLM 自行输出
+    if (items.length > 0) {
+      const profiles: Array<Record<string, unknown>> = items.map((item) => ({ summary: item }))
+      if (profiles.length > 0) {
+        result.profile = { user_profiles: profiles }
+      }
+    } else {
+      // 向后兼容旧格式：SUMMARY / 结构化字段
+      const record: Record<string, unknown> = {
+        user_name: userName,
+        summary: getFirst(kv, 'SUMMARY'),
+        output_reasoning: getFirst(kv, 'OUTPUT_REASONING') ?? getFirst(kv, 'SUMMARY'),
+        hard_skills: getFirst(kv, 'HARD_SKILLS')
+          ?.split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+        soft_skills: getFirst(kv, 'SOFT_SKILLS')
+          ?.split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+        work_responsibility: getFirst(kv, 'WORK_RESPONSIBILITY')
+          ?.split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+        interests: getFirst(kv, 'INTERESTS')
+          ?.split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+        tendency: getFirst(kv, 'TENDENCY')
+          ?.split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+      }
+      const legacyUserId = getFirst(kv, 'USER_ID')
+      if (legacyUserId) record.user_id = legacyUserId
+      const hasContent = Object.values(record).some(
+        (v) => v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && v.length === 0)
+      )
+      if (hasContent) {
+        result.profile = { user_profiles: [record] }
+      }
     }
   }
 

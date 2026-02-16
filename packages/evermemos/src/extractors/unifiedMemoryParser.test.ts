@@ -201,6 +201,55 @@ SUMMARY: 用户希望被称呼为"老大"
     expect(p.user_name).toBeUndefined()
   })
 
+  it('PROFILE 新格式：多个 ITEM 生成多条原子画像', () => {
+    const text = `
+## PROFILE
+ITEM: 用户希望被称为"老大"
+ITEM: 用户喜欢华语流行音乐
+ITEM: 用户特别喜爱周杰伦
+ITEM: 用户正在开发名为"Prizm"的项目
+ITEM: 用户习惯使用便签记录项目和想法
+`
+    const result = parseUnifiedMemoryText(text)
+    expect(result?.profile?.user_profiles).toHaveLength(5)
+    const profiles = result!.profile!.user_profiles! as Array<Record<string, unknown>>
+    expect(profiles[0].summary).toBe('用户希望被称为"老大"')
+    expect(profiles[1].summary).toBe('用户喜欢华语流行音乐')
+    expect(profiles[2].summary).toBe('用户特别喜爱周杰伦')
+    expect(profiles[3].summary).toBe('用户正在开发名为"Prizm"的项目')
+    expect(profiles[4].summary).toBe('用户习惯使用便签记录项目和想法')
+  })
+
+  it('PROFILE 新格式：单条 ITEM 也有效', () => {
+    const text = `
+## PROFILE
+ITEM: 用户偏好暗色主题
+`
+    const result = parseUnifiedMemoryText(text)
+    expect(result?.profile?.user_profiles).toHaveLength(1)
+    expect((result!.profile!.user_profiles![0] as Record<string, unknown>).summary).toBe(
+      '用户偏好暗色主题'
+    )
+  })
+
+  it('PROFILE 有 ITEM 时忽略旧格式字段（SUMMARY/USER_NAME 等）', () => {
+    const text = `
+## PROFILE
+USER_NAME: 张三
+SUMMARY: 这条应该被忽略
+ITEM: 用户名叫张三
+ITEM: 用户喜欢跑步
+`
+    const result = parseUnifiedMemoryText(text)
+    // 有 ITEM 时走新格式分支，USER_NAME 和 SUMMARY 被忽略
+    expect(result?.profile?.user_profiles).toHaveLength(2)
+    const profiles = result!.profile!.user_profiles! as Array<Record<string, unknown>>
+    expect(profiles[0].summary).toBe('用户名叫张三')
+    expect(profiles[1].summary).toBe('用户喜欢跑步')
+    // 不应有 user_name 字段
+    expect(profiles[0].user_name).toBeUndefined()
+  })
+
   it('小节标题大小写不敏感（解析器转大写）', () => {
     const text = `
 ## episode
