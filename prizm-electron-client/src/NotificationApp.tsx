@@ -160,8 +160,7 @@ function NotificationItemContent({ item }: { item: NotifItem }) {
       {extra && (
         <div className="notification-item__body">
           <Markdown>
-            {String(extra).slice(0, 120)}
-            {String(extra).length > 120 ? '…' : ''}
+            {String(extra).slice(0, 120) + (String(extra).length > 120 ? '…' : '')}
           </Markdown>
         </div>
       )}

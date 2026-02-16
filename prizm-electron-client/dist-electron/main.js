@@ -175,7 +175,7 @@ async function registerClientOnServer(serverUrl, name, requestedScopes) {
     const registerUrl = `${serverUrl.replace(/\/+$/, '')}/auth/register`;
     const body = {
         name,
-        requested_scopes: requestedScopes && requestedScopes.length > 0 ? requestedScopes : undefined
+        requestedScopes: requestedScopes && requestedScopes.length > 0 ? requestedScopes : undefined
     };
     const registerResp = await fetch(registerUrl, {
         method: 'POST',

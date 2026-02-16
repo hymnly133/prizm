@@ -16,7 +16,7 @@ const defaultValue: WorkNavigationContextValue = {
   consumePendingWorkFile: () => {}
 }
 
-const WorkNavigationContext = createContext<WorkNavigationContextValue>(defaultValue)
+export const WorkNavigationContext = createContext<WorkNavigationContextValue>(defaultValue)
 
 export function useWorkNavigation(): WorkNavigationContextValue {
   return useContext(WorkNavigationContext)

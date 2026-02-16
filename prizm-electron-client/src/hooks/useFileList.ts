@@ -252,7 +252,7 @@ export function useFileList(scope: string) {
 
       if (needTodoListFetchRef.current) fetchTodoList = true
 
-      const fetches: Promise<FileItem | null>[] = []
+      const fetches: Promise<FileItem | FileItem[] | null>[] = []
       for (const id of toFetchNote) {
         fetches.push(
           http

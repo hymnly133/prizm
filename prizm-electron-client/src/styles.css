@@ -1613,15 +1613,9 @@
   gap: 2px;
   min-width: 0;
 }
-.agent-session-item-title {
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .agent-session-item-summary {
-  font-size: 11px;
-  color: var(--ant-color-text-tertiary);
+  font-size: 13px;
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1635,11 +1629,6 @@
 }
 /* 鼠标悬停在列表行上时显示操作按钮 */
 .agent-sessions-list *:hover > .agent-session-actions {
-  opacity: 1;
-  pointer-events: auto;
-}
-/* 编辑（重命名）时始终显示 */
-.agent-session-editing .agent-session-actions {
   opacity: 1;
   pointer-events: auto;
 }
@@ -1821,18 +1810,6 @@
   font-size: 13px;
   margin: 0 16px;
   flex-shrink: 0;
-}
-
-/* Agent session rename input */
-.agent-rename-input {
-  width: 100%;
-  border: 1px solid var(--ant-color-primary);
-  border-radius: var(--ant-border-radius);
-  background: var(--ant-color-bg-container);
-  color: var(--ant-color-text);
-  padding: 2px 6px;
-  font-size: 13px;
-  outline: none;
 }
 
 /* 思考链 / reasoning 展示 */
@@ -2392,4 +2369,64 @@
   color: var(--ant-color-text-quaternary);
   text-align: center;
   padding: 12px 0;
+}
+
+/* Agent 后台对话指示器：导航栏 Agent 按钮右上角脉冲圆点 */
+.agent-bg-indicator {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ant-color-primary, #1677ff);
+  margin-left: 4px;
+  vertical-align: top;
+  position: relative;
+  top: -1px;
+  animation: agent-bg-pulse 1.5s ease-in-out infinite;
+}
+@keyframes agent-bg-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.75);
+  }
+}
+
+/* ── 文件内嵌预览面板（Agent 页右侧） ── */
+.file-preview-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--ant-color-bg-container);
+}
+.file-preview-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+  flex-shrink: 0;
+  gap: 8px;
+}
+.file-preview-panel__title {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.file-preview-panel__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+.file-preview-panel__body .md-preview-wrap {
+  font-size: 13px;
+  line-height: 1.7;
 }

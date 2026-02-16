@@ -7,6 +7,7 @@ import { PrizmProvider, usePrizmContext, SyncEventProvider } from './context/Pri
 import { WorkNavigationProvider } from './context/WorkNavigationContext'
 import { ChatWithFileProvider } from './context/ChatWithFileContext'
 import { setLastSyncEvent } from './events/syncEventStore'
+import { useAgentSending } from './events/agentBackgroundStore'
 import { AppHeader } from './components/layout'
 import { QuickActionHandler } from './components/QuickActionHandler'
 import AgentPage from './views/AgentPage'
@@ -30,6 +31,7 @@ function AppContent() {
   )
   const navigateToWork = useCallback(() => setActivePage('work'), [])
   const navigateToAgent = useCallback(() => setActivePage('agent'), [])
+  const agentSending = useAgentSending()
 
   useEffect(() => {
     addLog('Prizm Electron 通知客户端启动', 'info')
@@ -96,6 +98,9 @@ function AppContent() {
               onClick={() => setActivePage('agent')}
             >
               Agent
+              {agentSending && activePage !== 'agent' && (
+                <span className="agent-bg-indicator" title="Agent 对话进行中" />
+              )}
             </Button>
             <Button
               type={activePage === 'user' ? 'primary' : 'default'}
@@ -123,11 +128,10 @@ function AppContent() {
           <QuickActionHandler setActivePage={setActivePage} />
           <div className="app-main">
             {activePage === 'work' && <WorkPage />}
-            {activePage === 'agent' && (
-              <SyncEventProvider>
-                <AgentPage />
-              </SyncEventProvider>
-            )}
+            {/* AgentPage 始终挂载，支持后台继续对话，仅通过 CSS 隐藏 */}
+            <SyncEventProvider>
+              <AgentPage hidden={activePage !== 'agent'} />
+            </SyncEventProvider>
             {activePage === 'user' && <UserPage />}
             {activePage === 'settings' && <SettingsPage />}
             {activePage === 'test' && (

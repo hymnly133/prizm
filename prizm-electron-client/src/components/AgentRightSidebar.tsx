@@ -27,6 +27,7 @@ interface SessionStats {
     totalTokens: number
     rounds: number
     byModel: Record<string, { input: number; output: number; total: number; count: number }>
+    byScope?: Record<string, { input: number; output: number; total: number; count: number }>
   }
   memoryCreated: {
     totalCount: number
@@ -34,6 +35,14 @@ interface SessionStats {
     memories: Array<{ id: string; memory: string; memory_type?: string; messageId: string }>
   }
 }
+
+const TOKEN_SCOPE_LABELS: Record<string, string> = {
+  chat: '对话',
+  document_summary: '文档摘要',
+  conversation_summary: '对话摘要',
+  memory: '记忆'
+}
+const TOKEN_SCOPE_ORDER = ['chat', 'document_summary', 'conversation_summary', 'memory']
 
 /** 统一活动记录（与 API 返回一致） */
 interface ActivityItem {
@@ -63,7 +72,6 @@ import {
   Coins,
   Sparkles
 } from 'lucide-react'
-import type { MemoryItem } from '@prizm/shared'
 
 interface AgentRightSidebarProps {
   sending?: boolean
@@ -103,12 +111,10 @@ export function AgentRightSidebar({
   const [systemPrompt, setSystemPrompt] = useState<string>('')
   const [systemPromptLoading, setSystemPromptLoading] = useState(false)
   const [systemPromptModalOpen, setSystemPromptModalOpen] = useState(false)
-  const [threeLevelMemories, setThreeLevelMemories] = useState<{
-    user: MemoryItem[]
-    scope: MemoryItem[]
-    session: MemoryItem[]
-  } | null>(null)
-  const [threeLevelLoading, setThreeLevelLoading] = useState(false)
+  const [memoryEnabled, setMemoryEnabled] = useState(false)
+  const [userMemoryCount, setUserMemoryCount] = useState(0)
+  const [scopeMemoryCount, setScopeMemoryCount] = useState(0)
+  const [memoryCountsLoading, setMemoryCountsLoading] = useState(false)
   const [sessionsCount, setSessionsCount] = useState(0)
   const [sessionsCountLoading, setSessionsCountLoading] = useState(false)
   const [sessionStats, setSessionStats] = useState<SessionStats | null>(null)
@@ -165,22 +171,22 @@ export function AgentRightSidebar({
     }
   }, [http])
 
-  const loadThreeLevelMemories = useCallback(async () => {
+  const loadMemoryCounts = useCallback(async () => {
     if (!http || !currentScope) return
-    setThreeLevelLoading(true)
+    setMemoryCountsLoading(true)
     try {
-      const res = await http.getThreeLevelMemories(currentScope, currentSession?.id)
-      if (res.enabled) {
-        setThreeLevelMemories({ user: res.user, scope: res.scope, session: res.session })
-      } else {
-        setThreeLevelMemories(null)
-      }
+      const res = await http.getMemoryCounts(currentScope)
+      setMemoryEnabled(res.enabled)
+      setUserMemoryCount(res.userCount)
+      setScopeMemoryCount(res.scopeCount)
     } catch {
-      setThreeLevelMemories(null)
+      setMemoryEnabled(false)
+      setUserMemoryCount(0)
+      setScopeMemoryCount(0)
     } finally {
-      setThreeLevelLoading(false)
+      setMemoryCountsLoading(false)
     }
-  }, [http, currentScope, currentSession?.id])
+  }, [http, currentScope])
 
   const loadSessionsCount = useCallback(async () => {
     if (!http || !currentScope) return
@@ -242,8 +248,8 @@ export function AgentRightSidebar({
   }, [currentSession?.id, currentScope, loadSessionContext, loadSessionStats])
 
   useEffect(() => {
-    if (currentScope) void loadThreeLevelMemories()
-  }, [currentScope, currentSession?.id, loadThreeLevelMemories])
+    if (currentScope) void loadMemoryCounts()
+  }, [currentScope, loadMemoryCounts])
 
   useEffect(() => {
     void loadModels()
@@ -258,11 +264,11 @@ export function AgentRightSidebar({
   useEffect(() => {
     if (prevSendingRef.current && !sending && currentSession?.id) {
       void loadSessionContext()
-      void loadThreeLevelMemories()
+      void loadMemoryCounts()
       void loadSessionStats()
     }
     prevSendingRef.current = sending
-  }, [sending, currentSession?.id, loadSessionContext, loadThreeLevelMemories, loadSessionStats])
+  }, [sending, currentSession?.id, loadSessionContext, loadMemoryCounts, loadSessionStats])
 
   /** 当前会话中最后一条 assistant 消息的 toolCalls（含乐观更新） */
   const latestToolCalls: ToolCallRecord[] = useMemo(() => {
@@ -388,30 +394,20 @@ export function AgentRightSidebar({
                 <Brain size={14} className="agent-right-section-icon" />
                 记忆状态
               </h3>
-              {threeLevelLoading ? (
+              {memoryCountsLoading ? (
                 <div className="agent-right-loading">
                   <Loader2 size={14} className="spinning" />
                   <span>加载中</span>
                 </div>
-              ) : threeLevelMemories ? (
+              ) : memoryEnabled ? (
                 <div className="agent-memory-state">
                   <div className="agent-memory-tier">
                     <span className="agent-memory-tier-label">User 层</span>
-                    <span className="agent-memory-tier-count">
-                      {threeLevelMemories.user.length}
-                    </span>
+                    <span className="agent-memory-tier-count">{userMemoryCount}</span>
                   </div>
                   <div className="agent-memory-tier">
                     <span className="agent-memory-tier-label">Scope 层</span>
-                    <span className="agent-memory-tier-count">
-                      {threeLevelMemories.scope.length}
-                    </span>
-                  </div>
-                  <div className="agent-memory-tier">
-                    <span className="agent-memory-tier-label">Session 层</span>
-                    <span className="agent-memory-tier-count">
-                      {threeLevelMemories.session.length}
-                    </span>
+                    <span className="agent-memory-tier-count">{scopeMemoryCount}</span>
                   </div>
                 </div>
               ) : (
@@ -721,33 +717,21 @@ export function AgentRightSidebar({
                 <Brain size={14} className="agent-right-section-icon" />
                 记忆状态
               </h3>
-              {threeLevelLoading ? (
+              {memoryCountsLoading ? (
                 <div className="agent-right-loading">
                   <Loader2 size={14} className="spinning" />
                   <span>加载中</span>
                 </div>
-              ) : threeLevelMemories ? (
+              ) : memoryEnabled ? (
                 <div className="agent-memory-state">
                   <div className="agent-memory-tier">
                     <span className="agent-memory-tier-label">User 层</span>
-                    <span className="agent-memory-tier-count">
-                      {threeLevelMemories.user.length}
-                    </span>
+                    <span className="agent-memory-tier-count">{userMemoryCount}</span>
                   </div>
                   <div className="agent-memory-tier">
                     <span className="agent-memory-tier-label">Scope 层</span>
-                    <span className="agent-memory-tier-count">
-                      {threeLevelMemories.scope.length}
-                    </span>
+                    <span className="agent-memory-tier-count">{scopeMemoryCount}</span>
                   </div>
-                  {!isNewConversationReady && (
-                    <div className="agent-memory-tier">
-                      <span className="agent-memory-tier-label">Session 层</span>
-                      <span className="agent-memory-tier-count">
-                        {threeLevelMemories.session.length}
-                      </span>
-                    </div>
-                  )}
                 </div>
               ) : (
                 <p className="agent-right-empty">暂无记忆或未启用</p>
@@ -796,6 +780,25 @@ export function AgentRightSidebar({
                             {sessionStats.tokenUsage.rounds}
                           </span>
                         </div>
+                        {/* 按功能分类 */}
+                        {sessionStats.tokenUsage.byScope &&
+                          Object.keys(sessionStats.tokenUsage.byScope).length > 0 &&
+                          TOKEN_SCOPE_ORDER.filter((s) => sessionStats.tokenUsage.byScope?.[s]).map(
+                            (s) => {
+                              const info = sessionStats.tokenUsage.byScope![s]!
+                              return (
+                                <div key={s} className="agent-stats-row agent-stats-row-sub">
+                                  <span className="agent-stats-key">
+                                    {TOKEN_SCOPE_LABELS[s] ?? s}
+                                  </span>
+                                  <span className="agent-stats-value agent-stats-value-secondary">
+                                    {formatToken(info.total)} ({info.count}次)
+                                  </span>
+                                </div>
+                              )
+                            }
+                          )}
+                        {/* 按模型分组 */}
                         {Object.keys(sessionStats.tokenUsage.byModel).length > 1 &&
                           Object.entries(sessionStats.tokenUsage.byModel).map(([model, info]) => (
                             <div key={model} className="agent-stats-row agent-stats-row-sub">

@@ -22,7 +22,11 @@ declare global {
       }): Promise<boolean>
       stopClipboardSync(): Promise<boolean>
       onClipboardItemAdded(callback: () => void): () => void
-      showNotification(payload: { title: string; body?: string; source?: string }): Promise<boolean>
+      showNotification(
+        payload:
+          | import('@prizm/client-core').NotifyWindowPayload
+          | { title: string; body?: string; source?: string }
+      ): Promise<boolean>
       onLogFromMain(
         callback: (entry: {
           level: string

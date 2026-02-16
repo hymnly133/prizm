@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useLogsContext } from '../context/LogsContext'
 import { usePrizmContext, useSyncEventContext } from '../context/PrizmContext'
 import { useScope } from '../hooks/useScope'
+import type { EventType } from '@prizm/client-core'
 import { setLastSyncEvent } from '../events/syncEventStore'
 
 export default function TestPage() {
@@ -121,7 +122,7 @@ export default function TestPage() {
     }
   }
 
-  function triggerRefresh(eventType: string) {
+  function triggerRefresh(eventType: EventType) {
     setLastSyncEvent(eventType)
     addLog(`已触发刷新: ${eventType}`, 'info')
   }

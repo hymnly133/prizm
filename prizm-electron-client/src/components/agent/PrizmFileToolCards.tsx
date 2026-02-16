@@ -49,8 +49,8 @@ function parseArgsSummary(argsStr: string): string {
   }
 }
 
-/* ── 从参数解析文件引用 ── */
-function parseFileRef(argsStr: string): { kind: FileKind; id: string } | null {
+/* ── 从参数（或 result）解析文件引用 ── */
+function parseFileRef(argsStr: string, resultStr?: string): { kind: FileKind; id: string } | null {
   try {
     const obj = JSON.parse(argsStr || '{}') as Record<string, unknown>
     if (obj.documentId && typeof obj.documentId === 'string')
@@ -58,10 +58,17 @@ function parseFileRef(argsStr: string): { kind: FileKind; id: string } | null {
     if (obj.noteId && typeof obj.noteId === 'string') return { kind: 'note', id: obj.noteId }
     if (obj.todoListId && typeof obj.todoListId === 'string')
       return { kind: 'todoList', id: obj.todoListId }
-    return null
   } catch {
-    return null
+    /* ignore */
   }
+  // 回退：从 result 文本解析 ID（如 prizm_create_document 返回 "已创建文档 abc123"）
+  if (resultStr) {
+    const docMatch = resultStr.match(/已创建文档\s+(\S+)/)
+    if (docMatch?.[1]) return { kind: 'document', id: docMatch[1] }
+    const noteMatch = resultStr.match(/已创建便签\s+(\S+)/)
+    if (noteMatch?.[1]) return { kind: 'note', id: noteMatch[1] }
+  }
+  return null
 }
 
 /* ── Done 状态的展开/折叠卡片 ── */
@@ -119,7 +126,7 @@ function FileToolCardDone({
           {fileRef && (
             <button
               className="tool-card__open-btn"
-              title="在工作区中打开"
+              title="打开预览"
               onClick={(e) => {
                 e.stopPropagation()
                 onOpenFile(fileRef.kind, fileRef.id)
@@ -163,7 +170,7 @@ function PrizmFileToolCard({ tc }: { tc: ToolCallRecord }) {
   const argsSummary = parseArgsSummary(tc.arguments)
   const isError = !!tc.isError
   const { openFileAtWork } = useWorkNavigation()
-  const fileRef = status === 'done' && !isError ? parseFileRef(tc.arguments) : null
+  const fileRef = status === 'done' && !isError ? parseFileRef(tc.arguments, tc.result) : null
 
   if (status === 'preparing') {
     return (
@@ -218,6 +225,7 @@ function PrizmFileToolCard({ tc }: { tc: ToolCallRecord }) {
 
 /* ── 注册：这些文件相关工具使用自定义卡片 ── */
 const FILE_RELATED_PRIZM_TOOLS = [
+  'prizm_create_document',
   'prizm_get_document_content',
   'prizm_update_document',
   'prizm_delete_document',

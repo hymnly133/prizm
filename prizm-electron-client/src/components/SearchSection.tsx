@@ -1,4 +1,5 @@
 import { Input, List, Tag } from '@lobehub/ui'
+import type { InputRef } from 'antd'
 import type { SearchResult } from '@prizm/client-core'
 import { useRef, useState, useEffect } from 'react'
 import { getSearchResultKindLabel } from '../constants/todo'
@@ -32,7 +33,7 @@ export default function SearchSection({
   const [showResults, setShowResults] = useState(false)
   const [focusedIndex, setFocusedIndex] = useState(0)
   const sectionRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<InputRef>(null)
   const itemRefs = useRef<(HTMLElement | null)[]>([])
 
   const debouncedQuery = useDebounce(query, 200)

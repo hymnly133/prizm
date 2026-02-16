@@ -134,13 +134,14 @@ export function parseMcpJson(value: string): ParseMcpResult {
     typeof parsed.mcpServers === 'object' &&
     !Array.isArray(parsed.mcpServers)
   ) {
-    const keys = Object.keys(parsed.mcpServers)
+    const mcpServersObj = parsed.mcpServers as LobeChatMcpServers
+    const keys = Object.keys(mcpServersObj)
     if (keys.length === 0) {
       return { errorCode: ParseMcpErrorCode.EmptyMcpServers, status: 'error' }
     }
     const servers: McpServerConfig[] = []
     for (const id of keys) {
-      const cfg = lobeConfigToPrizm(id, parsed.mcpServers[id])
+      const cfg = lobeConfigToPrizm(id, mcpServersObj[id])
       if (!cfg) {
         return { errorCode: ParseMcpErrorCode.InvalidMcpStructure, status: 'error' }
       }

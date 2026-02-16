@@ -74,7 +74,7 @@ export function DataCardHoverMenuContent({
     ? [{ key: '__empty', label: '暂无会话', disabled: true }]
     : sessions.map((s) => ({
         key: s.id,
-        label: s.title || '新会话'
+        label: s.llmSummary?.trim() || '新会话'
       }))
 
   const items: GenericItemType[] = [

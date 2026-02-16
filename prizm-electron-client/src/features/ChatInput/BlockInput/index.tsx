@@ -102,6 +102,49 @@ function createChipSpan(markdown: string, label: string, type: 'command' | 'ref'
   return span
 }
 
+/** Parse markdown string and render as DOM nodes, converting @(type:id) and /(cmd) to chips */
+function renderMarkdownToDOM(root: HTMLElement, markdown: string): void {
+  root.innerHTML = ''
+  const chipRegex = /(@\([^)]+\))|(\/\([^)]+\))/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  const appendText = (text: string) => {
+    const lines = text.split('\n')
+    lines.forEach((line, i) => {
+      if (line) root.appendChild(document.createTextNode(line))
+      if (i < lines.length - 1) root.appendChild(document.createElement('br'))
+    })
+  }
+
+  while ((match = chipRegex.exec(markdown)) !== null) {
+    if (match.index > lastIndex) {
+      appendText(markdown.slice(lastIndex, match.index))
+    }
+    const full = match[0]
+    if (full.startsWith('@(')) {
+      const inner = full.slice(2, -1)
+      const chip = createChipSpan(
+        full,
+        `@${inner.length > 20 ? inner.slice(0, 20) + '\u2026' : inner}`,
+        'ref'
+      )
+      root.appendChild(chip)
+    } else {
+      const inner = full.slice(2, -1)
+      const chip = createChipSpan(full, `/${inner}`, 'command')
+      root.appendChild(chip)
+    }
+    lastIndex = chipRegex.lastIndex
+  }
+
+  if (lastIndex < markdown.length) {
+    appendText(markdown.slice(lastIndex))
+  }
+
+  root.setAttribute('data-empty', markdown === '' ? 'true' : 'false')
+}
+
 const BlockInput = memo(() => {
   const rootRef = useRef<HTMLDivElement>(null)
   const storeApi = useStoreApi()
@@ -165,12 +208,23 @@ const BlockInput = memo(() => {
   }, [])
 
   useEffect(() => {
-    if (markdownContent !== '' || !rootRef.current) return
     const root = rootRef.current
-    if (getSerializedMarkdown(root) === '') return
-    root.innerHTML = '<br>'
-    root.setAttribute('data-empty', 'true')
-    lastSerializedRef.current = ''
+    if (!root) return
+
+    if (markdownContent === '') {
+      if (getSerializedMarkdown(root) === '') return
+      root.innerHTML = '<br>'
+      root.setAttribute('data-empty', 'true')
+      lastSerializedRef.current = ''
+      return
+    }
+
+    // Skip if content matches last known serialization (i.e. came from user input)
+    if (markdownContent === lastSerializedRef.current) return
+
+    // External change detected (e.g. from PendingChatPayloadApplicator) - render to DOM
+    renderMarkdownToDOM(root, markdownContent)
+    lastSerializedRef.current = markdownContent
   }, [markdownContent])
 
   const handleInput = useCallback(() => {

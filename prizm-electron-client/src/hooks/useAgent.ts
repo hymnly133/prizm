@@ -5,6 +5,7 @@
  */
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { usePrizmContext, useSyncEventContext } from '../context/PrizmContext'
+import { setAgentSending } from '../events/agentBackgroundStore'
 import type {
   AgentSession,
   AgentMessage,
@@ -42,6 +43,9 @@ export function useAgent(scope: string) {
 
   /** 当前流式请求的 AbortController */
   const abortControllerRef = useRef<AbortController | null>(null)
+
+  /** stopGeneration 的兜底超时，流自然结束时清理 */
+  const stopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const http = manager?.getHttpClient()
 
@@ -111,7 +115,7 @@ export function useAgent(scope: string) {
   )
 
   const updateSession = useCallback(
-    async (id: string, update: { title?: string }) => {
+    async (id: string, update: { llmSummary?: string }) => {
       if (!http || !scope) return null
       try {
         const session = await http.updateAgentSession(id, update, scope)
@@ -127,18 +131,25 @@ export function useAgent(scope: string) {
 
   /** 停止当前生成 */
   const stopGeneration = useCallback(async () => {
-    // 1. 本地 abort fetch
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort()
-      abortControllerRef.current = null
-    }
-    // 2. 通知后端停止（双路径保险）
+    // 1. 通知后端停止（服务端会 abort LLM 流，发送 done + usage，然后 res.end）
+    //    此时 SSE 流仍然打开，客户端能自然收到 done 事件获取 usage
     if (http && currentSession) {
       try {
         await http.stopAgentChat(currentSession.id, scope)
       } catch {
         // 忽略：后端可能已结束
       }
+    }
+    // 2. 设置超时兜底：如果 SSE 流未在 3s 内自然结束，才强制 abort
+    const ac = abortControllerRef.current
+    if (ac) {
+      const timer = setTimeout(() => {
+        if (abortControllerRef.current === ac) {
+          ac.abort()
+          abortControllerRef.current = null
+        }
+      }, 3000)
+      stopTimeoutRef.current = timer
     }
   }, [http, currentSession, scope])
 
@@ -147,6 +158,7 @@ export function useAgent(scope: string) {
       const session = sessionOverride ?? currentSession
       if (!http || !session || !content.trim()) return null
       setSending(true)
+      setAgentSending(true)
       setError(null)
 
       // 创建 AbortController
@@ -325,6 +337,10 @@ export function useAgent(scope: string) {
                 ]
               })
             }
+            // 独立 usage 事件（服务端在 abort/error 时的回退路径）
+            if (chunk.type === 'usage' && chunk.value) {
+              lastUsage = chunk.value as AgentMessage['usage']
+            }
             if (chunk.type === 'done') {
               if (chunk.usage) lastUsage = chunk.usage
               if (chunk.model) lastModel = chunk.model
@@ -440,7 +456,12 @@ export function useAgent(scope: string) {
         return null
       } finally {
         abortControllerRef.current = null
+        if (stopTimeoutRef.current) {
+          clearTimeout(stopTimeoutRef.current)
+          stopTimeoutRef.current = null
+        }
         setSending(false)
+        setAgentSending(false)
       }
     },
     [http, currentSession, scope, refreshSessions, selectedModel]
@@ -457,10 +478,11 @@ export function useAgent(scope: string) {
     }
   }, [lastSyncEvent, scope, currentSession?.id, refreshSessions, loadSession])
 
-  // 组件卸载时 abort 进行中的请求
+  // 组件卸载时清理（AgentPage 始终挂载，仅 app 关闭时触发）
   useEffect(() => {
     return () => {
       abortControllerRef.current?.abort()
+      setAgentSending(false)
     }
   }, [])
 

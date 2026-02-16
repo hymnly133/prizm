@@ -4,7 +4,7 @@
  * 支持停止生成、错误提示、会话重命名
  * 输入框使用 @lobehub/editor ChatInput，悬浮面板样式
  */
-import { ActionIcon, Empty, Flexbox, List, Markdown } from '@lobehub/ui'
+import { ActionIcon, Empty, Flexbox, List, Markdown, Tag } from '@lobehub/ui'
 import { ChatActionsBar as BaseChatActionsBar, ChatList, type ChatMessage } from '@lobehub/ui/chat'
 
 /** 过滤 createAt/updateAt 等非 DOM 属性，避免 React 警告 */
@@ -15,13 +15,15 @@ function ChatActionsBar(props: React.ComponentProps<typeof BaseChatActionsBar>) 
   }
   return <BaseChatActionsBar {...rest} />
 }
-import { LayoutDashboard, Pencil, Plus, Trash2 } from 'lucide-react'
+import { LayoutDashboard, Plus, Trash2, X } from 'lucide-react'
 import { useRef, useState, useMemo, useCallback, useEffect } from 'react'
 import { usePrizmContext } from '../context/PrizmContext'
 import { useChatWithFile } from '../context/ChatWithFileContext'
+import { WorkNavigationContext } from '../context/WorkNavigationContext'
 import { useAgent } from '../hooks/useAgent'
 import { useAgentScopeData } from '../hooks/useAgentScopeData'
 import { useScope } from '../hooks/useScope'
+import type { FileKind } from '../hooks/useFileList'
 import { MessageUsage } from '../components/MessageUsage'
 import { AgentRightSidebar } from '../components/AgentRightSidebar'
 import { ResizableSidebar } from '../components/layout'
@@ -30,26 +32,129 @@ import {
   DesktopChatInput,
   PendingChatPayloadApplicator,
   useChatInputStore,
+  useChatInputStoreApi,
   type ActionKeys
 } from '../features/ChatInput'
 import type { AgentMessage, MessagePart, MessagePartTool } from '@prizm/client-core'
+import type { StickyNote, Document as PrizmDocument, TodoList } from '@prizm/client-core'
 import { ToolCallCard, MemoryGrowthTag } from '../components/agent'
 import { AgentOverviewPanel } from '../components/agent/AgentOverviewPanel'
 
-/** Module-level cache for "new conversation" draft content, survives page switches */
-let _newConversationDraft = ''
+/* ── 文件内嵌预览面板 ── */
+const KIND_LABELS: Record<FileKind, string> = {
+  note: '便签',
+  document: '文档',
+  todoList: '待办列表'
+}
 
-/** Restores cached draft content on mount. Must be a child of ChatInputProvider. */
-function DraftCacheRestorer() {
-  const setMarkdownContent = useChatInputStore((s) => s.setMarkdownContent)
-  const restoredRef = useRef(false)
+function FilePreviewPanel({
+  fileRef,
+  scope,
+  onClose
+}: {
+  fileRef: { kind: FileKind; id: string }
+  scope: string
+  onClose: () => void
+}) {
+  const { manager } = usePrizmContext()
+  const http = manager?.getHttpClient()
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [title, setTitle] = useState('')
+  const [content, setContent] = useState('')
 
   useEffect(() => {
-    if (!restoredRef.current && _newConversationDraft) {
-      setMarkdownContent(_newConversationDraft)
-      restoredRef.current = true
+    if (!http) return
+    setLoading(true)
+    setError(null)
+
+    const fetchFile = async () => {
+      try {
+        if (fileRef.kind === 'document') {
+          const doc = await http.getDocument(fileRef.id, scope)
+          setTitle((doc as PrizmDocument).title || '无标题文档')
+          setContent((doc as PrizmDocument).content ?? '')
+        } else if (fileRef.kind === 'note') {
+          const note = await http.getNote(fileRef.id, scope)
+          const firstLine = ((note as StickyNote).content || '').split('\n')[0]?.trim()
+          setTitle(firstLine || '便签')
+          setContent((note as StickyNote).content || '')
+        } else if (fileRef.kind === 'todoList') {
+          const list = await http.getTodoList(scope, fileRef.id)
+          if (list) {
+            setTitle((list as TodoList).title || '待办列表')
+            const items = (list as TodoList).items ?? []
+            const md = items
+              .map((it) => `- [${it.status === 'done' ? 'x' : ' '}] ${it.title}`)
+              .join('\n')
+            setContent(md || '(空列表)')
+          } else {
+            setError('未找到该待办列表')
+          }
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : '加载失败')
+      } finally {
+        setLoading(false)
+      }
     }
-  }, [setMarkdownContent])
+    void fetchFile()
+  }, [http, fileRef.kind, fileRef.id, scope])
+
+  return (
+    <div className="file-preview-panel">
+      <div className="file-preview-panel__header">
+        <Flexbox horizontal align="center" gap={8} flex={1} style={{ minWidth: 0 }}>
+          <Tag size="small">{KIND_LABELS[fileRef.kind]}</Tag>
+          <span className="file-preview-panel__title">{title || '加载中…'}</span>
+        </Flexbox>
+        <ActionIcon icon={X} size="small" title="关闭" onClick={onClose} />
+      </div>
+      <div className="file-preview-panel__body">
+        {loading ? (
+          <div style={{ padding: 24, textAlign: 'center', opacity: 0.5 }}>加载中…</div>
+        ) : error ? (
+          <div style={{ padding: 24, textAlign: 'center', color: 'var(--ant-color-error)' }}>
+            {error}
+          </div>
+        ) : (
+          <div className="md-preview-wrap">
+            <Markdown>{content || '(空)'}</Markdown>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Draft cache key for new (unsaved) conversations */
+const DRAFT_KEY_NEW = '__new__'
+/** Module-level draft cache: sessionId → markdown content, survives session switches & page toggles */
+const _draftCache = new Map<string, string>()
+
+/**
+ * Saves / restores draft per session (keyed by sessionId).
+ * - On mount (or sessionId change): restores cached content
+ * - On cleanup (unmount or before sessionId change): saves current content
+ * Must be a child of ChatInputProvider.
+ */
+function DraftCacheManager({ sessionId }: { sessionId: string }) {
+  const storeApi = useChatInputStoreApi()
+  const setMarkdownContent = useChatInputStore((s) => s.setMarkdownContent)
+
+  useEffect(() => {
+    const cached = _draftCache.get(sessionId) ?? ''
+    setMarkdownContent(cached)
+
+    return () => {
+      const content = storeApi.getState().markdownContent
+      if (content.trim()) {
+        _draftCache.set(sessionId, content)
+      } else {
+        _draftCache.delete(sessionId)
+      }
+    }
+  }, [sessionId, storeApi, setMarkdownContent])
 
   return null
 }
@@ -177,7 +282,7 @@ function AssistantMessageExtra(props: ChatMessage) {
   )
 }
 
-export default function AgentPage() {
+export default function AgentPage({ hidden }: { hidden?: boolean }) {
   const { currentScope } = useScope()
   const { pendingPayload } = useChatWithFile()
   const { scopeItems, slashCommands } = useAgentScopeData(currentScope)
@@ -190,7 +295,6 @@ export default function AgentPage() {
     createSession,
     deleteSession,
     loadSession,
-    updateSession,
     sendMessage,
     stopGeneration,
     setCurrentSession,
@@ -199,20 +303,22 @@ export default function AgentPage() {
     setSelectedModel
   } = useAgent(currentScope)
 
-  const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
-  const [editTitle, setEditTitle] = useState('')
   const [overviewMode, setOverviewMode] = useState(!currentSession)
+  const [previewFile, setPreviewFile] = useState<{ kind: FileKind; id: string } | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const pendingHandledRef = useRef<string | null>(null)
 
-  /** Sync draft content to module-level cache for cross-page persistence */
+  /** Sync draft content to module-level cache for cross-page / cross-session persistence */
   const handleMarkdownContentChange = useCallback(
     (content: string) => {
-      if (!currentSession || overviewMode) {
-        _newConversationDraft = content
+      const key = currentSession?.id ?? DRAFT_KEY_NEW
+      if (content.trim()) {
+        _draftCache.set(key, content)
+      } else {
+        _draftCache.delete(key)
       }
     },
-    [currentSession, overviewMode]
+    [currentSession]
   )
 
   useEffect(() => {
@@ -250,7 +356,8 @@ export default function AgentPage() {
         if (!session) return
       }
 
-      _newConversationDraft = ''
+      _draftCache.delete(DRAFT_KEY_NEW)
+      if (session) _draftCache.delete(session.id)
       clearContent()
       await sendMessage(content, session)
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -265,16 +372,6 @@ export default function AgentPage() {
   }, [setCurrentSession])
 
   const leftActions: ActionKeys[] = ['fileUpload', 'clear']
-
-  const handleRename = async (id: string) => {
-    if (!editTitle.trim()) {
-      setEditingSessionId(null)
-      return
-    }
-    await updateSession(id, { title: editTitle.trim() })
-    setEditingSessionId(null)
-    setEditTitle('')
-  }
 
   /** 单一消息源：服务器消息 + 乐观更新（流式过程中原地更新 assistant） */
   const chatData: ChatMessage[] = useMemo(() => {
@@ -291,9 +388,11 @@ export default function AgentPage() {
     return messages.map(toChatMessage)
   }, [currentSession, optimisticMessages, sending])
 
-  // 仅在没有流式内容时显示 loading，避免转圈遮挡正在输出的文字
+  // 仅在没有流式内容时显示 loading，避免转圈遮挡正在输出的文字或工具卡片
   const lastMsg = chatData[chatData.length - 1]
-  const lastMsgHasContent = !!lastMsg?.content?.trim?.()
+  const lastExtra = lastMsg?.extra as { parts?: MessagePart[] } | undefined
+  const lastMsgHasContent =
+    !!lastMsg?.content?.trim?.() || (Array.isArray(lastExtra?.parts) && lastExtra!.parts.length > 0)
   const loadingId =
     sending && chatData.length > 0 && !lastMsgHasContent
       ? chatData[chatData.length - 1].id
@@ -301,54 +400,24 @@ export default function AgentPage() {
 
   const sessionListItems = sessions.map((s) => ({
     key: s.id,
-    className: editingSessionId === s.id ? 'agent-session-editing' : undefined,
     classNames: { actions: 'agent-session-actions' },
-    title:
-      editingSessionId === s.id ? (
-        <input
-          className="agent-rename-input"
-          value={editTitle}
-          onChange={(e) => setEditTitle(e.target.value)}
-          onBlur={() => handleRename(s.id)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') handleRename(s.id)
-            if (e.key === 'Escape') setEditingSessionId(null)
-          }}
-          autoFocus
-          onClick={(e) => e.stopPropagation()}
-        />
-      ) : (
-        <div className="agent-session-item">
-          <span className="agent-session-item-title">{s.title || '新会话'}</span>
-          {s.llmSummary?.trim() && (
-            <span className="agent-session-item-summary" title={s.llmSummary}>
-              {s.llmSummary.length > 50 ? `${s.llmSummary.slice(0, 50)}…` : s.llmSummary}
-            </span>
-          )}
-        </div>
-      ),
+    title: (
+      <div className="agent-session-item">
+        <span className="agent-session-item-summary" title={s.llmSummary}>
+          {s.llmSummary?.trim() || '新会话'}
+        </span>
+      </div>
+    ),
     actions: (
-      <>
-        <ActionIcon
-          icon={Pencil}
-          title="重命名"
-          size="small"
-          onClick={(e) => {
-            e.stopPropagation()
-            setEditingSessionId(s.id)
-            setEditTitle(s.title || '')
-          }}
-        />
-        <ActionIcon
-          icon={Trash2}
-          title="删除"
-          size="small"
-          onClick={(e) => {
-            e.stopPropagation()
-            deleteSession(s.id)
-          }}
-        />
-      </>
+      <ActionIcon
+        icon={Trash2}
+        title="删除"
+        size="small"
+        onClick={(e) => {
+          e.stopPropagation()
+          deleteSession(s.id)
+        }}
+      />
     ),
     showAction: true,
     onClick: () => {
@@ -358,7 +427,7 @@ export default function AgentPage() {
   }))
 
   return (
-    <section className="agent-page">
+    <section className="agent-page" style={hidden ? { display: 'none' } : undefined}>
       <ResizableSidebar side="left" storageKey="agent-sessions" defaultWidth={220}>
         <div className="agent-sidebar">
           <div className="agent-sidebar-header">
@@ -402,119 +471,147 @@ export default function AgentPage() {
         </div>
       </ResizableSidebar>
 
-      <div className="agent-content">
-        <div className="agent-main">
+      <WorkNavigationContext.Provider
+        value={{
+          openFileAtWork: (kind: FileKind, id: string) => setPreviewFile({ kind, id }),
+          pendingWorkFile: null,
+          consumePendingWorkFile: () => {}
+        }}
+      >
+        <div className="agent-content">
           {overviewMode ? (
-            <AgentOverviewPanel selectedModel={selectedModel} onModelChange={setSelectedModel} />
-          ) : currentSession ? (
-            <div className="agent-messages">
-              <ChatList
-                data={chatData}
-                variant="bubble"
-                showAvatar
-                showTitle
-                loadingId={loadingId}
-                renderActions={{
-                  default: ChatActionsBar
-                }}
-                renderMessages={{
-                  default: ({ editableContent }) => editableContent,
-                  assistant: (props) => {
-                    const extra = props.extra as { parts?: MessagePart[] } | undefined
-                    const parts = extra?.parts
-                    if (Array.isArray(parts) && parts.length > 0) {
-                      return (
-                        <div className="assistant-message-by-parts">
-                          {parts.map((p, i) =>
-                            p.type === 'text' ? (
-                              <div key={i} className="assistant-part-text">
-                                <Markdown>{p.content}</Markdown>
-                              </div>
-                            ) : (
-                              <ToolCallCard
-                                key={p.id}
-                                tc={{
-                                  id: p.id,
-                                  name: p.name,
-                                  arguments: p.arguments,
-                                  result: p.result,
-                                  isError: p.isError,
-                                  status: (p as MessagePartTool).status
-                                }}
-                              />
-                            )
-                          )}
-                        </div>
-                      )
-                    }
-                    return (props as { editableContent?: React.ReactNode }).editableContent ?? null
-                  }
-                }}
-                renderMessagesExtra={{
-                  assistant: AssistantMessageExtra
-                }}
-              />
-              <div ref={messagesEndRef} />
+            <div className="agent-main">
+              <AgentOverviewPanel selectedModel={selectedModel} onModelChange={setSelectedModel} />
             </div>
           ) : (
-            <div className="agent-empty">
-              <Empty
-                title="新对话"
-                description={loading ? '加载中...' : '在下方输入开始对话，会话将自动创建'}
-              />
-            </div>
+            <>
+              <div className="agent-main">
+                {currentSession ? (
+                  <div className="agent-messages">
+                    <ChatList
+                      data={chatData}
+                      variant="bubble"
+                      showAvatar
+                      showTitle
+                      loadingId={loadingId}
+                      renderActions={{
+                        default: ChatActionsBar
+                      }}
+                      renderMessages={{
+                        default: ({ editableContent }) => editableContent,
+                        assistant: (props) => {
+                          const extra = props.extra as { parts?: MessagePart[] } | undefined
+                          const parts = extra?.parts
+                          if (Array.isArray(parts) && parts.length > 0) {
+                            return (
+                              <div className="assistant-message-by-parts">
+                                {parts.map((p, i) =>
+                                  p.type === 'text' ? (
+                                    <div key={i} className="assistant-part-text">
+                                      <Markdown>{p.content}</Markdown>
+                                    </div>
+                                  ) : (
+                                    <ToolCallCard
+                                      key={p.id}
+                                      tc={{
+                                        id: p.id,
+                                        name: p.name,
+                                        arguments: p.arguments,
+                                        result: p.result,
+                                        isError: p.isError,
+                                        status: (p as MessagePartTool).status
+                                      }}
+                                    />
+                                  )
+                                )}
+                              </div>
+                            )
+                          }
+                          return (
+                            (props as { editableContent?: React.ReactNode }).editableContent ?? null
+                          )
+                        }
+                      }}
+                      renderMessagesExtra={{
+                        assistant: AssistantMessageExtra
+                      }}
+                    />
+                    <div ref={messagesEndRef} />
+                  </div>
+                ) : (
+                  <div className="agent-empty">
+                    <Empty
+                      title="新对话"
+                      description={loading ? '加载中...' : '在下方输入开始对话，会话将自动创建'}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {error && <div className="agent-error-banner">{error}</div>}
+
+              <div className="agent-input-wrap agent-input-floating">
+                <ChatInputProvider
+                  leftActions={leftActions}
+                  rightActions={[]}
+                  scopeItems={scopeItems}
+                  scopeSlashCommands={slashCommands}
+                  sendButtonProps={{
+                    disabled: sending,
+                    generating: sending,
+                    onStop: () => {
+                      stopGeneration()
+                    },
+                    shape: 'round'
+                  }}
+                  onSend={handleSend}
+                  onMarkdownContentChange={handleMarkdownContentChange}
+                  allowExpand
+                >
+                  <DraftCacheManager sessionId={currentSession?.id ?? DRAFT_KEY_NEW} />
+                  <PendingChatPayloadApplicator />
+                  <DesktopChatInput
+                    onClear={handleClear}
+                    inputContainerProps={{
+                      minHeight: 88,
+                      style: {
+                        borderRadius: 20,
+                        boxShadow: '0 12px 32px rgba(0,0,0,.04)'
+                      }
+                    }}
+                  />
+                </ChatInputProvider>
+              </div>
+            </>
           )}
         </div>
 
-        {error && <div className="agent-error-banner">{error}</div>}
-
-        <div className="agent-input-wrap agent-input-floating">
-          <ChatInputProvider
-            leftActions={leftActions}
-            rightActions={[]}
-            scopeItems={scopeItems}
-            scopeSlashCommands={slashCommands}
-            sendButtonProps={{
-              disabled: sending,
-              generating: sending,
-              onStop: () => {
-                stopGeneration()
-              },
-              shape: 'round'
-            }}
-            onSend={handleSend}
-            onMarkdownContentChange={handleMarkdownContentChange}
-            allowExpand
+        {!overviewMode && (
+          <ResizableSidebar
+            side="right"
+            storageKey="agent-right"
+            defaultWidth={previewFile ? 360 : 280}
           >
-            <DraftCacheRestorer />
-            <PendingChatPayloadApplicator />
-            <DesktopChatInput
-              onClear={handleClear}
-              inputContainerProps={{
-                minHeight: 88,
-                style: {
-                  borderRadius: 20,
-                  boxShadow: '0 12px 32px rgba(0,0,0,.04)'
-                }
-              }}
-            />
-          </ChatInputProvider>
-        </div>
-      </div>
-
-      {!overviewMode && (
-        <ResizableSidebar side="right" storageKey="agent-right" defaultWidth={280}>
-          <AgentRightSidebar
-            sending={sending}
-            error={error}
-            currentSession={currentSession}
-            optimisticMessages={optimisticMessages}
-            selectedModel={selectedModel}
-            onModelChange={setSelectedModel}
-            overviewMode={false}
-          />
-        </ResizableSidebar>
-      )}
+            {previewFile ? (
+              <FilePreviewPanel
+                fileRef={previewFile}
+                scope={currentScope}
+                onClose={() => setPreviewFile(null)}
+              />
+            ) : (
+              <AgentRightSidebar
+                sending={sending}
+                error={error}
+                currentSession={currentSession}
+                optimisticMessages={optimisticMessages}
+                selectedModel={selectedModel}
+                onModelChange={setSelectedModel}
+                overviewMode={false}
+              />
+            )}
+          </ResizableSidebar>
+        )}
+      </WorkNavigationContext.Provider>
     </section>
   )
 }

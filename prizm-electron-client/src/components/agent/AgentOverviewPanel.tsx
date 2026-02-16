@@ -39,9 +39,11 @@ export function AgentOverviewPanel({ selectedModel, onModelChange }: AgentOvervi
     loadDocuments,
     models,
     defaultModel,
-    threeLevelMemories,
-    threeLevelLoading,
-    loadThreeLevelMemories,
+    memoryEnabled,
+    userMemoryCount,
+    scopeMemoryCount,
+    memoryCountsLoading,
+    loadMemoryCounts,
     sessionsCount,
     sessionsCountLoading,
     loadSessionsCount
@@ -52,9 +54,9 @@ export function AgentOverviewPanel({ selectedModel, onModelChange }: AgentOvervi
   const handleRefreshAll = useCallback(() => {
     void loadScopeContext()
     void loadDocuments()
-    void loadThreeLevelMemories()
+    void loadMemoryCounts()
     void loadSessionsCount()
-  }, [loadScopeContext, loadDocuments, loadThreeLevelMemories, loadSessionsCount])
+  }, [loadScopeContext, loadDocuments, loadMemoryCounts, loadSessionsCount])
 
   return (
     <div className="overview-panel">
@@ -100,13 +102,13 @@ export function AgentOverviewPanel({ selectedModel, onModelChange }: AgentOvervi
               <StatBlock
                 icon={<Brain size={18} />}
                 label="User 记忆"
-                value={threeLevelLoading ? '...' : String(threeLevelMemories?.user.length ?? 0)}
+                value={memoryCountsLoading ? '...' : String(userMemoryCount)}
                 color="var(--ant-color-warning)"
               />
               <StatBlock
                 icon={<Sparkles size={18} />}
                 label="Scope 记忆"
-                value={threeLevelLoading ? '...' : String(threeLevelMemories?.scope.length ?? 0)}
+                value={memoryCountsLoading ? '...' : String(scopeMemoryCount)}
                 color="var(--ant-geekblue-6, #2f54eb)"
               />
             </div>
@@ -145,32 +147,27 @@ export function AgentOverviewPanel({ selectedModel, onModelChange }: AgentOvervi
             <button
               type="button"
               className="overview-card-action"
-              onClick={() => void loadThreeLevelMemories()}
-              disabled={threeLevelLoading}
+              onClick={() => void loadMemoryCounts()}
+              disabled={memoryCountsLoading}
               title="刷新记忆"
             >
               <RefreshCw size={12} />
             </button>
           </div>
           <div className="overview-card-body">
-            {threeLevelLoading ? (
+            {memoryCountsLoading ? (
               <LoadingPlaceholder />
-            ) : threeLevelMemories ? (
+            ) : memoryEnabled ? (
               <div className="overview-memory-tiers">
                 <MemoryTierBar
                   label="User"
-                  count={threeLevelMemories.user.length}
+                  count={userMemoryCount}
                   color="var(--ant-color-warning)"
                 />
                 <MemoryTierBar
                   label="Scope"
-                  count={threeLevelMemories.scope.length}
+                  count={scopeMemoryCount}
                   color="var(--ant-color-primary)"
-                />
-                <MemoryTierBar
-                  label="Session"
-                  count={threeLevelMemories.session.length}
-                  color="var(--ant-color-success)"
                 />
               </div>
             ) : (

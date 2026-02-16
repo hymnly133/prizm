@@ -71,6 +71,7 @@ function getCategoryColor(toolName: string): string {
 
 /* ── 可打开预览的文件相关工具 ── */
 const FILE_TOOLS = new Set([
+  'prizm_create_document',
   'prizm_get_document_content',
   'prizm_update_document',
   'prizm_delete_document',
@@ -84,8 +85,8 @@ const FILE_TOOLS = new Set([
   'prizm_update_todo_list'
 ])
 
-/* ── 从参数解析文件引用 ── */
-function parseFileRef(argsStr: string): { kind: FileKind; id: string } | null {
+/* ── 从参数（或 result）解析文件引用 ── */
+function parseFileRef(argsStr: string, resultStr?: string): { kind: FileKind; id: string } | null {
   try {
     const obj = JSON.parse(argsStr || '{}') as Record<string, unknown>
     if (obj.documentId && typeof obj.documentId === 'string')
@@ -93,10 +94,16 @@ function parseFileRef(argsStr: string): { kind: FileKind; id: string } | null {
     if (obj.noteId && typeof obj.noteId === 'string') return { kind: 'note', id: obj.noteId }
     if (obj.todoListId && typeof obj.todoListId === 'string')
       return { kind: 'todoList', id: obj.todoListId }
-    return null
   } catch {
-    return null
+    /* ignore */
   }
+  if (resultStr) {
+    const docMatch = resultStr.match(/已创建文档\s+(\S+)/)
+    if (docMatch?.[1]) return { kind: 'document', id: docMatch[1] }
+    const noteMatch = resultStr.match(/已创建便签\s+(\S+)/)
+    if (noteMatch?.[1]) return { kind: 'note', id: noteMatch[1] }
+  }
+  return null
 }
 
 /* ── 从参数提取摘要 ── */
@@ -130,7 +137,8 @@ export function ToolCallCard({ tc }: ToolCallCardProps) {
   const { openFileAtWork } = useWorkNavigation()
 
   const isFileRelated = FILE_TOOLS.has(tc.name)
-  const fileRef = isFileRelated && status === 'done' && !isError ? parseFileRef(tc.arguments) : null
+  const fileRef =
+    isFileRelated && status === 'done' && !isError ? parseFileRef(tc.arguments, tc.result) : null
 
   /* ── preparing: LLM 刚决定调用此工具 ── */
   if (status === 'preparing') {
@@ -242,7 +250,7 @@ function ToolCardDone({
           {fileRef && (
             <button
               className="tool-card__open-btn"
-              title="在工作区中打开"
+              title="打开预览"
               onClick={(e) => {
                 e.stopPropagation()
                 onOpenFile(fileRef.kind, fileRef.id)

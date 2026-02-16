@@ -6,7 +6,6 @@ import { useState, useCallback, useEffect } from 'react'
 import { usePrizmContext } from '../context/PrizmContext'
 import { useScope } from './useScope'
 import type { Document, AvailableModel } from '@prizm/client-core'
-import type { MemoryItem } from '@prizm/shared'
 
 export interface AgentOverviewData {
   currentScope: string
@@ -18,9 +17,14 @@ export interface AgentOverviewData {
   loadDocuments: () => Promise<void>
   models: AvailableModel[]
   defaultModel: string
-  threeLevelMemories: { user: MemoryItem[]; scope: MemoryItem[]; session: MemoryItem[] } | null
-  threeLevelLoading: boolean
-  loadThreeLevelMemories: () => Promise<void>
+  /** 记忆模块是否启用 */
+  memoryEnabled: boolean
+  /** User 层记忆总数 */
+  userMemoryCount: number
+  /** Scope 层记忆总数 */
+  scopeMemoryCount: number
+  memoryCountsLoading: boolean
+  loadMemoryCounts: () => Promise<void>
   sessionsCount: number
   sessionsCountLoading: boolean
   loadSessionsCount: () => Promise<void>
@@ -29,7 +33,7 @@ export interface AgentOverviewData {
   > | null
 }
 
-export function useAgentOverviewData(sessionId?: string): AgentOverviewData {
+export function useAgentOverviewData(): AgentOverviewData {
   const { currentScope } = useScope()
   const { manager } = usePrizmContext()
   const http = manager?.getHttpClient() ?? null
@@ -40,12 +44,10 @@ export function useAgentOverviewData(sessionId?: string): AgentOverviewData {
   const [documentsLoading, setDocumentsLoading] = useState(false)
   const [models, setModels] = useState<AvailableModel[]>([])
   const [defaultModel, setDefaultModel] = useState('')
-  const [threeLevelMemories, setThreeLevelMemories] = useState<{
-    user: MemoryItem[]
-    scope: MemoryItem[]
-    session: MemoryItem[]
-  } | null>(null)
-  const [threeLevelLoading, setThreeLevelLoading] = useState(false)
+  const [memoryEnabled, setMemoryEnabled] = useState(false)
+  const [userMemoryCount, setUserMemoryCount] = useState(0)
+  const [scopeMemoryCount, setScopeMemoryCount] = useState(0)
+  const [memoryCountsLoading, setMemoryCountsLoading] = useState(false)
   const [sessionsCount, setSessionsCount] = useState(0)
   const [sessionsCountLoading, setSessionsCountLoading] = useState(false)
 
@@ -87,22 +89,22 @@ export function useAgentOverviewData(sessionId?: string): AgentOverviewData {
     }
   }, [http])
 
-  const loadThreeLevelMemories = useCallback(async () => {
+  const loadMemoryCounts = useCallback(async () => {
     if (!http || !currentScope) return
-    setThreeLevelLoading(true)
+    setMemoryCountsLoading(true)
     try {
-      const res = await http.getThreeLevelMemories(currentScope, sessionId)
-      if (res.enabled) {
-        setThreeLevelMemories({ user: res.user, scope: res.scope, session: res.session })
-      } else {
-        setThreeLevelMemories(null)
-      }
+      const res = await http.getMemoryCounts(currentScope)
+      setMemoryEnabled(res.enabled)
+      setUserMemoryCount(res.userCount)
+      setScopeMemoryCount(res.scopeCount)
     } catch {
-      setThreeLevelMemories(null)
+      setMemoryEnabled(false)
+      setUserMemoryCount(0)
+      setScopeMemoryCount(0)
     } finally {
-      setThreeLevelLoading(false)
+      setMemoryCountsLoading(false)
     }
-  }, [http, currentScope, sessionId])
+  }, [http, currentScope])
 
   const loadSessionsCount = useCallback(async () => {
     if (!http || !currentScope) return
@@ -121,9 +123,9 @@ export function useAgentOverviewData(sessionId?: string): AgentOverviewData {
     void loadScopeContext()
     void loadDocuments()
     void loadModels()
-    void loadThreeLevelMemories()
+    void loadMemoryCounts()
     void loadSessionsCount()
-  }, [loadScopeContext, loadDocuments, loadModels, loadThreeLevelMemories, loadSessionsCount])
+  }, [loadScopeContext, loadDocuments, loadModels, loadMemoryCounts, loadSessionsCount])
 
   return {
     currentScope,
@@ -135,9 +137,11 @@ export function useAgentOverviewData(sessionId?: string): AgentOverviewData {
     loadDocuments,
     models,
     defaultModel,
-    threeLevelMemories,
-    threeLevelLoading,
-    loadThreeLevelMemories,
+    memoryEnabled,
+    userMemoryCount,
+    scopeMemoryCount,
+    memoryCountsLoading,
+    loadMemoryCounts,
     sessionsCount,
     sessionsCountLoading,
     loadSessionsCount,
