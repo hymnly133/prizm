@@ -43,6 +43,7 @@ export class SQLiteAdapter implements RelationalStoreAdapter {
         new_memory_metadata TEXT,
         kept_memory_content TEXT,
         vector_distance REAL,
+        text_similarity REAL,
         llm_reasoning TEXT,
         user_id TEXT,
         group_id TEXT,

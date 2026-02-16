@@ -13,6 +13,9 @@ import { IExtractor } from '../extractors/BaseExtractor.js'
 import type { UnifiedExtractor } from '../extractors/UnifiedExtractor.js'
 import type { ICompletionProvider } from '../utils/llm.js'
 import { DEDUP_CONFIRM_PROMPT } from '../prompts.js'
+import { Jieba } from '@node-rs/jieba'
+
+const jieba = new Jieba()
 
 export interface IEmbeddingProvider {
   getEmbedding(text: string): Promise<number[]>
@@ -27,6 +30,8 @@ export interface DedupLogEntry {
   new_memory_metadata: string
   kept_memory_content: string
   vector_distance: number
+  /** 文本相似度分数 (0~1)，-1 表示未使用文本匹配 */
+  text_similarity: number
   llm_reasoning: string
   user_id: string | null
   group_id: string | null
@@ -46,8 +51,13 @@ export interface MemoryManagerOptions {
 /** LanceDB 只能推断简单类型，将 metadata 等复杂字段序列化为字符串 */
 function toVectorRow(memory: Record<string, unknown>, vector: number[]): Record<string, unknown> {
   const { embedding: _, ...rest } = memory
+  // LanceDB 无法为 undefined 推断数据类型，统一转为 null
+  const sanitized: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(rest)) {
+    sanitized[key] = value === undefined ? null : value
+  }
   return {
-    ...rest,
+    ...sanitized,
     vector,
     metadata:
       typeof memory.metadata === 'string' ? memory.metadata : JSON.stringify(memory.metadata ?? {})
@@ -138,8 +148,11 @@ export class MemoryManager {
   /** L2 距离阈值：低于此值进入去重流程（cosine sim ≈ 0.90） */
   private static readonly DEDUP_L2_THRESHOLD = 0.45
 
+  /** 文本相似度阈值：高于此值进入 LLM 确认流程（LLM 不可用时作为自动去重阈值） */
+  private static readonly TEXT_DEDUP_THRESHOLD = 0.5
+
   /**
-   * 完整去重流程：向量匹配 → LLM 二次确认 → 记录日志 → touch。
+   * 完整去重流程：文本匹配 → 向量匹配 → LLM 二次确认 → 记录日志 → touch。
    * @returns 已有记忆 id（去重成功），或 null（应正常插入新记忆）
    */
   private async tryDedup(
@@ -154,35 +167,68 @@ export class MemoryManager {
       console.log(`[Dedup] Skipped: type=${type} not in DEDUP_TYPES`)
       return null
     }
-    if (!embedding || embedding.length === 0) {
-      console.log(
-        `[Dedup] Skipped: no embedding for type=${type}, content="${newContent.slice(0, 60)}"`
-      )
-      return null
-    }
 
     console.log(`[Dedup] Checking type=${type}, content="${newContent.slice(0, 80)}"`)
 
-    // 1. 向量搜索候选
-    const candidate = await this.findDedupCandidate(type, embedding, groupId, userId)
+    // ── 阶段 0：并行收集文本候选 + 向量候选 ──
+    const [textCandidate, vectorCandidate] = await Promise.all([
+      this.findDedupCandidateByText(type, newContent, groupId, userId),
+      embedding?.length
+        ? this.findDedupCandidate(type, embedding, groupId, userId)
+        : Promise.resolve(null)
+    ])
+
+    // 保留双分数原始值
+    const textSim = textCandidate?.similarity ?? -1
+    const vectorDist = vectorCandidate?.distance ?? -1
+
+    // 将向量 L2 距离归一化为 0~1 相似度分数（距离越小 → 分数越高）
+    const vectorSimNorm = vectorCandidate
+      ? 1 - vectorCandidate.distance / MemoryManager.DEDUP_L2_THRESHOLD
+      : -1
+
+    // 选择归一化分数最高的候选
+    const useText = textCandidate != null && (vectorSimNorm <= 0 || textSim >= vectorSimNorm)
+    const candidate = useText
+      ? {
+          existingId: textCandidate!.existingId,
+          existingContent: textCandidate!.existingContent,
+          source: 'text' as const
+        }
+      : vectorCandidate
+      ? {
+          existingId: vectorCandidate.existingId,
+          existingContent: vectorCandidate.existingContent,
+          source: 'vector' as const
+        }
+      : null
+
     if (!candidate) {
       console.log(`[Dedup] No candidate found, will insert new memory`)
       return null
     }
 
-    // 2. LLM 二次确认（若配置了 llmProvider）
-    let reasoning = `vector-only (distance=${candidate.distance.toFixed(3)})`
+    const detail = `text-sim=${textSim >= 0 ? textSim.toFixed(3) : 'N/A'}, vector-dist=${
+      vectorDist >= 0 ? vectorDist.toFixed(3) : 'N/A'
+    }, chosen=${candidate.source}`
+    console.log(`[Dedup] Best candidate: ${detail}`)
+
+    // ── 阶段 1：LLM 确认（必须） ──
+    let reasoning = detail
     if (this.llmProvider) {
       try {
         const llmResult = await this.confirmDedupWithLLM(candidate.existingContent, newContent)
         if (!llmResult.isDuplicate) {
-          console.log(`[Dedup] LLM says DIFF: ${llmResult.reasoning}`)
+          console.log(`[Dedup] Candidate (${detail}) rejected by LLM: ${llmResult.reasoning}`)
           return null
         }
-        reasoning = llmResult.reasoning
+        reasoning = `${detail}, ${llmResult.reasoning}`
       } catch (e) {
-        console.warn('[Dedup] LLM confirmation failed, falling back to vector-only:', e)
+        console.warn('[Dedup] LLM confirmation failed, falling back to similarity-only:', e)
+        reasoning = `${detail}, llm-fallback`
       }
+    } else {
+      reasoning = `${detail}, no-llm`
     }
 
     console.log(
@@ -190,23 +236,19 @@ export class MemoryManager {
         candidate.existingId
       }), suppressed="${newContent.slice(0, 60)}", reason="${reasoning}"`
     )
-
-    // 3. 记录去重日志（支持回退）
     await this.logDedupRecord({
       keptMemoryId: candidate.existingId,
       keptMemoryContent: candidate.existingContent,
       newMemoryContent: newContent,
       newMemoryType: type,
       newMemoryMetadata: newMemorySnapshot,
-      vectorDistance: candidate.distance,
+      vectorDistance: vectorDist,
+      textSimilarity: textSim,
       llmReasoning: reasoning,
       userId,
       groupId
     })
-
-    // 4. 刷新已有记忆的 updated_at
     await this.touchExistingMemory(candidate.existingId, groupId)
-
     return candidate.existingId
   }
 
@@ -256,6 +298,99 @@ export class MemoryManager {
     }
   }
 
+  /**
+   * 基于文本相似度的去重候选搜索（语言无关 + 中文增强）。
+   * 从关系型 DB 中查询同类型记忆，用 max(Dice 系数, jieba Jaccard) 匹配。
+   * - Dice 系数（字符 bigram）：语言无关，保序，对任意语言有效
+   * - jieba Jaccard（分词 token）：中文语义增强
+   * 对 mock embedding（所有值相同）场景下的去重尤为关键。
+   */
+  private async findDedupCandidateByText(
+    type: MemoryType,
+    newContent: string,
+    groupId: string | undefined,
+    userId: string | undefined
+  ): Promise<{
+    existingId: string
+    existingContent: string
+    similarity: number
+  } | null> {
+    try {
+      const conditions: string[] = ['type = ?']
+      const params: (string | number)[] = [type]
+
+      if (userId) {
+        conditions.push('user_id = ?')
+        params.push(userId)
+      }
+      if (groupId !== undefined) {
+        conditions.push('group_id = ?')
+        params.push(groupId)
+      } else if (type === MemoryType.PROFILE) {
+        conditions.push('group_id IS NULL')
+      }
+
+      const sql = `SELECT id, content FROM memories WHERE ${conditions.join(
+        ' AND '
+      )} ORDER BY updated_at DESC LIMIT 100`
+      const rows: Array<{ id: string; content: string }> = await this.storage.relational.query(
+        sql,
+        params
+      )
+      if (rows.length === 0) return null
+
+      const newNorm = normalizeForDedup(newContent)
+      if (newNorm.length === 0) return null
+
+      const newBigrams = buildBigrams(newNorm)
+      const newTokens = tokenizeForDedup(newContent)
+
+      let bestMatch: { existingId: string; existingContent: string; similarity: number } | null =
+        null
+
+      for (const row of rows) {
+        const existingContent = row.content ?? ''
+        if (!existingContent) continue
+
+        const existingNorm = normalizeForDedup(existingContent)
+        if (existingNorm.length === 0) continue
+
+        // 语言无关：Dice coefficient（字符 bigram）
+        const dice = diceCoefficientFromBigrams(newBigrams, buildBigrams(existingNorm))
+
+        // 中文增强：jieba token Jaccard（非中文场景 token 数可能为 0，此时退化为纯 Dice）
+        const existingTokens = tokenizeForDedup(existingContent)
+        const jaccard =
+          newTokens.size > 0 && existingTokens.size > 0
+            ? jaccardSimilarity(newTokens, existingTokens)
+            : 0
+
+        const sim = Math.max(dice, jaccard)
+        if (
+          sim >= MemoryManager.TEXT_DEDUP_THRESHOLD &&
+          (!bestMatch || sim > bestMatch.similarity)
+        ) {
+          bestMatch = { existingId: row.id, existingContent, similarity: sim }
+        }
+      }
+
+      if (bestMatch) {
+        console.log(
+          `[Dedup] Text search for ${type}: best match sim=${bestMatch.similarity.toFixed(3)}, id=${
+            bestMatch.existingId
+          }, content="${bestMatch.existingContent.slice(0, 60)}"`
+        )
+      } else {
+        console.log(`[Dedup] Text search for ${type}: no match above threshold`)
+      }
+
+      return bestMatch
+    } catch (e) {
+      console.warn(`[Dedup] Text search failed for ${type}:`, e)
+      return null
+    }
+  }
+
   /** LLM 轻量级二次确认：判断两条记忆是否语义等价 */
   private async confirmDedupWithLLM(
     existingContent: string,
@@ -285,6 +420,7 @@ export class MemoryManager {
     newMemoryType: string
     newMemoryMetadata?: Record<string, unknown>
     vectorDistance: number
+    textSimilarity: number
     llmReasoning: string
     userId?: string
     groupId?: string
@@ -298,6 +434,7 @@ export class MemoryManager {
         new_memory_metadata: info.newMemoryMetadata ? JSON.stringify(info.newMemoryMetadata) : null,
         kept_memory_content: info.keptMemoryContent,
         vector_distance: info.vectorDistance,
+        text_similarity: info.textSimilarity,
         llm_reasoning: info.llmReasoning,
         user_id: info.userId ?? null,
         group_id: info.groupId ?? null,
@@ -634,7 +771,7 @@ export class MemoryManager {
           id,
           memory_type: MemoryType.PROFILE,
           user_id: userId,
-          group_id: undefined,
+          group_id: null,
           created_at: now,
           updated_at: now,
           timestamp,
@@ -911,4 +1048,180 @@ export class MemoryManager {
       return 0
     }
   }
+}
+
+// ==================== 文本去重辅助函数 ====================
+
+/**
+ * 文本归一化：去除标点符号、多余空白，转小写。
+ * 语言无关，适用于 Dice 系数等基于字符的算法。
+ */
+export function normalizeForDedup(text: string): string {
+  return text.replace(/[\s\p{P}\p{S}]+/gu, '').toLowerCase()
+}
+
+/**
+ * 将归一化后的字符串拆为字符 bigram 的多重集合（Map<bigram, count>）。
+ * 使用 Map 而非 Set，以正确处理重复 bigram。
+ */
+export function buildBigrams(normalized: string): Map<string, number> {
+  const bigrams = new Map<string, number>()
+  for (let i = 0; i < normalized.length - 1; i++) {
+    const bg = normalized.slice(i, i + 2)
+    bigrams.set(bg, (bigrams.get(bg) ?? 0) + 1)
+  }
+  return bigrams
+}
+
+/**
+ * Sørensen-Dice coefficient（基于字符 bigram 多重集合）。
+ * Dice = 2 × |A ∩ B| / (|A| + |B|)
+ *
+ * 语言无关：
+ * - 中文：每个字符是语义单元，bigram 天然保序
+ * - 英文/其他：bigram 捕获词内字符模式
+ *
+ * O(n) 时间复杂度。
+ */
+export function diceCoefficientFromBigrams(a: Map<string, number>, b: Map<string, number>): number {
+  const sizeA = sumValues(a)
+  const sizeB = sumValues(b)
+  if (sizeA === 0 && sizeB === 0) return 1
+  if (sizeA === 0 || sizeB === 0) return 0
+
+  let intersection = 0
+  const smaller = a.size <= b.size ? a : b
+  const larger = a.size <= b.size ? b : a
+  for (const [bg, countA] of smaller) {
+    const countB = larger.get(bg)
+    if (countB !== undefined) {
+      intersection += Math.min(countA, countB)
+    }
+  }
+  return (2 * intersection) / (sizeA + sizeB)
+}
+
+/**
+ * 便捷函数：直接对两段文本计算 Dice coefficient。
+ */
+export function diceCoefficient(textA: string, textB: string): number {
+  const a = normalizeForDedup(textA)
+  const b = normalizeForDedup(textB)
+  if (a.length < 2 && b.length < 2) return a === b ? 1 : 0
+  return diceCoefficientFromBigrams(buildBigrams(a), buildBigrams(b))
+}
+
+function sumValues(map: Map<string, number>): number {
+  let s = 0
+  for (const v of map.values()) s += v
+  return s
+}
+
+// ---- jieba 分词 Jaccard（中文增强） ----
+
+/** 停用词集合（中英文高频无意义词） */
+const STOP_WORDS = new Set([
+  '的',
+  '了',
+  '是',
+  '在',
+  '我',
+  '有',
+  '和',
+  '就',
+  '不',
+  '人',
+  '都',
+  '一',
+  '一个',
+  '上',
+  '也',
+  '很',
+  '到',
+  '说',
+  '要',
+  '去',
+  '你',
+  '会',
+  '着',
+  '没有',
+  '看',
+  '好',
+  '自己',
+  '这',
+  'the',
+  'a',
+  'an',
+  'is',
+  'are',
+  'was',
+  'be',
+  'to',
+  'of',
+  'and',
+  'in',
+  'that',
+  'it',
+  'for'
+])
+
+/**
+ * 使用 jieba 分词将文本转为 token 集合（去停用词、去标点、转小写）。
+ * 中文增强信号，与 Dice 系数配合使用。
+ */
+export function tokenizeForDedup(text: string): Set<string> {
+  const tokens = jieba.cut(text, true)
+  const result = new Set<string>()
+  for (const t of tokens) {
+    const trimmed = t.trim().toLowerCase()
+    if (trimmed.length === 0) continue
+    if (/^[\s\p{P}\p{S}]+$/u.test(trimmed)) continue
+    if (STOP_WORDS.has(trimmed)) continue
+    result.add(trimmed)
+  }
+  return result
+}
+
+/**
+ * 计算两个 token 集合的 Jaccard 相似度。
+ * Jaccard = |A ∩ B| / |A ∪ B|
+ */
+export function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 && b.size === 0) return 1
+  if (a.size === 0 || b.size === 0) return 0
+
+  let intersection = 0
+  const smaller = a.size <= b.size ? a : b
+  const larger = a.size <= b.size ? b : a
+  for (const token of smaller) {
+    if (larger.has(token)) intersection++
+  }
+  const union = a.size + b.size - intersection
+  return union === 0 ? 0 : intersection / union
+}
+
+/**
+ * 综合文本相似度：max(Dice 系数, jieba Jaccard)。
+ * - Dice：语言无关，基于字符 bigram，保序
+ * - Jaccard：中文分词增强，捕获词级语义
+ * 取最大值确保对任意语言都有最佳覆盖。
+ */
+export function textSimilarity(textA: string, textB: string): number {
+  const normA = normalizeForDedup(textA)
+  const normB = normalizeForDedup(textB)
+
+  // Dice coefficient（字符 bigram）
+  let dice = 0
+  if (normA.length >= 2 && normB.length >= 2) {
+    dice = diceCoefficientFromBigrams(buildBigrams(normA), buildBigrams(normB))
+  } else if (normA === normB) {
+    dice = 1
+  }
+
+  // jieba token Jaccard
+  const tokensA = tokenizeForDedup(textA)
+  const tokensB = tokenizeForDedup(textB)
+  const jaccard = tokensA.size > 0 && tokensB.size > 0 ? jaccardSimilarity(tokensA, tokensB) : 0
+
+  return Math.max(dice, jaccard)
 }

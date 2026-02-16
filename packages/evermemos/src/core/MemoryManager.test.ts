@@ -1,22 +1,39 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { MemoryManager } from './MemoryManager.js'
+import {
+  MemoryManager,
+  tokenizeForDedup,
+  jaccardSimilarity,
+  diceCoefficient,
+  textSimilarity,
+  normalizeForDedup,
+  buildBigrams,
+  diceCoefficientFromBigrams
+} from './MemoryManager.js'
 import { MemoryType, RawDataType, type MemCell, type MemoryRoutingContext } from '../types.js'
 import type { StorageAdapter } from '../storage/interfaces.js'
 import type { IExtractor } from '../extractors/BaseExtractor.js'
 
-function createMockStorage(opts?: { vectorSearchResults?: any[] }): {
+function createMockStorage(opts?: {
+  vectorSearchResults?: any[]
+  /** 模拟已有记忆行（用于文本去重查询） */
+  existingMemories?: Array<{ id: string; content: string; type?: string; user_id?: string }>
+}): {
   storage: StorageAdapter
   inserts: Array<{ table: string; item: Record<string, unknown> }>
   updates: Array<{ table: string; id: string; item: Record<string, unknown> }>
   deletes: Array<{ table: string; id: string }>
   queryResults: Record<string, any[]>
   setVectorSearchResults: (results: any[]) => void
+  setExistingMemories: (
+    memories: Array<{ id: string; content: string; type?: string; user_id?: string }>
+  ) => void
 } {
   const inserts: Array<{ table: string; item: Record<string, unknown> }> = []
   const updates: Array<{ table: string; id: string; item: Record<string, unknown> }> = []
   const deletes: Array<{ table: string; id: string }> = []
   let queryResults: any[] = []
   let vectorSearchResults: any[] = opts?.vectorSearchResults ?? []
+  let existingMemories = opts?.existingMemories ?? []
 
   const relational = {
     get: async () => null,
@@ -30,7 +47,15 @@ function createMockStorage(opts?: { vectorSearchResults?: any[] }): {
     delete: async (table: string, id: string) => {
       deletes.push({ table, id })
     },
-    query: async (_sql: string, params?: any[]) => {
+    query: async (sql: string, params?: any[]) => {
+      // 文本去重查询：SELECT id, content FROM memories WHERE type = ? AND user_id = ? ...
+      if (sql.includes('SELECT id, content FROM memories')) {
+        const typeParam = params?.[0]
+        const userParam = params?.[1]
+        return existingMemories.filter(
+          (m) => (!typeParam || m.type === typeParam) && (!userParam || m.user_id === userParam)
+        )
+      }
       if (params && params[0] === 'group_id_lookup') return queryResults
       return queryResults
     }
@@ -58,6 +83,9 @@ function createMockStorage(opts?: { vectorSearchResults?: any[] }): {
     setVectorSearchResults: (results: any[]) => {
       vectorSearchResults = results
       ;(storage.vector as any).search = async () => results
+    },
+    setExistingMemories: (memories) => {
+      existingMemories = memories
     }
   }
 }
@@ -440,9 +468,12 @@ describe('MemoryManager', () => {
 
       // Dedup still works (vector-only)
       expect(inserts.filter((i) => i.item.type === MemoryType.EPISODIC_MEMORY)).toHaveLength(0)
-      // Dedup log records vector-only reasoning
+      // Dedup log records both scores
       const logEntry = inserts.find((i) => i.table === 'dedup_log')?.item
-      expect(logEntry?.llm_reasoning).toContain('vector-only')
+      expect(logEntry?.llm_reasoning).toContain('vector-dist')
+      expect(logEntry?.llm_reasoning).toContain('no-llm')
+      expect(logEntry?.vector_distance).toBe(0.1)
+      expect(logEntry?.text_similarity).toBe(-1)
     })
 
     it('should insert normally when distance above threshold', async () => {
@@ -702,10 +733,11 @@ describe('MemoryManager', () => {
 
       await manager.processMemCell(memcell, { userId: 'user1', scope: 'online' })
 
-      // LLM failed, should fallback to vector-only dedup (still deduped)
+      // LLM failed, should fallback to similarity-only dedup (still deduped)
       expect(inserts.filter((i) => i.item.type === MemoryType.EPISODIC_MEMORY)).toHaveLength(0)
       const logEntry = inserts.find((i) => i.table === 'dedup_log')?.item
-      expect(logEntry?.llm_reasoning).toContain('vector-only')
+      expect(logEntry?.llm_reasoning).toContain('vector-dist')
+      expect(logEntry?.llm_reasoning).toContain('llm-fallback')
     })
   })
 
@@ -759,6 +791,294 @@ describe('MemoryManager', () => {
       const manager = new MemoryManager(storage)
       const result = await manager.undoDedup('nonexistent')
       expect(result).toBeNull()
+    })
+  })
+
+  describe('Text-based dedup (jieba + Dice)', () => {
+    describe('diceCoefficient (language-agnostic)', () => {
+      it('should return 1 for identical strings', () => {
+        expect(diceCoefficient('hello world', 'hello world')).toBe(1)
+        expect(diceCoefficient('用户希望被称为老大', '用户希望被称为老大')).toBe(1)
+      })
+
+      it('should return 0 for completely different strings', () => {
+        expect(diceCoefficient('abc', 'xyz')).toBe(0)
+      })
+
+      it('should handle Chinese near-duplicates well', () => {
+        // 核心场景：Profile 重复
+        const sim = diceCoefficient('用户希望被称为老大', '用户希望被称呼为老大')
+        expect(sim).toBeGreaterThan(0.8) // Dice 对此场景效果很好
+      })
+
+      it('should distinguish different Chinese content', () => {
+        const sim = diceCoefficient('用户希望被称为老大', '用户倾向于使用受管理文档进行工作')
+        expect(sim).toBeLessThan(0.2)
+      })
+
+      it('should handle English near-duplicates', () => {
+        const sim = diceCoefficient('User wants to be called boss', 'User wishes to be called boss')
+        expect(sim).toBeGreaterThan(0.7)
+      })
+
+      it('should handle empty and very short strings', () => {
+        expect(diceCoefficient('', '')).toBe(1)
+        expect(diceCoefficient('a', '')).toBe(0)
+        expect(diceCoefficient('a', 'a')).toBe(1)
+        expect(diceCoefficient('a', 'b')).toBe(0)
+      })
+
+      it('should ignore punctuation and case', () => {
+        const sim = diceCoefficient('Hello, World!', 'hello world')
+        expect(sim).toBe(1)
+      })
+    })
+
+    describe('textSimilarity (combined Dice + Jaccard)', () => {
+      it('should return max of Dice and Jaccard', () => {
+        // Dice 和 Jaccard 都应 > 0，取 max
+        const sim = textSimilarity('用户希望被称为老大', '用户希望被称呼为老大')
+        expect(sim).toBeGreaterThan(0.7)
+      })
+
+      it('should handle English-only text via Dice', () => {
+        const sim = textSimilarity('I love programming', 'I love coding')
+        expect(sim).toBeGreaterThan(0.3)
+      })
+
+      it('should return 0 for completely unrelated text', () => {
+        const sim = textSimilarity('苹果手机', 'quantum physics')
+        expect(sim).toBeLessThan(0.1)
+      })
+    })
+
+    describe('tokenizeForDedup', () => {
+      it('should tokenize Chinese text and remove stop words', () => {
+        const tokens = tokenizeForDedup('用户希望被称为老大')
+        expect(tokens.size).toBeGreaterThan(0)
+        expect(tokens.has('用户')).toBe(true)
+        expect(tokens.has('老大')).toBe(true)
+        // 停用词 "的" 不应出现
+        expect(tokens.has('的')).toBe(false)
+      })
+
+      it('should handle empty/whitespace-only text', () => {
+        expect(tokenizeForDedup('').size).toBe(0)
+        expect(tokenizeForDedup('   ').size).toBe(0)
+      })
+
+      it('should handle English text', () => {
+        const tokens = tokenizeForDedup('User wants to be called boss')
+        expect(tokens.has('user')).toBe(true)
+        expect(tokens.has('boss')).toBe(true)
+        // 停用词 "to", "be" 不应出现
+        expect(tokens.has('to')).toBe(false)
+        expect(tokens.has('be')).toBe(false)
+      })
+    })
+
+    describe('jaccardSimilarity', () => {
+      it('should return 1 for identical sets', () => {
+        const a = new Set(['用户', '老大', '称为'])
+        expect(jaccardSimilarity(a, a)).toBe(1)
+      })
+
+      it('should return 0 for disjoint sets', () => {
+        const a = new Set(['用户', '老大'])
+        const b = new Set(['文档', '工作'])
+        expect(jaccardSimilarity(a, b)).toBe(0)
+      })
+
+      it('should compute correct similarity for overlapping sets', () => {
+        const a = new Set(['用户', '希望', '称为', '老大'])
+        const b = new Set(['用户', '希望', '称呼', '老大'])
+        // intersection = {用户, 希望, 老大} = 3
+        // union = {用户, 希望, 称为, 称呼, 老大} = 5
+        expect(jaccardSimilarity(a, b)).toBeCloseTo(3 / 5, 5)
+      })
+
+      it('should handle empty sets', () => {
+        expect(jaccardSimilarity(new Set(), new Set())).toBe(1)
+        expect(jaccardSimilarity(new Set(['a']), new Set())).toBe(0)
+      })
+    })
+
+    describe('Profile text dedup via unified extractor', () => {
+      function createMockLLMProvider(response: string) {
+        return {
+          generate: async () => response,
+          getEmbedding: async () => [0.1, 0.2, 0.3],
+          chat: async function* () {
+            yield { text: response }
+          }
+        } as any
+      }
+
+      it('should dedup Profile via text similarity + LLM confirmation', async () => {
+        const existingMemories = [
+          {
+            id: 'existing-profile-text-1',
+            content: '用户希望被称为老大',
+            type: MemoryType.PROFILE,
+            user_id: 'user1'
+          }
+        ]
+        const { storage, inserts, updates } = createMockStorage({
+          vectorSearchResults: [],
+          existingMemories
+        })
+
+        const llm = createMockLLMProvider('SAME 语义完全一致')
+        const embeddingProvider = { getEmbedding: async () => new Array(384).fill(0.01) }
+        const mockUnifiedExtractor = {
+          extractAll: async () => ({
+            profile: {
+              user_profiles: [{ summary: '用户希望被称呼为"老大"' }]
+            }
+          })
+        } as any
+
+        const manager = new MemoryManager(storage, {
+          llmProvider: llm,
+          unifiedExtractor: mockUnifiedExtractor,
+          embeddingProvider
+        })
+
+        const memcell: MemCell = {
+          original_data: [
+            { role: 'user', content: '叫我老大' },
+            { role: 'assistant', content: '好的，老大！' }
+          ],
+          type: RawDataType.CONVERSATION,
+          user_id: 'user1',
+          deleted: false,
+          scene: 'assistant'
+        }
+
+        const created = await manager.processMemCell(memcell, {
+          userId: 'user1',
+          scope: 'online'
+        })
+
+        // PROFILE 应被去重（文本匹配 + LLM 确认），不插入新记忆
+        expect(inserts.filter((i) => i.item.type === MemoryType.PROFILE)).toHaveLength(0)
+        // 已有记忆被 touch
+        expect(
+          updates.filter((u) => u.table === 'memories' && u.id === 'existing-profile-text-1')
+        ).toHaveLength(1)
+        // 去重日志写入
+        const dedupLogs = inserts.filter((i) => i.table === 'dedup_log')
+        expect(dedupLogs).toHaveLength(1)
+        expect(dedupLogs[0].item.kept_memory_id).toBe('existing-profile-text-1')
+        expect(String(dedupLogs[0].item.llm_reasoning)).toContain('text-sim')
+        // LLM 确认结果也写入 reasoning
+        expect(String(dedupLogs[0].item.llm_reasoning)).toContain('SAME')
+        // 双分数都记录
+        expect(dedupLogs[0].item.text_similarity).toBeGreaterThan(0.5)
+        expect(dedupLogs[0].item.vector_distance).toBe(-1) // mock embedding 无向量候选
+      })
+
+      it('should NOT text-dedup Profile when content is different', async () => {
+        const existingMemories = [
+          {
+            id: 'existing-profile-diff',
+            content: '用户倾向于使用受管理文档进行工作',
+            type: MemoryType.PROFILE,
+            user_id: 'user1'
+          }
+        ]
+        const { storage, inserts } = createMockStorage({
+          vectorSearchResults: [],
+          existingMemories
+        })
+
+        const embeddingProvider = { getEmbedding: async () => new Array(384).fill(0.01) }
+        const mockUnifiedExtractor = {
+          extractAll: async () => ({
+            profile: {
+              user_profiles: [{ summary: '用户希望被称为老大' }]
+            }
+          })
+        } as any
+
+        const manager = new MemoryManager(storage, {
+          unifiedExtractor: mockUnifiedExtractor,
+          embeddingProvider
+        })
+
+        const memcell: MemCell = {
+          original_data: [
+            { role: 'user', content: '叫我老大' },
+            { role: 'assistant', content: '好的，老大！' }
+          ],
+          type: RawDataType.CONVERSATION,
+          user_id: 'user1',
+          deleted: false,
+          scene: 'assistant'
+        }
+
+        const created = await manager.processMemCell(memcell, {
+          userId: 'user1',
+          scope: 'online'
+        })
+
+        // 内容不同，PROFILE 应正常插入
+        expect(inserts.filter((i) => i.item.type === MemoryType.PROFILE)).toHaveLength(1)
+      })
+
+      it('should dedup Profile with medium text similarity + LLM confirmation', async () => {
+        // 已有记忆比新记忆多几个 token，sim 在 0.5~0.75 的中等区间
+        const existingMemories = [
+          {
+            id: 'existing-profile-medium',
+            content: '用户是一名资深程序员，希望被称为老大',
+            type: MemoryType.PROFILE,
+            user_id: 'user1'
+          }
+        ]
+        const { storage, inserts, updates } = createMockStorage({
+          vectorSearchResults: [],
+          existingMemories
+        })
+
+        const llm = createMockLLMProvider('SAME 两条都描述用户希望被称为老大')
+        const embeddingProvider = { getEmbedding: async () => new Array(384).fill(0.01) }
+        const mockUnifiedExtractor = {
+          extractAll: async () => ({
+            profile: {
+              user_profiles: [{ summary: '用户希望被称为老大' }]
+            }
+          })
+        } as any
+
+        const manager = new MemoryManager(storage, {
+          llmProvider: llm,
+          unifiedExtractor: mockUnifiedExtractor,
+          embeddingProvider
+        })
+
+        const memcell: MemCell = {
+          original_data: [
+            { role: 'user', content: '叫我老大' },
+            { role: 'assistant', content: '好的！' }
+          ],
+          type: RawDataType.CONVERSATION,
+          user_id: 'user1',
+          deleted: false,
+          scene: 'assistant'
+        }
+
+        const created = await manager.processMemCell(memcell, {
+          userId: 'user1',
+          scope: 'online'
+        })
+
+        // LLM 确认相同 → 去重
+        expect(inserts.filter((i) => i.item.type === MemoryType.PROFILE)).toHaveLength(0)
+        expect(
+          updates.filter((u) => u.table === 'memories' && u.id === 'existing-profile-medium')
+        ).toHaveLength(1)
+      })
     })
   })
 })
