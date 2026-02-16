@@ -4,11 +4,14 @@
  */
 import { createContext, useContext, useCallback, useState } from 'react'
 import type { FileKind } from '../hooks/useFileList'
+import type { FilePathRef } from '@prizm/shared'
 
 /** 单个文件引用 */
 export interface ChatFileRef {
   kind: FileKind
   id: string
+  /** 显示标题（可选，用于引用 chip 展示） */
+  title?: string
 }
 
 /** 统一的 chatWith 载荷 */
@@ -17,10 +20,14 @@ export interface ChatWithPayload {
   text?: string
   /** 引用文件列表（支持多个） */
   files?: ChatFileRef[]
+  /** 文件路径引用（通过路径引用文件，可以是工作区内或外部文件） */
+  fileRefs?: FilePathRef[]
   /** 命令列表（如 /docs, /help） */
   commands?: string[]
   /** 指定会话 ID（省略则新建） */
   sessionId?: string
+  /** 强制新建对话（忽略当前 session，确保在全新对话中发送） */
+  forceNew?: boolean
 }
 
 /** @deprecated 旧接口兼容，请使用 ChatWithPayload */
@@ -79,6 +86,13 @@ export function ChatWithFileProvider({
 
   const chatWith = useCallback(
     (payload: ChatWithPayload) => {
+      console.log('[ImportAI-Chip] ChatWithFileContext.chatWith 收到', {
+        hasFileRefs: !!payload.fileRefs?.length,
+        fileRefsCount: payload.fileRefs?.length ?? 0,
+        hasFiles: !!payload.files?.length,
+        hasText: !!payload.text,
+        forceNew: payload.forceNew
+      })
       setPendingPayload(payload)
       onNavigateToAgent()
     },
