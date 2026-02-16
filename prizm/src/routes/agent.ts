@@ -30,6 +30,7 @@ import { listSlashCommands } from '../llm/slashCommandRegistry'
 import { getAllToolMetadata } from '../llm/toolMetadata'
 import {
   isMemoryEnabled,
+  listAllUserProfiles,
   searchUserAndScopeMemories,
   searchThreeLevelMemories,
   addMemoryInteraction,
@@ -559,28 +560,54 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         history = [...systemPrefix, ...cacheRaw, currentUserMsg]
       }
 
-      // 每轮注入 User/Scope 记忆；Session 仅在有压缩内容时注入
+      // ---- 记忆注入策略 ----
+      // 1) 用户画像（PROFILE）：每轮必定注入，直接列表（不依赖语义搜索），放在 system prompt 紧后
+      // 2) 工作区/会话记忆：基于语义搜索按相关性注入
       const trimmedContent = content.trim()
       const isFirstMessage = session.messages.length === 0
-      const shouldInjectMemory =
-        isMemoryEnabled() &&
-        (trimmedContent.length >= 4 || (isFirstMessage && trimmedContent.length >= 1))
-      const memoryQuery = trimmedContent.length >= 4 ? trimmedContent : '用户偏好与工作区概况'
+      const memoryEnabled = isMemoryEnabled()
+
       let injectedMemoriesForClient: {
         user: import('@prizm/shared').MemoryItem[]
         scope: import('@prizm/shared').MemoryItem[]
         session: import('@prizm/shared').MemoryItem[]
       } | null = null
 
-      if (shouldInjectMemory) {
-        try {
-          const maxCharsPerMemory = 80
-          const truncateMem = (s: string) =>
-            s.length <= maxCharsPerMemory ? s : s.slice(0, maxCharsPerMemory) + '…'
+      const maxCharsPerMemory = 80
+      const truncateMem = (s: string) =>
+        s.length <= maxCharsPerMemory ? s : s.slice(0, maxCharsPerMemory) + '…'
 
+      // --- Step 1: 每轮必注入用户画像（最高优先级，紧跟 system prompt） ---
+      let profileMem: import('@prizm/shared').MemoryItem[] = []
+      if (memoryEnabled) {
+        try {
+          profileMem = await listAllUserProfiles(memoryUserId)
+          if (profileMem.length > 0) {
+            const profilePrompt =
+              '[用户画像 - 必须严格遵守]\n' +
+              profileMem.map((m) => `- ${truncateMem(m.memory)}`).join('\n') +
+              '\n\n请根据以上用户画像调整你的称呼和回复风格。'
+            // 插入到 system prompt 之后（index 1），确保位于所有对话历史之前
+            const profileInsertIdx = history.findIndex((m) => m.role !== 'system')
+            const insertAt = profileInsertIdx === -1 ? history.length : profileInsertIdx
+            history.splice(insertAt, 0, { role: 'system', content: profilePrompt })
+            log.info('Injected user profile: %d items (always-on)', profileMem.length)
+          }
+        } catch (profileErr) {
+          log.warn('User profile loading failed, proceeding without:', profileErr)
+        }
+      }
+
+      // --- Step 2: 工作区/会话记忆（基于语义搜索，按相关性注入） ---
+      const shouldInjectContextMemory =
+        memoryEnabled &&
+        (trimmedContent.length >= 4 || (isFirstMessage && trimmedContent.length >= 1))
+      const memoryQuery = trimmedContent.length >= 4 ? trimmedContent : '用户偏好与工作区概况'
+
+      if (shouldInjectContextMemory) {
+        try {
           const two = await searchUserAndScopeMemories(memoryQuery, memoryUserId, scope)
-          let userMem = two.user
-          let scopeMem = two.scope
+          const scopeMem = two.scope
           let sessionMem: { memory: string }[] = []
           if (compressedThrough > 0) {
             const three = await searchThreeLevelMemories(memoryQuery, memoryUserId, scope, id)
@@ -588,11 +615,6 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
           }
 
           const sections: string[] = []
-          if (userMem.length > 0) {
-            sections.push(
-              '[用户画像与偏好]\n' + userMem.map((m) => `- ${truncateMem(m.memory)}`).join('\n')
-            )
-          }
           if (scopeMem.length > 0) {
             sections.push(
               '[工作区记忆]\n' + scopeMem.map((m) => `- ${truncateMem(m.memory)}`).join('\n')
@@ -604,19 +626,21 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
             )
           }
 
-          if (sections.length > 0) {
+          if (sections.length > 0 || profileMem.length > 0) {
             injectedMemoriesForClient = {
-              user: userMem,
+              user: profileMem,
               scope: scopeMem,
               session: sessionMem as import('@prizm/shared').MemoryItem[]
             }
-            const memoryPrompt = sections.join('\n\n')
-            const insertIdx =
-              compressedThrough > 0 ? session.messages.filter((m) => m.role === 'system').length : 0
-            history.splice(insertIdx, 0, { role: 'system', content: memoryPrompt })
+            if (sections.length > 0) {
+              const memoryPrompt = sections.join('\n\n')
+              const insertIdx = history.findIndex((m, i) => i > 0 && m.role !== 'system')
+              const insertAt = insertIdx === -1 ? history.length : insertIdx
+              history.splice(insertAt, 0, { role: 'system', content: memoryPrompt })
+            }
             log.info(
-              'Injected memories: user=%d, scope=%d, session=%d (compressedThrough=%d)',
-              userMem.length,
+              'Injected memories: profile=%d, scope=%d, session=%d (compressedThrough=%d)',
+              profileMem.length,
               scopeMem.length,
               sessionMem.length,
               compressedThrough
@@ -624,6 +648,15 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
           }
         } catch (memErr) {
           log.warn('Memory search failed, proceeding without:', memErr)
+        }
+      }
+
+      // 确保 profile 已注入时也设置 client 通知（即使没有 scope/session 记忆）
+      if (!injectedMemoriesForClient && profileMem.length > 0) {
+        injectedMemoriesForClient = {
+          user: profileMem,
+          scope: [],
+          session: []
         }
       }
 

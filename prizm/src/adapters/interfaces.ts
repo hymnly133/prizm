@@ -4,14 +4,10 @@
  */
 
 import type {
-  StickyNote,
-  CreateNotePayload,
-  UpdateNotePayload,
   TodoList,
   TodoItem,
   CreateTodoItemPayload,
   UpdateTodoItemPayload,
-  PomodoroSession,
   ClipboardItem,
   Document,
   CreateDocumentPayload,
@@ -20,40 +16,6 @@ import type {
   AgentMessage,
   MessageUsage
 } from '../types'
-
-// ============ Sticky Notes 适配器 ============
-
-export interface IStickyNotesAdapter {
-  /**
-   * 获取所有便签
-   * @param scope 数据 scope
-   */
-  getAllNotes?(scope: string): Promise<StickyNote[]>
-
-  /**
-   * 根据 ID 获取便签
-   * @param scope 数据 scope
-   */
-  getNoteById?(scope: string, id: string): Promise<StickyNote | null>
-
-  /**
-   * 创建便签
-   * @param scope 数据 scope
-   */
-  createNote?(scope: string, payload: CreateNotePayload): Promise<StickyNote>
-
-  /**
-   * 更新便签
-   * @param scope 数据 scope
-   */
-  updateNote?(scope: string, id: string, payload: UpdateNotePayload): Promise<StickyNote>
-
-  /**
-   * 删除便签
-   * @param scope 数据 scope
-   */
-  deleteNote?(scope: string, id: string): Promise<void>
-}
 
 // ============ Notification 适配器 ============
 
@@ -118,28 +80,6 @@ export interface ITodoListAdapter {
     listId: string,
     items: Pick<TodoItem, 'id' | 'title' | 'status' | 'description'>[]
   ): Promise<TodoList>
-}
-
-// ============ 番茄钟适配器 ============
-
-export interface IPomodoroAdapter {
-  /**
-   * 创建一个新的番茄钟会话（开始计时）
-   */
-  startSession?(scope: string, payload: { taskId?: string; tag?: string }): Promise<PomodoroSession>
-
-  /**
-   * 结束一个番茄钟会话（更新结束时间和时长）
-   */
-  stopSession?(scope: string, id: string): Promise<PomodoroSession>
-
-  /**
-   * 获取指定范围内的番茄钟记录
-   */
-  getSessions?(
-    scope: string,
-    filters?: { taskId?: string; from?: number; to?: number }
-  ): Promise<PomodoroSession[]>
 }
 
 // ============ 剪贴板历史适配器 ============
@@ -281,10 +221,8 @@ export interface IAgentAdapter {
 // ============ 适配器集合 ============
 
 export interface PrizmAdapters {
-  notes?: IStickyNotesAdapter
   notification?: INotificationAdapter
   todoList?: ITodoListAdapter
-  pomodoro?: IPomodoroAdapter
   clipboard?: IClipboardAdapter
   documents?: IDocumentsAdapter
   agent?: IAgentAdapter

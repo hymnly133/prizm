@@ -19,12 +19,11 @@ import { getConfig } from './config'
 import { ClientRegistry } from './auth/ClientRegistry'
 import { createAuthMiddleware } from './auth/authMiddleware'
 import { createAuthRoutes } from './routes/auth'
-import { createNotesRoutes } from './routes/notes'
 import { createNotifyRoutes } from './routes/notify'
 import { createTodoListRoutes } from './routes/todoList'
-import { createPomodoroRoutes } from './routes/pomodoro'
 import { createClipboardRoutes } from './routes/clipboard'
 import { createDocumentsRoutes } from './routes/documents'
+import { createFilesRoutes } from './routes/files'
 import { createSearchRoutes } from './routes/search'
 import { SearchIndexService } from './search/searchIndexService'
 import { SQLiteAdapter } from '@prizm/evermemos'
@@ -133,12 +132,11 @@ export function createPrizmServer(
   const searchIndexStore = new SQLiteAdapter(searchIndexDbPath)
   const searchIndex = new SearchIndexService(searchIndexStore)
   searchIndex.setAdapters(adapters)
-  createNotesRoutes(router, adapters.notes)
   createNotifyRoutes(router, adapters.notification)
   createTodoListRoutes(router, adapters.todoList)
-  createPomodoroRoutes(router, adapters.pomodoro)
   createClipboardRoutes(router, adapters.clipboard)
   createDocumentsRoutes(router, adapters.documents, searchIndex)
+  createFilesRoutes(router)
   createSearchRoutes(router, adapters, searchIndex)
   createAgentRoutes(router, adapters.agent)
   createMcpConfigRoutes(router)

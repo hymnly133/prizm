@@ -5,11 +5,9 @@
 
 import { createLogger } from '../logger'
 import type {
-  IStickyNotesAdapter,
   INotificationAdapter,
   ITodoListAdapter,
   CreateTodoItemPayloadExt,
-  IPomodoroAdapter,
   IClipboardAdapter,
   IDocumentsAdapter,
   IAgentAdapter,
@@ -19,15 +17,11 @@ import type {
   LLMChatMessage
 } from './interfaces'
 import type {
-  StickyNote,
-  CreateNotePayload,
-  UpdateNotePayload,
   TodoList,
   TodoItem,
   TodoItemStatus,
   CreateTodoItemPayload,
   UpdateTodoItemPayload,
-  PomodoroSession,
   ClipboardItem,
   Document,
   CreateDocumentPayload,
@@ -64,67 +58,6 @@ function isTransientError(err: unknown): boolean {
     msg.includes('socket hang up') ||
     msg.includes('network timeout')
   )
-}
-
-// ============ 默认 Sticky Notes 适配器 ============
-
-export class DefaultStickyNotesAdapter implements IStickyNotesAdapter {
-  async getAllNotes(scope: string): Promise<StickyNote[]> {
-    const data = scopeStore.getScopeData(scope)
-    return [...data.notes]
-  }
-
-  async getNoteById(scope: string, id: string): Promise<StickyNote | null> {
-    const data = scopeStore.getScopeData(scope)
-    return data.notes.find((n) => n.id === id) ?? null
-  }
-
-  async createNote(scope: string, payload: CreateNotePayload): Promise<StickyNote> {
-    const data = scopeStore.getScopeData(scope)
-    const note: StickyNote = {
-      id: genUniqueId(),
-      content: payload.content ?? '',
-      imageUrls: payload.imageUrls,
-      tags: payload.tags,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      fileRefs: payload.fileRefs
-    }
-    data.notes.push(note)
-    scopeStore.saveScope(scope)
-    log.info('Note created:', note.id, 'scope:', scope)
-    return note
-  }
-
-  async updateNote(scope: string, id: string, payload: UpdateNotePayload): Promise<StickyNote> {
-    const data = scopeStore.getScopeData(scope)
-    const idx = data.notes.findIndex((n) => n.id === id)
-    if (idx < 0) throw new Error(`Note not found: ${id}`)
-
-    const existing = data.notes[idx]
-    const updated: StickyNote = {
-      ...existing,
-      ...(payload.content !== undefined && { content: payload.content }),
-      ...(payload.imageUrls !== undefined && { imageUrls: payload.imageUrls }),
-      ...(payload.tags !== undefined && { tags: payload.tags }),
-      ...(payload.fileRefs !== undefined && { fileRefs: payload.fileRefs }),
-      updatedAt: Date.now()
-    }
-    data.notes[idx] = updated
-    scopeStore.saveScope(scope)
-    log.info('Note updated:', id, 'scope:', scope)
-    return updated
-  }
-
-  async deleteNote(scope: string, id: string): Promise<void> {
-    const data = scopeStore.getScopeData(scope)
-    const idx = data.notes.findIndex((n) => n.id === id)
-    if (idx >= 0) {
-      data.notes.splice(idx, 1)
-      scopeStore.saveScope(scope)
-      log.info('Note deleted:', id, 'scope:', scope)
-    }
-  }
 }
 
 // ============ 默认 Notification 适配器 ============
@@ -194,6 +127,7 @@ export class DefaultTodoListAdapter implements ITodoListAdapter {
       id: genUniqueId(),
       title: payload?.title ?? '待办',
       items: [],
+      relativePath: '',
       createdAt: now,
       updatedAt: now
     }
@@ -320,71 +254,6 @@ export class DefaultTodoListAdapter implements ITodoListAdapter {
   }
 }
 
-// ============ 默认 Pomodoro 适配器 ============
-
-export class DefaultPomodoroAdapter implements IPomodoroAdapter {
-  async startSession(
-    scope: string,
-    payload: { taskId?: string; tag?: string }
-  ): Promise<PomodoroSession> {
-    const data = scopeStore.getScopeData(scope)
-    const now = Date.now()
-    const session: PomodoroSession = {
-      id: genUniqueId(),
-      taskId: payload.taskId,
-      startedAt: now,
-      endedAt: now,
-      durationMinutes: 0,
-      tag: payload.tag
-    }
-    data.pomodoroSessions.push(session)
-    scopeStore.saveScope(scope)
-    log.info('Session started:', session.id, 'scope:', scope)
-    return session
-  }
-
-  async stopSession(scope: string, id: string): Promise<PomodoroSession> {
-    const data = scopeStore.getScopeData(scope)
-    const idx = data.pomodoroSessions.findIndex((s) => s.id === id)
-    if (idx < 0) throw new Error(`Pomodoro session not found: ${id}`)
-
-    const existing = data.pomodoroSessions[idx]
-    const endedAt = Date.now()
-    const durationMinutes = Math.max(0, Math.round((endedAt - existing.startedAt) / 60000))
-
-    const updated: PomodoroSession = {
-      ...existing,
-      endedAt,
-      durationMinutes
-    }
-
-    data.pomodoroSessions[idx] = updated
-    scopeStore.saveScope(scope)
-    log.info('Session stopped:', id, 'scope:', scope)
-    return updated
-  }
-
-  async getSessions(
-    scope: string,
-    filters?: { taskId?: string; from?: number; to?: number }
-  ): Promise<PomodoroSession[]> {
-    const data = scopeStore.getScopeData(scope)
-    let sessions = [...data.pomodoroSessions]
-
-    if (filters?.taskId) {
-      sessions = sessions.filter((s) => s.taskId === filters.taskId)
-    }
-    if (typeof filters?.from === 'number') {
-      sessions = sessions.filter((s) => s.startedAt >= filters.from!)
-    }
-    if (typeof filters?.to === 'number') {
-      sessions = sessions.filter((s) => s.startedAt <= filters.to!)
-    }
-
-    return sessions
-  }
-}
-
 // ============ 默认 Clipboard 适配器 ============
 
 export class DefaultClipboardAdapter implements IClipboardAdapter {
@@ -440,6 +309,7 @@ export class DefaultDocumentsAdapter implements IDocumentsAdapter {
       id: genUniqueId(),
       title: payload.title || '未命名文档',
       content: payload.content ?? '',
+      relativePath: '',
       createdAt: now,
       updatedAt: now
     }
@@ -840,10 +710,8 @@ export class DefaultAgentAdapter implements IAgentAdapter {
 
 export function createDefaultAdapters(): PrizmAdapters {
   return {
-    notes: new DefaultStickyNotesAdapter(),
     notification: new DefaultNotificationAdapter(),
     todoList: new DefaultTodoListAdapter(),
-    pomodoro: new DefaultPomodoroAdapter(),
     clipboard: new DefaultClipboardAdapter(),
     documents: new DefaultDocumentsAdapter(),
     agent: new DefaultAgentAdapter()
