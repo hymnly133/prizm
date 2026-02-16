@@ -62,6 +62,21 @@ electron_1.contextBridge.exposeInMainWorld('prizm', {
     selectFolder() {
         return electron_1.ipcRenderer.invoke('select_folder');
     },
+    readFiles(paths) {
+        return electron_1.ipcRenderer.invoke('read_files', { paths });
+    },
+    selectAndReadFiles() {
+        return electron_1.ipcRenderer.invoke('select_and_read_files');
+    },
+    /** Electron 40 中 File.path 已弃用，用 webUtils.getPathForFile 替代 */
+    getPathForFile(file) {
+        try {
+            return electron_1.webUtils.getPathForFile(file) || '';
+        }
+        catch {
+            return '';
+        }
+    },
     onExecuteQuickAction(callback) {
         const handler = (_, payload) => callback(payload);
         electron_1.ipcRenderer.on('execute-quick-action', handler);

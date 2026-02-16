@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 /**
  * 向渲染进程暴露一个与 Tauri invoke 语义接近的 API
@@ -83,6 +83,23 @@ contextBridge.exposeInMainWorld('prizm', {
 
   selectFolder() {
     return ipcRenderer.invoke('select_folder')
+  },
+
+  readFiles(paths: string[]) {
+    return ipcRenderer.invoke('read_files', { paths })
+  },
+
+  selectAndReadFiles() {
+    return ipcRenderer.invoke('select_and_read_files')
+  },
+
+  /** Electron 40 中 File.path 已弃用，用 webUtils.getPathForFile 替代 */
+  getPathForFile(file: File): string {
+    try {
+      return webUtils.getPathForFile(file) || ''
+    } catch {
+      return ''
+    }
   },
 
   onExecuteQuickAction(callback: (payload: { action: string; selectedText: string }) => void) {

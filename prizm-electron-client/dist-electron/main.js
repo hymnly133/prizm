@@ -211,17 +211,22 @@ function createMainWindow() {
     if (mainWindow) {
         return mainWindow;
     }
+    // 根据系统主题设置窗口初始背景色，防止深色模式下白色闪屏
+    const isDark = electron_1.nativeTheme.shouldUseDarkColors;
+    const bgColor = isDark ? '#000000' : '#ffffff';
     mainWindow = new electron_1.BrowserWindow({
         width: 980,
         height: 640,
         minWidth: 400,
         minHeight: 500,
         resizable: true,
+        show: false,
+        backgroundColor: bgColor,
         titleBarStyle: 'hidden',
         ...(process.platform === 'win32' && {
             titleBarOverlay: {
                 color: '#00000000',
-                symbolColor: '#888888',
+                symbolColor: isDark ? '#CCCCCC' : '#333333',
                 height: 36
             }
         }),
@@ -230,6 +235,10 @@ function createMainWindow() {
             contextIsolation: true,
             nodeIntegration: false
         }
+    });
+    // 等待页面首次渲染完成后再显示窗口，避免白色闪屏
+    mainWindow.once('ready-to-show', () => {
+        mainWindow?.show();
     });
     if (isDev) {
         mainWindow.loadURL('http://localhost:5183');
@@ -748,6 +757,137 @@ function registerIpcHandlers() {
         if (result.canceled || !result.filePaths.length)
             return null;
         return result.filePaths[0];
+    });
+    /** 文本文件扩展名白名单 */
+    const TEXT_EXTS = new Set([
+        '.txt',
+        '.md',
+        '.markdown',
+        '.json',
+        '.csv',
+        '.xml',
+        '.html',
+        '.htm',
+        '.yaml',
+        '.yml',
+        '.log',
+        '.js',
+        '.ts',
+        '.py',
+        '.java',
+        '.go',
+        '.rs',
+        '.c',
+        '.cpp',
+        '.h',
+        '.hpp',
+        '.css',
+        '.scss',
+        '.less',
+        '.vue',
+        '.jsx',
+        '.tsx',
+        '.toml',
+        '.ini',
+        '.cfg',
+        '.conf',
+        '.sh',
+        '.bat',
+        '.ps1',
+        '.rb',
+        '.php',
+        '.swift',
+        '.kt',
+        '.sql',
+        '.r',
+        '.lua',
+        '.pl',
+        '.env',
+        '.gitignore',
+        '.editorconfig',
+        '.prettierrc',
+        '.eslintrc'
+    ]);
+    const MAX_TEXT_SIZE = 1024 * 1024; // 1 MB
+    function readFilesFromPaths(paths) {
+        const results = [];
+        for (const filePath of paths) {
+            try {
+                const stat = fs.statSync(filePath);
+                if (!stat.isFile())
+                    continue;
+                const ext = path.extname(filePath).toLowerCase();
+                const name = path.basename(filePath);
+                const isTextExt = TEXT_EXTS.has(ext) || ext === '';
+                if (isTextExt || stat.size < 256 * 1024) {
+                    let content = fs.readFileSync(filePath, 'utf-8');
+                    let truncated = false;
+                    if (content.length > MAX_TEXT_SIZE) {
+                        content = content.slice(0, MAX_TEXT_SIZE);
+                        truncated = true;
+                    }
+                    results.push({ path: filePath, name, size: stat.size, content, ext, truncated });
+                }
+                else {
+                    results.push({
+                        path: filePath,
+                        name,
+                        size: stat.size,
+                        content: null,
+                        ext,
+                        unsupported: true
+                    });
+                }
+            }
+            catch (err) {
+                main_1.default.warn('[read_files] skip file:', filePath, err);
+            }
+        }
+        return results;
+    }
+    electron_1.ipcMain.handle('read_files', async (_event, { paths }) => {
+        return readFilesFromPaths(paths);
+    });
+    electron_1.ipcMain.handle('select_and_read_files', async () => {
+        const opts = {
+            properties: ['openFile', 'multiSelections'],
+            title: '选择要导入的文件',
+            filters: [
+                {
+                    name: '文本文件',
+                    extensions: [
+                        'txt',
+                        'md',
+                        'json',
+                        'csv',
+                        'xml',
+                        'html',
+                        'yaml',
+                        'yml',
+                        'log',
+                        'js',
+                        'ts',
+                        'py',
+                        'java',
+                        'go',
+                        'rs',
+                        'c',
+                        'cpp',
+                        'css',
+                        'vue',
+                        'jsx',
+                        'tsx'
+                    ]
+                },
+                { name: '所有文件', extensions: ['*'] }
+            ]
+        };
+        const result = mainWindow
+            ? await electron_1.dialog.showOpenDialog(mainWindow, opts)
+            : await electron_1.dialog.showOpenDialog(opts);
+        if (result.canceled || !result.filePaths.length)
+            return null;
+        return readFilesFromPaths(result.filePaths);
     });
     electron_1.ipcMain.handle('get_platform', () => {
         return process.platform;
