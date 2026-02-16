@@ -18,6 +18,8 @@ export function reciprocalRankFusion(
   const scores: Map<string, number> = new Map()
   const docs: Map<string, ScoredDoc> = new Map()
 
+  const numLists = 2
+
   // Process list 1
   list1.forEach((doc, rank) => {
     const score = 1.0 / (k + rank + 1)
@@ -31,10 +33,11 @@ export function reciprocalRankFusion(
     scores.set(doc.id, (scores.get(doc.id) || 0) + score)
     if (!docs.has(doc.id)) {
       docs.set(doc.id, doc)
-    } else {
-      // Merge properties if needed, for now just keep existing
     }
   })
+
+  // Normalize: theoretical max = numLists / (k + 1) (rank 0 in every list)
+  const maxScore = numLists / (k + 1)
 
   // Sort by score descending
   const sortedIds = Array.from(scores.keys()).sort(
@@ -43,7 +46,7 @@ export function reciprocalRankFusion(
 
   return sortedIds.map((id) => {
     const doc = docs.get(id)!
-    return { ...doc, score: scores.get(id) || 0 }
+    return { ...doc, score: (scores.get(id) || 0) / maxScore }
   })
 }
 
@@ -54,6 +57,8 @@ export function reciprocalRankFusionMulti(lists: ScoredDoc[][], k: number = 60):
   const scores: Map<string, number> = new Map()
   const docs: Map<string, ScoredDoc> = new Map()
 
+  const numLists = lists.length || 1
+
   for (const list of lists) {
     list.forEach((doc, rank) => {
       const score = 1.0 / (k + rank + 1)
@@ -62,11 +67,14 @@ export function reciprocalRankFusionMulti(lists: ScoredDoc[][], k: number = 60):
     })
   }
 
+  // Normalize: theoretical max = numLists / (k + 1) (rank 0 in every list)
+  const maxScore = numLists / (k + 1)
+
   const sortedIds = Array.from(scores.keys()).sort(
     (a, b) => (scores.get(b) || 0) - (scores.get(a) || 0)
   )
   return sortedIds.map((id) => {
     const doc = docs.get(id)!
-    return { ...doc, score: scores.get(id) || 0 }
+    return { ...doc, score: (scores.get(id) || 0) / maxScore }
   })
 }

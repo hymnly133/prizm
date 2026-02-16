@@ -66,7 +66,8 @@ export class RetrievalManager {
 
   private async keywordSearch(request: RetrieveRequest): Promise<SearchResult[]> {
     const tokens: string[] = jieba.cut(request.query, true)
-    const likePart = tokens.filter((t: string) => t.trim().length > 0).join('%')
+    const validTokens = tokens.filter((t: string) => t.trim().length > 0)
+    const likePart = validTokens.join('%')
     if (!likePart) return []
 
     const limit = request.limit || 20
@@ -84,13 +85,37 @@ export class RetrievalManager {
     const sql = `SELECT * FROM memories WHERE ${conditions.join(' AND ')} LIMIT ?`
     const rows = await this.storage.relational.query(sql, params)
 
-    return rows.map((r) => ({
-      id: r.id,
-      score: 1.0,
-      content: r.content,
-      metadata: r.metadata,
-      type: r.type as MemoryType
-    }))
+    const queryLower = request.query.toLowerCase()
+    const tokensLower = validTokens.map((t) => t.toLowerCase())
+
+    return rows
+      .map((r) => {
+        const content = (r.content as string) || ''
+        const contentLower = content.toLowerCase()
+        const contentLen = content.length || 1
+
+        let hitCount = 0
+        for (const tok of tokensLower) {
+          let idx = 0
+          while ((idx = contentLower.indexOf(tok, idx)) !== -1) {
+            hitCount++
+            idx += tok.length
+          }
+        }
+
+        const exactBonus = contentLower.includes(queryLower) ? 2 : 0
+        const density = hitCount / contentLen
+        const score = exactBonus + density * 1000
+
+        return {
+          id: r.id,
+          score,
+          content: r.content,
+          metadata: r.metadata,
+          type: r.type as MemoryType
+        } as SearchResult
+      })
+      .sort((a, b) => b.score - a.score)
   }
 
   private async vectorSearch(request: RetrieveRequest): Promise<SearchResult[]> {

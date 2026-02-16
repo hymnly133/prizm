@@ -4,9 +4,7 @@ import { MemoryType, RawDataType, type MemCell, type MemoryRoutingContext } from
 import type { StorageAdapter } from '../storage/interfaces.js'
 import type { IExtractor } from '../extractors/BaseExtractor.js'
 
-function createMockStorage(opts?: {
-  vectorSearchResults?: any[]
-}): {
+function createMockStorage(opts?: { vectorSearchResults?: any[] }): {
   storage: StorageAdapter
   inserts: Array<{ table: string; item: Record<string, unknown> }>
   updates: Array<{ table: string; id: string; item: Record<string, unknown> }>
@@ -343,7 +341,9 @@ describe('MemoryManager', () => {
       // No new memory inserted
       expect(inserts.filter((i) => i.item.type === MemoryType.EPISODIC_MEMORY)).toHaveLength(0)
       // Existing memory touched
-      expect(updates.filter((u) => u.table === 'memories' && u.id === 'existing-ep-1')).toHaveLength(1)
+      expect(
+        updates.filter((u) => u.table === 'memories' && u.id === 'existing-ep-1')
+      ).toHaveLength(1)
       // Dedup log written
       expect(inserts.filter((i) => i.table === 'dedup_log')).toHaveLength(1)
       const logEntry = inserts.find((i) => i.table === 'dedup_log')!.item
@@ -396,7 +396,10 @@ describe('MemoryManager', () => {
       const manager = new MemoryManager(storage, { llmProvider: llm })
       manager.registerExtractor(
         MemoryType.FORESIGHT,
-        createMockExtractorWithEmbedding(MemoryType.FORESIGHT, 'user will need workspace assistance')
+        createMockExtractorWithEmbedding(
+          MemoryType.FORESIGHT,
+          'user will need workspace assistance'
+        )
       )
 
       const memcell: MemCell = {
@@ -416,9 +419,7 @@ describe('MemoryManager', () => {
 
     it('should fallback to vector-only dedup when no llmProvider', async () => {
       const { storage, inserts, updates, setVectorSearchResults } = createMockStorage()
-      setVectorSearchResults([
-        { id: 'existing-ep-3', content: 'existing content', _distance: 0.1 }
-      ])
+      setVectorSearchResults([{ id: 'existing-ep-3', content: 'existing content', _distance: 0.1 }])
 
       // No llmProvider
       const manager = new MemoryManager(storage)
@@ -543,9 +544,7 @@ describe('MemoryManager', () => {
 
     it('should handle LLM error gracefully and fallback to vector-only', async () => {
       const { storage, inserts, setVectorSearchResults } = createMockStorage()
-      setVectorSearchResults([
-        { id: 'existing-ep-4', content: 'existing', _distance: 0.1 }
-      ])
+      setVectorSearchResults([{ id: 'existing-ep-4', content: 'existing', _distance: 0.1 }])
 
       const errorLLM = {
         generate: async () => {

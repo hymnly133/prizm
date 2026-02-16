@@ -136,4 +136,139 @@ describe('RetrievalManager', () => {
       })
     })
   })
+
+  describe('keyword search relevance sorting', () => {
+    it('should rank exact query match higher than partial match', async () => {
+      const relational = {
+        get: async () => null,
+        find: async () => [],
+        insert: async () => {},
+        update: async () => {},
+        delete: async () => {},
+        query: async () => [
+          {
+            id: 'm1',
+            content:
+              '这是一段很长的文本，其中提到了称呼这个词，但内容很多很多其他无关的东西填充文本',
+            type: MemoryType.EPISODIC_MEMORY,
+            metadata: {}
+          },
+          {
+            id: 'm2',
+            content: '用户明确要求AI助手使用"老大"作为对他的称呼。',
+            type: MemoryType.EPISODIC_MEMORY,
+            metadata: {}
+          }
+        ]
+      }
+
+      const vector = {
+        add: async () => {},
+        search: async () => [],
+        delete: async () => {}
+      }
+
+      const llmProvider = { getEmbedding: async () => [0.1, 0.2] }
+      const storage: StorageAdapter = { relational, vector }
+      const manager = new RetrievalManager(storage, llmProvider as any)
+
+      const results = await manager.retrieve({
+        query: '称呼',
+        user_id: 'u1',
+        method: RetrieveMethod.KEYWORD,
+        limit: 10
+      })
+
+      expect(results).toHaveLength(2)
+      // The shorter, more focused content about "称呼" should rank higher
+      expect(results[0].id).toBe('m2')
+    })
+
+    it('should give higher score to content with higher keyword density', async () => {
+      const relational = {
+        get: async () => null,
+        find: async () => [],
+        insert: async () => {},
+        update: async () => {},
+        delete: async () => {},
+        query: async () => [
+          {
+            id: 'low-density',
+            content: 'x'.repeat(200) + '称呼' + 'x'.repeat(200),
+            type: MemoryType.EPISODIC_MEMORY,
+            metadata: {}
+          },
+          {
+            id: 'high-density',
+            content: '称呼就是称呼',
+            type: MemoryType.EPISODIC_MEMORY,
+            metadata: {}
+          }
+        ]
+      }
+
+      const vector = {
+        add: async () => {},
+        search: async () => [],
+        delete: async () => {}
+      }
+
+      const llmProvider = { getEmbedding: async () => [0.1, 0.2] }
+      const storage: StorageAdapter = { relational, vector }
+      const manager = new RetrievalManager(storage, llmProvider as any)
+
+      const results = await manager.retrieve({
+        query: '称呼',
+        user_id: 'u1',
+        method: RetrieveMethod.KEYWORD,
+        limit: 10
+      })
+
+      expect(results).toHaveLength(2)
+      expect(results[0].id).toBe('high-density')
+      expect(results[0].score).toBeGreaterThan(results[1].score)
+    })
+  })
+
+  describe('hybrid search normalized scores', () => {
+    it('should produce scores in [0, 1] range', async () => {
+      const relational = {
+        get: async () => null,
+        find: async () => [],
+        insert: async () => {},
+        update: async () => {},
+        delete: async () => {},
+        query: async () => [
+          { id: 'k1', content: '称呼 老大', type: MemoryType.EPISODIC_MEMORY, metadata: {} }
+        ]
+      }
+
+      const vector = {
+        add: async () => {},
+        search: async () => [
+          { id: 'k1', content: '称呼 老大', group_id: undefined, user_id: 'u1', _distance: 0.1 }
+        ],
+        delete: async () => {}
+      }
+
+      const llmProvider = { getEmbedding: async () => [0.1, 0.2] }
+      const storage: StorageAdapter = { relational, vector }
+      const manager = new RetrievalManager(storage, llmProvider as any)
+
+      const results = await manager.retrieve({
+        query: '称呼',
+        user_id: 'u1',
+        method: RetrieveMethod.HYBRID,
+        limit: 5
+      })
+
+      expect(results.length).toBeGreaterThan(0)
+      for (const r of results) {
+        expect(r.score).toBeGreaterThanOrEqual(0)
+        expect(r.score).toBeLessThanOrEqual(1)
+      }
+      // Item present in both lists at rank 0 should get score = 1.0
+      expect(results[0].score).toBeCloseTo(1.0, 1)
+    })
+  })
 })

@@ -756,6 +756,15 @@ export class MemoryManager {
     return rows
   }
 
+  /** 统计用户记忆总数 */
+  async countMemories(user_id: string): Promise<number> {
+    const rows = await this.storage.relational.query(
+      'SELECT COUNT(*) as cnt FROM memories WHERE user_id = ?',
+      [user_id]
+    )
+    return (rows[0] as any)?.cnt ?? 0
+  }
+
   /** 按 round_message_id 列出该轮对话新创建的记忆 */
   async listMemoriesByRoundMessageId(
     user_id: string,
