@@ -2,12 +2,14 @@
  * 领域数据类型 - 与服务器 API 结构对齐
  */
 
-// ============ 便签 ============
+// ============ 便签（已废弃，保留类型用于迁移兼容） ============
 
+/** @deprecated 已合并到 Document，仅用于迁移兼容 */
 export interface StickyNoteFileRef {
   path: string
 }
 
+/** @deprecated 已合并到 Document，仅用于迁移兼容 */
 export interface StickyNote {
   id: string
   content: string
@@ -15,20 +17,6 @@ export interface StickyNote {
   tags?: string[]
   createdAt: number
   updatedAt: number
-  fileRefs?: StickyNoteFileRef[]
-}
-
-export interface CreateNotePayload {
-  content?: string
-  imageUrls?: string[]
-  tags?: string[]
-  fileRefs?: StickyNoteFileRef[]
-}
-
-export interface UpdateNotePayload {
-  content?: string
-  imageUrls?: string[]
-  tags?: string[]
   fileRefs?: StickyNoteFileRef[]
 }
 
@@ -51,6 +39,8 @@ export interface TodoList {
   id: string
   title: string
   items: TodoItem[]
+  /** 相对 scopeRoot 的路径（含文件名） */
+  relativePath: string
   createdAt: number
   updatedAt: number
 }
@@ -76,8 +66,9 @@ export interface UpdateTodoListPayload {
   updateItems?: Array<{ id: string } & UpdateTodoItemPayload>
 }
 
-// ============ 番茄钟 ============
+// ============ 番茄钟（已废弃） ============
 
+/** @deprecated 番茄钟已移除，仅用于迁移兼容 */
 export interface PomodoroSession {
   id: string
   taskId?: string
@@ -105,8 +96,12 @@ export interface Document {
   id: string
   title: string
   content?: string
+  /** 可选标签 */
+  tags?: string[]
   /** LLM 生成的持久化摘要，用于 Agent 上下文 */
   llmSummary?: string
+  /** 相对 scopeRoot 的路径（含文件名） */
+  relativePath: string
   createdAt: number
   updatedAt: number
 }
@@ -114,11 +109,15 @@ export interface Document {
 export interface CreateDocumentPayload {
   title: string
   content?: string
+  tags?: string[]
+  /** 可选：指定存放路径（相对 scopeRoot 的目录），默认存在 scopeRoot */
+  directory?: string
 }
 
 export interface UpdateDocumentPayload {
   title?: string
   content?: string
+  tags?: string[]
   llmSummary?: string
 }
 
@@ -178,19 +177,52 @@ export interface AgentSession {
   updatedAt: number
 }
 
+// ============ 通用文件系统（Layer 0） ============
+
+/** 文件/目录条目（/files/list 返回结构） */
+export interface FileEntry {
+  name: string
+  /** 相对 scopeRoot 的路径 */
+  relativePath: string
+  isDir: boolean
+  isFile: boolean
+  size?: number
+  lastModified?: number
+  children?: FileEntry[]
+  /** 仅 Prizm 管理文件有此字段 */
+  prizmType?: string
+  /** 仅 Prizm 管理文件有此字段 */
+  prizmId?: string
+}
+
+/** 文件读取结果（/files/read 返回结构） */
+export interface FileReadResult {
+  relativePath: string
+  size: number
+  lastModified: number
+  /** 文件内容（UTF-8 文本） */
+  content?: string
+  /** 仅 Prizm 管理文件：解析后的 frontmatter */
+  frontmatter?: Record<string, unknown>
+  /** 仅 Prizm 管理文件的 prizm_type */
+  prizmType?: string
+}
+
 // ============ Agent Scope / 上下文（API 与客户端类型） ============
 
 /** 可引用项类型 */
-export type ScopeRefKind = 'note' | 'todo' | 'document'
+export type ScopeRefKind = 'document' | 'todo' | 'file'
 
 /** 顶层聚合类型 */
-export type ScopeTopLevelKind = 'notes' | 'todoList' | 'document' | 'sessions'
+export type ScopeTopLevelKind = 'todoList' | 'document' | 'sessions' | 'files'
 
 /** 可引用的单条项（用于 @ 补全与 scope-items API） */
 export interface ScopeRefItem {
   id: string
   kind: ScopeRefKind
   title: string
+  /** 文件相对路径 */
+  relativePath?: string
   charCount: number
   isShort: boolean
   updatedAt: number
@@ -232,7 +264,7 @@ export interface ItemProvision {
 export type ScopeActivityAction = 'read' | 'create' | 'update' | 'delete' | 'list' | 'search'
 
 /** 活动目标项类型 */
-export type ScopeActivityItemKind = 'note' | 'todo' | 'document' | 'clipboard'
+export type ScopeActivityItemKind = 'todo' | 'document' | 'clipboard' | 'file'
 
 /** 统一 Scope 活动记录 */
 export interface ScopeActivityRecord {

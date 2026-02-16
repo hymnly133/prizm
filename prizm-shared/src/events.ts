@@ -3,68 +3,56 @@
  * 单一数据源：数组为权威定义，对象形式供 server 键式访问
  */
 
-import type {
-  NotificationPayload,
-  StickyNote,
-  ClipboardItem,
-  Document,
-  PomodoroSession,
-  TodoItem
-} from './domain'
+import type { NotificationPayload, ClipboardItem, Document, TodoItem } from './domain'
 
 export const EVENT_TYPES = [
   'notification',
   'smtc:change',
-  'note:created',
-  'note:updated',
-  'note:deleted',
   'todo_list:created',
   'todo_list:updated',
   'todo_list:deleted',
   'todo_item:created',
   'todo_item:updated',
   'todo_item:deleted',
-  'pomodoro:started',
-  'pomodoro:stopped',
   'clipboard:itemAdded',
   'clipboard:itemDeleted',
   'document:created',
   'document:updated',
-  'document:deleted'
+  'document:deleted',
+  'file:created',
+  'file:updated',
+  'file:deleted',
+  'file:moved'
 ] as const
 
 export type EventType = (typeof EVENT_TYPES)[number]
 
-/** 对象形式，供 server 使用 EVENT_TYPES_OBJ.NOTE_CREATED 等键式访问 */
+/** 对象形式，供 server 使用 EVENT_TYPES_OBJ.DOCUMENT_CREATED 等键式访问 */
 export const EVENT_TYPES_OBJ = {
   NOTIFICATION: 'notification',
   SMTC_CHANGE: 'smtc:change',
-  NOTE_CREATED: 'note:created',
-  NOTE_UPDATED: 'note:updated',
-  NOTE_DELETED: 'note:deleted',
   TODO_LIST_CREATED: 'todo_list:created',
   TODO_LIST_UPDATED: 'todo_list:updated',
   TODO_LIST_DELETED: 'todo_list:deleted',
   TODO_ITEM_CREATED: 'todo_item:created',
   TODO_ITEM_UPDATED: 'todo_item:updated',
   TODO_ITEM_DELETED: 'todo_item:deleted',
-  POMODORO_STARTED: 'pomodoro:started',
-  POMODORO_STOPPED: 'pomodoro:stopped',
   CLIPBOARD_ITEM_ADDED: 'clipboard:itemAdded',
   CLIPBOARD_ITEM_DELETED: 'clipboard:itemDeleted',
   DOCUMENT_CREATED: 'document:created',
   DOCUMENT_UPDATED: 'document:updated',
-  DOCUMENT_DELETED: 'document:deleted'
+  DOCUMENT_DELETED: 'document:deleted',
+  FILE_CREATED: 'file:created',
+  FILE_UPDATED: 'file:updated',
+  FILE_DELETED: 'file:deleted',
+  FILE_MOVED: 'file:moved'
 } as const satisfies Record<string, EventType>
 
 /** 服务端全部事件类型（用于 subscribeEvents: "all"） */
 export const ALL_EVENTS: readonly string[] = [...EVENT_TYPES]
 
-/** 数据同步事件：便签/任务/剪贴板/文档变更时触发，用于客户端实时刷新列表 */
+/** 数据同步事件：任务/剪贴板/文档/文件变更时触发，用于客户端实时刷新列表 */
 export const DATA_SYNC_EVENTS = [
-  'note:created',
-  'note:updated',
-  'note:deleted',
   'todo_list:created',
   'todo_list:updated',
   'todo_list:deleted',
@@ -75,7 +63,11 @@ export const DATA_SYNC_EVENTS = [
   'clipboard:itemDeleted',
   'document:created',
   'document:updated',
-  'document:deleted'
+  'document:deleted',
+  'file:created',
+  'file:updated',
+  'file:deleted',
+  'file:moved'
 ] as const
 
 export type DataSyncEventType = (typeof DATA_SYNC_EVENTS)[number]
@@ -125,26 +117,34 @@ export interface SMTCPayload extends EventPayloadBase {
   action: 'play' | 'pause' | 'stop' | 'skipNext' | 'skipPrevious' | 'toggle'
 }
 
+/** 文件事件载荷 */
+export interface FileEventPayload extends EventPayloadBase {
+  /** 相对 scopeRoot 的路径 */
+  relativePath: string
+  /** 旧路径（仅 file:moved 事件） */
+  oldRelativePath?: string
+  isDir?: boolean
+}
+
 /** 各事件类型对应的 payload 类型 */
 export interface EventPayloadMap {
   notification: NotificationPayload
   'smtc:change': SMTCPayload
-  'note:created': Partial<StickyNote> & EventPayloadBase
-  'note:updated': Partial<StickyNote> & EventPayloadBase
-  'note:deleted': { id: string } & EventPayloadBase
   'todo_list:created': import('./domain').TodoList & { listId: string } & EventPayloadBase
   'todo_list:updated': TodoListUpdatePayload
   'todo_list:deleted': TodoListDeletedPayload
   'todo_item:created': TodoItem & { itemId: string; listId: string } & EventPayloadBase
   'todo_item:updated': TodoItem & { itemId: string; listId: string } & EventPayloadBase
   'todo_item:deleted': TodoItemDeletedPayload
-  'pomodoro:started': PomodoroSession & EventPayloadBase
-  'pomodoro:stopped': PomodoroSession & EventPayloadBase
   'clipboard:itemAdded': ClipboardItem & EventPayloadBase
   'clipboard:itemDeleted': { id: string } & EventPayloadBase
   'document:created': Partial<Document> & EventPayloadBase
   'document:updated': Partial<Document> & EventPayloadBase
   'document:deleted': { id: string } & EventPayloadBase
+  'file:created': FileEventPayload
+  'file:updated': FileEventPayload
+  'file:deleted': FileEventPayload
+  'file:moved': FileEventPayload
 }
 
 /** 类型安全的 EventPushMessage，payload 与 eventType 对应 */
