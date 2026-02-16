@@ -14,6 +14,7 @@ import {
   hasScopeAccess
 } from '../scopeUtils'
 import { scopeStore, DEFAULT_SCOPE } from '../core/ScopeStore'
+import { MEMORY_USER_ID } from '@prizm/shared'
 import { buildScopeContextSummary } from '../llm/scopeContext'
 import { buildSystemPrompt } from '../llm/systemPrompt'
 import { scheduleTurnSummary } from '../llm/conversationSummaryService'
@@ -252,6 +253,10 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         byModel: {} as Record<
           string,
           { input: number; output: number; total: number; count: number }
+        >,
+        byScope: {} as Record<
+          string,
+          { input: number; output: number; total: number; count: number }
         >
       }
       for (const r of tokenRecords) {
@@ -266,6 +271,15 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         tokenSummary.byModel[m].output += r.outputTokens
         tokenSummary.byModel[m].total += r.totalTokens
         tokenSummary.byModel[m].count += 1
+        // 按功能分类聚合
+        const s = r.usageScope || 'chat'
+        if (!tokenSummary.byScope[s]) {
+          tokenSummary.byScope[s] = { input: 0, output: 0, total: 0, count: 0 }
+        }
+        tokenSummary.byScope[s].input += r.inputTokens
+        tokenSummary.byScope[s].output += r.outputTokens
+        tokenSummary.byScope[s].total += r.totalTokens
+        tokenSummary.byScope[s].count += 1
       }
 
       // 2. 记忆创建：从 messages 的 memoryGrowth 字段聚合
@@ -379,7 +393,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
     }
   })
 
-  // PATCH /agent/sessions/:id - 更新会话（标题等）
+  // PATCH /agent/sessions/:id - 更新会话（摘要等）
   router.patch('/agent/sessions/:id', async (req: Request, res: Response) => {
     try {
       if (!adapter?.updateSession) {
@@ -392,8 +406,8 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         return res.status(403).json({ error: 'scope access denied' })
       }
 
-      const { title } = req.body ?? {}
-      const session = await adapter.updateSession(scope, id, { title })
+      const { llmSummary } = req.body ?? {}
+      const session = await adapter.updateSession(scope, id, { llmSummary })
       res.json({ session })
     } catch (error) {
       log.error('update agent session error:', error)
@@ -460,14 +474,15 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         cachedContextTurns: bodyB
       } = req.body ?? {}
       const ctxWin = getContextWindowSettings()
-      const userId = req.prizmClient?.clientId ?? 'default'
+      // 记忆和 token 统一使用固定 userId，不按客户端隔离
+      const memoryUserId = MEMORY_USER_ID
 
       // 追加用户消息
       await adapter.appendMessage(scope, id, {
         role: 'user',
         content: content.trim()
       })
-      scheduleTurnSummary(scope, id, content.trim(), userId)
+      scheduleTurnSummary(scope, id, content.trim(), memoryUserId)
 
       // Slash 命令：若为首位 / 且命中注册命令，执行后直接返回结果，不调用 LLM
       if (content.trim().startsWith('/')) {
@@ -513,7 +528,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
           try {
             await addSessionMemoryFromRounds(
               slice.map((m) => ({ role: m.role, content: m.content })),
-              userId,
+              memoryUserId,
               scope,
               id
             )
@@ -552,9 +567,9 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         (trimmedContent.length >= 4 || (isFirstMessage && trimmedContent.length >= 1))
       const memoryQuery = trimmedContent.length >= 4 ? trimmedContent : '用户偏好与工作区概况'
       let injectedMemoriesForClient: {
-        user: typeof import('@prizm/shared').MemoryItem[]
-        scope: typeof import('@prizm/shared').MemoryItem[]
-        session: typeof import('@prizm/shared').MemoryItem[]
+        user: import('@prizm/shared').MemoryItem[]
+        scope: import('@prizm/shared').MemoryItem[]
+        session: import('@prizm/shared').MemoryItem[]
       } | null = null
 
       if (shouldInjectMemory) {
@@ -563,12 +578,12 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
           const truncateMem = (s: string) =>
             s.length <= maxCharsPerMemory ? s : s.slice(0, maxCharsPerMemory) + '…'
 
-          const two = await searchUserAndScopeMemories(memoryQuery, userId, scope)
+          const two = await searchUserAndScopeMemories(memoryQuery, memoryUserId, scope)
           let userMem = two.user
           let scopeMem = two.scope
           let sessionMem: { memory: string }[] = []
           if (compressedThrough > 0) {
-            const three = await searchThreeLevelMemories(memoryQuery, userId, scope, id)
+            const three = await searchThreeLevelMemories(memoryQuery, memoryUserId, scope, id)
             sessionMem = three.session
           }
 
@@ -593,7 +608,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
             injectedMemoriesForClient = {
               user: userMem,
               scope: scopeMem,
-              session: sessionMem as typeof import('@prizm/shared').MemoryItem[]
+              session: sessionMem as import('@prizm/shared').MemoryItem[]
             }
             const memoryPrompt = sections.join('\n\n')
             const insertIdx =
@@ -773,7 +788,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
                     { role: 'user', content: content.trim() },
                     { role: 'assistant', content: fullContent }
                   ],
-                  userId,
+                  memoryUserId,
                   scope,
                   id,
                   appendedMsg.id
@@ -821,7 +836,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
                   { role: 'user', content: content.trim() },
                   { role: 'assistant', content: fullContent }
                 ],
-                userId,
+                memoryUserId,
                 scope,
                 id,
                 appendedMsg.id
@@ -884,7 +899,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
                   { role: 'user', content: content.trim() },
                   { role: 'assistant', content: fullContent }
                 ],
-                userId,
+                memoryUserId,
                 scope,
                 id,
                 appendedMsg.id
@@ -915,8 +930,8 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         }
       } finally {
         const usedModel = typeof model === 'string' && model.trim() ? model.trim() : undefined
-        if (userId && lastUsage) {
-          recordTokenUsage(userId, 'chat', lastUsage, usedModel)
+        if (lastUsage) {
+          recordTokenUsage(memoryUserId, 'chat', lastUsage, usedModel)
         }
         if (chatCompletedAt && lastUsage) {
           try {

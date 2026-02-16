@@ -8,6 +8,7 @@ import { scopeStore } from '../core/ScopeStore'
 import { getLLMProvider } from './index'
 import { createLogger } from '../logger'
 import { getConversationSummarySettings } from '../settings/agentToolsStore'
+import { MEMORY_USER_ID } from '@prizm/shared'
 import { recordTokenUsage } from './tokenUsage'
 
 const log = createLogger('ConversationSummary')
@@ -71,7 +72,7 @@ export function scheduleTurnSummary(
       log.error('Turn summary failed:', sessionId, 'scope:', scope, err)
     } finally {
       if (lastUsage) {
-        recordTokenUsage(userId ?? 'anonymous', 'conversation_summary', lastUsage, model)
+        recordTokenUsage(MEMORY_USER_ID, 'conversation_summary', lastUsage, model)
       }
     }
   })()

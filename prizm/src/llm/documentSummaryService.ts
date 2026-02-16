@@ -9,6 +9,7 @@ import { getLLMProvider } from './index'
 import { createLogger } from '../logger'
 import { getDocumentSummarySettings } from '../settings/agentToolsStore'
 import { recordTokenUsage } from './tokenUsage'
+import { MEMORY_USER_ID } from '@prizm/shared'
 import { isMemoryEnabled, addDocumentToMemory } from './EverMemService'
 
 const log = createLogger('DocumentSummary')
@@ -80,7 +81,7 @@ export function scheduleDocumentSummary(scope: string, documentId: string, userI
 
       // 异步将文档内容写入 scope:docs 记忆层
       if (isMemoryEnabled()) {
-        addDocumentToMemory(userId ?? 'anonymous', scope, documentId).catch((e) =>
+        addDocumentToMemory(MEMORY_USER_ID, scope, documentId).catch((e) =>
           log.warn('Failed to store document memory:', documentId, e)
         )
       }
@@ -88,7 +89,7 @@ export function scheduleDocumentSummary(scope: string, documentId: string, userI
       log.error('Document summary failed:', documentId, 'scope:', scope, err)
     } finally {
       if (lastUsage) {
-        recordTokenUsage(userId ?? 'anonymous', 'document_summary', lastUsage, model)
+        recordTokenUsage(MEMORY_USER_ID, 'document_summary', lastUsage, model)
       }
     }
   })()

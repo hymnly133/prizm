@@ -116,7 +116,7 @@ function buildDocumentsSection(scope: string, data: ScopeData, maxItems: number)
 }
 
 /**
- * 会话区块：仅数量或标题列表
+ * 会话区块：仅数量或摘要列表
  */
 function buildSessionsSection(data: ScopeData): string {
   const sessions = data.agentSessions ?? []
@@ -124,17 +124,13 @@ function buildSessionsSection(data: ScopeData): string {
 
   const sorted = [...sessions].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
   const slice = sorted.slice(0, 8)
-  const titles = slice.map((s) => s.title?.trim() || s.id).join('、')
-  const allMeaningless = slice.every((s) => {
-    const t = (s.title ?? '').trim()
-    return !t || t === '新会话' || t === s.id
-  })
+  const summaries = slice.map((s) => s.llmSummary?.trim()).filter(Boolean)
 
-  if (allMeaningless || !titles) {
+  if (!summaries.length) {
     return `## 会话\n共 ${sorted.length} 个会话`
   }
   const tail = sorted.length > 8 ? ` …共 ${sorted.length} 个会话` : ''
-  return `## 会话\n${titles}${tail}`
+  return `## 会话\n${summaries.join('、')}${tail}`
 }
 
 /**

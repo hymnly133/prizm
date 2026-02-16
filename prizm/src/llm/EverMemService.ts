@@ -12,6 +12,9 @@ import {
   DefaultQueryExpansionProvider,
   MemoryRoutingContext
 } from '@prizm/evermemos'
+import Database from 'better-sqlite3'
+import fs from 'fs'
+import { MEMORY_USER_ID } from '@prizm/shared'
 import { createLogger } from '../logger'
 import {
   ensureMemoryDir,
@@ -19,10 +22,12 @@ import {
   getUserMemoryVecPath,
   getScopeMemoryDbPath,
   getScopeMemoryVecPath,
-  ensureScopeMemoryDir
+  ensureScopeMemoryDir,
+  getUsersDir
 } from '../core/PathProviderCore'
 import { scopeStore } from '../core/ScopeStore'
 import { appendSessionMemories } from '../core/mdStore'
+import { readUserTokenUsage, writeUserTokenUsage } from '../core/UserStore'
 import { createCompositeStorageAdapter } from './CompositeStorageAdapter'
 import { getLLMProvider } from '../llm/index'
 import { CompletionRequest, ICompletionProvider } from '@prizm/evermemos'
@@ -115,8 +120,137 @@ class PrizmLLMAdapter implements ICompletionProvider {
   }
 }
 
+/**
+ * 迁移单个 SQLite 记忆数据库：将所有 user_id 统一为 MEMORY_USER_ID。
+ * 处理迁移过程中的 UNIQUE 冲突（如果相同 id 已存在则跳过）。
+ */
+function migrateMemoryDb(dbPath: string, label: string): void {
+  if (!fs.existsSync(dbPath)) return
+  try {
+    const db = new Database(dbPath)
+    // 查找需要迁移的记忆数量
+    const countRow = db
+      .prepare('SELECT COUNT(*) as cnt FROM memories WHERE user_id != ? AND user_id IS NOT NULL')
+      .get(MEMORY_USER_ID) as { cnt: number } | undefined
+    const count = countRow?.cnt ?? 0
+    if (count > 0) {
+      const result = db
+        .prepare('UPDATE memories SET user_id = ? WHERE user_id != ? AND user_id IS NOT NULL')
+        .run(MEMORY_USER_ID, MEMORY_USER_ID)
+      log.info(
+        `[Migration] ${label}: unified ${result.changes} memory rows to user_id="${MEMORY_USER_ID}"`
+      )
+    }
+    // 同样迁移 dedup_log 表
+    try {
+      const dedupResult = db
+        .prepare('UPDATE dedup_log SET user_id = ? WHERE user_id != ? AND user_id IS NOT NULL')
+        .run(MEMORY_USER_ID, MEMORY_USER_ID)
+      if (dedupResult.changes > 0) {
+        log.info(`[Migration] ${label}: unified ${dedupResult.changes} dedup_log rows`)
+      }
+    } catch {
+      // dedup_log 表可能不存在，忽略
+    }
+    db.close()
+  } catch (e) {
+    log.warn(`[Migration] ${label}: failed to migrate:`, e)
+  }
+}
+
+/**
+ * 启动时运行记忆 user_id 迁移：将散落在不同 clientId 下的记忆合并到统一 userId。
+ * 幂等操作，已迁移的数据不会重复处理。
+ */
+function runMemoryUserIdMigration(): void {
+  // 1. 迁移 User DB
+  const userDbPath = getUserMemoryDbPath()
+  migrateMemoryDb(userDbPath, 'user.db')
+
+  // 2. 迁移所有已注册 Scope 的 DB
+  const scopes = scopeStore.getAllScopes()
+  for (const scopeId of scopes) {
+    try {
+      const scopeRoot = scopeStore.getScopeRootPath(scopeId)
+      if (!scopeRoot) continue
+      const scopeDbPath = getScopeMemoryDbPath(scopeRoot)
+      migrateMemoryDb(scopeDbPath, `scope[${scopeId}]`)
+    } catch {
+      // scope root path not available, skip
+    }
+  }
+}
+
+/**
+ * 启动时运行 token 使用数据迁移：将散落在不同 userId 目录下的 token 记录合并到统一用户。
+ * 幂等：已合并的目录下文件被删除，不会重复处理。
+ */
+function runTokenUsageMigration(): void {
+  const usersDir = getUsersDir()
+  if (!fs.existsSync(usersDir)) return
+
+  const targetId = MEMORY_USER_ID
+  let entries: string[]
+  try {
+    entries = fs.readdirSync(usersDir)
+  } catch {
+    return
+  }
+
+  // 收集所有非目标用户的 token 记录
+  let merged = 0
+  for (const entry of entries) {
+    if (entry === targetId) continue
+    const entryPath = `${usersDir}/${entry}`
+    try {
+      const stat = fs.statSync(entryPath)
+      if (!stat.isDirectory()) continue
+    } catch {
+      continue
+    }
+
+    const records = readUserTokenUsage(entry)
+    if (records.length === 0) continue
+
+    // 读取目标用户已有记录，追加后写回
+    const targetRecords = readUserTokenUsage(targetId)
+    // 按 id 去重，避免重复追加
+    const existingIds = new Set(targetRecords.map((r) => r.id))
+    const newRecords = records.filter((r) => !existingIds.has(r.id))
+    if (newRecords.length > 0) {
+      const combined = [...targetRecords, ...newRecords]
+      combined.sort((a, b) => a.timestamp - b.timestamp)
+      writeUserTokenUsage(targetId, combined)
+      merged += newRecords.length
+    }
+
+    // 删除旧用户的 token 文件（保留目录，可能有其他数据）
+    try {
+      const oldTokenFile = `${entryPath}/.prizm/token_usage.md`
+      if (fs.existsSync(oldTokenFile)) {
+        fs.unlinkSync(oldTokenFile)
+      }
+    } catch {
+      // ignore cleanup errors
+    }
+  }
+
+  if (merged > 0) {
+    log.info(
+      `[Migration] Token usage: merged ${merged} records from ${
+        entries.length - 1
+      } user(s) into "${targetId}"`
+    )
+  }
+}
+
 export async function initEverMemService() {
   ensureMemoryDir()
+
+  // 启动时执行 user_id 统一迁移
+  runMemoryUserIdMigration()
+  runTokenUsageMigration()
+
   const userDbPath = getUserMemoryDbPath()
   const userVecPath = getUserMemoryVecPath()
 
@@ -253,7 +387,7 @@ export function setRetrievalManagerForTest(manager: RetrievalManager | null): vo
 /**
  * 三层路由：将对话记忆写入 User/Scope/Session 层
  * @param messages 对话消息
- * @param userId   真实用户 ID（clientId）
+ * @param userId   用户 ID（统一使用 MEMORY_USER_ID）
  * @param scope    数据 scope
  * @param sessionId 当前会话 ID
  * @param roundMessageId 关联的 assistant 消息 ID，用于按轮次查询记忆增长
@@ -716,6 +850,25 @@ export async function deleteMemoriesByGroupPrefix(groupPrefix: string): Promise<
 
 export function isMemoryEnabled(): boolean {
   return true
+}
+
+/**
+ * 获取各层记忆的实际总数（直接 COUNT，不依赖语义搜索）
+ */
+export async function getMemoryCounts(
+  userId: string,
+  scope?: string
+): Promise<{ userCount: number; scopeCount: number }> {
+  const userCount = await getUserManagers().memory.countMemories(userId)
+  let scopeCount = 0
+  if (scope) {
+    try {
+      scopeCount = await getScopeManagers(scope).scopeOnlyMemory.countMemories(userId)
+    } catch {
+      // scope not found
+    }
+  }
+  return { userCount, scopeCount }
 }
 
 /**

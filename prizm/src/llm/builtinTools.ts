@@ -11,16 +11,22 @@ import { scheduleDocumentSummary } from './documentSummaryService'
 import { listRefItems, getScopeRefItem, getScopeStats, searchScopeItems } from './scopeItemRegistry'
 import { recordActivity } from './contextTracker'
 import type { ScopeActivityItemKind, ScopeActivityAction } from '@prizm/shared'
+import { MEMORY_USER_ID } from '@prizm/shared'
 import { isMemoryEnabled, getAllMemories, searchMemoriesWithOptions } from './EverMemService'
+
+/** 工具参数属性定义（支持 array 类型的 items） */
+interface ToolPropertyDef {
+  type: string
+  description?: string
+  enum?: string[]
+  items?: { type: string }
+}
 
 function tool(
   name: string,
   description: string,
   parameters: {
-    properties: Record<
-      string,
-      { type: string; description?: string; enum?: string[]; items?: { type: string } }
-    >
+    properties: Record<string, ToolPropertyDef>
     required?: string[]
   }
 ): LLMTool {
@@ -43,60 +49,72 @@ function tool(
  */
 export function getBuiltinTools(): LLMTool[] {
   return [
-    tool('prizm_list_notes', '列出当前工作区的便签，含分组与字数。', {
-      properties: {},
-      required: []
-    }),
-    tool('prizm_read_note', '根据便签 ID 读取便签全文。', {
+    tool(
+      'prizm_list_notes',
+      '列出当前工作区所有便签的概要（ID、内容摘要、标签、字数）。' +
+        '当需要浏览便签全貌或查找特定便签的 ID 时使用。' +
+        '如果只需查找特定内容，优先使用 prizm_search。',
+      { properties: {}, required: [] }
+    ),
+    tool('prizm_read_note', '根据便签 ID 读取便签全文。当需要查看某条便签的完整内容时使用。', {
       properties: { noteId: { type: 'string', description: '便签 ID' } },
       required: ['noteId']
-    }),
-    tool('prizm_create_note', '创建一条便签。', {
-      properties: {
-        content: { type: 'string', description: '便签内容' },
-        tags: {
-          type: 'array',
-          items: { type: 'string' },
-          description: '可选标签列表'
-        }
-      },
-      required: ['content']
-    }),
-    tool('prizm_update_note', '更新便签内容或标签。', {
-      properties: {
-        noteId: { type: 'string', description: '便签 ID' },
-        content: { type: 'string', description: '新内容' },
-        tags: {
-          type: 'array',
-          items: { type: 'string' },
-          description: '新标签列表'
-        }
-      },
-      required: ['noteId']
-    }),
-    tool('prizm_delete_note', '删除指定便签。', {
-      properties: { noteId: { type: 'string', description: '便签 ID' } },
-      required: ['noteId']
-    }),
-    tool('prizm_list_todos', '列出当前工作区的待办项，含状态与标题。多列表时按 list 分组展示。', {
-      properties: {},
-      required: []
     }),
     tool(
-      'prizm_list_todo_lists',
-      '列出所有 TODO 列表的 id 与标题，供 prizm_create_todo 选择 listId 或决定用 listTitle 新建。',
+      'prizm_create_note',
+      '创建一条新便签。创建前应确认用户意图，并检查是否已有相关便签可更新。同一话题不要拆成多条。返回新建便签的 ID。',
       {
-        properties: {},
-        required: []
+        properties: {
+          content: { type: 'string', description: '便签内容（纯文本）' },
+          tags: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '可选标签列表，用于分类'
+          }
+        },
+        required: ['content']
       }
     ),
-    tool('prizm_read_todo', '根据待办项 ID 读取详情。', {
+    tool(
+      'prizm_update_note',
+      '更新已有便签的内容或标签。修改前建议先 prizm_read_note 确认当前内容。仅传入需要修改的字段。',
+      {
+        properties: {
+          noteId: { type: 'string', description: '目标便签 ID' },
+          content: { type: 'string', description: '新内容（不传则不修改）' },
+          tags: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '新标签列表（不传则不修改）'
+          }
+        },
+        required: ['noteId']
+      }
+    ),
+    tool('prizm_delete_note', '删除指定便签。删除前需二次确认用户意图。', {
+      properties: { noteId: { type: 'string', description: '便签 ID' } },
+      required: ['noteId']
+    }),
+    tool(
+      'prizm_list_todos',
+      '列出当前工作区的所有待办项，含状态与标题，按列表分组。' +
+        '当需要查看待办全貌时使用。查找特定内容优先用 prizm_search。',
+      { properties: {}, required: [] }
+    ),
+    tool(
+      'prizm_list_todo_lists',
+      '列出所有待办列表的 id 与标题。' +
+        '在创建待办项前调用，以决定用已有 listId 还是用 listTitle 新建列表。',
+      { properties: {}, required: [] }
+    ),
+    tool('prizm_read_todo', '根据待办项 ID 读取详情（标题、描述、状态等）。', {
       properties: { todoId: { type: 'string', description: '待办项 ID' } },
       required: ['todoId']
     }),
     tool(
       'prizm_create_todo',
-      '创建一条待办项。必须指定 listId（追加到已有列表）或 listTitle（新建列表并添加），二者必填其一。',
+      '创建一条待办项。必须指定 listId（追加到已有列表）或 listTitle（新建列表并添加），二者必填其一。' +
+        '不确定有哪些列表时，先调用 prizm_list_todo_lists 查看。',
       {
         properties: {
           title: { type: 'string', description: '标题' },
@@ -118,7 +136,7 @@ export function getBuiltinTools(): LLMTool[] {
         required: ['title']
       }
     ),
-    tool('prizm_update_todo', '更新待办项状态、标题或描述。', {
+    tool('prizm_update_todo', '更新待办项状态、标题或描述。仅传入需要修改的字段。', {
       properties: {
         todoId: { type: 'string', description: '待办项 ID' },
         status: { type: 'string', enum: ['todo', 'doing', 'done'] },
@@ -127,50 +145,78 @@ export function getBuiltinTools(): LLMTool[] {
       },
       required: ['todoId']
     }),
-    tool('prizm_delete_todo', '删除指定待办项。', {
+    tool('prizm_delete_todo', '删除指定待办项。删除前需二次确认用户意图。', {
       properties: { todoId: { type: 'string', description: '待办项 ID' } },
       required: ['todoId']
     }),
-    tool('prizm_list_documents', '列出当前工作区的文档。', { properties: {}, required: [] }),
-    tool('prizm_get_document_content', '根据文档 ID 获取完整正文。需要查看文档详细内容时调用。', {
+    tool(
+      'prizm_list_documents',
+      '列出当前工作区的所有文档（ID、标题、字数）。' +
+        '当需要浏览文档全貌或查找文档 ID 时使用。查找特定内容优先用 prizm_search。',
+      { properties: {}, required: [] }
+    ),
+    tool('prizm_get_document_content', '根据文档 ID 获取完整正文。当需要查看文档详细内容时调用。', {
       properties: { documentId: { type: 'string', description: '文档 ID' } },
       required: ['documentId']
     }),
-    tool('prizm_create_document', '创建一篇文档。', {
-      properties: {
-        title: { type: 'string', description: '标题' },
-        content: { type: 'string', description: '正文' }
-      },
-      required: ['title']
-    }),
-    tool('prizm_update_document', '更新文档标题或正文。', {
-      properties: {
-        documentId: { type: 'string', description: '文档 ID' },
-        title: { type: 'string' },
-        content: { type: 'string' }
-      },
-      required: ['documentId']
-    }),
-    tool('prizm_delete_document', '删除指定文档。', {
+    tool(
+      'prizm_create_document',
+      '创建一篇文档。创建前应检查是否已有相关文档可更新。同一话题只建一篇，不要拆分。内容应精炼有价值，避免冗余重复。返回新建文档的 ID。',
+      {
+        properties: {
+          title: { type: 'string', description: '标题' },
+          content: { type: 'string', description: '正文' }
+        },
+        required: ['title']
+      }
+    ),
+    tool(
+      'prizm_update_document',
+      '更新文档标题或正文。修改前建议先 prizm_get_document_content 确认当前内容。仅传入需要修改的字段。',
+      {
+        properties: {
+          documentId: { type: 'string', description: '文档 ID' },
+          title: { type: 'string' },
+          content: { type: 'string' }
+        },
+        required: ['documentId']
+      }
+    ),
+    tool('prizm_delete_document', '删除指定文档。删除前需二次确认用户意图。', {
       properties: { documentId: { type: 'string', description: '文档 ID' } },
       required: ['documentId']
     }),
-    tool('prizm_search', '在工作区便签、待办、文档中全文搜索。', {
-      properties: { query: { type: 'string', description: '搜索关键词' } },
-      required: ['query']
-    }),
-    tool('prizm_scope_stats', '获取当前工作区数据统计（条数、字数等）。', {
-      properties: {},
-      required: []
-    }),
-    tool('prizm_list_memories', '列出当前用户的记忆条目（与对话相关的长期记忆）。', {
-      properties: {},
-      required: []
-    }),
-    tool('prizm_search_memories', '按语义/关键词搜索用户记忆，用于回忆过往对话或偏好。', {
-      properties: { query: { type: 'string', description: '搜索问题或关键词' } },
-      required: ['query']
-    })
+    tool(
+      'prizm_search',
+      '在工作区便签、待办、文档中全文搜索关键词。' +
+        '当用户询问特定内容但不确定在哪个类型中时使用。' +
+        '返回匹配条目列表（类型+ID+标题）。优先用于精确/关键词查询。' +
+        '语义模糊查询请改用 prizm_search_memories。',
+      {
+        properties: { query: { type: 'string', description: '搜索关键词或短语' } },
+        required: ['query']
+      }
+    ),
+    tool(
+      'prizm_scope_stats',
+      '获取当前工作区数据统计（各类型条数、字数）。快速了解工作区数据全貌时使用。',
+      { properties: {}, required: [] }
+    ),
+    tool(
+      'prizm_list_memories',
+      '列出当前用户的所有长期记忆条目。当需要浏览记忆全貌时使用。查找特定记忆优先用 prizm_search_memories。',
+      { properties: {}, required: [] }
+    ),
+    tool(
+      'prizm_search_memories',
+      '按语义搜索用户长期记忆（过往对话、偏好、习惯）。' +
+        '当用户问"我之前说过什么"、"上次聊了什么"、"我的偏好是什么"时使用。' +
+        '与 prizm_search 不同：这是向量语义搜索，适合模糊/意图性查询。',
+      {
+        properties: { query: { type: 'string', description: '搜索问题或关键短语' } },
+        required: ['query']
+      }
+    )
   ]
 }
 
@@ -453,8 +499,7 @@ export async function executeBuiltinTool(
 
       case 'prizm_list_memories': {
         if (!isMemoryEnabled()) return { text: '记忆模块未启用。', isError: true }
-        const memUserId = userId ?? 'default'
-        const memories = await getAllMemories(memUserId, scope)
+        const memories = await getAllMemories(MEMORY_USER_ID, scope)
         if (!memories.length) return { text: '当前无记忆条目。' }
         const lines = memories
           .slice(0, 50)
@@ -471,8 +516,7 @@ export async function executeBuiltinTool(
         if (!isMemoryEnabled()) return { text: '记忆模块未启用。', isError: true }
         const searchQuery = typeof args.query === 'string' ? args.query.trim() : ''
         if (!searchQuery) return { text: '请提供搜索关键词。', isError: true }
-        const memSearchUserId = userId ?? 'default'
-        const memories = await searchMemoriesWithOptions(searchQuery, memSearchUserId, scope)
+        const memories = await searchMemoriesWithOptions(searchQuery, MEMORY_USER_ID, scope)
         if (!memories.length) return { text: '未找到相关记忆。' }
         const lines = memories.map((m) => `- ${m.memory}`)
         return { text: lines.join('\n') }

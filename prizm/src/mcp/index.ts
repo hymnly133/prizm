@@ -22,6 +22,7 @@ import { EVENT_TYPES } from '../websocket/types'
 import { ONLINE_SCOPE } from '../core/ScopeStore'
 import { getConfig } from '../config'
 import { parseTodoItemsFromInput } from '../utils/todoItems'
+import { MEMORY_USER_ID } from '@prizm/shared'
 import { isMemoryEnabled, getAllMemories, searchMemoriesWithOptions } from '../llm/EverMemService'
 
 function createMcpServerWithTools(
@@ -335,8 +336,13 @@ function createMcpServerWithTools(
     listId?: string
     title?: string
     items?: unknown[]
-    updateItem?: { id: string; status?: string; title?: string; description?: string }
-    updateItems?: Array<{ id: string; status?: string; title?: string; description?: string }>
+    updateItem?: { id: string; status?: TodoItemStatus; title?: string; description?: string }
+    updateItems?: Array<{
+      id: string
+      status?: TodoItemStatus
+      title?: string
+      description?: string
+    }>
   }) {
     const { listId, title, items, updateItem, updateItems } = args
     const adapter = adapters.todoList
@@ -395,7 +401,7 @@ function createMcpServerWithTools(
     } else {
       if (updateItem !== undefined) {
         const updated = await adapter.updateTodoItem(scope, updateItem.id, {
-          status: updateItem.status as TodoItemStatus | undefined,
+          status: updateItem.status,
           title: updateItem.title,
           description: updateItem.description
         })
@@ -404,7 +410,7 @@ function createMcpServerWithTools(
       if (updateItems !== undefined && updateItems.length > 0) {
         for (const u of updateItems) {
           const updated = await adapter.updateTodoItem(scope, u.id, {
-            status: u.status as TodoItemStatus | undefined,
+            status: u.status,
             title: u.title,
             description: u.description
           })
@@ -798,7 +804,7 @@ function createMcpServerWithTools(
           isError: false
         }
       }
-      const memories = await getAllMemories('default', scope)
+      const memories = await getAllMemories(MEMORY_USER_ID, scope)
       return {
         content: [
           {
@@ -849,7 +855,7 @@ function createMcpServerWithTools(
           isError: true
         }
       }
-      const memories = await searchMemoriesWithOptions(q, 'default', scope)
+      const memories = await searchMemoriesWithOptions(q, MEMORY_USER_ID, scope)
       return {
         content: [
           {

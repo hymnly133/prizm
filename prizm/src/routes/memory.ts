@@ -7,16 +7,16 @@ import { toErrorResponse } from '../errors'
 import { createLogger } from '../logger'
 import { hasScopeAccess } from '../scopeUtils'
 import { DEFAULT_SCOPE } from '../core/ScopeStore'
+import { MEMORY_USER_ID } from '@prizm/shared'
 import {
   isMemoryEnabled,
   getAllMemories,
   searchMemoriesWithOptions,
-  searchUserAndScopeMemories,
-  searchThreeLevelMemories,
   deleteMemory,
   getRoundMemories,
   listDedupLog,
-  undoDedupLog
+  undoDedupLog,
+  getMemoryCounts
 } from '../llm/EverMemService'
 import { RetrieveMethod, MemoryType } from '@prizm/evermemos'
 import { readUserTokenUsage } from '../core/UserStore'
@@ -38,12 +38,10 @@ function getScopeFromRequest(req: Request, fromBody?: boolean): string {
 }
 
 export function createMemoryRoutes(router: Router): void {
-  // GET /agent/token-usage - 当前用户的 token 使用记录（按功能 scope）
-  // 鉴权关闭或无 clientId 时使用 default，保证客户端能展示用量
+  // GET /agent/token-usage - token 使用记录（全局共享，不按客户端隔离）
   router.get('/agent/token-usage', async (req: Request, res: Response) => {
     try {
-      const userId = req.prizmClient?.clientId ?? 'default'
-      const records = readUserTokenUsage(userId)
+      const records = readUserTokenUsage(MEMORY_USER_ID)
       res.json({ records })
     } catch (error) {
       log.error('token-usage error:', error)
@@ -64,8 +62,7 @@ export function createMemoryRoutes(router: Router): void {
         return res.json({ enabled: false, memories: [] })
       }
 
-      const userId = req.prizmClient?.clientId ?? 'default'
-      const memories = await getAllMemories(userId, scope)
+      const memories = await getAllMemories(MEMORY_USER_ID, scope)
       res.json({ enabled: true, memories })
     } catch (error) {
       log.error('list memories error:', error)
@@ -120,11 +117,10 @@ export function createMemoryRoutes(router: Router): void {
         options.memory_types = memory_types.filter((t) => validTypes.includes(t)) as MemoryType[]
       }
       const hasOptions = Object.keys(options).length > 0
-      const userId = req.prizmClient?.clientId ?? 'default'
 
       const memories = await searchMemoriesWithOptions(
         query.trim(),
-        userId,
+        MEMORY_USER_ID,
         scope,
         hasOptions ? options : undefined
       )
@@ -136,8 +132,8 @@ export function createMemoryRoutes(router: Router): void {
     }
   })
 
-  // GET /agent/memories/three-level - 三层记忆状态（User/Scope/Session），供客户端可视化
-  router.get('/agent/memories/three-level', async (req: Request, res: Response) => {
+  // GET /agent/memories/counts - 各层记忆总数（直接 COUNT，不依赖语义搜索）
+  router.get('/agent/memories/counts', async (req: Request, res: Response) => {
     try {
       const scope = getScopeFromQuery(req)
       if (!hasScopeAccess(req, scope)) {
@@ -145,36 +141,13 @@ export function createMemoryRoutes(router: Router): void {
       }
 
       if (!isMemoryEnabled()) {
-        return res.json({ enabled: false, user: [], scope: [], session: [] })
+        return res.json({ enabled: false, userCount: 0, scopeCount: 0 })
       }
 
-      const sessionId =
-        typeof req.query.sessionId === 'string' && req.query.sessionId.trim()
-          ? req.query.sessionId.trim()
-          : undefined
-      const userId = req.prizmClient?.clientId ?? 'default'
-      const query = '用户偏好与工作区概况'
-
-      if (sessionId) {
-        const three = await searchThreeLevelMemories(query, userId, scope, sessionId, {
-          limit: 10
-        })
-        return res.json({
-          enabled: true,
-          user: three.user,
-          scope: three.scope,
-          session: three.session
-        })
-      }
-      const two = await searchUserAndScopeMemories(query, userId, scope, { limit: 10 })
-      return res.json({
-        enabled: true,
-        user: two.user,
-        scope: two.scope,
-        session: []
-      })
+      const counts = await getMemoryCounts(MEMORY_USER_ID, scope)
+      res.json({ enabled: true, ...counts })
     } catch (error) {
-      log.error('three-level memories error:', error)
+      log.error('memory counts error:', error)
       const { status, body } = toErrorResponse(error)
       res.status(status).json(body)
     }
@@ -197,8 +170,7 @@ export function createMemoryRoutes(router: Router): void {
         return res.status(400).json({ error: 'messageId is required' })
       }
 
-      const userId = req.prizmClient?.clientId ?? 'default'
-      const growth = await getRoundMemories(userId, messageId, scope)
+      const growth = await getRoundMemories(MEMORY_USER_ID, messageId, scope)
       res.json(growth)
     } catch (error) {
       log.error('get round memories error:', error)
@@ -249,9 +221,8 @@ export function createMemoryRoutes(router: Router): void {
         return res.json({ entries: [] })
       }
 
-      const userId = req.prizmClient?.clientId ?? 'default'
       const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : undefined
-      const entries = await listDedupLog(userId, scope, limit)
+      const entries = await listDedupLog(MEMORY_USER_ID, scope, limit)
       res.json({ entries })
     } catch (error) {
       log.error('list dedup log error:', error)
