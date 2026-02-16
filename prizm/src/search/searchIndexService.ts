@@ -218,16 +218,6 @@ export class SearchIndexService {
     const docs: { id: string; title: string; text: string }[] = []
     const entries: [string, IndexEntry][] = []
 
-    if (adapters.notes?.getAllNotes) {
-      const notes = await adapters.notes.getAllNotes(scope)
-      for (const n of notes) {
-        const content = n.content ?? ''
-        const title = content.slice(0, 80)
-        const doc = itemToDoc('note', n, content, title)
-        docs.push(doc)
-        entries.push([doc.id, { kind: 'note', raw: n }])
-      }
-    }
     if (adapters.documents?.getAllDocuments) {
       const list = await adapters.documents.getAllDocuments(scope)
       for (const d of list) {

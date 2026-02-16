@@ -562,6 +562,26 @@ export interface MemorySearchOptions {
   memory_types?: MemoryType[]
 }
 
+// ---- 用户画像直接列表 API ----
+
+/** 每轮注入的 profile 条数上限 */
+const INJECT_PROFILE_LIMIT = 10
+
+/**
+ * 直接列出用户所有 PROFILE 记忆（不依赖语义搜索，确保每轮完整注入）。
+ * 结果按 updated_at DESC 排序，最新的画像条目优先。
+ */
+export async function listAllUserProfiles(
+  userId: string,
+  limit: number = INJECT_PROFILE_LIMIT
+): Promise<MemoryItem[]> {
+  const manager = getUserManagers().memory
+  const rows = await manager.listMemories(userId, 200)
+  // 过滤 PROFILE 类型
+  const profileRows = rows.filter((r: any) => r.type === MemoryType.PROFILE)
+  return profileRows.slice(0, limit).map(mapRowToMemoryItem)
+}
+
 // ---- 三层检索 API ----
 
 /**

@@ -39,7 +39,7 @@ export interface ResolvedRef {
 }
 
 const REF_KIND_MAP: Record<string, ScopeRefKind> = {
-  note: 'note',
+  note: 'document',
   doc: 'document',
   todo: 'todo'
 }

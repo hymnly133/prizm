@@ -8,10 +8,10 @@ import { scopeStore } from '../core/ScopeStore'
 import type { ScopeData } from '../core/ScopeStore'
 
 /** 顶层聚合类型 */
-export type ScopeTopLevelKind = 'notes' | 'todoList' | 'document' | 'sessions'
+export type ScopeTopLevelKind = 'todoList' | 'document' | 'sessions'
 
 /** 可引用项类型（用于 @ 与工具）；会话暂不可引用详情 */
-export type ScopeRefKind = 'note' | 'todo' | 'document'
+export type ScopeRefKind = 'todo' | 'document'
 
 /** 短内容阈值（字符） */
 const SHORT_CONTENT_THRESHOLD = 500
@@ -56,26 +56,6 @@ function getData(scope: string): ScopeData {
   return scopeStore.getScopeData(scope)
 }
 
-function noteToRefItem(n: {
-  id: string
-  content: string
-  updatedAt: number
-  tags?: string[]
-}): ScopeRefItem {
-  const content = (n.content ?? '').trim()
-  const charCount = content.length
-  const tagsOrStatus = n.tags?.length ? n.tags.join(', ') : undefined
-  return {
-    id: n.id,
-    kind: 'note',
-    title: content.slice(0, 30) + (content.length > 30 ? '…' : ''),
-    charCount,
-    isShort: charCount < SHORT_CONTENT_THRESHOLD,
-    updatedAt: n.updatedAt ?? 0,
-    groupOrStatus: tagsOrStatus
-  }
-}
-
 function todoToRefItem(it: {
   id: string
   title: string
@@ -116,24 +96,11 @@ function docToRefItem(d: {
 }
 
 /**
- * 返回顶层元素列表（notes、todoList、各 document、sessions）
+ * 返回顶层元素列表（todoList、各 document、sessions）
  */
 export function listTopLevel(scope: string): ScopeTopLevelItem[] {
   const data = getData(scope)
   const result: ScopeTopLevelItem[] = []
-
-  // notes：便签列表作为一个顶层
-  const notesCharCount = data.notes.reduce((sum, n) => sum + ((n.content ?? '').length || 0), 0)
-  const notesUpdated = data.notes.length ? Math.max(...data.notes.map((n) => n.updatedAt ?? 0)) : 0
-  result.push({
-    kind: 'notes',
-    id: 'notes',
-    title: '便签',
-    itemCount: data.notes.length,
-    totalCharCount: notesCharCount,
-    updatedAt: notesUpdated,
-    dataAvailable: true
-  })
 
   // todoList：每个 list 一个顶层项
   for (const list of data.todoLists ?? []) {
@@ -186,17 +153,12 @@ export function listTopLevel(scope: string): ScopeTopLevelItem[] {
 }
 
 /**
- * 返回可引用项列表（便签项、待办项、文档），用于 @ 补全与工具
+ * 返回可引用项列表（待办项、文档），用于 @ 补全与工具
  */
 export function listRefItems(scope: string, kind?: ScopeRefKind): ScopeRefItem[] {
   const data = getData(scope)
   const out: ScopeRefItem[] = []
 
-  if (!kind || kind === 'note') {
-    for (const n of data.notes) {
-      out.push(noteToRefItem(n))
-    }
-  }
   if (!kind || kind === 'todo') {
     for (const list of data.todoLists ?? []) {
       for (const it of list.items ?? []) {
@@ -222,14 +184,6 @@ export function getScopeRefItem(
   id: string
 ): ScopeRefItemDetail | null {
   const data = getData(scope)
-
-  if (kind === 'note') {
-    const n = data.notes.find((x) => x.id === id)
-    if (!n) return null
-    const content = (n.content ?? '').trim()
-    const base = noteToRefItem(n)
-    return { ...base, content, summary: undefined }
-  }
 
   if (kind === 'todo') {
     for (const list of data.todoLists ?? []) {
@@ -261,10 +215,6 @@ export function getScopeRefItem(
 export function getScopeStats(scope: string): ScopeStats {
   const data = getData(scope)
   const byKind: ScopeStats['byKind'] = {
-    notes: {
-      count: data.notes.length,
-      chars: data.notes.reduce((s, n) => s + (n.content ?? '').length, 0)
-    },
     todoList: {
       count: (data.todoLists ?? []).reduce((n, l) => n + (l.items?.length ?? 0), 0),
       chars: (data.todoLists ?? []).reduce(
@@ -287,9 +237,8 @@ export function getScopeStats(scope: string): ScopeStats {
     sessions: { count: data.agentSessions.length, chars: 0 }
   }
 
-  const totalItems =
-    byKind.notes.count + byKind.todoList.count + byKind.document.count + byKind.sessions.count
-  const totalChars = byKind.notes.chars + byKind.todoList.chars + byKind.document.chars
+  const totalItems = byKind.todoList.count + byKind.document.count + byKind.sessions.count
+  const totalChars = byKind.todoList.chars + byKind.document.chars
 
   return { totalItems, totalChars, byKind }
 }

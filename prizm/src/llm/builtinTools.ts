@@ -1,10 +1,12 @@
 /**
- * Agent 内置工具：便签/待办/文档 CRUD、搜索、统计
+ * Agent 内置工具：文件系统、待办/文档 CRUD、搜索、统计
  * 工具定义与执行统一在此模块，供 DefaultAgentAdapter.chat 使用
  */
 
+import path from 'path'
 import type { LLMTool } from '../adapters/interfaces'
 import { scopeStore } from '../core/ScopeStore'
+import * as mdStore from '../core/mdStore'
 import { genUniqueId } from '../id'
 import type { TodoItemStatus, TodoList } from '../types'
 import { scheduleDocumentSummary } from './documentSummaryService'
@@ -13,6 +15,7 @@ import { recordActivity } from './contextTracker'
 import type { ScopeActivityItemKind, ScopeActivityAction } from '@prizm/shared'
 import { MEMORY_USER_ID } from '@prizm/shared'
 import { isMemoryEnabled, getAllMemories, searchMemoriesWithOptions } from './EverMemService'
+import { getSessionWorkspaceDir } from '../core/PathProviderCore'
 
 /** 工具参数属性定义（支持 array 类型的 items） */
 interface ToolPropertyDef {
@@ -44,57 +47,83 @@ function tool(
   }
 }
 
+/** workspace 参数：选择操作主工作区还是会话临时工作区（仅在使用相对路径时生效） */
+const WORKSPACE_PARAM: ToolPropertyDef = {
+  type: 'string',
+  description:
+    '目标工作区（仅相对路径时生效）："main"（默认）= 主工作区，"session" = 当前会话临时工作区。' +
+    '草稿、临时计算结果等应写入 "session"；正式文件写入 "main"。' +
+    '使用绝对路径时可忽略此参数，系统会自动识别所属工作区。',
+  enum: ['main', 'session']
+}
+
 /**
  * 返回所有内置工具定义（不含 Tavily，Tavily 由 adapter 按配置追加）
  */
 export function getBuiltinTools(): LLMTool[] {
   return [
     tool(
-      'prizm_list_notes',
-      '列出当前工作区所有便签的概要（ID、内容摘要、标签、字数）。' +
-        '当需要浏览便签全貌或查找特定便签的 ID 时使用。' +
-        '如果只需查找特定内容，优先使用 prizm_search。',
-      { properties: {}, required: [] }
-    ),
-    tool('prizm_read_note', '根据便签 ID 读取便签全文。当需要查看某条便签的完整内容时使用。', {
-      properties: { noteId: { type: 'string', description: '便签 ID' } },
-      required: ['noteId']
-    }),
-    tool(
-      'prizm_create_note',
-      '创建一条新便签。创建前应确认用户意图，并检查是否已有相关便签可更新。同一话题不要拆成多条。返回新建便签的 ID。',
+      'prizm_file_list',
+      '列出工作区指定目录下的文件和子目录。path 为空时列出根目录。' +
+        '支持相对路径和绝对路径。设置 workspace="session" 可列出会话临时工作区。',
       {
         properties: {
-          content: { type: 'string', description: '便签内容（纯文本）' },
-          tags: {
-            type: 'array',
-            items: { type: 'string' },
-            description: '可选标签列表，用于分类'
-          }
+          path: {
+            type: 'string',
+            description: '目录路径（相对路径或绝对路径），默认为空表示根目录'
+          },
+          workspace: WORKSPACE_PARAM
         },
-        required: ['content']
+        required: []
       }
     ),
     tool(
-      'prizm_update_note',
-      '更新已有便签的内容或标签。修改前建议先 prizm_read_note 确认当前内容。仅传入需要修改的字段。',
+      'prizm_file_read',
+      '根据路径读取文件内容。支持相对路径和绝对路径（绝对路径自动识别所属工作区）。',
       {
         properties: {
-          noteId: { type: 'string', description: '目标便签 ID' },
-          content: { type: 'string', description: '新内容（不传则不修改）' },
-          tags: {
-            type: 'array',
-            items: { type: 'string' },
-            description: '新标签列表（不传则不修改）'
-          }
+          path: { type: 'string', description: '文件路径（相对路径或绝对路径）' },
+          workspace: WORKSPACE_PARAM
         },
-        required: ['noteId']
+        required: ['path']
       }
     ),
-    tool('prizm_delete_note', '删除指定便签。删除前需二次确认用户意图。', {
-      properties: { noteId: { type: 'string', description: '便签 ID' } },
-      required: ['noteId']
-    }),
+    tool(
+      'prizm_file_write',
+      '将内容写入指定路径的文件。若文件不存在则创建，存在则覆盖。支持相对路径和绝对路径。' +
+        '草稿、临时内容应设置 workspace="session" 或使用临时工作区绝对路径。',
+      {
+        properties: {
+          path: { type: 'string', description: '文件路径（相对路径或绝对路径）' },
+          content: { type: 'string', description: '要写入的内容' },
+          workspace: WORKSPACE_PARAM
+        },
+        required: ['path', 'content']
+      }
+    ),
+    tool(
+      'prizm_file_move',
+      '移动或重命名文件/目录。支持相对路径和绝对路径。源和目标必须在同一工作区内。',
+      {
+        properties: {
+          from: { type: 'string', description: '源路径（相对或绝对）' },
+          to: { type: 'string', description: '目标路径（相对或绝对）' },
+          workspace: WORKSPACE_PARAM
+        },
+        required: ['from', 'to']
+      }
+    ),
+    tool(
+      'prizm_file_delete',
+      '删除指定路径的文件或目录。删除前需二次确认用户意图。支持相对路径和绝对路径。',
+      {
+        properties: {
+          path: { type: 'string', description: '文件或目录路径（相对或绝对）' },
+          workspace: WORKSPACE_PARAM
+        },
+        required: ['path']
+      }
+    ),
     tool(
       'prizm_list_todos',
       '列出当前工作区的所有待办项，含状态与标题，按列表分组。' +
@@ -237,6 +266,55 @@ export async function executeBuiltinTool(
   userId?: string
 ): Promise<BuiltinToolResult> {
   const data = scopeStore.getScopeData(scope)
+  const scopeRoot = scopeStore.getScopeRootPath(scope)
+  const sessionWorkspaceRoot = sessionId ? getSessionWorkspaceDir(scopeRoot, sessionId) : null
+
+  /**
+   * 解析路径参数：支持相对路径和绝对路径。
+   * - 相对路径：根据 workspace 参数选择根目录
+   * - 绝对路径：自动检测属于主工作区还是临时工作区，转换为相对路径
+   * 返回 { fileRoot, relativePath, wsType } 或 null（路径越界）
+   */
+  const resolvePath = (
+    rawPath: string,
+    wsArg: unknown
+  ): { fileRoot: string; relativePath: string; wsType: 'main' | 'session' } | null => {
+    if (path.isAbsolute(rawPath)) {
+      const normalized = path.resolve(rawPath)
+      // 优先匹配临时工作区（更精确的路径）
+      if (sessionWorkspaceRoot) {
+        const normalizedSession = path.resolve(sessionWorkspaceRoot)
+        if (
+          normalized === normalizedSession ||
+          normalized.startsWith(normalizedSession + path.sep)
+        ) {
+          mdStore.ensureSessionWorkspace(scopeRoot, sessionId!)
+          const rel =
+            normalized === normalizedSession ? '' : path.relative(normalizedSession, normalized)
+          return { fileRoot: sessionWorkspaceRoot, relativePath: rel, wsType: 'session' }
+        }
+      }
+      // 再匹配主工作区
+      const normalizedRoot = path.resolve(scopeRoot)
+      if (normalized === normalizedRoot || normalized.startsWith(normalizedRoot + path.sep)) {
+        const rel = normalized === normalizedRoot ? '' : path.relative(normalizedRoot, normalized)
+        return { fileRoot: scopeRoot, relativePath: rel, wsType: 'main' }
+      }
+      // 绝对路径不在任何已知工作区内
+      return null
+    }
+
+    // 相对路径：根据 workspace 参数决定根目录
+    if (wsArg === 'session' && sessionId && sessionWorkspaceRoot) {
+      mdStore.ensureSessionWorkspace(scopeRoot, sessionId)
+      return { fileRoot: sessionWorkspaceRoot, relativePath: rawPath, wsType: 'session' }
+    }
+    return { fileRoot: scopeRoot, relativePath: rawPath, wsType: 'main' }
+  }
+
+  /** 返回 workspace 标签，用于结果提示 */
+  const wsTypeLabel = (wsType: 'main' | 'session'): string =>
+    wsType === 'session' ? ' [临时工作区]' : ''
 
   const record = (itemId: string, itemKind: ScopeActivityItemKind, action: ScopeActivityAction) => {
     if (sessionId)
@@ -249,67 +327,84 @@ export async function executeBuiltinTool(
       })
   }
 
+  const OUT_OF_BOUNDS_MSG = '路径不在允许的工作区范围内。只能操作主工作区或会话临时工作区内的文件。'
+
   try {
     switch (toolName) {
-      case 'prizm_list_notes': {
-        const items = listRefItems(scope, 'note')
-        if (!items.length) return { text: '当前无便签。' }
-        const lines = items.map((r) => {
-          const g = r.groupOrStatus ? ` [${r.groupOrStatus}]` : ''
-          return `- ${r.id}: ${r.title}${g} (${r.charCount} 字)`
+      case 'prizm_file_list': {
+        const pathArg = typeof args.path === 'string' ? args.path : ''
+        const resolved = resolvePath(pathArg, args.workspace)
+        if (!resolved) return { text: OUT_OF_BOUNDS_MSG, isError: true }
+        const entries = mdStore.listDirectory(resolved.fileRoot, resolved.relativePath)
+        if (!entries.length) return { text: `目录为空或不存在。${wsTypeLabel(resolved.wsType)}` }
+        const lines = entries.map((e) => {
+          const type = e.isDir ? '[目录]' : '[文件]'
+          const extra = e.prizmType ? ` (${e.prizmType})` : ''
+          return `- ${type} ${e.relativePath}${extra}`
         })
-        return { text: lines.join('\n') }
+        return { text: lines.join('\n') + wsTypeLabel(resolved.wsType) }
       }
 
-      case 'prizm_read_note': {
-        const noteId = typeof args.noteId === 'string' ? args.noteId : ''
-        const detail = getScopeRefItem(scope, 'note', noteId)
-        if (!detail) return { text: `便签不存在: ${noteId}`, isError: true }
-        return { text: detail.content || '(空)' }
+      case 'prizm_file_read': {
+        const pathArg = typeof args.path === 'string' ? args.path : ''
+        const resolved = resolvePath(pathArg, args.workspace)
+        if (!resolved) return { text: OUT_OF_BOUNDS_MSG, isError: true }
+        const result = mdStore.readFileByPath(resolved.fileRoot, resolved.relativePath)
+        if (!result)
+          return {
+            text: `文件不存在或无法读取: ${pathArg}${wsTypeLabel(resolved.wsType)}`,
+            isError: true
+          }
+        record(resolved.relativePath, 'file', 'read')
+        return { text: result.content ?? '(空或二进制文件)' }
       }
 
-      case 'prizm_create_note': {
+      case 'prizm_file_write': {
+        const pathArg = typeof args.path === 'string' ? args.path : ''
         const content = typeof args.content === 'string' ? args.content : ''
-        const tags = Array.isArray(args.tags)
-          ? (args.tags as string[]).filter((t): t is string => typeof t === 'string')
-          : undefined
-        const now = Date.now()
-        const note = {
-          id: genUniqueId(),
-          content,
-          tags,
-          createdAt: now,
-          updatedAt: now
-        }
-        data.notes.push(note)
-        scopeStore.saveScope(scope)
-        record(note.id, 'note', 'create')
-        return { text: `已创建便签 ${note.id}` }
+        const resolved = resolvePath(pathArg, args.workspace)
+        if (!resolved) return { text: OUT_OF_BOUNDS_MSG, isError: true }
+        const ok = mdStore.writeFileByPath(resolved.fileRoot, resolved.relativePath, content)
+        if (!ok)
+          return { text: `写入失败: ${pathArg}${wsTypeLabel(resolved.wsType)}`, isError: true }
+        record(resolved.relativePath, 'file', 'create')
+        return { text: `已写入 ${pathArg}${wsTypeLabel(resolved.wsType)}` }
       }
 
-      case 'prizm_update_note': {
-        const noteId = typeof args.noteId === 'string' ? args.noteId : ''
-        const idx = data.notes.findIndex((n) => n.id === noteId)
-        if (idx < 0) return { text: `便签不存在: ${noteId}`, isError: true }
-        if (typeof args.content === 'string') data.notes[idx].content = args.content
-        if (args.tags !== undefined)
-          data.notes[idx].tags = Array.isArray(args.tags)
-            ? (args.tags as string[]).filter((t): t is string => typeof t === 'string')
-            : undefined
-        data.notes[idx].updatedAt = Date.now()
-        scopeStore.saveScope(scope)
-        record(noteId, 'note', 'update')
-        return { text: `已更新便签 ${noteId}` }
+      case 'prizm_file_move': {
+        const from = typeof args.from === 'string' ? args.from : ''
+        const to = typeof args.to === 'string' ? args.to : ''
+        const resolvedFrom = resolvePath(from, args.workspace)
+        const resolvedTo = resolvePath(to, args.workspace)
+        if (!resolvedFrom || !resolvedTo) return { text: OUT_OF_BOUNDS_MSG, isError: true }
+        // move 操作要求源和目标在同一工作区内
+        if (resolvedFrom.fileRoot !== resolvedTo.fileRoot)
+          return {
+            text: '移动失败：源路径和目标路径必须在同一工作区内。跨工作区请先 read 再 write + delete。',
+            isError: true
+          }
+        const ok = mdStore.moveFile(
+          resolvedFrom.fileRoot,
+          resolvedFrom.relativePath,
+          resolvedTo.relativePath
+        )
+        if (!ok)
+          return {
+            text: `移动失败: ${from} -> ${to}${wsTypeLabel(resolvedFrom.wsType)}`,
+            isError: true
+          }
+        return { text: `已移动 ${from} -> ${to}${wsTypeLabel(resolvedFrom.wsType)}` }
       }
 
-      case 'prizm_delete_note': {
-        const noteId = typeof args.noteId === 'string' ? args.noteId : ''
-        const i = data.notes.findIndex((n) => n.id === noteId)
-        if (i < 0) return { text: `便签不存在: ${noteId}`, isError: true }
-        data.notes.splice(i, 1)
-        scopeStore.saveScope(scope)
-        record(noteId, 'note', 'delete')
-        return { text: `已删除便签 ${noteId}` }
+      case 'prizm_file_delete': {
+        const pathArg = typeof args.path === 'string' ? args.path : ''
+        const resolved = resolvePath(pathArg, args.workspace)
+        if (!resolved) return { text: OUT_OF_BOUNDS_MSG, isError: true }
+        const ok = mdStore.deleteByPath(resolved.fileRoot, resolved.relativePath)
+        if (!ok)
+          return { text: `删除失败: ${pathArg}${wsTypeLabel(resolved.wsType)}`, isError: true }
+        record(resolved.relativePath, 'file', 'delete')
+        return { text: `已删除 ${pathArg}${wsTypeLabel(resolved.wsType)}` }
       }
 
       case 'prizm_list_todos': {
@@ -360,6 +455,7 @@ export async function executeBuiltinTool(
             id: genUniqueId(),
             title: listTitle,
             items: [],
+            relativePath: '',
             createdAt: now,
             updatedAt: now
           }
@@ -449,6 +545,7 @@ export async function executeBuiltinTool(
           id: genUniqueId(),
           title,
           content,
+          relativePath: '',
           createdAt: now,
           updatedAt: now
         }
@@ -493,7 +590,7 @@ export async function executeBuiltinTool(
       case 'prizm_scope_stats': {
         const stats = getScopeStats(scope)
         const t = stats.byKind
-        const text = `便签 ${t.notes.count} 条 / ${t.notes.chars} 字；待办 ${t.todoList.count} 项 / ${t.todoList.chars} 字；文档 ${t.document.count} 篇 / ${t.document.chars} 字；会话 ${t.sessions.count} 个。总计 ${stats.totalItems} 项，${stats.totalChars} 字。`
+        const text = `文档 ${t.document.count} 篇 / ${t.document.chars} 字；待办 ${t.todoList.count} 项 / ${t.todoList.chars} 字；会话 ${t.sessions.count} 个。总计 ${stats.totalItems} 项，${stats.totalChars} 字。`
         return { text }
       }
 
@@ -533,11 +630,11 @@ export async function executeBuiltinTool(
 
 /** 内置工具名称集合，用于判断是否为内置工具 */
 export const BUILTIN_TOOL_NAMES = new Set([
-  'prizm_list_notes',
-  'prizm_read_note',
-  'prizm_create_note',
-  'prizm_update_note',
-  'prizm_delete_note',
+  'prizm_file_list',
+  'prizm_file_read',
+  'prizm_file_write',
+  'prizm_file_move',
+  'prizm_file_delete',
   'prizm_list_todos',
   'prizm_list_todo_lists',
   'prizm_read_todo',

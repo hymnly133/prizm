@@ -24,7 +24,6 @@ const DEFAULT_MAX_SUMMARY_LEN = 2800
 const SHORT_THRESHOLD = 400
 
 /** 每类最大条数 */
-const MAX_NOTES = 8
 const MAX_TODO_ITEMS = 10
 const MAX_DOCUMENTS = 5
 
@@ -40,26 +39,6 @@ function truncate(text: string, maxLen: number = MAX_CONTENT_LEN): string {
   const s = text.trim().replace(/\s+/g, ' ')
   if (s.length <= maxLen) return s
   return s.slice(0, maxLen) + '…'
-}
-
-/**
- * 构建便签区块：每条便签项全文（一般较短）
- */
-function buildNotesSection(scope: string, data: ScopeData, maxItems: number): string {
-  const { notes } = data
-  if (!notes.length) return ''
-
-  const sorted = [...notes].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-  const lines: string[] = []
-  for (const n of sorted.slice(0, maxItems)) {
-    const prefix = n.tags?.length ? `[${n.tags.join(', ')}] ` : ''
-    const content = (n.content ?? '').trim()
-    lines.push(`- ${prefix}[id:${n.id}] ${content}`)
-  }
-  if (sorted.length > maxItems) {
-    lines.push(`  …共 ${sorted.length} 条`)
-  }
-  return `## 便签\n${lines.join('\n')}`
 }
 
 /**
@@ -134,17 +113,16 @@ function buildSessionsSection(data: ScopeData): string {
 }
 
 /**
- * 按优先级截断：超限时依次移除 notes → todo → documents → sessions
+ * 按优先级截断：超限时依次移除 todo → documents → sessions
  * @returns { text, truncated }
  */
 function truncateByPriority(
-  notesSec: string,
   todoSec: string,
   docsSec: string,
   sessionsSec: string,
   maxLen: number
 ): { text: string; truncated: boolean } {
-  const parts = [sessionsSec, docsSec, todoSec, notesSec].filter(Boolean)
+  const parts = [sessionsSec, docsSec, todoSec].filter(Boolean)
   let result = parts.join('\n\n')
   if (result.length <= maxLen) return { text: result, truncated: false }
 
@@ -166,17 +144,15 @@ export function buildScopeContextSummary(scope: string): string {
   const data = scopeStore.getScopeData(scope)
   const maxLen = getMaxSummaryLen()
 
-  const notesSection = buildNotesSection(scope, data, MAX_NOTES)
   const todoSection = buildTodoSection(scope, data, MAX_TODO_ITEMS)
   const docsSection = buildDocumentsSection(scope, data, MAX_DOCUMENTS)
   const sessionsSection = buildSessionsSection(data)
 
-  if (!notesSection && !todoSection && !docsSection && !sessionsSection) {
+  if (!todoSection && !docsSection && !sessionsSection) {
     return ''
   }
 
   const { text: summary, truncated } = truncateByPriority(
-    notesSection,
     todoSection,
     docsSection,
     sessionsSection,

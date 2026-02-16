@@ -1,6 +1,6 @@
 /**
  * Prizm MCP (Model Context Protocol) 服务器
- * 暴露本机统一上下文（便签、任务、剪贴板、文档）给 Agent 使用
+ * 暴露工作区上下文（文件、文档、任务、剪贴板）给 Agent 使用
  *
  * 连接方式：
  * - Cursor: 通过 stdio-bridge（见 MCP-CONFIG.md）或 HTTP/SSE
@@ -19,201 +19,149 @@ import type { PrizmAdapters } from '../adapters/interfaces'
 import type { TodoItemStatus } from '../types'
 import type { WebSocketServer } from '../websocket/WebSocketServer'
 import { EVENT_TYPES } from '../websocket/types'
-import { ONLINE_SCOPE } from '../core/ScopeStore'
+import { ONLINE_SCOPE, scopeStore } from '../core/ScopeStore'
 import { getConfig } from '../config'
 import { parseTodoItemsFromInput } from '../utils/todoItems'
 import { MEMORY_USER_ID } from '@prizm/shared'
 import { isMemoryEnabled, getAllMemories, searchMemoriesWithOptions } from '../llm/EverMemService'
+import * as mdStore from '../core/mdStore'
 
 function createMcpServerWithTools(
   adapters: PrizmAdapters,
   scope: string,
   getWsServer?: () => WebSocketServer | undefined
 ): McpServer {
-  const server = new McpServer({ name: 'prizm', version: '0.1.0' }, { capabilities: {} })
+  const server = new McpServer({ name: 'prizm', version: '0.2.0' }, { capabilities: {} })
+  const scopeRoot = scopeStore.getScopeRootPath(scope)
+
+  // ============ Layer 0: File System Tools ============
 
   server.registerTool(
-    'prizm_list_notes',
+    'prizm_file_list',
     {
-      description: '列出 Prizm 便签',
+      description: '列出工作区目录内容',
       inputSchema: z.object({
-        q: z.string().optional().describe('关键词过滤')
+        path: z.string().optional().default('').describe('相对路径，空字符串表示根目录'),
+        recursive: z.boolean().optional().default(false).describe('是否递归列出子目录')
       })
     },
-    async ({ q }) => {
-      const notes = adapters.notes?.getAllNotes ? await adapters.notes.getAllNotes(scope) : []
-      const filtered = q
-        ? notes.filter((n) => n.content.toLowerCase().includes(q.toLowerCase()))
-        : notes
+    async ({ path: dirPath, recursive }) => {
+      const entries = mdStore.listDirectory(scopeRoot, dirPath ?? '', { recursive })
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(
-              filtered.map((n) => ({
-                id: n.id,
-                content: n.content.slice(0, 200),
-                createdAt: n.createdAt
-              })),
-              null,
-              2
-            )
-          }
-        ]
+        content: [{ type: 'text' as const, text: JSON.stringify(entries, null, 2) }]
       }
     }
   )
 
   server.registerTool(
-    'prizm_create_note',
+    'prizm_file_read',
     {
-      description: '在 Prizm 中创建便签',
+      description: '读取工作区中的文件',
       inputSchema: z.object({
-        content: z.string().describe('便签内容'),
-        tags: z.array(z.string()).optional().describe('标签列表')
+        path: z.string().describe('相对路径')
       })
     },
-    async ({ content, tags }) => {
-      if (!adapters.notes?.createNote) {
+    async ({ path: filePath }) => {
+      const result = mdStore.readFileByPath(scopeRoot, filePath)
+      if (!result) {
         return {
-          content: [{ type: 'text' as const, text: 'Notes adapter not available' }],
-          isError: true
-        }
-      }
-      const note = await adapters.notes.createNote(scope, { content, tags })
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `Created note ${note.id}: ${note.content.slice(0, 100)}`
-          }
-        ]
-      }
-    }
-  )
-
-  server.registerTool(
-    'prizm_get_note',
-    {
-      description: '根据 ID 获取单条便签详情',
-      inputSchema: z.object({
-        id: z.string().describe('便签 ID')
-      })
-    },
-    async ({ id }) => {
-      const note = adapters.notes?.getNoteById ? await adapters.notes.getNoteById(scope, id) : null
-      if (!note) {
-        return {
-          content: [{ type: 'text' as const, text: `Note not found: ${id}` }],
+          content: [{ type: 'text' as const, text: `File not found: ${filePath}` }],
           isError: true
         }
       }
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(
-              {
-                id: note.id,
-                content: note.content,
-                imageUrls: note.imageUrls,
-                tags: note.tags,
-                createdAt: note.createdAt,
-                updatedAt: note.updatedAt
-              },
-              null,
-              2
-            )
-          }
-        ]
+        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }]
       }
     }
   )
 
   server.registerTool(
-    'prizm_update_note',
+    'prizm_file_write',
     {
-      description: '更新 Prizm 便签内容',
+      description: '写入文件到工作区',
       inputSchema: z.object({
-        id: z.string().describe('便签 ID'),
-        content: z.string().optional().describe('便签内容'),
-        tags: z.array(z.string()).optional().describe('标签列表')
+        path: z.string().describe('相对路径'),
+        content: z.string().describe('文件内容')
       })
     },
-    async ({ id, content, tags }) => {
-      if (!adapters.notes?.updateNote) {
+    async ({ path: filePath, content }) => {
+      if (mdStore.isSystemPath(filePath)) {
         return {
-          content: [{ type: 'text' as const, text: 'Notes adapter not available' }],
+          content: [{ type: 'text' as const, text: 'Cannot write to system directory' }],
           isError: true
         }
       }
-      const payload: { content?: string; tags?: string[] } = {}
-      if (content !== undefined) payload.content = content
-      if (tags !== undefined) payload.tags = tags
-      const note = await adapters.notes.updateNote(scope, id, payload)
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `Updated note ${note.id}`
-          }
-        ]
-      }
-    }
-  )
-
-  server.registerTool(
-    'prizm_delete_note',
-    {
-      description: '删除 Prizm 便签',
-      inputSchema: z.object({
-        id: z.string().describe('便签 ID')
-      })
-    },
-    async ({ id }) => {
-      if (!adapters.notes?.deleteNote) {
+      const ok = mdStore.writeFileByPath(scopeRoot, filePath, content)
+      if (!ok) {
         return {
-          content: [{ type: 'text' as const, text: 'Notes adapter not available' }],
+          content: [{ type: 'text' as const, text: 'Failed to write file' }],
           isError: true
         }
       }
-      await adapters.notes.deleteNote(scope, id)
       return {
-        content: [{ type: 'text' as const, text: `Deleted note ${id}` }]
+        content: [{ type: 'text' as const, text: `Written: ${filePath}` }]
       }
     }
   )
 
   server.registerTool(
-    'prizm_search_notes',
+    'prizm_file_move',
     {
-      description: '搜索 Prizm 便签内容',
+      description: '移动/重命名工作区中的文件',
       inputSchema: z.object({
-        query: z.string().describe('搜索关键词')
+        from: z.string().describe('源路径'),
+        to: z.string().describe('目标路径')
       })
     },
-    async ({ query }) => {
-      const notes = adapters.notes?.getAllNotes ? await adapters.notes.getAllNotes(scope) : []
-      const kw = query.toLowerCase()
-      const matched = notes.filter((n) => n.content.toLowerCase().includes(kw))
+    async ({ from, to }) => {
+      if (mdStore.isSystemPath(from) || mdStore.isSystemPath(to)) {
+        return {
+          content: [{ type: 'text' as const, text: 'Cannot move system files' }],
+          isError: true
+        }
+      }
+      const ok = mdStore.moveFile(scopeRoot, from, to)
+      if (!ok) {
+        return {
+          content: [{ type: 'text' as const, text: `Source not found: ${from}` }],
+          isError: true
+        }
+      }
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(
-              matched.map((n) => ({
-                id: n.id,
-                content: n.content,
-                createdAt: n.createdAt
-              })),
-              null,
-              2
-            )
-          }
-        ]
+        content: [{ type: 'text' as const, text: `Moved: ${from} -> ${to}` }]
       }
     }
   )
+
+  server.registerTool(
+    'prizm_file_delete',
+    {
+      description: '删除工作区中的文件或目录',
+      inputSchema: z.object({
+        path: z.string().describe('相对路径')
+      })
+    },
+    async ({ path: filePath }) => {
+      if (mdStore.isSystemPath(filePath)) {
+        return {
+          content: [{ type: 'text' as const, text: 'Cannot delete system files' }],
+          isError: true
+        }
+      }
+      const ok = mdStore.deleteByPath(scopeRoot, filePath)
+      if (!ok) {
+        return {
+          content: [{ type: 'text' as const, text: `File not found: ${filePath}` }],
+          isError: true
+        }
+      }
+      return {
+        content: [{ type: 'text' as const, text: `Deleted: ${filePath}` }]
+      }
+    }
+  )
+
+  // ============ Layer 1: Knowledge Base Tools ============
 
   server.registerTool(
     'prizm_list_todo_lists',
@@ -441,7 +389,7 @@ function createMcpServerWithTools(
   server.registerTool(
     'prizm_list_documents',
     {
-      description: '列出 Prizm 文档（正式信息文档）',
+      description: '列出 Prizm 知识库文档',
       inputSchema: z.object({
         q: z.string().optional().describe('关键词过滤标题或内容')
       })
@@ -465,6 +413,7 @@ function createMcpServerWithTools(
               filtered.map((d) => ({
                 id: d.id,
                 title: d.title,
+                relativePath: d.relativePath,
                 content: (d.content ?? '').slice(0, 200),
                 createdAt: d.createdAt
               })),
@@ -480,33 +429,26 @@ function createMcpServerWithTools(
   server.registerTool(
     'prizm_create_document',
     {
-      description: '在 Prizm 中创建文档',
+      description: '在 Prizm 知识库中创建结构化文档（自动添加 frontmatter、标题管理）',
       inputSchema: z.object({
         title: z.string().describe('文档标题'),
-        content: z.string().optional().describe('文档正文内容，支持 Markdown')
+        content: z.string().optional().describe('文档正文内容，支持 Markdown'),
+        tags: z.array(z.string()).optional().describe('标签列表')
       })
     },
-    async ({ title, content }) => {
+    async ({ title, content, tags }) => {
       if (!adapters.documents?.createDocument) {
         return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'Documents adapter not available'
-            }
-          ],
+          content: [{ type: 'text' as const, text: 'Documents adapter not available' }],
           isError: true
         }
       }
-      const doc = await adapters.documents.createDocument(scope, {
-        title,
-        content
-      })
+      const doc = await adapters.documents.createDocument(scope, { title, content, tags })
       return {
         content: [
           {
             type: 'text' as const,
-            text: `Created document ${doc.id}: ${doc.title}`
+            text: `Created document ${doc.id}: ${doc.title} (${doc.relativePath})`
           }
         ]
       }
@@ -516,7 +458,7 @@ function createMcpServerWithTools(
   server.registerTool(
     'prizm_get_document',
     {
-      description: '根据 ID 获取单条文档详情',
+      description: '根据 ID 获取知识库文档详情',
       inputSchema: z.object({
         id: z.string().describe('文档 ID')
       })
@@ -539,7 +481,9 @@ function createMcpServerWithTools(
               {
                 id: doc.id,
                 title: doc.title,
+                relativePath: doc.relativePath,
                 content: doc.content,
+                tags: doc.tags,
                 createdAt: doc.createdAt,
                 updatedAt: doc.updatedAt
               },
@@ -555,28 +499,25 @@ function createMcpServerWithTools(
   server.registerTool(
     'prizm_update_document',
     {
-      description: '更新 Prizm 文档',
+      description: '更新 Prizm 知识库文档',
       inputSchema: z.object({
         id: z.string().describe('文档 ID'),
         title: z.string().optional().describe('文档标题'),
-        content: z.string().optional().describe('文档正文，支持 Markdown')
+        content: z.string().optional().describe('文档正文，支持 Markdown'),
+        tags: z.array(z.string()).optional().describe('标签列表')
       })
     },
-    async ({ id, title, content }) => {
+    async ({ id, title, content, tags }) => {
       if (!adapters.documents?.updateDocument) {
         return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'Documents adapter not available'
-            }
-          ],
+          content: [{ type: 'text' as const, text: 'Documents adapter not available' }],
           isError: true
         }
       }
-      const payload: { title?: string; content?: string } = {}
+      const payload: { title?: string; content?: string; tags?: string[] } = {}
       if (title !== undefined) payload.title = title
       if (content !== undefined) payload.content = content
+      if (tags !== undefined) payload.tags = tags
       const doc = await adapters.documents.updateDocument(scope, id, payload)
       return {
         content: [
@@ -592,7 +533,7 @@ function createMcpServerWithTools(
   server.registerTool(
     'prizm_delete_document',
     {
-      description: '删除 Prizm 文档',
+      description: '删除 Prizm 知识库文档',
       inputSchema: z.object({
         id: z.string().describe('文档 ID')
       })
@@ -600,12 +541,7 @@ function createMcpServerWithTools(
     async ({ id }) => {
       if (!adapters.documents?.deleteDocument) {
         return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'Documents adapter not available'
-            }
-          ],
+          content: [{ type: 'text' as const, text: 'Documents adapter not available' }],
           isError: true
         }
       }
@@ -615,6 +551,8 @@ function createMcpServerWithTools(
       }
     }
   )
+
+  // ============ Clipboard Tools ============
 
   server.registerTool(
     'prizm_get_clipboard',
@@ -660,12 +598,7 @@ function createMcpServerWithTools(
     async ({ type, content }) => {
       if (!adapters.clipboard?.addItem) {
         return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'Clipboard adapter not available'
-            }
-          ],
+          content: [{ type: 'text' as const, text: 'Clipboard adapter not available' }],
           isError: true
         }
       }
@@ -675,12 +608,7 @@ function createMcpServerWithTools(
         createdAt: Date.now()
       })
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `Added clipboard item ${item.id}`
-          }
-        ]
+        content: [{ type: 'text' as const, text: `Added clipboard item ${item.id}` }]
       }
     }
   )
@@ -700,12 +628,7 @@ function createMcpServerWithTools(
       const item = items.find((c) => c.id === id)
       if (!item) {
         return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Clipboard item not found: ${id}`
-            }
-          ],
+          content: [{ type: 'text' as const, text: `Clipboard item not found: ${id}` }],
           isError: true
         }
       }
@@ -714,12 +637,7 @@ function createMcpServerWithTools(
           {
             type: 'text' as const,
             text: JSON.stringify(
-              {
-                id: item.id,
-                type: item.type,
-                content: item.content,
-                createdAt: item.createdAt
-              },
+              { id: item.id, type: item.type, content: item.content, createdAt: item.createdAt },
               null,
               2
             )
@@ -740,26 +658,18 @@ function createMcpServerWithTools(
     async ({ id }) => {
       if (!adapters.clipboard?.deleteItem) {
         return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'Clipboard adapter not available'
-            }
-          ],
+          content: [{ type: 'text' as const, text: 'Clipboard adapter not available' }],
           isError: true
         }
       }
       await adapters.clipboard.deleteItem(scope, id)
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `Deleted clipboard item ${id}`
-          }
-        ]
+        content: [{ type: 'text' as const, text: `Deleted clipboard item ${id}` }]
       }
     }
   )
+
+  // ============ Notification Tool ============
 
   server.registerTool(
     'prizm_notice',
@@ -776,15 +686,12 @@ function createMcpServerWithTools(
         ws.broadcast(EVENT_TYPES.NOTIFICATION, { title, body }, undefined)
       }
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `Notification sent: ${title}`
-          }
-        ]
+        content: [{ type: 'text' as const, text: `Notification sent: ${title}` }]
       }
     }
   )
+
+  // ============ Memory Tools ============
 
   server.registerTool(
     'prizm_list_memories',
@@ -929,6 +836,5 @@ export function mountMcpRoutes(
   }
 
   app.post('/mcp', (req: Request, res: Response) => void handler(req, res))
-  // GET 用于 SSE 被动流：客户端需带 Mcp-Session-Id（初始化后由 POST 响应返回）
   app.get('/mcp', (req: Request, res: Response) => void handler(req, res))
 }

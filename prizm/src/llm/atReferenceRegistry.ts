@@ -69,12 +69,12 @@ export function resolveKey(keyOrAlias: string): string | null {
 // ---------- 内置引用类型 ----------
 
 function builtinNoteResolve(scope: string, id: string) {
-  const detail = getScopeRefItem(scope, 'note', id)
+  const detail = getScopeRefItem(scope, 'document', id)
   return Promise.resolve(detail)
 }
 
 function builtinNoteList(scope: string, query?: string) {
-  let items = listRefItems(scope, 'note')
+  let items = listRefItems(scope, 'document')
   if (query?.trim()) {
     const q = query.trim().toLowerCase()
     items = items.filter((r) => r.title.toLowerCase().includes(q) || r.id.includes(q))

@@ -11,8 +11,8 @@ import {
 } from './slashCommandRegistry'
 
 async function runNotes(options: SlashCommandRunOptions): Promise<string> {
-  const items = listRefItems(options.scope, 'note')
-  if (!items.length) return '当前无便签。'
+  const items = listRefItems(options.scope, 'document')
+  if (!items.length) return '当前无便签/文档。'
   return items.map((r) => `- ${r.id}: ${r.title} (${r.charCount} 字)`).join('\n')
 }
 
@@ -36,12 +36,10 @@ async function runRead(options: SlashCommandRunOptions): Promise<string> {
   const [kind, id] = kindId.split(':', 2)
   const k = kind.toLowerCase()
   const refKind =
-    k === 'note'
-      ? 'note'
+    k === 'note' || k === 'doc' || k === 'document'
+      ? 'document'
       : k === 'todo'
       ? 'todo'
-      : k === 'doc' || k === 'document'
-      ? 'document'
       : null
   if (!refKind || !id) return `无法识别的类型: ${kind}`
   const detail = getScopeRefItem(options.scope, refKind, id)
@@ -52,7 +50,7 @@ async function runRead(options: SlashCommandRunOptions): Promise<string> {
 async function runStats(options: SlashCommandRunOptions): Promise<string> {
   const stats = getScopeStats(options.scope)
   const t = stats.byKind
-  return `便签 ${t.notes.count} 条 / ${t.notes.chars} 字；待办 ${t.todoList.count} 项 / ${t.todoList.chars} 字；文档 ${t.document.count} 篇 / ${t.document.chars} 字；会话 ${t.sessions.count} 个。总计 ${stats.totalItems} 项，${stats.totalChars} 字。`
+  return `文档 ${t.document.count} 篇 / ${t.document.chars} 字；待办 ${t.todoList.count} 项 / ${t.todoList.chars} 字；会话 ${t.sessions.count} 个。总计 ${stats.totalItems} 项，${stats.totalChars} 字。`
 }
 
 async function runSearch(options: SlashCommandRunOptions): Promise<string> {

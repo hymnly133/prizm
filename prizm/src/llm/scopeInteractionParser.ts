@@ -59,19 +59,19 @@ export function deriveScopeActivities(
         out.push({
           toolName: name,
           action: 'read',
-          itemKind: 'note',
+          itemKind: 'document',
           itemId: (args.noteId ?? args.id) as string,
           timestamp: ts
         })
         break
       case 'prizm_list_notes':
-        out.push({ toolName: name, action: 'list', itemKind: 'note', timestamp: ts })
+        out.push({ toolName: name, action: 'list', itemKind: 'document', timestamp: ts })
         break
       case 'prizm_create_note':
         out.push({
           toolName: name,
           action: 'create',
-          itemKind: 'note',
+          itemKind: 'document',
           itemId: extractIdFromResult(result),
           title: '便签',
           timestamp: ts
@@ -81,7 +81,7 @@ export function deriveScopeActivities(
         out.push({
           toolName: name,
           action: 'update',
-          itemKind: 'note',
+          itemKind: 'document',
           itemId: args.noteId as string,
           timestamp: ts
         })
@@ -90,13 +90,13 @@ export function deriveScopeActivities(
         out.push({
           toolName: name,
           action: 'delete',
-          itemKind: 'note',
+          itemKind: 'document',
           itemId: args.noteId as string,
           timestamp: ts
         })
         break
       case 'prizm_search_notes':
-        out.push({ toolName: name, action: 'search', itemKind: 'note', timestamp: ts })
+        out.push({ toolName: name, action: 'search', itemKind: 'document', timestamp: ts })
         break
 
       // === 待办 ===
