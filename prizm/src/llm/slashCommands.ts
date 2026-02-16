@@ -9,6 +9,16 @@ import {
   getSlashCommand,
   type SlashCommandRunOptions
 } from './slashCommandRegistry'
+import { loadAllCustomCommands, replaceTemplateVariables } from './customCommandLoader'
+import {
+  loadAllSkillMetadata,
+  activateSkill,
+  deactivateSkill,
+  getActiveSkills
+} from './skillManager'
+import { createLogger } from '../logger'
+
+const log = createLogger('SlashCommands')
 
 async function runNotes(options: SlashCommandRunOptions): Promise<string> {
   const items = listRefItems(options.scope, 'document')
@@ -36,11 +46,7 @@ async function runRead(options: SlashCommandRunOptions): Promise<string> {
   const [kind, id] = kindId.split(':', 2)
   const k = kind.toLowerCase()
   const refKind =
-    k === 'note' || k === 'doc' || k === 'document'
-      ? 'document'
-      : k === 'todo'
-      ? 'todo'
-      : null
+    k === 'note' || k === 'doc' || k === 'document' ? 'document' : k === 'todo' ? 'todo' : null
   if (!refKind || !id) return `无法识别的类型: ${kind}`
   const detail = getScopeRefItem(options.scope, refKind, id)
   if (!detail) return `未找到: ${refKind}:${id}`
@@ -81,6 +87,37 @@ async function runHelp(options: SlashCommandRunOptions): Promise<string> {
 }
 
 let builtinSlashRegistered = false
+
+/** 从 .prizm-data/commands/ 加载自定义命令并注册到 registry */
+function loadAndRegisterCustomCommands(): void {
+  try {
+    const commands = loadAllCustomCommands()
+    for (const cmd of commands) {
+      if (!cmd.enabled) continue
+      registerSlashCommand({
+        name: cmd.id,
+        aliases: cmd.aliases,
+        description: cmd.description ?? `自定义命令: ${cmd.name}`,
+        mode: cmd.mode,
+        allowedTools: cmd.allowedTools,
+        builtin: false,
+        run: async (options) => {
+          return replaceTemplateVariables(cmd.content, options.args)
+        }
+      })
+    }
+    if (commands.length > 0) {
+      log.info('Registered %d custom commands', commands.filter((c) => c.enabled).length)
+    }
+  } catch (err) {
+    log.warn('Failed to load custom commands:', err)
+  }
+}
+
+/** 重新加载自定义命令（供外部调用，如命令变更后刷新） */
+export function reloadCustomCommands(): void {
+  loadAndRegisterCustomCommands()
+}
 
 /** 注册内置 slash 命令 */
 export function registerBuiltinSlashCommands(): void {
@@ -138,6 +175,70 @@ export function registerBuiltinSlashCommands(): void {
     run: runHelp,
     builtin: true
   })
+
+  // /skill 命令：管理 skills
+  registerSlashCommand({
+    name: 'skill',
+    aliases: ['技能'],
+    description: '管理 Skills: /skill list | /skill <name> | /skill deactivate <name>',
+    builtin: true,
+    run: async (options) => {
+      const [subCmd, ...rest] = options.args
+      const scope = options.scope
+      const sessionId = options.sessionId ?? ''
+
+      if (!subCmd || subCmd === 'list') {
+        const allSkills = loadAllSkillMetadata()
+        const active = getActiveSkills(scope, sessionId)
+        const activeNames = new Set(active.map((a) => a.skillName))
+        if (allSkills.length === 0) return '当前无可用 Skills。'
+        return allSkills
+          .map(
+            (s) =>
+              `- ${s.name}${activeNames.has(s.name) ? ' ✓' : ''}: ${s.description.slice(0, 60)}`
+          )
+          .join('\n')
+      }
+
+      if (subCmd === 'deactivate' || subCmd === 'off') {
+        const name = rest[0]
+        if (!name) return '用法: /skill deactivate <name>'
+        const result = deactivateSkill(scope, sessionId, name)
+        return result ? `已取消激活 Skill: ${name}` : `Skill "${name}" 未激活或不存在`
+      }
+
+      if (subCmd === 'active') {
+        const active = getActiveSkills(scope, sessionId)
+        if (active.length === 0) return '当前会话无激活的 Skills。'
+        return active
+          .map(
+            (a) =>
+              `- ${a.skillName} (${a.autoActivated ? '自动' : '手动'}, ${new Date(
+                a.activatedAt
+              ).toLocaleTimeString()})`
+          )
+          .join('\n')
+      }
+
+      // /skill <name> → 手动激活
+      const activation = activateSkill(scope, sessionId, subCmd)
+      if (!activation) return `Skill "${subCmd}" 未找到。使用 /skill list 查看可用 Skills。`
+      return `已激活 Skill: ${subCmd}`
+    }
+  })
+
+  // 加载用户自定义命令
+  loadAndRegisterCustomCommands()
+}
+
+/** slash 命令执行结果 */
+export interface SlashCommandResult {
+  /** 结果文本 */
+  text: string
+  /** 命令模式：prompt 需注入 LLM，action 直接返回 */
+  mode: 'prompt' | 'action'
+  /** 原始命令名 */
+  commandName: string
 }
 
 /**
@@ -147,12 +248,16 @@ export async function tryRunSlashCommand(
   scope: string,
   sessionId: string | undefined,
   message: string
-): Promise<string | null> {
+): Promise<SlashCommandResult | null> {
   registerBuiltinSlashCommands()
   const parsed = parseSlashMessage(message)
   if (!parsed) return null
   const cmd = getSlashCommand(parsed.name)
   if (!cmd) return null
   const result = await cmd.run({ scope, sessionId, args: parsed.args })
-  return result
+  return {
+    text: result,
+    mode: cmd.mode ?? 'action',
+    commandName: cmd.name
+  }
 }

@@ -15,6 +15,10 @@ export interface SlashCommandDef {
   description: string
   run(options: SlashCommandRunOptions): Promise<string>
   builtin: boolean
+  /** prompt: 注入 LLM 上下文由 LLM 生成回复; action: 直接返回结果（默认 action 兼容旧命令） */
+  mode?: 'prompt' | 'action'
+  /** 允许的工具列表（兼容 Claude Code allowed-tools） */
+  allowedTools?: string[]
 }
 
 const registry = new Map<string, SlashCommandDef>()

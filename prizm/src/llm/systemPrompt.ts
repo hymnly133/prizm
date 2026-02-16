@@ -17,13 +17,23 @@ export interface SystemPromptOptions {
   scope: string
   sessionId?: string
   includeScopeContext?: boolean
+  /** 已激活的 skill 指令列表 */
+  activeSkillInstructions?: Array<{ name: string; instructions: string }>
+  /** 已加载的外部规则内容 */
+  rulesContent?: string
 }
 
 /**
  * 构建注入到对话前的 system 内容
  */
 export function buildSystemPrompt(options: SystemPromptOptions): string {
-  const { scope, sessionId, includeScopeContext = true } = options
+  const {
+    scope,
+    sessionId,
+    includeScopeContext = true,
+    activeSkillInstructions,
+    rulesContent
+  } = options
 
   const parts: string[] = []
 
@@ -51,7 +61,8 @@ export function buildSystemPrompt(options: SystemPromptOptions): string {
   parts.push('## 架构')
   parts.push('Layer 0 文件系统：`prizm_file_*` — 操作工作区内任意文件（相对路径或绝对路径）')
   parts.push(
-    'Layer 1 知识库：`prizm_*_document` / `prizm_*_todo_list` — 管理带元数据的结构化内容（文档、待办）'
+    'Layer 1 知识库：`prizm_*_document` / `prizm_*_todo` — 管理带元数据的结构化内容（文档、待办）。' +
+      '支持 `folder` 参数创建到嵌套目录，支持 `workspace` 参数选择主/临时工作区。'
   )
   parts.push('知识库文件本身也是文件，两层工具均可访问。`.prizm/` 系统目录禁止操作。')
 
@@ -59,11 +70,16 @@ export function buildSystemPrompt(options: SystemPromptOptions): string {
   if (sessionWorkspace) {
     parts.push('')
     parts.push('### 临时工作区')
-    parts.push(`路径: \`${sessionWorkspace}\`（当前会话专属，不被全局搜索索引）`)
+    parts.push(`路径: \`${sessionWorkspace}\`（当前会话专属，session 删除时清除）`)
     parts.push(
-      '`prizm_file_*` 的 `workspace` 参数：`"main"`（默认）操作主工作区；`"session"` 操作临时工作区。'
+      '所有 `prizm_file_*` 和知识库工具（`prizm_*_document`、`prizm_*_todo`）均支持 `workspace` 参数：'
     )
-    parts.push('用户说"草稿/临时/暂存" → session；说"创建/保存" → main；不确定 → 询问用户。')
+    parts.push('- `"main"`（默认）→ 主工作区，全局可见、可搜索')
+    parts.push('- `"session"` → 临时工作区，仅当前会话可见')
+    parts.push('决策规则：草稿/临时/试探 → session | 正式/保存/创建 → main | 不确定 → 询问用户')
+    parts.push(
+      '临时内容确认后需保留 → `prizm_promote_file(fileId)` 提升到主工作区（永久保留、可搜索）'
+    )
   }
 
   // ── P3: 工作区现状摘要（动态注入） ──
@@ -77,12 +93,46 @@ export function buildSystemPrompt(options: SystemPromptOptions): string {
     }
   }
 
+  // ── P3.5: 已激活 Skills 指令（动态注入） ──
+  if (activeSkillInstructions?.length) {
+    for (const skill of activeSkillInstructions) {
+      parts.push('')
+      parts.push(`## [Skill: ${skill.name}]`)
+      parts.push(skill.instructions)
+    }
+  }
+
+  // ── P3.6: 外部项目规则（Rules，来自 AGENTS.md/CLAUDE.md 等） ──
+  if (rulesContent) {
+    parts.push('')
+    parts.push('## 项目规则')
+    parts.push(rulesContent)
+  }
+
   // ── P4: 工具决策框架（决策树，不罗列工具名） ──
   parts.push('')
   parts.push('## 工具决策')
   parts.push('操作文件 → `prizm_file_*` | 管理文档/待办 → 知识库工具')
   parts.push('搜索关键词 → `prizm_search` | 回忆偏好/历史 → `prizm_search_memories`')
+  parts.push(
+    '执行命令 → `prizm_terminal_execute`（一次性） | 持久终端 → `prizm_terminal_spawn` + `prizm_terminal_send_keys`'
+  )
   parts.push('组合模式：list → read → update（先查 → 确认 → 再改）')
+  parts.push('')
+  parts.push('### 终端使用原则')
+  parts.push('- 一次性命令（ls、git、npm 等）→ `prizm_terminal_execute`')
+  parts.push(
+    '- 需要交互或长时间运行（dev server、watch）→ `prizm_terminal_spawn` 创建 + `prizm_terminal_send_keys` 交互'
+  )
+  parts.push(
+    '- `prizm_terminal_send_keys` 的 `pressEnter` 参数：' +
+      '`true`（默认）= 输入后按回车执行命令；`false` = 仅输入文本不按回车（密码、交互式提示、Tab补全等）'
+  )
+  parts.push(
+    '- 终端工具支持 `workspace` 参数：`"main"`（默认，全局目录）或 `"session"`（会话临时目录）。' +
+      '项目构建/依赖安装 → main | 临时脚本/测试 → session'
+  )
+  parts.push('- ⚠️ 安全：禁止执行删除系统文件、修改系统配置、rm -rf 等危险操作')
 
   // ── P5: 行为准则（合并 4 个旧段落为 1 个精简段） ──
   parts.push('')
@@ -103,6 +153,17 @@ export function buildSystemPrompt(options: SystemPromptOptions): string {
     '✅ 先 prizm_search("开会") 查重 → 无重复 → prizm_create_document 创建 → "已创建文档「明天开会」"'
   )
   parts.push('❌ 不查重直接创建 / 回复大段废话 / 创建多个文档')
+  parts.push('')
+  parts.push('用户：在 research 文件夹下写一篇关于 AI 的调研报告')
+  parts.push(
+    '✅ prizm_create_document({ title: "AI调研报告", content: "...", folder: "research" }) → research/AI调研报告.md'
+  )
+  parts.push('')
+  parts.push('用户：先帮我拟个草稿')
+  parts.push(
+    '✅ prizm_create_document({ title: "草稿", content: "...", workspace: "session" }) → 临时工作区'
+  )
+  parts.push('用户确认后 → prizm_promote_file({ fileId: "xxx" }) → 提升到主工作区')
 
   return parts.join('\n')
 }
