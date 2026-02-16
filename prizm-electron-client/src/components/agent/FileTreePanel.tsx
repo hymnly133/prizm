@@ -103,7 +103,12 @@ export const FileTreePanel = memo<FileTreePanelProps>(({ scope, sessionId, onPre
 
   const handleSendToChat = useCallback(
     (node: TreeNode) => {
-      chatWith({ text: `@file:${node.id}` })
+      if (node.prizmType && node.prizmId) {
+        const kind = node.prizmType as import('../../hooks/useFileList').FileKind
+        chatWith({ files: [{ kind, id: node.prizmId, title: node.name }] })
+      } else {
+        chatWith({ files: [{ kind: 'document', id: node.id, title: node.name }] })
+      }
     },
     [chatWith]
   )

@@ -129,6 +129,9 @@
     transform: rotate(360deg);
   }
 }
+.import-spin-icon {
+  animation: spin 1s linear infinite;
+}
 @keyframes notification-updated {
   0% {
     box-shadow: 0 0 0 2px var(--ant-color-primary);
@@ -1954,6 +1957,45 @@
   margin-bottom: 16px;
 }
 
+/* Agent thinking indicator - LLM 生成工具参数时的「思考中」提示 */
+.agent-thinking-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  margin: 4px 48px;
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary, #999);
+  animation: agent-thinking-fade 1.5s ease-in-out infinite;
+}
+.agent-thinking-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ant-color-primary, #1677ff);
+  animation: agent-thinking-pulse 1.2s ease-in-out infinite;
+}
+@keyframes agent-thinking-pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+@keyframes agent-thinking-fade {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 /* Agent error banner */
 .agent-error-banner {
   padding: 8px 16px;
@@ -2188,6 +2230,101 @@
 }
 .tool-card__open-btn:active {
   transform: scale(0.97);
+}
+
+/* ── 等待用户交互卡片 ── */
+.tool-card--interact {
+  border-color: var(--ant-color-warning-border, #ffe58f);
+  background: color-mix(
+    in srgb,
+    var(--ant-color-warning-bg, #fffbe6) 50%,
+    var(--ant-color-bg-container)
+  );
+}
+.tool-card--interact:hover {
+  border-color: var(--ant-color-warning, #faad14);
+}
+
+.tool-card__interact-body {
+  margin-top: 8px;
+  padding: 8px 0 2px;
+  border-top: 1px solid var(--ant-color-warning-border, #ffe58f);
+}
+
+.tool-card__interact-message {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+  margin-bottom: 6px;
+}
+
+.tool-card__interact-paths {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.tool-card__interact-path {
+  display: block;
+  font-size: 11px;
+  padding: 3px 8px;
+  background: var(--ant-color-fill-quaternary);
+  border-radius: 4px;
+  color: var(--ant-color-text);
+  word-break: break-all;
+  font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+}
+
+.tool-card__interact-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tool-card__interact-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tool-card__interact-btn--approve {
+  background: var(--ant-color-success-bg, #f6ffed);
+  border-color: var(--ant-color-success-border, #b7eb8f);
+  color: var(--ant-color-success, #52c41a);
+}
+.tool-card__interact-btn--approve:hover:not(:disabled) {
+  background: var(--ant-color-success-bg-hover, #d9f7be);
+  border-color: var(--ant-color-success, #52c41a);
+}
+
+.tool-card__interact-btn--deny {
+  background: var(--ant-color-bg-container);
+  border-color: var(--ant-color-border);
+  color: var(--ant-color-text-secondary);
+}
+.tool-card__interact-btn--deny:hover:not(:disabled) {
+  border-color: var(--ant-color-error, #ff4d4f);
+  color: var(--ant-color-error, #ff4d4f);
+}
+
+/* ── 等待用户交互时的脉冲动画 ── */
+.tool-card--interact .tool-card__indicator {
+  animation: interact-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes interact-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
 }
 
 /* 展开内容 */
@@ -2548,6 +2685,44 @@
     opacity: 0.4;
     transform: scale(0.75);
   }
+}
+
+/* Agent 交互警告指示器：导航栏 Agent 按钮右上角橙色脉冲圆点 */
+.agent-interact-indicator {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ant-color-warning, #faad14);
+  margin-left: 4px;
+  vertical-align: top;
+  position: relative;
+  top: -1px;
+  animation: agent-interact-pulse 1s ease-in-out infinite;
+}
+@keyframes agent-interact-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.8);
+  }
+}
+
+/* Agent 会话列表：需要用户交互的会话徽章（橙色小圆点） */
+.agent-session-interact-badge {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ant-color-warning, #faad14);
+  margin-right: 6px;
+  vertical-align: middle;
+  flex-shrink: 0;
+  animation: agent-interact-pulse 1s ease-in-out infinite;
 }
 
 /* ── 文件内嵌预览面板（Agent 页右侧） ── */

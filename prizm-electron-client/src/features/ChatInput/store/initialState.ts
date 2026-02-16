@@ -3,10 +3,23 @@ import type { ChatInputProps } from '@lobehub/editor/react'
 
 import type { ActionKeys } from '../ActionBar/config'
 
+/** 输入框中的一条引用（显示在引用栏，不嵌入编辑器） */
+export interface InputRef {
+  /** 引用类型 */
+  type: 'doc' | 'note' | 'todo' | 'file'
+  /** 标识：doc/note/todo 为 id，file 为编码后路径 */
+  key: string
+  /** 显示名称 */
+  label: string
+  /** 发送时注入消息的 markdown，如 @(doc:id) 或 @(file:path) */
+  markdown: string
+}
+
 export type SendButtonHandler = (params: {
   clearContent: () => void
   editor: IEditor | null
   getMarkdownContent: () => string
+  getInputRefs: () => InputRef[]
 }) => Promise<void> | void
 
 export interface SendButtonProps {
@@ -57,16 +70,14 @@ export interface PublicState {
   showTypoBar?: boolean
 }
 
-export type OverlayReplacement = (
-  replaceStart: number,
-  replaceEnd: number,
-  replacementMarkdown: string,
-  chipLabel: string
-) => void
+/** 文本替换回调：将 overlay 选中的区间替换为纯文本（不再插入 chip） */
+export type OverlayTextReplacer = (replaceStart: number, replaceEnd: number, text: string) => void
 
 export interface State extends PublicState {
-  applyOverlayReplacement: OverlayReplacement | null
+  applyOverlayTextReplace: OverlayTextReplacer | null
   editor?: IEditor
+  /** 当前输入附带的引用列表（显示在引用栏，不嵌入编辑器） */
+  inputRefs: InputRef[]
   focusBlockInput: (() => void) | null
   isContentEmpty: boolean
   markdownContent: string
@@ -76,8 +87,9 @@ export interface State extends PublicState {
 
 export const initialState: State = {
   allowExpand: true,
-  applyOverlayReplacement: null,
+  applyOverlayTextReplace: null,
   expand: false,
+  inputRefs: [],
   focusBlockInput: null,
   isContentEmpty: false,
   leftActions: [],

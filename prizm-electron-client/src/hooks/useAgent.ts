@@ -1,496 +1,134 @@
 /**
- * useAgent - Agent 会话管理、发消息、流式消费、停止生成
- * 仿照 LobeHub：乐观更新 + 流式原地更新，不依赖 loadSession 获取消息
- * 流式更新使用普通 setState，避免 flushSync 阻塞主线程导致卡顿、无法交互
+ * useAgent - Agent 会话管理 hook（Store 的薄包装层）
+ *
+ * 所有数据和流式逻辑由 agentSessionStore（Zustand）管理，
+ * 此 hook 负责：
+ * 1. 向 Store 注入 HTTP client
+ * 2. 将 sync events 转发给 Store
+ * 3. 绑定 scope 参数，向 AgentPage 暴露与旧 API 兼容的返回值
  */
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useEffect, useCallback } from 'react'
 import { usePrizmContext, useSyncEventContext } from '../context/PrizmContext'
-import { setAgentSending } from '../events/agentBackgroundStore'
-import type {
-  AgentSession,
-  AgentMessage,
-  ToolCallRecord,
-  MessagePart,
-  MessagePartTool
-} from '@prizm/client-core'
-import type { MemoryItem } from '@prizm/shared'
-
-function tmpId(prefix: string): string {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-}
+import {
+  useAgentSessionStore,
+  selectCurrentSession,
+  selectCurrentStreamingState
+} from '../store/agentSessionStore'
+import type { AgentSession } from '@prizm/client-core'
+import type { FilePathRef } from '@prizm/shared'
 
 export function useAgent(scope: string) {
   const { manager } = usePrizmContext()
   const { lastSyncEvent } = useSyncEventContext()
-  const [sessions, setSessions] = useState<AgentSession[]>([])
-  const [currentSession, setCurrentSession] = useState<AgentSession | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [sending, setSending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
-  /** 客户端选择的模型，空则用服务端默认 */
-  const [selectedModel, setSelectedModel] = useState<string | undefined>(undefined)
-
-  /** 乐观更新消息：发送时的 [userMsg, assistantMsg]，流式过程中原地更新 assistant */
-  const [optimisticMessages, setOptimisticMessages] = useState<AgentMessage[]>([])
-
-  /** 本轮 chat 注入的记忆（SSE memory_injected 事件），供可视化 */
-  const [lastInjectedMemories, setLastInjectedMemories] = useState<{
-    user: MemoryItem[]
-    scope: MemoryItem[]
-    session: MemoryItem[]
-  } | null>(null)
-
-  /** 当前流式请求的 AbortController */
-  const abortControllerRef = useRef<AbortController | null>(null)
-
-  /** stopGeneration 的兜底超时，流自然结束时清理 */
-  const stopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const http = manager?.getHttpClient()
-
-  const refreshSessions = useCallback(async () => {
-    if (!http || !scope) return
-    setLoading(true)
-    try {
-      const list = await http.listAgentSessions(scope)
-      setSessions(list)
-    } catch {
-      setSessions([])
-    } finally {
-      setLoading(false)
+  // --- 注入 HTTP client ---
+  useEffect(() => {
+    const http = manager?.getHttpClient()
+    if (http) {
+      useAgentSessionStore.getState().setHttpClient(http)
     }
-  }, [http, scope])
+  }, [manager])
 
-  const createSession = useCallback(async () => {
-    if (!http || !scope) return null
-    setLoading(true)
-    try {
-      const session = await http.createAgentSession(scope)
-      await refreshSessions()
-      setCurrentSession(session)
-      return session
-    } catch {
-      return null
-    } finally {
-      setLoading(false)
+  // --- 转发 sync events ---
+  useEffect(() => {
+    if (lastSyncEvent?.startsWith('agent:') && scope) {
+      useAgentSessionStore.getState().handleSyncEvent(lastSyncEvent, scope)
     }
-  }, [http, scope, refreshSessions])
+  }, [lastSyncEvent, scope])
+
+  // --- 初始化加载 ---
+  useEffect(() => {
+    const http = manager?.getHttpClient()
+    if (http && scope) {
+      useAgentSessionStore.getState().setHttpClient(http)
+      void useAgentSessionStore.getState().refreshSessions(scope)
+    }
+  }, [manager, scope])
+
+  // --- 从 Store 选取状态 ---
+  const sessions = useAgentSessionStore((s) => s.sessions)
+  const currentSession = useAgentSessionStore(selectCurrentSession)
+  const loading = useAgentSessionStore((s) => s.loading)
+  const error = useAgentSessionStore((s) => s.error)
+  const selectedModel = useAgentSessionStore((s) => s.selectedModel)
+
+  const streamingState = useAgentSessionStore(selectCurrentStreamingState)
+  const sending = streamingState?.sending ?? false
+  const thinking = streamingState?.thinking ?? false
+  const optimisticMessages = streamingState?.optimisticMessages ?? EMPTY_MESSAGES
+  const pendingInteract = streamingState?.pendingInteract ?? null
+  const lastInjectedMemories = streamingState?.lastInjectedMemories ?? null
+
+  // --- 绑定 scope 的 action 封装 ---
+  const refreshSessions = useCallback(
+    () => useAgentSessionStore.getState().refreshSessions(scope),
+    [scope]
+  )
+
+  const createSession = useCallback(
+    () => useAgentSessionStore.getState().createSession(scope),
+    [scope]
+  )
 
   const deleteSession = useCallback(
-    async (id: string) => {
-      if (!http || !scope) return
-      setLoading(true)
-      try {
-        await http.deleteAgentSession(id, scope)
-        if (currentSession?.id === id) {
-          setCurrentSession(null)
-          setOptimisticMessages([])
-        }
-        await refreshSessions()
-      } finally {
-        setLoading(false)
-      }
-    },
-    [http, scope, currentSession?.id, refreshSessions]
+    (id: string) => useAgentSessionStore.getState().deleteSession(id, scope),
+    [scope]
   )
 
   const loadSession = useCallback(
-    async (id: string) => {
-      if (!http || !scope) return null
-      setLoading(true)
-      setOptimisticMessages([]) // 切换会话时清除乐观更新
-      setError(null)
-      try {
-        const session = await http.getAgentSession(id, scope)
-        setCurrentSession(session)
-        return session
-      } catch {
-        return null
-      } finally {
-        setLoading(false)
-      }
-    },
-    [http, scope]
+    (id: string) => useAgentSessionStore.getState().loadSession(id, scope),
+    [scope]
   )
 
   const updateSession = useCallback(
-    async (id: string, update: { llmSummary?: string }) => {
-      if (!http || !scope) return null
-      try {
-        const session = await http.updateAgentSession(id, update, scope)
-        setCurrentSession((prev) => (prev?.id === id ? { ...prev, ...session } : prev))
-        await refreshSessions()
-        return session
-      } catch {
-        return null
-      }
-    },
-    [http, scope, refreshSessions]
+    (id: string, update: { llmSummary?: string }) =>
+      useAgentSessionStore.getState().updateSession(id, update, scope),
+    [scope]
   )
-
-  /** 停止当前生成 */
-  const stopGeneration = useCallback(async () => {
-    // 1. 通知后端停止（服务端会 abort LLM 流，发送 done + usage，然后 res.end）
-    //    此时 SSE 流仍然打开，客户端能自然收到 done 事件获取 usage
-    if (http && currentSession) {
-      try {
-        await http.stopAgentChat(currentSession.id, scope)
-      } catch {
-        // 忽略：后端可能已结束
-      }
-    }
-    // 2. 设置超时兜底：如果 SSE 流未在 3s 内自然结束，才强制 abort
-    const ac = abortControllerRef.current
-    if (ac) {
-      const timer = setTimeout(() => {
-        if (abortControllerRef.current === ac) {
-          ac.abort()
-          abortControllerRef.current = null
-        }
-      }, 3000)
-      stopTimeoutRef.current = timer
-    }
-  }, [http, currentSession, scope])
 
   const sendMessage = useCallback(
-    async (content: string, sessionOverride?: AgentSession | null): Promise<string | null> => {
-      const session = sessionOverride ?? currentSession
-      if (!http || !session || !content.trim()) return null
-      setSending(true)
-      setAgentSending(true)
-      setError(null)
-
-      // 创建 AbortController
-      const ac = new AbortController()
-      abortControllerRef.current = ac
-
-      const now = Date.now()
-      const userMsg: AgentMessage = {
-        id: tmpId('user'),
-        role: 'user',
-        content: content.trim(),
-        createdAt: now
-      }
-      const assistantMsg: AgentMessage = {
-        id: tmpId('assistant'),
-        role: 'assistant',
-        content: '',
-        createdAt: now
-      }
-
-      setOptimisticMessages([userMsg, assistantMsg])
-      const sessionId = session.id
-      let lastUsage: AgentMessage['usage'] | undefined
-      let lastModel: string | undefined
-      let lastMemoryGrowth: AgentMessage['memoryGrowth'] | undefined
-      let lastMessageId: string | undefined
-
-      try {
-        let fullContent = ''
-        let segmentContent = ''
-        let fullReasoning = ''
-        const fullToolCalls: ToolCallRecord[] = []
-        const parts: MessagePart[] = []
-        let wasStopped = false
-        let commandResultContent: string | null = null
-        await http.streamChat(session.id, content.trim(), {
-          scope,
-          signal: ac.signal,
-          model: selectedModel,
-          onChunk: (chunk) => {
-            if (
-              chunk.type === 'memory_injected' &&
-              chunk.value &&
-              typeof chunk.value === 'object' &&
-              'user' in chunk.value &&
-              'scope' in chunk.value &&
-              'session' in chunk.value
-            ) {
-              setLastInjectedMemories(
-                chunk.value as { user: MemoryItem[]; scope: MemoryItem[]; session: MemoryItem[] }
-              )
-            }
-            if (chunk.type === 'command_result' && typeof chunk.value === 'string') {
-              commandResultContent = chunk.value
-              setOptimisticMessages((prev) => {
-                if (prev.length < 1) return prev
-                return [
-                  prev[0],
-                  {
-                    id: tmpId('cmd'),
-                    role: 'system',
-                    content: chunk.value as string,
-                    createdAt: Date.now()
-                  }
-                ]
-              })
-            }
-            if (chunk.type === 'text' && chunk.value) {
-              fullContent += chunk.value
-              segmentContent += chunk.value
-              setOptimisticMessages((prev) => {
-                if (prev.length < 2) return prev
-                const assistant = {
-                  ...prev[1],
-                  content: fullContent,
-                  ...(parts.length > 0
-                    ? { parts: [...parts, { type: 'text' as const, content: segmentContent }] }
-                    : {})
-                }
-                return [prev[0], assistant]
-              })
-            }
-            if (chunk.type === 'reasoning' && chunk.value) {
-              fullReasoning += chunk.value
-              setOptimisticMessages((prev) => {
-                if (prev.length < 2) return prev
-                const assistant = {
-                  ...prev[1],
-                  content: prev[1].content,
-                  reasoning: fullReasoning
-                }
-                return [prev[0], assistant]
-              })
-            }
-            if (
-              chunk.type === 'tool_result_chunk' &&
-              chunk.value &&
-              typeof chunk.value === 'object' &&
-              'id' in chunk.value &&
-              'chunk' in chunk.value
-            ) {
-              const { id, chunk: chunkText } = chunk.value as { id: string; chunk: string }
-              // 服务端在首轮有 tool_calls 时不会先发 done，会先发 tool_result_chunk，必须先刷入当前文本段再插入 tool，否则顺序会变成 B A D C
-              if (segmentContent) {
-                parts.push({ type: 'text', content: segmentContent })
-                segmentContent = ''
-              }
-              const existing = parts.find(
-                (p): p is MessagePartTool => p.type === 'tool' && p.id === id
-              )
-              const newParts: MessagePart[] = existing
-                ? parts.map((p) =>
-                    p.type === 'tool' && p.id === id ? { ...p, result: p.result + chunkText } : p
-                  )
-                : [
-                    ...parts,
-                    { type: 'tool' as const, id, name: '…', arguments: '', result: chunkText }
-                  ]
-              parts.length = 0
-              parts.push(...newParts)
-              setOptimisticMessages((prev) => {
-                if (prev.length < 2) return prev
-                return [
-                  prev[0],
-                  {
-                    ...prev[1],
-                    content: fullContent,
-                    toolCalls: [...fullToolCalls],
-                    parts: [...newParts]
-                  }
-                ]
-              })
-            }
-            if (
-              chunk.type === 'tool_call' &&
-              chunk.value &&
-              typeof chunk.value === 'object' &&
-              'id' in chunk.value
-            ) {
-              const tc = chunk.value as ToolCallRecord
-              const existingIdx = fullToolCalls.findIndex((t) => t.id === tc.id)
-              if (existingIdx >= 0) fullToolCalls[existingIdx] = tc
-              else fullToolCalls.push(tc)
-              if (segmentContent) {
-                parts.push({ type: 'text', content: segmentContent })
-                segmentContent = ''
-              }
-              const existingTool = parts.find(
-                (p): p is MessagePartTool => p.type === 'tool' && p.id === tc.id
-              )
-              const toolPart: MessagePartTool = {
-                type: 'tool',
-                id: tc.id,
-                name: tc.name,
-                arguments: tc.arguments ?? '',
-                result: tc.result ?? existingTool?.result ?? '',
-                ...(tc.isError && { isError: true }),
-                ...(tc.status && { status: tc.status })
-              }
-              if (existingTool) {
-                const idx = parts.indexOf(existingTool)
-                parts[idx] = toolPart
-              } else {
-                parts.push(toolPart)
-              }
-              setOptimisticMessages((prev) => {
-                if (prev.length < 2) return prev
-                return [
-                  prev[0],
-                  {
-                    ...prev[1],
-                    content: fullContent,
-                    toolCalls: [...fullToolCalls],
-                    parts: [...parts]
-                  }
-                ]
-              })
-            }
-            // 独立 usage 事件（服务端在 abort/error 时的回退路径）
-            if (chunk.type === 'usage' && chunk.value) {
-              lastUsage = chunk.value as AgentMessage['usage']
-            }
-            if (chunk.type === 'done') {
-              if (chunk.usage) lastUsage = chunk.usage
-              if (chunk.model) lastModel = chunk.model
-              if (chunk.stopped) wasStopped = true
-              if (segmentContent) {
-                parts.push({ type: 'text', content: segmentContent })
-                segmentContent = ''
-              }
-              lastMemoryGrowth = chunk.memoryGrowth ?? undefined
-              lastMessageId = chunk.messageId
-              if (!commandResultContent) {
-                setOptimisticMessages((prev) => {
-                  if (prev.length < 2) return prev
-                  return [
-                    prev[0],
-                    {
-                      ...prev[1],
-                      id: lastMessageId ?? prev[1].id,
-                      content: prev[1].content,
-                      model: lastModel ?? prev[1].model,
-                      usage: lastUsage ?? prev[1].usage,
-                      toolCalls: fullToolCalls.length > 0 ? fullToolCalls : prev[1].toolCalls,
-                      ...(parts.length > 0 && { parts: [...parts] }),
-                      ...(fullReasoning && { reasoning: fullReasoning }),
-                      ...(lastMemoryGrowth && { memoryGrowth: lastMemoryGrowth })
-                    }
-                  ]
-                })
-              }
-            }
-          },
-          onError: (msg) => {
-            setError(msg)
-          }
-        })
-
-        // 流式结束：将乐观消息合并进 currentSession（含 model、usage、reasoning、toolCalls 或 command_result）
-        setCurrentSession((prev) => {
-          const base = prev?.id === sessionId ? prev : session
-          if (base.id !== sessionId) return prev ?? base
-          if (commandResultContent != null) {
-            return {
-              ...base,
-              messages: [
-                ...base.messages,
-                userMsg,
-                {
-                  id: tmpId('cmd'),
-                  role: 'system',
-                  content: commandResultContent,
-                  createdAt: Date.now()
-                }
-              ]
-            }
-          }
-          const assistantWithGrowth = {
-            ...assistantMsg,
-            id: lastMessageId ?? assistantMsg.id,
-            content: fullContent,
-            model: lastModel,
-            usage: lastUsage,
-            ...(fullReasoning && { reasoning: fullReasoning }),
-            ...(fullToolCalls.length > 0 && { toolCalls: fullToolCalls }),
-            ...(parts.length > 0 && { parts: [...parts] }),
-            ...(lastMemoryGrowth && { memoryGrowth: lastMemoryGrowth })
-          }
-          return {
-            ...base,
-            messages: [...base.messages, userMsg, assistantWithGrowth]
-          }
-        })
-        setOptimisticMessages([])
-        await refreshSessions()
-        return commandResultContent ?? fullContent
-      } catch (err) {
-        // AbortError 是正常停止
-        const isAbort = err instanceof Error && err.name === 'AbortError'
-        if (isAbort) {
-          // 停止时将已有内容合并进 session（含 usage/model，若已收到 done）
-          setOptimisticMessages((prev) => {
-            if (prev.length < 2) return []
-            const assistant = prev[1]
-            if (assistant?.content) {
-              setCurrentSession((s) => {
-                const base = s?.id === sessionId ? s : session
-                if (base.id !== sessionId) return s ?? base
-                return {
-                  ...base,
-                  messages: [
-                    ...base.messages,
-                    userMsg,
-                    {
-                      ...assistant,
-                      content: assistant.content,
-                      model: lastModel ?? assistant.model,
-                      usage: lastUsage ?? assistant.usage,
-                      ...(assistant.toolCalls?.length && { toolCalls: assistant.toolCalls }),
-                      ...(assistant.parts?.length && { parts: assistant.parts }),
-                      ...(assistant.reasoning && {
-                        reasoning: assistant.reasoning
-                      })
-                    }
-                  ]
-                }
-              })
-            }
-            return []
-          })
-        } else {
-          setError(err instanceof Error ? err.message : '发送失败')
-          setOptimisticMessages([])
-        }
-        return null
-      } finally {
-        abortControllerRef.current = null
-        if (stopTimeoutRef.current) {
-          clearTimeout(stopTimeoutRef.current)
-          stopTimeoutRef.current = null
-        }
-        setSending(false)
-        setAgentSending(false)
-      }
+    (content: string, sessionOverride?: AgentSession | null, fileRefs?: FilePathRef[]) => {
+      const state = useAgentSessionStore.getState()
+      const sid = sessionOverride?.id ?? state.currentSessionId
+      if (!sid) return Promise.resolve(null)
+      return state.sendMessage(sid, content, scope, fileRefs)
     },
-    [http, currentSession, scope, refreshSessions, selectedModel]
+    [scope]
   )
 
-  useEffect(() => {
-    if (http && scope) void refreshSessions()
-  }, [http, scope, refreshSessions])
-
-  useEffect(() => {
-    if (lastSyncEvent?.startsWith('agent:')) {
-      if (scope) void refreshSessions()
-      if (currentSession) void loadSession(currentSession.id)
+  const stopGeneration = useCallback(() => {
+    const state = useAgentSessionStore.getState()
+    if (state.currentSessionId) {
+      return state.stopGeneration(state.currentSessionId, scope)
     }
-  }, [lastSyncEvent, scope, currentSession?.id, refreshSessions, loadSession])
+    return Promise.resolve()
+  }, [scope])
 
-  // 组件卸载时清理（AgentPage 始终挂载，仅 app 关闭时触发）
-  useEffect(() => {
-    return () => {
-      abortControllerRef.current?.abort()
-      setAgentSending(false)
-    }
+  const setCurrentSession = useCallback((s: AgentSession | null) => {
+    useAgentSessionStore.getState().switchSession(s?.id ?? null)
   }, [])
+
+  const setSelectedModel = useCallback((model: string | undefined) => {
+    useAgentSessionStore.getState().setSelectedModel(model)
+  }, [])
+
+  const respondToInteract = useCallback(
+    (requestId: string, approved: boolean, paths?: string[]) => {
+      const state = useAgentSessionStore.getState()
+      if (state.currentSessionId) {
+        return state.respondToInteract(state.currentSessionId, requestId, approved, scope, paths)
+      }
+      return Promise.resolve()
+    },
+    [scope]
+  )
 
   return {
     sessions,
     currentSession,
     loading,
     sending,
+    thinking,
     error,
     refreshSessions,
     createSession,
@@ -503,6 +141,11 @@ export function useAgent(scope: string) {
     optimisticMessages,
     selectedModel,
     setSelectedModel,
-    lastInjectedMemories
+    lastInjectedMemories,
+    pendingInteract,
+    respondToInteract
   }
 }
+
+/** 稳定空数组引用，避免无流式状态时每次渲染创建新数组 */
+const EMPTY_MESSAGES: import('@prizm/client-core').AgentMessage[] = []

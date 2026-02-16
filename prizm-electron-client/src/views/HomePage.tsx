@@ -11,6 +11,7 @@ import {
   Clipboard,
   Clock,
   FileText,
+  Import,
   ListTodo,
   MessageSquare,
   Plus,
@@ -20,6 +21,7 @@ import {
 import { useHomeData } from '../hooks/useHomeData'
 import { useWorkNavigation } from '../context/WorkNavigationContext'
 import { useChatWithFile } from '../context/ChatWithFileContext'
+import { useImportContext } from '../context/ImportContext'
 import ScopeSidebar from '../components/ui/ScopeSidebar'
 import TodoItemRow from '../components/todo/TodoItemRow'
 import type { AgentSession, TodoList, Document as PrizmDocument } from '@prizm/client-core'
@@ -92,6 +94,7 @@ function HomePage({
   const data = useHomeData()
   const { openFileAtWork } = useWorkNavigation()
   const { chatWith } = useChatWithFile()
+  const { startImportFromFileDialog } = useImportContext()
 
   /* 最近 5 条会话，按 updatedAt 排序 */
   const recentSessions = useMemo(() => {
@@ -287,6 +290,13 @@ function HomePage({
               size="middle"
             >
               待办
+            </Button>
+            <Button
+              icon={<Icon icon={Import} size="small" />}
+              onClick={() => void startImportFromFileDialog()}
+              size="middle"
+            >
+              导入
             </Button>
           </div>
         </motion.div>

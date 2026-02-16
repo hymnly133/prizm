@@ -1,16 +1,14 @@
 /**
- * 富文本输入：contenteditable + 内联命令块/引用块（chip），类似 AI IDE
- * 序列化规则：文本直接输出，chip 用 data-markdown 输出
+ * 纯文本输入：contenteditable + 换行支持
+ * 不再内联渲染 chip——所有引用通过 RefChipsBar 在输入框外展示
  */
 import { memo, useCallback, useEffect, useRef } from 'react'
 
 import { useClientSettings } from '../../../context/ClientSettingsContext'
 import { useChatInputStore, useStoreApi } from '../store'
 
-const CHIP_CLASS = 'chat-input-chip'
-const DATA_MARKDOWN = 'data-markdown'
-
-function getSerializedMarkdown(root: HTMLElement): string {
+/** 获取纯文本内容（保留换行） */
+function getPlainText(root: HTMLElement): string {
   let out = ''
   const walk = (node: Node) => {
     if (node.nodeType === Node.TEXT_NODE) {
@@ -19,9 +17,13 @@ function getSerializedMarkdown(root: HTMLElement): string {
     }
     if (node.nodeType !== Node.ELEMENT_NODE) return
     const el = node as HTMLElement
-    if (el.classList.contains(CHIP_CLASS)) {
-      out += el.getAttribute(DATA_MARKDOWN) ?? ''
+    const tag = el.tagName
+    if (tag === 'BR') {
+      out += '\n'
       return
+    }
+    if (tag === 'DIV' || tag === 'P') {
+      if (out.length > 0 && !out.endsWith('\n')) out += '\n'
     }
     for (let i = 0; i < node.childNodes.length; i++) walk(node.childNodes[i]!)
   }
@@ -29,11 +31,8 @@ function getSerializedMarkdown(root: HTMLElement): string {
   return out
 }
 
-function findRangeBySerializedOffsets(
-  root: HTMLElement,
-  startOffset: number,
-  endOffset: number
-): Range | null {
+/** 在 contentEditable 中根据序列化偏移量定位文本范围 */
+function findTextRange(root: HTMLElement, startOffset: number, endOffset: number): Range | null {
   let current = 0
   let startNode: Node | null = null
   let startOff = 0
@@ -57,19 +56,25 @@ function findRangeBySerializedOffsets(
     }
     if (node.nodeType !== Node.ELEMENT_NODE) return false
     const el = node as HTMLElement
-    if (el.classList.contains(CHIP_CLASS)) {
-      const len = (el.getAttribute(DATA_MARKDOWN) ?? '').length
-      if (current + len > startOffset && startNode === null) {
+    if (el.tagName === 'BR') {
+      if (current >= startOffset && startNode === null) {
+        startNode = node.parentNode!
+        startOff = Array.from(node.parentNode!.childNodes).indexOf(node as ChildNode)
+      }
+      current += 1
+      if (current >= endOffset && endNode === null) {
+        endNode = node.parentNode!
+        endOff = Array.from(node.parentNode!.childNodes).indexOf(node as ChildNode) + 1
+        return true
+      }
+      return false
+    }
+    if (el.tagName === 'DIV' || el.tagName === 'P') {
+      if (current > 0 && current >= startOffset && startNode === null) {
         startNode = node
         startOff = 0
       }
-      if (current + len >= endOffset && endNode === null) {
-        endNode = node
-        endOff = node.childNodes.length
-        return true
-      }
-      current += len
-      return false
+      if (current > 0) current += 1
     }
     for (let i = 0; i < node.childNodes.length; i++) {
       if (walk(node.childNodes[i]!)) return true
@@ -84,65 +89,19 @@ function findRangeBySerializedOffsets(
   return range
 }
 
-function createChipSpan(markdown: string, label: string, type: 'command' | 'ref'): HTMLSpanElement {
-  const span = document.createElement('span')
-  span.className = CHIP_CLASS
-  span.setAttribute(DATA_MARKDOWN, markdown)
-  span.setAttribute('data-type', type)
-  span.contentEditable = 'false'
-  span.textContent = label
-  span.style.display = 'inline-block'
-  span.style.margin = '0 2px'
-  span.style.padding = '2px 6px'
-  span.style.borderRadius = '4px'
-  span.style.background = 'var(--ant-color-fill-quaternary, #f0f0f0)'
-  span.style.color = 'var(--ant-color-primary, #1677ff)'
-  span.style.fontSize = '12px'
-  span.style.verticalAlign = 'middle'
-  return span
-}
-
-/** Parse markdown string and render as DOM nodes, converting @(type:id) and /(cmd) to chips */
-function renderMarkdownToDOM(root: HTMLElement, markdown: string): void {
+/** 将纯文本渲染到 DOM（保留换行） */
+function renderTextToDOM(root: HTMLElement, text: string): void {
   root.innerHTML = ''
-  const chipRegex = /(@\([^)]+\))|(\/\([^)]+\))/g
-  let lastIndex = 0
-  let match: RegExpExecArray | null
-
-  const appendText = (text: string) => {
-    const lines = text.split('\n')
-    lines.forEach((line, i) => {
-      if (line) root.appendChild(document.createTextNode(line))
-      if (i < lines.length - 1) root.appendChild(document.createElement('br'))
-    })
+  if (!text) {
+    root.setAttribute('data-empty', 'true')
+    return
   }
-
-  while ((match = chipRegex.exec(markdown)) !== null) {
-    if (match.index > lastIndex) {
-      appendText(markdown.slice(lastIndex, match.index))
-    }
-    const full = match[0]
-    if (full.startsWith('@(')) {
-      const inner = full.slice(2, -1)
-      const chip = createChipSpan(
-        full,
-        `@${inner.length > 20 ? inner.slice(0, 20) + '\u2026' : inner}`,
-        'ref'
-      )
-      root.appendChild(chip)
-    } else {
-      const inner = full.slice(2, -1)
-      const chip = createChipSpan(full, `/${inner}`, 'command')
-      root.appendChild(chip)
-    }
-    lastIndex = chipRegex.lastIndex
-  }
-
-  if (lastIndex < markdown.length) {
-    appendText(markdown.slice(lastIndex))
-  }
-
-  root.setAttribute('data-empty', markdown === '' ? 'true' : 'false')
+  const lines = text.split('\n')
+  lines.forEach((line, i) => {
+    if (line) root.appendChild(document.createTextNode(line))
+    if (i < lines.length - 1) root.appendChild(document.createElement('br'))
+  })
+  root.setAttribute('data-empty', 'false')
 }
 
 const BlockInput = memo(() => {
@@ -158,44 +117,46 @@ const BlockInput = memo(() => {
   const syncToStore = useCallback(() => {
     const root = rootRef.current
     if (!root) return
-    const serialized = getSerializedMarkdown(root)
-    root.setAttribute('data-empty', serialized === '' ? 'true' : 'false')
-    if (serialized === lastSerializedRef.current) return
-    lastSerializedRef.current = serialized
-    setMarkdownContent(serialized)
+    const text = getPlainText(root)
+    root.setAttribute('data-empty', text === '' ? 'true' : 'false')
+    if (text === lastSerializedRef.current) return
+    lastSerializedRef.current = text
+    setMarkdownContent(text)
   }, [setMarkdownContent])
 
-  const applyReplacement = useCallback(
-    (replaceStart: number, replaceEnd: number, replacementMarkdown: string, chipLabel: string) => {
+  /** 替换指定偏移范围的文本为纯文本（被 MentionSlashOverlay 使用） */
+  const applyTextReplace = useCallback(
+    (replaceStart: number, replaceEnd: number, text: string) => {
       const root = rootRef.current
       if (!root) return
-      const type = replacementMarkdown.startsWith('@') ? 'ref' : 'command'
-      const range = findRangeBySerializedOffsets(root, replaceStart, replaceEnd)
+      const range = findTextRange(root, replaceStart, replaceEnd)
       if (!range) return
       range.deleteContents()
-      const chip = createChipSpan(replacementMarkdown, chipLabel, type)
-      range.insertNode(chip)
-      lastSerializedRef.current = getSerializedMarkdown(root)
+      if (text) {
+        const textNode = document.createTextNode(text)
+        range.insertNode(textNode)
+        const sel = window.getSelection()
+        if (sel) {
+          sel.removeAllRanges()
+          const r = document.createRange()
+          r.setStartAfter(textNode)
+          r.collapse(true)
+          sel.addRange(r)
+        }
+      }
+      lastSerializedRef.current = getPlainText(root)
       setMarkdownContent(lastSerializedRef.current)
       root.focus()
-      const sel = window.getSelection()
-      if (sel) {
-        sel.removeAllRanges()
-        const r = document.createRange()
-        r.setStartAfter(chip)
-        r.collapse(true)
-        sel.addRange(r)
-      }
     },
     [setMarkdownContent]
   )
 
   useEffect(() => {
-    storeApi.getState().setApplyOverlayReplacement(applyReplacement)
+    storeApi.getState().setApplyOverlayTextReplace(applyTextReplace)
     return () => {
-      storeApi.getState().setApplyOverlayReplacement(null)
+      storeApi.getState().setApplyOverlayTextReplace(null)
     }
-  }, [storeApi, applyReplacement])
+  }, [storeApi, applyTextReplace])
 
   useEffect(() => {
     const focus = () => rootRef.current?.focus()
@@ -212,18 +173,16 @@ const BlockInput = memo(() => {
     if (!root) return
 
     if (markdownContent === '') {
-      if (getSerializedMarkdown(root) === '') return
+      if (getPlainText(root) === '') return
       root.innerHTML = '<br>'
       root.setAttribute('data-empty', 'true')
       lastSerializedRef.current = ''
       return
     }
 
-    // Skip if content matches last known serialization (i.e. came from user input)
     if (markdownContent === lastSerializedRef.current) return
 
-    // External change detected (e.g. from PendingChatPayloadApplicator) - render to DOM
-    renderMarkdownToDOM(root, markdownContent)
+    renderTextToDOM(root, markdownContent)
     lastSerializedRef.current = markdownContent
   }, [markdownContent])
 
@@ -260,30 +219,6 @@ const BlockInput = memo(() => {
     [overlayKeyHandler, handleSendButton, sendWithEnter]
   )
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      const text = e.dataTransfer.getData('text/plain')
-      if (text.startsWith('@file:')) {
-        e.preventDefault()
-        e.stopPropagation()
-        const root = rootRef.current
-        if (root) {
-          root.focus()
-          document.execCommand('insertText', false, text + ' ')
-          syncToStore()
-        }
-      }
-    },
-    [syncToStore]
-  )
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes('text/plain')) {
-      e.preventDefault()
-      e.dataTransfer.dropEffect = 'copy'
-    }
-  }, [])
-
   return (
     <div
       ref={rootRef}
@@ -296,8 +231,6 @@ const BlockInput = memo(() => {
       onInput={handleInput}
       onPaste={handlePaste}
       onKeyDown={handleKeyDown}
-      onDrop={handleDrop}
-      onDragOver={handleDragOver}
       style={{
         minHeight: 46,
         padding: '8px 12px',

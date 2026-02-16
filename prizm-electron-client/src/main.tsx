@@ -32,11 +32,16 @@ if (document.documentElement.dataset.platform === 'win32' && window.prizm?.setTi
   mq.addEventListener('change', (e) => updateOverlayTheme(e.matches))
 }
 
+// 在 React 首次渲染前同步检测系统主题，传入 defaultAppearance 防止 CSS-in-JS 层 FOUC
+// 参考 antd-style 官方最佳实践：https://ant-design.github.io/antd-style/best-practice/fix-switch-theme-fouc/
+const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+const initialAppearance = systemDark ? 'dark' : 'light'
+
 const root = createRoot(document.getElementById('app')!)
 root.render(
   <div className="app-root">
     <ConfigProvider motion={motion}>
-      <ThemeProvider themeMode="auto">
+      <ThemeProvider themeMode="auto" defaultAppearance={initialAppearance}>
         <App>
           <ToastHost position="bottom-right" duration={4000} />
           <div className="app-root__content">

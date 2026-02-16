@@ -35,16 +35,16 @@ export function DataCardHoverMenuContent({
   const fetchedRef = useRef(false)
 
   const openNewChat = useCallback(() => {
-    chatWith({ files: [{ kind: file.kind, id: file.id }] })
+    chatWith({ files: [{ kind: file.kind, id: file.id, title: file.title }] })
     onClose()
-  }, [file.kind, file.id, chatWith, onClose])
+  }, [file.kind, file.id, file.title, chatWith, onClose])
 
   const openInSession = useCallback(
     (sessionId: string) => {
-      chatWith({ files: [{ kind: file.kind, id: file.id }], sessionId })
+      chatWith({ files: [{ kind: file.kind, id: file.id, title: file.title }], sessionId })
       onClose()
     },
-    [file.kind, file.id, chatWith, onClose]
+    [file.kind, file.id, file.title, chatWith, onClose]
   )
 
   const loadSessions = useCallback(async () => {

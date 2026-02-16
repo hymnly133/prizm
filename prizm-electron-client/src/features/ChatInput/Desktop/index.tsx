@@ -8,6 +8,7 @@ import { useChatInputStore, useStoreApi } from '../store'
 import ActionBar from '../ActionBar'
 import BlockInput from '../BlockInput'
 import MentionSlashOverlay from '../MentionSlashOverlay'
+import RefChipsBar from '../RefChipsBar'
 import SendArea from '../SendArea'
 
 const styles = createStaticStyles(({ css }) => ({
@@ -89,7 +90,12 @@ const DesktopChatInput = memo<DesktopChatInputProps>(
                 left={<ActionBar leftActions={leftActions} onClear={onClear} />}
               />
             }
-            header={<Flexbox gap={0}>{extenHeaderContent}</Flexbox>}
+            header={
+              <Flexbox gap={0}>
+                {extenHeaderContent}
+                <RefChipsBar />
+              </Flexbox>
+            }
             {...inputContainerProps}
             className={cx(expand && styles.inputFullscreen, inputContainerProps?.className)}
           >

@@ -1,6 +1,6 @@
 import { EditorProvider, useEditor } from '@lobehub/editor/react'
 import type { ReactNode } from 'react'
-import { memo, useRef } from 'react'
+import { memo, useRef, useEffect } from 'react'
 
 import { createStore, Provider } from './store'
 import type { StoreUpdaterProps } from './StoreUpdater'
@@ -28,6 +28,10 @@ export const ChatInputProvider = memo<ChatInputProviderProps>(
   }) => {
     const editor = useEditor()
     const slashMenuRef = useRef<HTMLDivElement>(null)
+    useEffect(() => {
+      console.log('[ImportAI-Chip] ChatInputProvider 已挂载')
+      return () => console.log('[ImportAI-Chip] ChatInputProvider 已卸载')
+    }, [])
 
     return (
       <EditorProvider>

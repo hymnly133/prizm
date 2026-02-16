@@ -28,10 +28,11 @@ import { useWorkNavigation } from '../context/WorkNavigationContext'
 import type { FileKind, FileItem } from '../hooks/useFileList'
 import type { TodoItemStatus } from '@prizm/client-core'
 import type { SavePayload } from '../components/FileDetailView'
-import { FileText, FolderTree, LayoutGrid, ListTodo } from 'lucide-react'
+import { FileText, FolderTree, Import, LayoutGrid, ListTodo } from 'lucide-react'
 import { getKindLabel, STATUS_LABELS } from '../constants/todo'
 import { WorkFolderView } from '../components/WorkFolderView'
 import { WorkspaceFoldersSection } from '../components/WorkspaceFoldersSection'
+import { useImportContext } from '../context/ImportContext'
 import type { TreeNode } from '../hooks/useFileTree'
 
 const VIEW_MODE_KEY = 'prizm-work-view-mode'
@@ -47,6 +48,7 @@ function WorkPage() {
   const { fileList, fileListLoading, refreshFileList, optimisticAdd, optimisticRemove } =
     useFileList(currentScope)
   const { pendingWorkFile, consumePendingWorkFile } = useWorkNavigation()
+  const { startImportFromFileDialog } = useImportContext()
 
   const [activeTab, setActiveTab] = useState('files')
   const [viewMode, setViewMode] = useState<'flat' | 'folder'>(() => {
@@ -390,6 +392,12 @@ function WorkPage() {
         <div className="work-page__toolbar-actions">
           <ActionIcon icon={ListTodo} title="新建待办" onClick={onAddTodo} size="large" />
           <ActionIcon icon={FileText} title="新建文档" onClick={onAddDocument} size="large" />
+          <ActionIcon
+            icon={Import}
+            title="导入文件"
+            onClick={() => void startImportFromFileDialog()}
+            size="large"
+          />
           <span className="work-page__toolbar-divider" />
           <ActionIcon
             icon={LayoutGrid}

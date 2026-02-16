@@ -1,18 +1,22 @@
 import type { StateCreator } from 'zustand/vanilla'
 
-import type { PublicState, State } from './initialState'
-import type { OverlayReplacement } from './initialState'
+import type { PublicState, State, InputRef } from './initialState'
+import type { OverlayTextReplacer } from './initialState'
 import { initialState } from './initialState'
 
 export interface Action {
+  addInputRef: (ref: InputRef) => void
+  clearInputRefs: () => void
   getJSONState: () => unknown
   getMarkdownContent: () => string
   handleSendButton: () => void
   handleStop: () => void
-  setApplyOverlayReplacement: (fn: OverlayReplacement | null) => void
+  removeInputRef: (key: string) => void
+  setApplyOverlayTextReplace: (fn: OverlayTextReplacer | null) => void
   setDocument: (type: string, content: unknown, options?: Record<string, unknown>) => void
   setExpand: (expand: boolean) => void
   setFocusBlockInput: (fn: (() => void) | null) => void
+  setInputRefs: (refs: InputRef[]) => void
   setJSONState: (content: unknown) => void
   setMarkdownContent: (content: string) => void
   setOverlayKeyHandler: (handler: ((e: KeyboardEvent) => void) | null) => void
@@ -28,6 +32,16 @@ export const store: CreateStore = (publicState) => (set, get) => ({
   ...initialState,
   ...publicState,
 
+  addInputRef: (ref: InputRef) => {
+    const existing = get().inputRefs
+    if (existing.some((r) => r.key === ref.key && r.type === ref.type)) return
+    set({ inputRefs: [...existing, ref] })
+  },
+
+  clearInputRefs: () => {
+    set({ inputRefs: [] })
+  },
+
   getJSONState: () => {
     return get().editor?.getDocument('json')
   },
@@ -40,9 +54,11 @@ export const store: CreateStore = (publicState) => (set, get) => ({
     const result = get().onSend?.({
       clearContent: () => {
         get().setMarkdownContent('')
+        get().clearInputRefs()
       },
       editor: editor ?? null,
-      getMarkdownContent: get().getMarkdownContent
+      getMarkdownContent: get().getMarkdownContent,
+      getInputRefs: () => get().inputRefs
     })
     const focusEditor = () => get().editor?.focus() ?? get().focusBlockInput?.()
     if (result && typeof (result as Promise<unknown>)?.then === 'function') {
@@ -70,12 +86,24 @@ export const store: CreateStore = (publicState) => (set, get) => ({
     set({ expand })
   },
 
-  setMarkdownContent: (content) => {
-    set({ markdownContent: content })
+  removeInputRef: (key: string) => {
+    set({ inputRefs: get().inputRefs.filter((r) => r.key !== key) })
   },
 
-  setApplyOverlayReplacement: (fn: OverlayReplacement | null) => {
-    set({ applyOverlayReplacement: fn })
+  setApplyOverlayTextReplace: (fn: OverlayTextReplacer | null) => {
+    set({ applyOverlayTextReplace: fn })
+  },
+
+  setInputRefs: (refs: InputRef[]) => {
+    console.log('[ImportAI-Chip] ChatInputStore.setInputRefs 调用', {
+      count: refs.length,
+      refs: refs.map((r) => ({ type: r.type, key: r.key.slice(0, 60), label: r.label }))
+    })
+    set({ inputRefs: refs })
+  },
+
+  setMarkdownContent: (content) => {
+    set({ markdownContent: content })
   },
 
   setFocusBlockInput: (fn: (() => void) | null) => {

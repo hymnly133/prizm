@@ -1,14 +1,25 @@
 /**
  * @ 引用与 / slash 命令提示候选框
  * 使用 @lobehub/ui List 组件，检测 @ 或 / 触发后展示候选并支持选择插入
+ *
+ * @ 引用：选中后添加到 inputRefs（引用栏），清除输入中的 @xxx 文本
+ * / 命令：选中后替换为纯文本 /(cmd)
  */
 import { List, Tag } from '@lobehub/ui'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useChatInputStore, useStoreApi } from './store'
 import type { ScopeRefItem, SlashCommandItem } from './store/initialState'
+import { encodeFilePathForRef } from '../../utils/fileRefEncoding'
 
 function kindToKey(kind: string): string {
-  return kind === 'document' ? 'doc' : kind
+  switch (kind) {
+    case 'document':
+      return 'doc'
+    case 'todoList':
+      return 'todo'
+    default:
+      return kind
+  }
 }
 
 /** 序列化格式：@(内容) 明确引用结束区域 */
@@ -117,29 +128,39 @@ const MentionSlashOverlay = memo(() => {
   const selectItem = useCallback(
     (index: number) => {
       if (!parsed || index < 0 || index >= candidates.length) return
-      const before = markdownContent.slice(0, parsed.replaceStart)
-      const after = markdownContent.slice(parsed.replaceEnd)
-      let replacement: string
-      let chipLabel: string
+
+      const applyText = storeApi.getState().applyOverlayTextReplace
+
       if (isAt) {
         const item = candidates[index] as ScopeRefItem
         const key = kindToKey(item.kind)
-        replacement = `@(${key}:${item.id})`
-        chipLabel = `@${key}:${item.id.slice(0, 8)}`
+        const refKey = item.id
+        const markdown = `@(${key}:${encodeFilePathForRef(refKey)})`
+        const label = item.title.length > 30 ? item.title.slice(0, 30) + '…' : item.title
+
+        storeApi.getState().addInputRef({
+          type: key as 'doc' | 'note' | 'todo' | 'file',
+          key: refKey,
+          label,
+          markdown
+        })
+
+        if (applyText) {
+          applyText(parsed.replaceStart, parsed.replaceEnd, '')
+        }
       } else {
         const cmd = candidates[index] as SlashCommandItem
-        replacement = `/(${cmd.name})`
-        chipLabel = `/${cmd.name}`
+        const replacement = `/(${cmd.name})`
+
+        if (applyText) {
+          applyText(parsed.replaceStart, parsed.replaceEnd, replacement)
+        } else if (editor) {
+          const before = markdownContent.slice(0, parsed.replaceStart)
+          const after = markdownContent.slice(parsed.replaceEnd)
+          setDocument('markdown', before + replacement + after)
+        }
       }
-      const apply = storeApi.getState().applyOverlayReplacement
-      if (apply) {
-        apply(parsed.replaceStart, parsed.replaceEnd, replacement, chipLabel)
-        setSelectedIndex(0)
-        return
-      }
-      if (!editor) return
-      const newContent = before + replacement + after
-      setDocument('markdown', newContent)
+
       setSelectedIndex(0)
     },
     [parsed, editor, candidates, isAt, markdownContent, setDocument, storeApi]
@@ -191,7 +212,6 @@ const MentionSlashOverlay = memo(() => {
     }
   }, [visible, stableOverlayHandler, storeApi])
 
-  // 仅键盘切换候选项时滚动到面板中间；鼠标悬停/点击不滚动
   useEffect(() => {
     if (!visible || candidates.length === 0 || !scrollFromKeyboardRef.current) return
     scrollFromKeyboardRef.current = false

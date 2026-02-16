@@ -1,21 +1,21 @@
-import { subscribeWithSelector } from "zustand/middleware";
-import { shallow } from "zustand/shallow";
-import { createWithEqualityFn } from "zustand/traditional";
-import { createContext } from "zustand-utils";
+import { subscribeWithSelector } from 'zustand/middleware'
+import { shallow } from 'zustand/shallow'
+import { createWithEqualityFn } from 'zustand/traditional'
+import { createContext } from 'zustand-utils'
 
-import type { Store } from "./action";
-import { store } from "./action";
-import type { State } from "./initialState";
+import type { Store } from './action'
+import { store } from './action'
+import type { State } from './initialState'
 
-export type { PublicState, State } from "./initialState";
+export type { PublicState, State, InputRef } from './initialState'
 
 export const createStore = (initState?: Partial<State>) =>
-	createWithEqualityFn(subscribeWithSelector(store(initState)), shallow);
+  createWithEqualityFn(subscribeWithSelector(store(initState)), shallow)
 
 export const {
-	useStore: useChatInputStore,
-	useStoreApi,
-	Provider,
-} = createContext<ReturnType<typeof createStore>>();
+  useStore: useChatInputStore,
+  useStoreApi,
+  Provider
+} = createContext<ReturnType<typeof createStore>>()
 
-export { selectors } from "./selectors";
+export { selectors } from './selectors'

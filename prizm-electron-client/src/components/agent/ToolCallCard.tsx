@@ -2,6 +2,7 @@
  * 工具卡片 - 按工具类别展示不同外观
  * 内置工具有分类图标与彩色指示条；文件相关工具有明确的「打开」按钮
  * 支持 preparing → running → done 三阶段，preparing/running 阶段即时渲染
+ * 支持检测 OUT_OF_BOUNDS 错误并显示授权按钮
  */
 import { Flexbox, Icon, Tag } from '@lobehub/ui'
 import {
@@ -18,13 +19,34 @@ import {
   Wrench,
   Bell,
   ChevronDown,
+  ShieldCheck,
   type LucideIcon
 } from 'lucide-react'
-import { useState, memo } from 'react'
-import type { ToolCallRecord } from '@prizm/client-core'
+import { useState, memo, createContext, useContext, useCallback } from 'react'
+import type { ToolCallRecord, InteractRequestPayload } from '@prizm/client-core'
 import { getToolDisplayName, getToolMetadata, getToolRender, isPrizmTool } from '@prizm/client-core'
 import type { FileKind } from '../../hooks/useFileList'
 import { useWorkNavigation } from '../../context/WorkNavigationContext'
+
+/** OUT_OF_BOUNDS 错误标识符 */
+const OUT_OF_BOUNDS_ERROR_CODE = 'OUT_OF_BOUNDS'
+
+/** 授权路径回调上下文 */
+export interface GrantPathContextValue {
+  grantPaths: (paths: string[]) => Promise<void>
+}
+const GrantPathContext = createContext<GrantPathContextValue | null>(null)
+export const GrantPathProvider = GrantPathContext.Provider
+
+/** 工具交互回调上下文 */
+export interface InteractContextValue {
+  /** 当前待处理的交互请求 */
+  pendingInteract: InteractRequestPayload | null
+  /** 响应交互：approve 或 deny */
+  respondToInteract: (requestId: string, approved: boolean, paths?: string[]) => Promise<void>
+}
+const InteractContext = createContext<InteractContextValue | null>(null)
+export const InteractProvider = InteractContext.Provider
 
 export interface ToolCallCardProps {
   tc: ToolCallRecord
@@ -124,6 +146,9 @@ export const ToolCallCard = memo(function ToolCallCard({ tc }: ToolCallCardProps
   if (customRender) return <>{customRender({ tc })}</>
 
   const status = tc.status ?? 'done'
+  if (status === 'preparing' || status === 'running') {
+    console.debug('[ToolCallCard] render status=%s id=%s name=%s', status, tc.id, tc.name)
+  }
   const displayName = getToolDisplayName(tc.name)
   const CategoryIcon = getCategoryIcon(tc.name)
   const accentColor = getCategoryColor(tc.name)
@@ -174,6 +199,19 @@ export const ToolCallCard = memo(function ToolCallCard({ tc }: ToolCallCardProps
     )
   }
 
+  /* ── awaiting_interact: 工具需要用户确认 ── */
+  if (status === 'awaiting_interact') {
+    return (
+      <ToolCardAwaitingInteract
+        tc={tc}
+        displayName={displayName}
+        CategoryIcon={CategoryIcon}
+        accentColor={accentColor}
+        argsSummary={argsSummary}
+      />
+    )
+  }
+
   /* ── done: 可展开/折叠的完成卡片 ── */
   return (
     <ToolCardDone
@@ -203,6 +241,18 @@ function toolCallPropsEqual(prev: ToolCallCardProps, next: ToolCallCardProps): b
   )
 }
 
+/** 从工具参数中提取路径 */
+function extractPathFromArgs(argsStr: string): string | null {
+  try {
+    const obj = JSON.parse(argsStr || '{}') as Record<string, unknown>
+    if (typeof obj.path === 'string') return obj.path
+    if (typeof obj.from === 'string') return obj.from
+    return null
+  } catch {
+    return null
+  }
+}
+
 /* ── Done 状态的卡片，独立组件以维护 expanded state ── */
 function ToolCardDone({
   tc,
@@ -224,6 +274,29 @@ function ToolCardDone({
   onOpenFile: (kind: FileKind, id: string) => void
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [granting, setGranting] = useState(false)
+  const [granted, setGranted] = useState(false)
+  const grantCtx = useContext(GrantPathContext)
+
+  const isOutOfBounds = isError && tc.result?.includes(OUT_OF_BOUNDS_ERROR_CODE)
+  const outOfBoundsPath = isOutOfBounds ? extractPathFromArgs(tc.arguments) : null
+
+  const handleGrant = useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (!grantCtx || !outOfBoundsPath || granting || granted) return
+      setGranting(true)
+      try {
+        await grantCtx.grantPaths([outOfBoundsPath])
+        setGranted(true)
+      } catch {
+        /* ignore */
+      } finally {
+        setGranting(false)
+      }
+    },
+    [grantCtx, outOfBoundsPath, granting, granted]
+  )
 
   return (
     <div className={`tool-card${isError ? ' tool-card--error' : ''}`} data-status="done">
@@ -248,14 +321,41 @@ function ToolCardDone({
           <Flexbox flex={1} gap={2} style={{ minWidth: 0 }}>
             <Flexbox horizontal align="center" gap={6}>
               <span className="tool-card__name">{displayName}</span>
-              {isError && (
+              {isError && !isOutOfBounds && (
                 <Tag size="small" color="error">
                   失败
+                </Tag>
+              )}
+              {isOutOfBounds && (
+                <Tag size="small" color="warning">
+                  需要授权
                 </Tag>
               )}
             </Flexbox>
             {argsSummary && <span className="tool-card__desc">{argsSummary}</span>}
           </Flexbox>
+          {isOutOfBounds && outOfBoundsPath && grantCtx && (
+            <button
+              className="tool-card__open-btn"
+              title={granted ? '已授权' : '授权访问此路径'}
+              disabled={granting || granted}
+              onClick={handleGrant}
+              style={
+                granted
+                  ? {
+                      background: 'var(--ant-color-success-bg, #f6ffed)',
+                      color: 'var(--ant-color-success, #52c41a)'
+                    }
+                  : {
+                      background: 'var(--ant-color-warning-bg, #fff7e6)',
+                      color: 'var(--ant-color-warning-text, #d46b08)'
+                    }
+              }
+            >
+              <ShieldCheck size={12} />
+              <span>{granted ? '已授权' : granting ? '授权中…' : '授权'}</span>
+            </button>
+          )}
           {fileRef && (
             <button
               className="tool-card__open-btn"
@@ -292,6 +392,107 @@ function ToolCardDone({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/* ── 等待用户交互状态的卡片：显示路径和 Approve/Deny 按钮 ── */
+function ToolCardAwaitingInteract({
+  tc,
+  displayName,
+  CategoryIcon,
+  accentColor,
+  argsSummary
+}: {
+  tc: ToolCallRecord
+  displayName: string
+  CategoryIcon: LucideIcon
+  accentColor: string
+  argsSummary: string
+}) {
+  const interactCtx = useContext(InteractContext)
+  const [responding, setResponding] = useState(false)
+  const warningColor = 'var(--ant-color-warning, #faad14)'
+
+  const handleApprove = useCallback(async () => {
+    if (!interactCtx?.pendingInteract || responding) return
+    setResponding(true)
+    try {
+      await interactCtx.respondToInteract(
+        interactCtx.pendingInteract.requestId,
+        true,
+        interactCtx.pendingInteract.paths
+      )
+    } finally {
+      setResponding(false)
+    }
+  }, [interactCtx, responding])
+
+  const handleDeny = useCallback(async () => {
+    if (!interactCtx?.pendingInteract || responding) return
+    setResponding(true)
+    try {
+      await interactCtx.respondToInteract(interactCtx.pendingInteract.requestId, false)
+    } finally {
+      setResponding(false)
+    }
+  }, [interactCtx, responding])
+
+  const paths = interactCtx?.pendingInteract?.paths ?? []
+
+  return (
+    <div className="tool-card tool-card--interact" data-status="awaiting_interact">
+      <div className="tool-card__indicator" style={{ background: warningColor }} />
+      <div style={{ padding: '10px 14px' }}>
+        <Flexbox gap={8} horizontal align="center">
+          <div className="tool-card__icon-wrap" style={{ '--tc-accent': warningColor } as never}>
+            <Icon icon={ShieldCheck} size={15} />
+          </div>
+          <Flexbox flex={1} gap={2}>
+            <Flexbox horizontal align="center" gap={6}>
+              <span className="tool-card__name">{displayName}</span>
+              <Tag size="small" color="warning">
+                需要授权
+              </Tag>
+            </Flexbox>
+            {argsSummary && <span className="tool-card__desc">{argsSummary}</span>}
+          </Flexbox>
+          <Loader2 size={14} className="tool-card__spinner" />
+        </Flexbox>
+        {/* 路径列表和操作按钮 */}
+        <div className="tool-card__interact-body">
+          <div className="tool-card__interact-message">
+            工具需要访问以下路径，AI 正在等待您的确认：
+          </div>
+          {paths.length > 0 && (
+            <div className="tool-card__interact-paths">
+              {paths.map((p: string, i: number) => (
+                <code key={i} className="tool-card__interact-path">
+                  {p}
+                </code>
+              ))}
+            </div>
+          )}
+          <Flexbox horizontal gap={8} style={{ marginTop: 8 }}>
+            <button
+              className="tool-card__interact-btn tool-card__interact-btn--approve"
+              onClick={handleApprove}
+              disabled={responding}
+            >
+              <ShieldCheck size={13} />
+              <span>{responding ? '处理中…' : '允许访问'}</span>
+            </button>
+            <button
+              className="tool-card__interact-btn tool-card__interact-btn--deny"
+              onClick={handleDeny}
+              disabled={responding}
+            >
+              <AlertCircle size={13} />
+              <span>拒绝</span>
+            </button>
+          </Flexbox>
+        </div>
+      </div>
     </div>
   )
 }

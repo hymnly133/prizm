@@ -734,9 +734,22 @@ export function MemoryInspector() {
                             <Tag bordered={false} color="blue">
                               {entry.new_memory_type}
                             </Tag>
-                            {entry.vector_distance != null && (
-                              <span>向量距离: {Number(entry.vector_distance).toFixed(3)}</span>
-                            )}
+                            {entry.text_similarity != null &&
+                              Number(entry.text_similarity) >= 0 && (
+                                <Tooltip title={`文本相似度分数 (Dice/Jaccard max)`}>
+                                  <Tag bordered={false} color="cyan" style={{ cursor: 'help' }}>
+                                    文本: {Number(entry.text_similarity).toFixed(3)}
+                                  </Tag>
+                                </Tooltip>
+                              )}
+                            {entry.vector_distance != null &&
+                              Number(entry.vector_distance) >= 0 && (
+                                <Tooltip title={`向量 L2 距离（越小越相似）`}>
+                                  <Tag bordered={false} color="geekblue" style={{ cursor: 'help' }}>
+                                    向量: {Number(entry.vector_distance).toFixed(3)}
+                                  </Tag>
+                                </Tooltip>
+                              )}
                             {entry.llm_reasoning && (
                               <Tooltip title={entry.llm_reasoning}>
                                 <Tag bordered={false} color="purple" style={{ cursor: 'help' }}>

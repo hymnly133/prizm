@@ -37,6 +37,28 @@ declare global {
       ): () => void
       logFromRenderer(message: string, type: string): Promise<boolean>
       selectFolder(): Promise<string | null>
+      readFiles(paths: string[]): Promise<
+        Array<{
+          path: string
+          name: string
+          size: number
+          content: string | null
+          ext: string
+          unsupported?: boolean
+          truncated?: boolean
+        }>
+      >
+      selectAndReadFiles(): Promise<Array<{
+        path: string
+        name: string
+        size: number
+        content: string | null
+        ext: string
+        unsupported?: boolean
+        truncated?: boolean
+      }> | null>
+      /** File.path 已弃用，拖拽时用此获取路径 */
+      getPathForFile(file: File): string
       onExecuteQuickAction(
         callback: (payload: { action: string; selectedText: string }) => void
       ): () => void
