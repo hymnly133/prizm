@@ -9,8 +9,8 @@ import type { MessageUsage, TokenUsageScope } from '@prizm/shared'
 export type {
   StickyNote,
   StickyNoteFileRef,
-  CreateNotePayload,
-  UpdateNotePayload,
+  FileEntry,
+  FileReadResult,
   TodoList,
   TodoItem,
   TodoItemStatus,
@@ -160,7 +160,7 @@ export interface ToolCallRecord {
 export interface ScopeInteraction {
   toolName: string
   action: 'read' | 'create' | 'update' | 'delete' | 'list' | 'search'
-  itemKind?: 'note' | 'document' | 'todo' | 'clipboard'
+  itemKind?: 'document' | 'todo' | 'clipboard' | 'file'
   itemId?: string
   title?: string
   timestamp?: number
@@ -251,7 +251,7 @@ export interface SessionStats {
 
 // ============ 统一搜索结果（仅 client-core） ============
 
-export type SearchResultKind = 'note' | 'document' | 'clipboard' | 'todoList'
+export type SearchResultKind = 'document' | 'clipboard' | 'todoList' | 'file'
 
 export interface SearchResult {
   kind: SearchResultKind

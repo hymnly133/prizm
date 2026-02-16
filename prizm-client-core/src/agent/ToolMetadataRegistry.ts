@@ -15,13 +15,11 @@ export interface ToolMetadata {
 }
 
 const FALLBACK_METADATA: Record<string, ToolMetadata> = {
-  prizm_list_notes: { name: 'prizm_list_notes', displayName: '列出便签', category: 'note' },
-  prizm_read_note: { name: 'prizm_read_note', displayName: '读取便签', category: 'note' },
-  prizm_get_note: { name: 'prizm_get_note', displayName: '读取便签', category: 'note' },
-  prizm_create_note: { name: 'prizm_create_note', displayName: '创建便签', category: 'note' },
-  prizm_update_note: { name: 'prizm_update_note', displayName: '更新便签', category: 'note' },
-  prizm_delete_note: { name: 'prizm_delete_note', displayName: '删除便签', category: 'note' },
-  prizm_search_notes: { name: 'prizm_search_notes', displayName: '搜索便签', category: 'note' },
+  prizm_file_list: { name: 'prizm_file_list', displayName: '列出文件', category: 'file' },
+  prizm_file_read: { name: 'prizm_file_read', displayName: '读取文件', category: 'file' },
+  prizm_file_write: { name: 'prizm_file_write', displayName: '写入文件', category: 'file' },
+  prizm_file_move: { name: 'prizm_file_move', displayName: '移动/重命名文件', category: 'file' },
+  prizm_file_delete: { name: 'prizm_file_delete', displayName: '删除文件', category: 'file' },
   prizm_list_todos: { name: 'prizm_list_todos', displayName: '列出待办', category: 'todo' },
   prizm_list_todo_list: { name: 'prizm_list_todo_list', displayName: '列出待办', category: 'todo' },
   prizm_read_todo: { name: 'prizm_read_todo', displayName: '读取待办', category: 'todo' },

@@ -2,12 +2,12 @@ import type { PrizmConfig, NotificationPayload } from '../types'
 import { PrizmWebSocketClient } from '../websocket/connection'
 import type { WebSocketConfig, WebSocketEventHandler, WebSocketEventType } from '../types'
 import type {
-  StickyNote,
+  FileEntry,
+  FileReadResult,
   TodoList,
   TodoItem,
   CreateTodoItemPayload,
   UpdateTodoItemPayload,
-  PomodoroSession,
   ClipboardItem,
   Document,
   AgentSession,
@@ -204,66 +204,92 @@ export class PrizmClient {
     })
   }
 
-  // ============ Notes / Sticky Notes ============
+  // ============ Files (Layer 0) ============
 
-  async listNotes(options?: { q?: string; tag?: string; scope?: string }): Promise<StickyNote[]> {
+  async fileList(options?: {
+    path?: string
+    recursive?: boolean
+    scope?: string
+    sessionWorkspace?: string
+  }): Promise<FileEntry[]> {
     const scope = options?.scope ?? this.defaultScope
     const query: Record<string, string | undefined> = {
-      q: options?.q,
-      tag: options?.tag,
-      scope
+      path: options?.path,
+      recursive: options?.recursive ? 'true' : undefined,
+      scope,
+      sessionWorkspace: options?.sessionWorkspace
     }
-    const url = this.buildUrl('/notes', query)
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: this.buildHeaders()
-    })
+    const url = this.buildUrl('/files/list', query)
+    const response = await fetch(url, { method: 'GET', headers: this.buildHeaders() })
     if (!response.ok) {
       const text = await response.text().catch(() => '')
       throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
     }
-    const data = (await response.json()) as { notes: StickyNote[] }
-    return data.notes
+    const data = (await response.json()) as { files: FileEntry[] }
+    return data.files
   }
 
-  async getNote(id: string, scope?: string): Promise<StickyNote> {
-    const data = await this.request<{ note: StickyNote }>(`/notes/${encodeURIComponent(id)}`, {
-      method: 'GET',
-      scope
-    })
-    return data.note
+  async fileRead(filePath: string, scope?: string): Promise<FileReadResult> {
+    const s = scope ?? this.defaultScope
+    const url = this.buildUrl('/files/read', { path: filePath, scope: s })
+    const response = await fetch(url, { method: 'GET', headers: this.buildHeaders() })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
+    }
+    const data = (await response.json()) as { file: FileReadResult }
+    return data.file
   }
 
-  async createNote(
-    payload: Partial<Pick<StickyNote, 'content' | 'imageUrls' | 'tags' | 'fileRefs'>>,
-    scope?: string
-  ): Promise<StickyNote> {
-    const data = await this.request<{ note: StickyNote }>('/notes', {
+  async fileWrite(filePath: string, content: string, scope?: string): Promise<void> {
+    await this.request<{ ok: boolean }>('/files/write', {
       method: 'POST',
       scope,
-      body: JSON.stringify(payload ?? {})
+      body: JSON.stringify({ path: filePath, content })
     })
-    return data.note
   }
 
-  async updateNote(
-    id: string,
-    payload: Partial<Pick<StickyNote, 'content' | 'imageUrls' | 'tags' | 'fileRefs'>>,
-    scope?: string
-  ): Promise<StickyNote> {
-    const data = await this.request<{ note: StickyNote }>(`/notes/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
+  async fileMkdir(dirPath: string, scope?: string): Promise<void> {
+    await this.request<{ ok: boolean }>('/files/mkdir', {
+      method: 'POST',
       scope,
-      body: JSON.stringify(payload ?? {})
+      body: JSON.stringify({ path: dirPath })
     })
-    return data.note
   }
 
-  async deleteNote(id: string, scope?: string): Promise<void> {
-    await this.request<void>(`/notes/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-      scope
+  async fileMove(from: string, to: string, scope?: string): Promise<void> {
+    await this.request<{ ok: boolean }>('/files/move', {
+      method: 'POST',
+      scope,
+      body: JSON.stringify({ from, to })
     })
+  }
+
+  async fileDelete(filePath: string, scope?: string): Promise<void> {
+    const s = scope ?? this.defaultScope
+    const url = this.buildUrl('/files/delete', { path: filePath, scope: s })
+    const response = await fetch(url, { method: 'DELETE', headers: this.buildHeaders() })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
+    }
+  }
+
+  async fileStat(
+    filePath: string,
+    scope?: string
+  ): Promise<{ size: number; lastModified: number; isDir: boolean; isFile: boolean }> {
+    const s = scope ?? this.defaultScope
+    const url = this.buildUrl('/files/stat', { path: filePath, scope: s })
+    const response = await fetch(url, { method: 'GET', headers: this.buildHeaders() })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
+    }
+    const data = (await response.json()) as {
+      stat: { size: number; lastModified: number; isDir: boolean; isFile: boolean }
+    }
+    return data.stat
   }
 
   // ============ TODO 列表 ============
@@ -391,57 +417,6 @@ export class PrizmClient {
     })
   }
 
-  // ============ Pomodoro ============
-
-  async startPomodoro(options?: {
-    taskId?: string
-    tag?: string
-    scope?: string
-  }): Promise<PomodoroSession> {
-    const data = await this.request<{ session: PomodoroSession }>('/pomodoro/start', {
-      method: 'POST',
-      scope: options?.scope,
-      body: JSON.stringify({
-        taskId: options?.taskId,
-        tag: options?.tag
-      })
-    })
-    return data.session
-  }
-
-  async stopPomodoro(id: string, scope?: string): Promise<PomodoroSession> {
-    const data = await this.request<{ session: PomodoroSession }>('/pomodoro/stop', {
-      method: 'POST',
-      scope,
-      body: JSON.stringify({ id })
-    })
-    return data.session
-  }
-
-  async listPomodoroSessions(options?: {
-    taskId?: string
-    from?: number
-    to?: number
-    scope?: string
-  }): Promise<PomodoroSession[]> {
-    const query: Record<string, string | undefined> = {}
-    if (options?.taskId) query.taskId = options.taskId
-    if (typeof options?.from === 'number') query.from = String(options.from)
-    if (typeof options?.to === 'number') query.to = String(options.to)
-
-    const url = this.buildUrl('/pomodoro/sessions', query)
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: this.buildHeaders()
-    })
-    if (!response.ok) {
-      const text = await response.text().catch(() => '')
-      throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
-    }
-    const data = (await response.json()) as { sessions: PomodoroSession[] }
-    return data.sessions
-  }
-
   // ============ Notify ============
 
   async sendNotify(title: string, body?: string, scope?: string): Promise<{ success: boolean }> {
@@ -563,7 +538,7 @@ export class PrizmClient {
   async search(options: {
     keywords: string | string[]
     scope?: string
-    types?: Array<'note' | 'document' | 'clipboard' | 'todoList'>
+    types?: Array<'document' | 'clipboard' | 'todoList' | 'file'>
     limit?: number
     mode?: 'any' | 'all'
     /** 模糊程度 0~1，默认 0.2；0 关闭模糊 */
