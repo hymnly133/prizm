@@ -2,7 +2,8 @@
  * 内置 Slash 命令实现与注册
  */
 
-import { listRefItems, getScopeRefItem, getScopeStats, searchScopeItems } from './scopeItemRegistry'
+import { listRefItems, getScopeRefItem, getScopeStats } from './scopeItemRegistry'
+import { getSearchIndexForTools } from './builtinTools'
 import {
   registerSlashCommand,
   parseSlashMessage,
@@ -62,9 +63,17 @@ async function runStats(options: SlashCommandRunOptions): Promise<string> {
 async function runSearch(options: SlashCommandRunOptions): Promise<string> {
   const query = options.args.join(' ').trim()
   if (!query) return '用法: /search <关键词>'
-  const items = searchScopeItems(options.scope, query)
-  if (!items.length) return '未找到匹配项。'
-  return items.map((r) => `- [${r.kind}] ${r.id}: ${r.title}`).join('\n')
+  const searchIndex = getSearchIndexForTools()
+  if (!searchIndex) return '搜索服务未初始化。'
+  const results = await searchIndex.search(options.scope, query, { complete: true, limit: 20 })
+  if (!results.length) return '未找到匹配项。'
+  return results
+    .map((r) => {
+      const title = (r.raw as { title?: string })?.title ?? r.id
+      const srcTag = r.source === 'fulltext' ? ' [全文]' : ''
+      return `- [${r.kind}] ${r.id}: ${title}${srcTag}`
+    })
+    .join('\n')
 }
 
 async function runContext(options: SlashCommandRunOptions): Promise<string> {

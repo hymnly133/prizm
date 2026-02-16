@@ -48,6 +48,7 @@ import {
 } from '../core/mdStore'
 import { genUniqueId } from '../id'
 import type { TokenUsageRecord } from '../types'
+import { interactManager } from '../llm/interactManager'
 
 const log = createLogger('Agent')
 
@@ -464,6 +465,113 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
     }
   })
 
+  // POST /agent/sessions/:id/grant-paths - 授权外部文件路径
+  router.post('/agent/sessions/:id/grant-paths', async (req: Request, res: Response) => {
+    try {
+      if (!adapter?.updateSession || !adapter?.getSession) {
+        return res.status(503).json({ error: 'Agent adapter not available' })
+      }
+
+      const id = ensureStringParam(req.params.id)
+      const scope = getScopeFromQuery(req)
+      if (!hasScopeAccess(req, scope)) {
+        return res.status(403).json({ error: 'scope access denied' })
+      }
+
+      const session = await adapter.getSession(scope, id)
+      if (!session) {
+        return res.status(404).json({ error: 'Session not found' })
+      }
+
+      const { paths } = req.body ?? {}
+      if (!Array.isArray(paths) || paths.length === 0) {
+        return res.status(400).json({ error: 'paths array is required' })
+      }
+
+      const validPaths = paths.filter((p: unknown) => typeof p === 'string' && p.trim())
+      if (validPaths.length === 0) {
+        return res.status(400).json({ error: 'paths must contain valid path strings' })
+      }
+
+      const existing = new Set(session.grantedPaths ?? [])
+      for (const p of validPaths) {
+        existing.add(p)
+      }
+
+      const updated = await adapter.updateSession(scope, id, {
+        grantedPaths: Array.from(existing)
+      })
+      res.json({ session: updated, grantedPaths: updated.grantedPaths })
+    } catch (error) {
+      log.error('grant-paths error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // POST /agent/sessions/:id/interact-response - 工具交互响应（approve/deny）
+  router.post('/agent/sessions/:id/interact-response', async (req: Request, res: Response) => {
+    try {
+      if (!adapter?.updateSession || !adapter?.getSession) {
+        return res.status(503).json({ error: 'Agent adapter not available' })
+      }
+
+      const id = ensureStringParam(req.params.id)
+      const scope = getScopeFromQuery(req)
+      if (!hasScopeAccess(req, scope)) {
+        return res.status(403).json({ error: 'scope access denied' })
+      }
+
+      const { requestId, approved, paths } = req.body ?? {}
+      if (typeof requestId !== 'string' || !requestId.trim()) {
+        return res.status(400).json({ error: 'requestId is required' })
+      }
+      if (typeof approved !== 'boolean') {
+        return res.status(400).json({ error: 'approved (boolean) is required' })
+      }
+
+      // 验证请求存在且属于当前会话
+      const request = interactManager.getRequest(requestId)
+      if (!request) {
+        return res.status(404).json({ error: 'Interact request not found or already resolved' })
+      }
+      if (request.sessionId !== id || request.scope !== scope) {
+        return res.status(403).json({ error: 'Interact request does not belong to this session' })
+      }
+
+      const grantedPaths = Array.isArray(paths)
+        ? paths.filter((p: unknown) => typeof p === 'string' && p.trim())
+        : request.paths
+
+      // 如果批准，持久化新授权路径到 session
+      if (approved && grantedPaths.length > 0) {
+        const session = await adapter.getSession(scope, id)
+        if (session) {
+          const existing = new Set(session.grantedPaths ?? [])
+          for (const p of grantedPaths) existing.add(p)
+          await adapter.updateSession(scope, id, { grantedPaths: Array.from(existing) })
+          log.info('[Interact] Persisted %d granted paths for session %s', existing.size, id)
+        }
+      }
+
+      // 解除 adapter 中的阻塞
+      const resolved = interactManager.resolveRequest(requestId, approved, grantedPaths)
+      if (!resolved) {
+        return res.status(410).json({ error: 'Interact request expired or already resolved' })
+      }
+
+      res.json({
+        requestId,
+        approved,
+        grantedPaths: approved ? grantedPaths : []
+      })
+    } catch (error) {
+      log.error('interact-response error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
   // DELETE /agent/sessions/:id - 删除会话
   router.delete('/agent/sessions/:id', async (req: Request, res: Response) => {
     try {
@@ -481,6 +589,9 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
       const key = chatKey(scope, id)
       activeChats.get(key)?.abort()
       activeChats.delete(key)
+
+      // 取消待处理的交互请求
+      interactManager.cancelSession(id, scope)
 
       // 清理关联终端
       try {
@@ -515,9 +626,30 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         return res.status(404).json({ error: 'Session not found' })
       }
 
-      const { content } = req.body ?? {}
+      const { content, fileRefs: bodyFileRefs } = req.body ?? {}
       if (typeof content !== 'string' || !content.trim()) {
         return res.status(400).json({ error: 'content is required' })
+      }
+
+      // 处理文件路径引用：自动将 fileRefs 中的路径加入 session.grantedPaths
+      const fileRefPaths: string[] = Array.isArray(bodyFileRefs)
+        ? bodyFileRefs
+            .filter((r: unknown) => r && typeof (r as Record<string, unknown>).path === 'string')
+            .map((r: { path: string }) => r.path)
+        : []
+      if (fileRefPaths.length > 0) {
+        const existing = new Set(session.grantedPaths ?? [])
+        let changed = false
+        for (const p of fileRefPaths) {
+          if (!existing.has(p)) {
+            existing.add(p)
+            changed = true
+          }
+        }
+        if (changed && adapter.updateSession) {
+          session.grantedPaths = Array.from(existing)
+          await adapter.updateSession(scope, id, { grantedPaths: session.grantedPaths })
+        }
       }
 
       const bodyModel = req.body?.model
@@ -774,10 +906,11 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         res.flush?.()
       }
 
-      // 客户端断开连接时也 abort
+      // 客户端断开连接时也 abort，并取消所有待处理的审批请求
       res.on('close', () => {
         ac.abort()
         activeChats.delete(key)
+        interactManager.cancelSession(id, scope)
       })
 
       let fullContent = ''
@@ -792,7 +925,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
             arguments: string
             result: string
             isError?: boolean
-            status?: 'preparing' | 'running' | 'done'
+            status?: 'preparing' | 'running' | 'awaiting_interact' | 'done'
           }
       > = []
       const fullToolCalls: Array<{
@@ -801,7 +934,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         arguments: string
         result: string
         isError?: boolean
-        status?: 'preparing' | 'running' | 'done'
+        status?: 'preparing' | 'running' | 'awaiting_interact' | 'done'
       }> = []
       function flushSegment(): void {
         if (segmentContent) {
@@ -819,6 +952,17 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
       let usageSent = false
       let hasError = false
       let chatCompletedAt = 0
+
+      // SSE 心跳：当 LLM 长时间生成工具参数（不产出可见事件）时，
+      // 每 3 秒发送 SSE 注释行让客户端知道 AI 仍在工作
+      const HEARTBEAT_INTERVAL_MS = 3000
+      const heartbeatTimer = setInterval(() => {
+        if (!res.writableEnded) {
+          res.write(`: heartbeat\n\n`)
+          res.flush?.()
+        }
+      }, HEARTBEAT_INTERVAL_MS)
+
       try {
         for await (const chunk of adapter.chat(scope, id, history, {
           model,
@@ -826,7 +970,8 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
           mcpEnabled: mcpEnabled !== false,
           includeScopeContext: includeScopeContext !== false,
           activeSkillInstructions,
-          rulesContent
+          rulesContent,
+          grantedPaths: session.grantedPaths
         })) {
           if (ac.signal.aborted) break
           if (chunk.usage) lastUsage = chunk.usage
@@ -864,6 +1009,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
           if (chunk.toolCall) {
             flushSegment()
             const tc = chunk.toolCall
+            log.info('[SSE] tool_call status=%s id=%s name=%s', tc.status ?? 'done', tc.id, tc.name)
             const toolPart = {
               type: 'tool' as const,
               id: tc.id,
@@ -887,6 +1033,22 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
               `data: ${JSON.stringify({
                 type: 'tool_call',
                 value: chunk.toolCall
+              })}\n\n`
+            )
+            res.flush?.()
+          }
+          // 交互请求：工具需要用户确认，SSE 流将在此处暂停直到用户响应
+          if (chunk.interactRequest) {
+            log.info(
+              '[SSE] interact_request requestId=%s tool=%s paths=%s',
+              chunk.interactRequest.requestId,
+              chunk.interactRequest.toolName,
+              chunk.interactRequest.paths.join(', ')
+            )
+            res.write(
+              `data: ${JSON.stringify({
+                type: 'interact_request',
+                value: chunk.interactRequest
               })}\n\n`
             )
             res.flush?.()
@@ -1054,6 +1216,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
           res.flush?.()
         }
       } finally {
+        clearInterval(heartbeatTimer)
         const usedModel = typeof model === 'string' && model.trim() ? model.trim() : undefined
         if (lastUsage) {
           recordTokenUsage(memoryUserId, 'chat', lastUsage, usedModel)

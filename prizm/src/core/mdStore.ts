@@ -884,6 +884,9 @@ function parseAgentSession(
   const llmSummary = typeof d.llmSummary === 'string' ? d.llmSummary : undefined
   const compressedThroughRound =
     typeof d.compressedThroughRound === 'number' ? d.compressedThroughRound : undefined
+  const grantedPaths = Array.isArray(d.grantedPaths)
+    ? (d.grantedPaths as unknown[]).filter((p): p is string => typeof p === 'string')
+    : undefined
   return {
     id,
     scope,
@@ -891,7 +894,8 @@ function parseAgentSession(
     createdAt,
     updatedAt,
     ...(llmSummary != null && { llmSummary }),
-    ...(compressedThroughRound != null && { compressedThroughRound })
+    ...(compressedThroughRound != null && { compressedThroughRound }),
+    ...(grantedPaths && grantedPaths.length > 0 && { grantedPaths })
   }
 }
 
@@ -973,6 +977,7 @@ export function writeAgentSessions(
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
       ...(s.compressedThroughRound != null && { compressedThroughRound: s.compressedThroughRound }),
+      ...(s.grantedPaths?.length && { grantedPaths: s.grantedPaths }),
       messages: s.messages.map((m) => ({
         id: m.id,
         role: m.role,

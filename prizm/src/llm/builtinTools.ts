@@ -9,7 +9,8 @@ import * as mdStore from '../core/mdStore'
 import { genUniqueId } from '../id'
 import type { TodoItemStatus, TodoList } from '../types'
 import { scheduleDocumentSummary } from './documentSummaryService'
-import { listRefItems, getScopeRefItem, getScopeStats, searchScopeItems } from './scopeItemRegistry'
+import { listRefItems, getScopeRefItem, getScopeStats } from './scopeItemRegistry'
+import type { SearchIndexService } from '../search/searchIndexService'
 import { recordActivity } from './contextTracker'
 import type { ScopeActivityItemKind, ScopeActivityAction } from '@prizm/shared'
 import { MEMORY_USER_ID } from '@prizm/shared'
@@ -20,10 +21,22 @@ import {
   resolveFolder,
   resolveWorkspaceType,
   wsTypeLabel,
-  OUT_OF_BOUNDS_MSG
+  OUT_OF_BOUNDS_MSG,
+  OUT_OF_BOUNDS_ERROR_CODE
 } from './workspaceResolver'
 import { getTerminalManager, stripAnsi } from '../terminal/TerminalSessionManager'
 import { builtinToolEvents } from './builtinToolEvents'
+
+/** SearchIndexService 实例注入 - 由 server.ts 初始化时调用 */
+let _searchIndex: SearchIndexService | null = null
+
+export function setSearchIndexForTools(searchIndex: SearchIndexService): void {
+  _searchIndex = searchIndex
+}
+
+export function getSearchIndexForTools(): SearchIndexService | null {
+  return _searchIndex
+}
 
 /** 工具参数属性定义（支持 array 类型的 items） */
 interface ToolPropertyDef {
@@ -250,12 +263,29 @@ export function getBuiltinTools(): LLMTool[] {
     }),
     tool(
       'prizm_search',
-      '在工作区便签、待办、文档中全文搜索关键词。' +
+      '在工作区便签、待办、文档中搜索关键词（分词索引 + 全文扫描混合搜索，保证不漏）。' +
         '当用户询问特定内容但不确定在哪个类型中时使用。' +
-        '返回匹配条目列表（类型+ID+标题）。优先用于精确/关键词查询。' +
+        '返回匹配条目列表（类型+ID+标题+内容预览+相关度评分）。' +
+        '支持中文分词，多个关键词用空格分隔。' +
         '语义模糊查询请改用 prizm_search_memories。',
       {
-        properties: { query: { type: 'string', description: '搜索关键词或短语' } },
+        properties: {
+          query: {
+            type: 'string',
+            description: '搜索关键词或短语（多词用空格分隔，如"竞品 分析"）'
+          },
+          types: {
+            type: 'array',
+            description:
+              '限定搜索类型，可选 "document"、"todoList"、"clipboard"、"note"。不指定则搜索全部。',
+            items: { type: 'string' }
+          },
+          tags: {
+            type: 'array',
+            description: '按标签过滤（OR 逻辑：含任一指定 tag 即匹配）。不指定则不过滤。',
+            items: { type: 'string' }
+          }
+        },
         required: ['query']
       }
     ),
@@ -339,15 +369,26 @@ export function getBuiltinTools(): LLMTool[] {
     ),
     tool(
       'prizm_terminal_send_keys',
-      '向已有终端发送按键输入并等待返回输出。用于与 prizm_terminal_spawn 创建的持久终端交互。',
+      '向持久终端发送输入。通过 pressEnter 控制是否按回车：' +
+        'pressEnter=true（默认）自动追加回车执行命令，无需在 input 中包含换行符；' +
+        'pressEnter=false 仅键入文本不执行。' +
+        '支持分步调用：先 type（pressEnter=false）再单独 Enter（input=""，pressEnter=true）。' +
+        'input 中的 \\n 会原样发送给终端（不等同于回车执行）。',
       {
         properties: {
           terminalId: { type: 'string', description: '目标终端 ID' },
-          input: { type: 'string', description: '要发送的输入内容' },
+          input: {
+            type: 'string',
+            description:
+              '要发送的文本内容。执行命令时只写命令本身（如 "ls -la"），不要手动加 \\n 或 \\r——回车由 pressEnter 控制。' +
+              '可以为空字符串 ""，配合 pressEnter=true 实现单独按回车。'
+          },
           pressEnter: {
             type: 'boolean',
             description:
-              '是否在输入后按下回车键。true = 执行命令（默认），false = 仅输入文本不按回车（用于交互式输入、密码、补全等场景）'
+              '是否在 input 之后自动按下回车键（发送 \\r）。' +
+              'true（默认）= 发送 input 后按回车，用于执行命令；' +
+              'false = 仅键入 input 文本，不按回车，用于交互式输入、密码、Tab 补全、分步输入等场景。'
           },
           waitMs: {
             type: 'number',
@@ -368,13 +409,15 @@ export interface BuiltinToolResult {
 /**
  * 执行内置工具；sessionId 可选，用于记录修改到 ContextTracker
  * userId 可选，用于记忆检索的真实用户 ID
+ * grantedPaths 可选，用户授权的外部文件路径列表
  */
 export async function executeBuiltinTool(
   scope: string,
   toolName: string,
   args: Record<string, unknown>,
   sessionId?: string,
-  userId?: string
+  userId?: string,
+  grantedPaths?: string[]
 ): Promise<BuiltinToolResult> {
   const data = scopeStore.getScopeData(scope)
   const scopeRoot = scopeStore.getScopeRootPath(scope)
@@ -397,8 +440,9 @@ export async function executeBuiltinTool(
     switch (toolName) {
       case 'prizm_file_list': {
         const pathArg = typeof args.path === 'string' ? args.path : ''
-        const resolved = resolvePath(wsCtx, pathArg, wsArg)
-        if (!resolved) return { text: OUT_OF_BOUNDS_MSG, isError: true }
+        const resolved = resolvePath(wsCtx, pathArg, wsArg, grantedPaths)
+        if (!resolved)
+          return { text: `[${OUT_OF_BOUNDS_ERROR_CODE}] ${OUT_OF_BOUNDS_MSG}`, isError: true }
         const entries = mdStore.listDirectory(resolved.fileRoot, resolved.relativePath)
         if (!entries.length) return { text: `目录为空或不存在。${wsTypeLabel(resolved.wsType)}` }
         const lines = entries.map((e) => {
@@ -411,8 +455,9 @@ export async function executeBuiltinTool(
 
       case 'prizm_file_read': {
         const pathArg = typeof args.path === 'string' ? args.path : ''
-        const resolved = resolvePath(wsCtx, pathArg, wsArg)
-        if (!resolved) return { text: OUT_OF_BOUNDS_MSG, isError: true }
+        const resolved = resolvePath(wsCtx, pathArg, wsArg, grantedPaths)
+        if (!resolved)
+          return { text: `[${OUT_OF_BOUNDS_ERROR_CODE}] ${OUT_OF_BOUNDS_MSG}`, isError: true }
         const result = mdStore.readFileByPath(resolved.fileRoot, resolved.relativePath)
         if (!result)
           return {
@@ -426,8 +471,9 @@ export async function executeBuiltinTool(
       case 'prizm_file_write': {
         const pathArg = typeof args.path === 'string' ? args.path : ''
         const content = typeof args.content === 'string' ? args.content : ''
-        const resolved = resolvePath(wsCtx, pathArg, wsArg)
-        if (!resolved) return { text: OUT_OF_BOUNDS_MSG, isError: true }
+        const resolved = resolvePath(wsCtx, pathArg, wsArg, grantedPaths)
+        if (!resolved)
+          return { text: `[${OUT_OF_BOUNDS_ERROR_CODE}] ${OUT_OF_BOUNDS_MSG}`, isError: true }
         const ok = mdStore.writeFileByPath(resolved.fileRoot, resolved.relativePath, content)
         if (!ok)
           return { text: `写入失败: ${pathArg}${wsTypeLabel(resolved.wsType)}`, isError: true }
@@ -443,9 +489,10 @@ export async function executeBuiltinTool(
       case 'prizm_file_move': {
         const from = typeof args.from === 'string' ? args.from : ''
         const to = typeof args.to === 'string' ? args.to : ''
-        const resolvedFrom = resolvePath(wsCtx, from, wsArg)
-        const resolvedTo = resolvePath(wsCtx, to, wsArg)
-        if (!resolvedFrom || !resolvedTo) return { text: OUT_OF_BOUNDS_MSG, isError: true }
+        const resolvedFrom = resolvePath(wsCtx, from, wsArg, grantedPaths)
+        const resolvedTo = resolvePath(wsCtx, to, wsArg, grantedPaths)
+        if (!resolvedFrom || !resolvedTo)
+          return { text: `[${OUT_OF_BOUNDS_ERROR_CODE}] ${OUT_OF_BOUNDS_MSG}`, isError: true }
         // move 操作要求源和目标在同一工作区内
         if (resolvedFrom.fileRoot !== resolvedTo.fileRoot)
           return {
@@ -473,8 +520,9 @@ export async function executeBuiltinTool(
 
       case 'prizm_file_delete': {
         const pathArg = typeof args.path === 'string' ? args.path : ''
-        const resolved = resolvePath(wsCtx, pathArg, wsArg)
-        if (!resolved) return { text: OUT_OF_BOUNDS_MSG, isError: true }
+        const resolved = resolvePath(wsCtx, pathArg, wsArg, grantedPaths)
+        if (!resolved)
+          return { text: `[${OUT_OF_BOUNDS_ERROR_CODE}] ${OUT_OF_BOUNDS_MSG}`, isError: true }
         const ok = mdStore.deleteByPath(resolved.fileRoot, resolved.relativePath)
         if (!ok)
           return { text: `删除失败: ${pathArg}${wsTypeLabel(resolved.wsType)}`, isError: true }
@@ -542,7 +590,8 @@ export async function executeBuiltinTool(
           }
         }
         const folderResult = resolveFolder(wsCtx, args.folder, wsArg)
-        if (!folderResult) return { text: OUT_OF_BOUNDS_MSG, isError: true }
+        if (!folderResult)
+          return { text: `[${OUT_OF_BOUNDS_ERROR_CODE}] ${OUT_OF_BOUNDS_MSG}`, isError: true }
         const { folder: folderPath, wsType: todoWsType } = folderResult
         const todoTitle = typeof args.title === 'string' ? args.title : '(无标题)'
         const todoDesc = typeof args.description === 'string' ? args.description : undefined
@@ -715,7 +764,8 @@ export async function executeBuiltinTool(
         const title = typeof args.title === 'string' ? args.title : '未命名文档'
         const content = typeof args.content === 'string' ? args.content : ''
         const folderResult = resolveFolder(wsCtx, args.folder, wsArg)
-        if (!folderResult) return { text: OUT_OF_BOUNDS_MSG, isError: true }
+        if (!folderResult)
+          return { text: `[${OUT_OF_BOUNDS_ERROR_CODE}] ${OUT_OF_BOUNDS_MSG}`, isError: true }
         const { folder: folderPath, wsType } = folderResult
         const sanitizedName = mdStore.sanitizeFileName(title) + '.md'
         const relativePath = folderPath ? `${folderPath}/${sanitizedName}` : ''
@@ -830,11 +880,28 @@ export async function executeBuiltinTool(
       }
 
       case 'prizm_search': {
-        const query = typeof args.query === 'string' ? args.query : ''
-        const items = searchScopeItems(scope, query)
-        if (!items.length) return { text: '未找到匹配项。' }
-        const lines = items.map((r) => `- [${r.kind}] ${r.id}: ${r.title}`)
-        return { text: lines.join('\n') }
+        const query = typeof args.query === 'string' ? args.query.trim() : ''
+        if (!query) return { text: '请提供搜索关键词。', isError: true }
+        if (!_searchIndex) {
+          return { text: '搜索服务未初始化。', isError: true }
+        }
+        const types = Array.isArray(args.types) ? args.types : undefined
+        const tags = Array.isArray(args.tags) ? args.tags : undefined
+        const results = await _searchIndex.search(scope, query, {
+          complete: true,
+          limit: 20,
+          types,
+          tags
+        })
+        if (!results.length) return { text: '未找到匹配项。' }
+        const lines = results.map((r) => {
+          const srcTag = r.source === 'fulltext' ? ' [全文]' : ''
+          const preview = r.preview && r.preview !== '(空)' ? `\n  预览: ${r.preview}` : ''
+          return `- [${r.kind}] ${r.id}: ${
+            (r.raw as { title?: string })?.title ?? r.id
+          }${srcTag}${preview}`
+        })
+        return { text: `找到 ${results.length} 条结果：\n${lines.join('\n')}` }
       }
 
       case 'prizm_scope_stats': {
@@ -889,7 +956,7 @@ export async function executeBuiltinTool(
           timeoutMs: timeoutSec * 1000,
           sessionType: 'exec',
           title: `exec: ${command.slice(0, 40)}`,
-          workspaceType: wsType
+          workspaceType: wsType === 'granted' ? 'main' : wsType
         })
         const MAX_OUTPUT = 8192
         let output = result.output
@@ -939,8 +1006,8 @@ export async function executeBuiltinTool(
         // 记录发送前的输出长度
         const prevOutput = termMgr.getRecentOutput(terminalId)
         const prevLen = prevOutput.length
-        // 发送输入；pressEnter=true 时追加回车，否则仅输入文本
-        const dataToSend = pressEnter ? input + '\n' : input
+        // 发送输入；pressEnter=true 时追加 \r（PTY 中模拟 Enter 键），否则仅输入文本
+        const dataToSend = pressEnter ? input + '\r' : input
         termMgr.writeToTerminal(terminalId, dataToSend)
         // 等待输出
         await new Promise((resolve) => setTimeout(resolve, waitMs))

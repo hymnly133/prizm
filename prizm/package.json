@@ -35,7 +35,9 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
+    "@node-rs/jieba": "^2.0.1",
     "@prizm/evermemos": "workspace:*",
+    "@vscode/ripgrep": "^1.17.0",
     "better-sqlite3": "^12.6.2",
     "compression": "^1.8.1",
     "cors": "^2.8.6",

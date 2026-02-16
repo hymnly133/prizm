@@ -1,8 +1,11 @@
 /**
  * @ 引用可扩展注册表
  * 开发时注册内置类型；生产时可从配置加载用户自定义引用类型
+ * 内置类型：note, doc, todo, file
  */
 
+import * as fs from 'fs'
+import * as path from 'path'
 import type { ScopeRefItem, ScopeRefItemDetail } from './scopeItemRegistry'
 import { getScopeRefItem, listRefItems } from './scopeItemRegistry'
 import type { ScopeRefKind } from './scopeItemRegistry'
@@ -110,10 +113,55 @@ function builtinDocList(scope: string, query?: string) {
   return Promise.resolve(items)
 }
 
+/** file 引用解析：id 为文件路径（可能经过 %29 编码） */
+function builtinFileResolve(
+  _scope: string,
+  encodedPath: string
+): Promise<ScopeRefItemDetail | null> {
+  const filePath = encodedPath.replace(/%29/g, ')')
+  try {
+    const resolved = path.resolve(filePath)
+    if (!fs.existsSync(resolved)) {
+      return Promise.resolve(null)
+    }
+    const stat = fs.statSync(resolved)
+    const baseName = path.basename(resolved)
+    const baseDetail: Omit<ScopeRefItemDetail, 'content'> = {
+      id: encodedPath,
+      kind: 'document' as ScopeRefKind,
+      title: baseName,
+      charCount: 0,
+      isShort: false,
+      updatedAt: stat.mtimeMs
+    }
+    if (stat.isDirectory()) {
+      const entries = fs.readdirSync(resolved)
+      const content = `目录 ${resolved} 内容：\n${entries.join('\n')}`
+      return Promise.resolve({ ...baseDetail, content, charCount: content.length })
+    }
+    const MAX_SIZE = 512 * 1024
+    if (stat.size > MAX_SIZE) {
+      const content =
+        `[文件过大，仅读取前 ${MAX_SIZE} 字节]\n` +
+        fs.readFileSync(resolved, 'utf-8').slice(0, MAX_SIZE)
+      return Promise.resolve({ ...baseDetail, content, charCount: content.length })
+    }
+    const content = fs.readFileSync(resolved, 'utf-8')
+    return Promise.resolve({
+      ...baseDetail,
+      content,
+      charCount: content.length,
+      isShort: content.length < 500
+    })
+  } catch {
+    return Promise.resolve(null)
+  }
+}
+
 /** 是否已注册内置引用 */
 let builtinAtRefsRegistered = false
 
-/** 注册内置 @ 引用类型（note、doc、todo）；首次调用时执行 */
+/** 注册内置 @ 引用类型（note、doc、todo、file）；首次调用时执行 */
 export function registerBuiltinAtReferences(): void {
   if (builtinAtRefsRegistered) return
   builtinAtRefsRegistered = true
@@ -139,6 +187,13 @@ export function registerBuiltinAtReferences(): void {
     label: '待办',
     resolveRef: builtinTodoResolve,
     listCandidates: builtinTodoList,
+    builtin: true
+  })
+  registerAtReference({
+    key: 'file',
+    aliases: ['文件'],
+    label: '文件路径',
+    resolveRef: builtinFileResolve,
     builtin: true
   })
 }

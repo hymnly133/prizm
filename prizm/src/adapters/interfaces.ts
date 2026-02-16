@@ -117,8 +117,8 @@ export interface IDocumentsAdapter {
 
 // ============ Agent  LLM 提供商 ============
 
-/** 工具调用状态：preparing=参数填写中 running=执行中 done=已完成 */
-export type ToolCallStatus = 'preparing' | 'running' | 'done'
+/** 工具调用状态：preparing=参数填写中 running=执行中 awaiting_interact=等待用户交互 done=已完成 */
+export type ToolCallStatus = 'preparing' | 'running' | 'awaiting_interact' | 'done'
 
 /** 单次工具调用记录（用于 SSE 下发客户端展示） */
 export interface ToolCallRecord {
@@ -146,6 +146,17 @@ export interface LLMStreamChunk {
   toolCall?: ToolCallRecord
   /** 工具结果分块（大 result 时先流式下发，再发完整 toolCall） */
   toolResultChunk?: { id: string; chunk: string }
+  /**
+   * 交互请求：工具执行需要用户确认（如文件访问越界、敏感操作等）。
+   * yield 此事件后，adapter 将阻塞等待用户通过 API 确认/拒绝。
+   * 客户端应显示交互卡片并通过 POST /agent/sessions/:id/interact-response 响应。
+   */
+  interactRequest?: {
+    requestId: string
+    toolCallId: string
+    toolName: string
+    paths: string[]
+  }
 }
 
 /** OpenAI 风格 tool 定义 */
@@ -196,11 +207,11 @@ export interface IAgentAdapter {
 
   getMessages?(scope: string, sessionId: string): Promise<AgentMessage[]>
 
-  /** 更新会话（对话摘要、压缩轮次等） */
+  /** 更新会话（对话摘要、压缩轮次、授权路径等） */
   updateSession?(
     scope: string,
     id: string,
-    update: { llmSummary?: string; compressedThroughRound?: number }
+    update: { llmSummary?: string; compressedThroughRound?: number; grantedPaths?: string[] }
   ): Promise<AgentSession>
 
   /** 流式对话，返回 SSE 流 */
@@ -218,6 +229,8 @@ export interface IAgentAdapter {
       activeSkillInstructions?: Array<{ name: string; instructions: string }>
       /** 外部项目规则内容 */
       rulesContent?: string
+      /** 用户授权的外部文件路径列表 */
+      grantedPaths?: string[]
     }
   ): AsyncIterable<LLMStreamChunk>
 }

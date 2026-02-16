@@ -32,10 +32,14 @@ const mockManager = {
   runningCount: 0
 }
 
-vi.mock('../terminal/TerminalSessionManager', () => ({
-  getTerminalManager: () => mockManager,
-  TerminalSessionManager: vi.fn()
-}))
+vi.mock('../terminal/TerminalSessionManager', async (importOriginal) => {
+  const orig = await importOriginal<typeof import('../terminal/TerminalSessionManager')>()
+  return {
+    getTerminalManager: () => mockManager,
+    TerminalSessionManager: vi.fn(),
+    stripAnsi: orig.stripAnsi
+  }
+})
 
 // Mock ScopeStore
 vi.mock('../core/ScopeStore', () => ({
@@ -385,13 +389,14 @@ describe('Agent Terminal Tools', () => {
       const result = await executeBuiltinTool(
         'default',
         'prizm_terminal_send_keys',
-        { terminalId: 'term-1', input: 'ls -la\n' },
+        { terminalId: 'term-1', input: 'ls -la' },
         'session-1'
       )
 
       expect(result.isError).toBeFalsy()
       expect(result.text).toContain('new output from command')
-      expect(mockManager.writeToTerminal).toHaveBeenCalledWith('term-1', 'ls -la\n')
+      // pressEnter 默认 true，会在 input 后追加 \r
+      expect(mockManager.writeToTerminal).toHaveBeenCalledWith('term-1', 'ls -la\r')
     })
 
     it('should return error for empty terminalId', async () => {

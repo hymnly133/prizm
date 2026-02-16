@@ -41,12 +41,23 @@ import { buildSystemPrompt } from '../llm/systemPrompt'
 import { processMessageAtRefs } from '../llm/atReferenceParser'
 import { registerBuiltinAtReferences } from '../llm/atReferenceRegistry'
 import { getBuiltinTools, executeBuiltinTool, BUILTIN_TOOL_NAMES } from '../llm/builtinTools'
+import { OUT_OF_BOUNDS_ERROR_CODE } from '../llm/workspaceResolver'
+import { interactManager } from '../llm/interactManager'
 
 const log = createLogger('Adapter')
 
 /** 工具 result 超过此长度时先流式下发 tool_result_chunk，再发完整 tool_call */
 const TOOL_RESULT_STREAM_THRESHOLD = 500
 const TOOL_RESULT_CHUNK_SIZE = 200
+
+/** 从工具参数中提取涉及的文件路径（用于审批请求） */
+function extractPathsFromToolArgs(args: Record<string, unknown>): string[] {
+  const paths: string[] = []
+  if (typeof args.path === 'string' && args.path.trim()) paths.push(args.path.trim())
+  if (typeof args.from === 'string' && args.from.trim()) paths.push(args.from.trim())
+  if (typeof args.to === 'string' && args.to.trim()) paths.push(args.to.trim())
+  return paths
+}
 
 /** 判断是否为瞬态网络错误（可重试） */
 function isTransientError(err: unknown): boolean {
@@ -403,7 +414,7 @@ export class DefaultAgentAdapter implements IAgentAdapter {
   async updateSession(
     scope: string,
     id: string,
-    update: { llmSummary?: string; compressedThroughRound?: number }
+    update: { llmSummary?: string; compressedThroughRound?: number; grantedPaths?: string[] }
   ): Promise<AgentSession> {
     const data = scopeStore.getScopeData(scope)
     const session = data.agentSessions.find((s) => s.id === id)
@@ -414,6 +425,9 @@ export class DefaultAgentAdapter implements IAgentAdapter {
     }
     if (update.compressedThroughRound !== undefined) {
       session.compressedThroughRound = update.compressedThroughRound
+    }
+    if (update.grantedPaths !== undefined) {
+      session.grantedPaths = update.grantedPaths
     }
     session.updatedAt = Date.now()
     scopeStore.saveScope(scope)
@@ -459,6 +473,7 @@ export class DefaultAgentAdapter implements IAgentAdapter {
       includeScopeContext?: boolean
       activeSkillInstructions?: Array<{ name: string; instructions: string }>
       rulesContent?: string
+      grantedPaths?: string[]
     }
   ): AsyncIterable<LLMStreamChunk> {
     const provider = getLLMProvider()
@@ -481,10 +496,12 @@ export class DefaultAgentAdapter implements IAgentAdapter {
       const last = messages[messages.length - 1]
       const rest = messages.slice(0, -1)
       if (last.role === 'user' && typeof last.content === 'string') {
+        const fileRefPaths = options?.grantedPaths
         const { injectedPrefix, message } = await processMessageAtRefs(
           scope,
           sessionId,
-          last.content
+          last.content,
+          { fileRefPaths, grantedPaths: options?.grantedPaths }
         )
         if (injectedPrefix) {
           baseMessages.push({ role: 'system', content: injectedPrefix })
@@ -550,6 +567,8 @@ export class DefaultAgentAdapter implements IAgentAdapter {
 
       let toolCalls: Array<{ id: string; name: string; arguments: string }> | undefined
       let assistantContent = ''
+      /** 已经发出 preparing 事件的工具 ID 集合 */
+      const announcedPreparing = new Set<string>()
 
       for await (const chunk of stream) {
         if (chunk.text) {
@@ -560,6 +579,12 @@ export class DefaultAgentAdapter implements IAgentAdapter {
         if (chunk.usage) lastUsage = chunk.usage
         // LLM 流式生成阶段检测到工具名，立即通知客户端显示 preparing 卡片
         if (chunk.toolCallPreparing) {
+          log.info(
+            '[ToolCall] preparing: id=%s name=%s',
+            chunk.toolCallPreparing.id,
+            chunk.toolCallPreparing.name
+          )
+          announcedPreparing.add(chunk.toolCallPreparing.id)
           yield {
             toolCall: {
               id: chunk.toolCallPreparing.id,
@@ -598,8 +623,40 @@ export class DefaultAgentAdapter implements IAgentAdapter {
 
       const manager = getMcpClientManager()
 
-      // 先发出所有 running 状态
+      // 对于未曾发出 preparing 的工具，补发 preparing 事件
+      // 某些 LLM API 不增量流式 tool_call，直接在 finish_reason 中返回完整工具调用
       for (const tc of toolCalls) {
+        if (!announcedPreparing.has(tc.id)) {
+          log.info('[ToolCall] late preparing (not streamed): id=%s name=%s', tc.id, tc.name)
+          announcedPreparing.add(tc.id)
+          yield {
+            toolCall: {
+              id: tc.id,
+              name: tc.name,
+              arguments: '',
+              result: '',
+              status: 'preparing' as const
+            }
+          }
+        }
+      }
+
+      // 确保 preparing 事件到达客户端并渲染后再发送 running。
+      // 当 LLM API 不增量流式 tool_call 时，preparing 和 running 几乎同时产出，
+      // 如果不加延迟，二者可能在同一 TCP 包到达客户端被 React 批处理合并。
+      // 300ms 足以让客户端完成至少一帧渲染，用户可以看到「准备调用…」卡片。
+      if (announcedPreparing.size > 0) {
+        await new Promise((r) => setTimeout(r, 300))
+      }
+
+      // 发出所有 running 状态
+      for (const tc of toolCalls) {
+        log.info(
+          '[ToolCall] running: id=%s name=%s args_len=%d',
+          tc.id,
+          tc.name,
+          tc.arguments.length
+        )
         yield {
           toolCall: {
             id: tc.id,
@@ -611,17 +668,53 @@ export class DefaultAgentAdapter implements IAgentAdapter {
         }
       }
 
-      // 并行执行所有工具调用
-      const execResults = await Promise.all(
+      // 并行执行所有工具调用（第一轮，可能触发 OUT_OF_BOUNDS 需要审批）
+      interface ExecResult {
+        tc: { id: string; name: string; arguments: string }
+        text: string
+        isError: boolean
+        /** 需要用户审批（OUT_OF_BOUNDS 错误） */
+        needsInteract?: boolean
+        /** 需要授权的路径列表 */
+        interactPaths?: string[]
+        /** 解析后的参数（审批通过后重试用） */
+        parsedArgs?: Record<string, unknown>
+      }
+
+      /** 运行时 grantedPaths，审批通过后动态追加 */
+      let runtimeGrantedPaths = [...(options?.grantedPaths ?? [])]
+
+      const execResults: ExecResult[] = await Promise.all(
         toolCalls.map(async (tc) => {
           try {
             const args = JSON.parse(tc.arguments || '{}') as Record<string, unknown>
             let text: string
             let isError = false
             if (BUILTIN_TOOL_NAMES.has(tc.name)) {
-              const result = await executeBuiltinTool(scope, tc.name, args, sessionId)
+              const result = await executeBuiltinTool(
+                scope,
+                tc.name,
+                args,
+                sessionId,
+                undefined,
+                runtimeGrantedPaths
+              )
               text = result.text
               isError = result.isError ?? false
+              // 检测 OUT_OF_BOUNDS：需要用户授权
+              if (isError && text.includes(OUT_OF_BOUNDS_ERROR_CODE)) {
+                const paths = extractPathsFromToolArgs(args)
+                if (paths.length > 0) {
+                  return {
+                    tc,
+                    text,
+                    isError,
+                    needsInteract: true,
+                    interactPaths: paths,
+                    parsedArgs: args
+                  }
+                }
+              }
             } else if (tc.name === 'tavily_web_search') {
               const query = typeof args.query === 'string' ? args.query : ''
               const results = await searchTavily(query)
@@ -644,7 +737,6 @@ export class DefaultAgentAdapter implements IAgentAdapter {
             }
             return { tc, text, isError }
           } catch (err) {
-            // 瞬态网络错误重试一次
             if (isTransientError(err)) {
               await new Promise((r) => setTimeout(r, 500))
               try {
@@ -652,7 +744,14 @@ export class DefaultAgentAdapter implements IAgentAdapter {
                 let text: string
                 let isError = false
                 if (BUILTIN_TOOL_NAMES.has(tc.name)) {
-                  const result = await executeBuiltinTool(scope, tc.name, args, sessionId)
+                  const result = await executeBuiltinTool(
+                    scope,
+                    tc.name,
+                    args,
+                    sessionId,
+                    undefined,
+                    runtimeGrantedPaths
+                  )
                   text = result.text
                   isError = result.isError ?? false
                 } else {
@@ -678,7 +777,125 @@ export class DefaultAgentAdapter implements IAgentAdapter {
         })
       )
 
-      // 按原始顺序 yield 结果（保持消息顺序一致性）
+      // ---- 交互阻塞流程 ----
+      // 对需要用户交互的工具逐个处理：yield 交互请求 → 阻塞等待 → 用户确认后重试
+      for (let i = 0; i < execResults.length; i++) {
+        const r = execResults[i]
+        if (!r.needsInteract || !r.interactPaths?.length) continue
+        if (options?.signal?.aborted) break
+
+        // 检查路径是否已在之前的交互中被授权（同一批次中多个工具访问同一路径）
+        const uncoveredPaths = r.interactPaths.filter((p) => !runtimeGrantedPaths.includes(p))
+        if (uncoveredPaths.length === 0) {
+          // 路径已被授权，直接重试
+          try {
+            const retryResult = await executeBuiltinTool(
+              scope,
+              r.tc.name,
+              r.parsedArgs ?? {},
+              sessionId,
+              undefined,
+              runtimeGrantedPaths
+            )
+            execResults[i] = {
+              tc: r.tc,
+              text: retryResult.text,
+              isError: retryResult.isError ?? false
+            }
+          } catch (retryErr) {
+            log.warn('Auto-retry after batch interact failed:', retryErr)
+          }
+          continue
+        }
+
+        // 通知客户端：工具进入等待用户交互状态
+        yield {
+          toolCall: {
+            id: r.tc.id,
+            name: r.tc.name,
+            arguments: r.tc.arguments,
+            result: '',
+            status: 'awaiting_interact' as const
+          }
+        }
+
+        // 创建交互请求并 yield（SSE 发送到客户端）
+        const { request, promise } = interactManager.createRequest(
+          sessionId ?? '',
+          scope,
+          r.tc.id,
+          r.tc.name,
+          uncoveredPaths
+        )
+
+        yield {
+          interactRequest: {
+            requestId: request.requestId,
+            toolCallId: r.tc.id,
+            toolName: r.tc.name,
+            paths: uncoveredPaths
+          }
+        }
+
+        log.info(
+          '[Interact] Blocking for tool=%s paths=%s requestId=%s',
+          r.tc.name,
+          uncoveredPaths.join(', '),
+          request.requestId
+        )
+
+        // 阻塞等待用户确认/拒绝（Promise 由 interactManager.resolveRequest 解除）
+        const response = await promise
+
+        if (response.approved && response.grantedPaths?.length) {
+          // 更新运行时授权路径
+          for (const p of response.grantedPaths) {
+            if (!runtimeGrantedPaths.includes(p)) runtimeGrantedPaths.push(p)
+          }
+
+          log.info(
+            '[Interact] Approved, retrying tool=%s with %d granted paths',
+            r.tc.name,
+            runtimeGrantedPaths.length
+          )
+
+          // 通知客户端：工具恢复执行
+          yield {
+            toolCall: {
+              id: r.tc.id,
+              name: r.tc.name,
+              arguments: r.tc.arguments,
+              result: '',
+              status: 'running' as const
+            }
+          }
+
+          // 用更新后的路径重试工具执行
+          try {
+            const retryResult = await executeBuiltinTool(
+              scope,
+              r.tc.name,
+              r.parsedArgs ?? {},
+              sessionId,
+              undefined,
+              runtimeGrantedPaths
+            )
+            execResults[i] = {
+              tc: r.tc,
+              text: retryResult.text,
+              isError: retryResult.isError ?? false
+            }
+          } catch (retryErr) {
+            const errText = retryErr instanceof Error ? retryErr.message : String(retryErr)
+            execResults[i] = { tc: r.tc, text: `Error: ${errText}`, isError: true }
+          }
+        } else {
+          log.info('[Interact] Denied for tool=%s requestId=%s', r.tc.name, request.requestId)
+          // 拒绝：保持原始 OUT_OF_BOUNDS 错误，LLM 将看到并做出反应
+        }
+      }
+
+      // 按原始顺序 yield 最终结果（保持消息顺序一致性）
       for (const { tc, text, isError } of execResults) {
         if (text.length >= TOOL_RESULT_STREAM_THRESHOLD) {
           for (let i = 0; i < text.length; i += TOOL_RESULT_CHUNK_SIZE) {

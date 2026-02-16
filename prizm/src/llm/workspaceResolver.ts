@@ -7,7 +7,7 @@ import path from 'path'
 import * as mdStore from '../core/mdStore'
 import { getSessionWorkspaceDir } from '../core/PathProviderCore'
 
-export type WorkspaceType = 'main' | 'session'
+export type WorkspaceType = 'main' | 'session' | 'granted'
 
 /** 解析后的路径结果 */
 export interface ResolvedPath {
@@ -37,13 +37,15 @@ export function createWorkspaceContext(scopeRoot: string, sessionId?: string): W
 /**
  * 解析路径参数：支持相对路径和绝对路径。
  * - 相对路径：根据 wsArg 参数选择根目录
- * - 绝对路径：自动检测属于主工作区还是临时工作区，转换为相对路径
+ * - 绝对路径：自动检测属于主工作区、临时工作区或授权路径，转换为相对路径
+ * - grantedPaths：用户显式授权的外部文件/文件夹路径
  * 返回 ResolvedPath 或 null（路径越界）
  */
 export function resolvePath(
   ctx: WorkspaceContext,
   rawPath: string,
-  wsArg?: string
+  wsArg?: string,
+  grantedPaths?: string[]
 ): ResolvedPath | null {
   if (path.isAbsolute(rawPath)) {
     const normalized = path.resolve(rawPath)
@@ -62,6 +64,20 @@ export function resolvePath(
     if (normalized === normalizedRoot || normalized.startsWith(normalizedRoot + path.sep)) {
       const rel = normalized === normalizedRoot ? '' : path.relative(normalizedRoot, normalized)
       return { fileRoot: ctx.scopeRoot, relativePath: rel, wsType: 'main' }
+    }
+    // 检查授权路径
+    if (grantedPaths?.length) {
+      for (const granted of grantedPaths) {
+        const normalizedGranted = path.resolve(granted)
+        if (
+          normalized === normalizedGranted ||
+          normalized.startsWith(normalizedGranted + path.sep)
+        ) {
+          const parentDir = path.dirname(normalizedGranted)
+          const rel = path.relative(parentDir, normalized)
+          return { fileRoot: parentDir, relativePath: rel, wsType: 'granted' }
+        }
+      }
     }
     return null
   }
@@ -129,9 +145,14 @@ export function resolveWorkspaceType(
 
 /** 返回 workspace 标签（用于结果提示） */
 export function wsTypeLabel(wsType: WorkspaceType): string {
-  return wsType === 'session' ? ' [临时工作区]' : ''
+  if (wsType === 'session') return ' [临时工作区]'
+  if (wsType === 'granted') return ' [授权路径]'
+  return ''
 }
 
 /** 路径越界的统一错误提示 */
 export const OUT_OF_BOUNDS_MSG =
-  '路径不在允许的工作区范围内。只能操作主工作区或会话临时工作区内的文件。'
+  '路径不在允许的工作区范围内。只能操作主工作区、会话临时工作区或用户授权的路径内的文件。'
+
+/** 路径越界错误标识符，客户端可据此识别需要授权的情况 */
+export const OUT_OF_BOUNDS_ERROR_CODE = 'OUT_OF_BOUNDS'

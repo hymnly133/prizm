@@ -61,8 +61,13 @@ export function buildSystemPrompt(options: SystemPromptOptions): string {
   parts.push('## 架构')
   parts.push('Layer 0 文件系统：`prizm_file_*` — 操作工作区内任意文件（相对路径或绝对路径）')
   parts.push(
-    'Layer 1 知识库：`prizm_*_document` / `prizm_*_todo` — 管理带元数据的结构化内容（文档、待办）。' +
+    'Layer 1 知识库（优先）：`prizm_*_document` / `prizm_*_todo` — 管理带元数据的结构化内容（文档、待办）。' +
       '支持 `folder` 参数创建到嵌套目录，支持 `workspace` 参数选择主/临时工作区。'
+  )
+  parts.push(
+    '⚠️ **默认优先知识库**：用户提到"文档"、"笔记"、"知识"、"记录"、"资料"、"报告"、"总结"等内容管理需求时，' +
+      '一律优先使用知识库工具（`prizm_*_document`），而非 `prizm_file_*`。' +
+      '仅当用户明确指定文件路径、要求操作特定格式文件（如 .py/.json/.csv）、或明确说"文件"时，才使用文件系统工具。'
   )
   parts.push('知识库文件本身也是文件，两层工具均可访问。`.prizm/` 系统目录禁止操作。')
 
@@ -112,7 +117,10 @@ export function buildSystemPrompt(options: SystemPromptOptions): string {
   // ── P4: 工具决策框架（决策树，不罗列工具名） ──
   parts.push('')
   parts.push('## 工具决策')
-  parts.push('操作文件 → `prizm_file_*` | 管理文档/待办 → 知识库工具')
+  parts.push(
+    '"文档"/"笔记"/"知识"/"记录"/"资料"/"报告"/"总结" → **知识库工具**（`prizm_*_document`）| ' +
+      '指定路径或特定格式文件 → `prizm_file_*`'
+  )
   parts.push('搜索关键词 → `prizm_search` | 回忆偏好/历史 → `prizm_search_memories`')
   parts.push(
     '执行命令 → `prizm_terminal_execute`（一次性） | 持久终端 → `prizm_terminal_spawn` + `prizm_terminal_send_keys`'
@@ -125,14 +133,40 @@ export function buildSystemPrompt(options: SystemPromptOptions): string {
     '- 需要交互或长时间运行（dev server、watch）→ `prizm_terminal_spawn` 创建 + `prizm_terminal_send_keys` 交互'
   )
   parts.push(
-    '- `prizm_terminal_send_keys` 的 `pressEnter` 参数：' +
-      '`true`（默认）= 输入后按回车执行命令；`false` = 仅输入文本不按回车（密码、交互式提示、Tab补全等）'
-  )
-  parts.push(
     '- 终端工具支持 `workspace` 参数：`"main"`（默认，全局目录）或 `"session"`（会话临时目录）。' +
       '项目构建/依赖安装 → main | 临时脚本/测试 → session'
   )
-  parts.push('- ⚠️ 安全：禁止执行删除系统文件、修改系统配置、rm -rf 等危险操作')
+  parts.push('')
+  parts.push('### `prizm_terminal_send_keys` 使用规范')
+  parts.push(
+    '`pressEnter` 控制是否在 input 后自动按回车（\\r）。**不要**在 input 中手动添加 \\n 或 \\r 来执行命令。'
+  )
+  parts.push('')
+  parts.push('**场景 1：直接执行命令**（最常用）')
+  parts.push('```')
+  parts.push('{ input: "npm install", pressEnter: true }  // 或省略 pressEnter（默认 true）')
+  parts.push('```')
+  parts.push('')
+  parts.push('**场景 2：分步输入再执行**（先 type 文本，再单独按回车）')
+  parts.push('```')
+  parts.push(
+    '步骤1: { input: "git commit -m \\"feat: add login\\"", pressEnter: false }  // 仅键入'
+  )
+  parts.push('步骤2: { input: "", pressEnter: true }  // 单独按回车执行')
+  parts.push('```')
+  parts.push('')
+  parts.push('**场景 3：交互式输入**（密码、确认提示、选择菜单）')
+  parts.push('```')
+  parts.push('{ input: "y", pressEnter: true }   // 输入 y 并回车确认')
+  parts.push('{ input: "mypassword", pressEnter: true }  // 输入密码并回车')
+  parts.push('```')
+  parts.push('')
+  parts.push('**场景 4：仅键入文本不执行**（Tab 补全、部分输入）')
+  parts.push('```')
+  parts.push('{ input: "cd /usr/lo", pressEnter: false }  // 键入路径前缀，等待用户或后续补全')
+  parts.push('```')
+  parts.push('')
+  parts.push('⚠️ 安全：禁止执行删除系统文件、修改系统配置、rm -rf 等危险操作')
 
   // ── P5: 行为准则（合并 4 个旧段落为 1 个精简段） ──
   parts.push('')
@@ -157,6 +191,12 @@ export function buildSystemPrompt(options: SystemPromptOptions): string {
   parts.push('用户：在 research 文件夹下写一篇关于 AI 的调研报告')
   parts.push(
     '✅ prizm_create_document({ title: "AI调研报告", content: "...", folder: "research" }) → research/AI调研报告.md'
+  )
+  parts.push('❌ prizm_file_write({ path: "research/AI调研报告.md" }) — 文档类内容应用知识库工具')
+  parts.push('')
+  parts.push('用户：帮我写一个 config.json 配置文件')
+  parts.push(
+    '✅ prizm_file_write({ path: "config.json", content: "..." }) — 指定了具体格式文件，用文件工具'
   )
   parts.push('')
   parts.push('用户：先帮我拟个草稿')

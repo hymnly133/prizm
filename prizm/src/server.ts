@@ -26,6 +26,7 @@ import { createDocumentsRoutes } from './routes/documents'
 import { createFilesRoutes } from './routes/files'
 import { createSearchRoutes } from './routes/search'
 import { SearchIndexService } from './search/searchIndexService'
+import { setSearchIndexForTools } from './llm/builtinTools'
 import { SQLiteAdapter } from '@prizm/evermemos'
 import { createAgentRoutes } from './routes/agent'
 import { createMcpConfigRoutes } from './routes/mcpConfig'
@@ -141,6 +142,7 @@ export function createPrizmServer(
   const searchIndexStore = new SQLiteAdapter(searchIndexDbPath)
   const searchIndex = new SearchIndexService(searchIndexStore)
   searchIndex.setAdapters(adapters)
+  setSearchIndexForTools(searchIndex)
   createNotifyRoutes(router, adapters.notification)
   createTodoListRoutes(router, adapters.todoList)
   createClipboardRoutes(router, adapters.clipboard)

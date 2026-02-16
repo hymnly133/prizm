@@ -106,18 +106,61 @@ class PrizmLLMAdapter implements ICompletionProvider {
   }
 
   async getEmbedding(text: string): Promise<number[]> {
+    // 优先使用本地 embedding provider（如 bge-small-zh-v1.5）
+    if (_localEmbeddingProvider) {
+      return _localEmbeddingProvider(text)
+    }
+
     const provider = getLLMProvider()
-    // Assuming provider has getEmbedding, otherwise we need to implement it or use a specific embedding model
-    // For now, let's assume the provider interface supports it or we use a fallback
     if ('embed' in provider) {
       // @ts-ignore
       const resp = await provider.embed([text])
       return resp[0]
     }
-    // Mock embedding if not supported (to avoid runtime crash on some providers)
-    // In production we should ensure generic OpenAILikeProvider supports embed
-    return new Array(1536).fill(0.01)
+
+    // 回退：mock embedding（仅用于向量表占位，实际去重依赖 jieba 文本相似度）
+    if (!_mockEmbeddingWarned) {
+      console.warn(
+        '[EverMemService] No embedding provider available, using mock embedding. ' +
+          'Text-based dedup (jieba) will still work. ' +
+          'Set PRIZM_LOCAL_EMBEDDING=1 to enable local embedding model.'
+      )
+      _mockEmbeddingWarned = true
+    }
+    return new Array(384).fill(0.01)
   }
+}
+
+// ==================== 本地 Embedding 接口 ====================
+
+/** 本地 embedding 函数签名 */
+export type LocalEmbeddingFn = (text: string) => Promise<number[]>
+
+/** 已注册的本地 embedding provider（由外部模块注入） */
+let _localEmbeddingProvider: LocalEmbeddingFn | null = null
+
+/** mock embedding 警告是否已打印（避免重复日志） */
+let _mockEmbeddingWarned = false
+
+/**
+ * 注册本地 embedding provider。
+ * 用法示例（待实现 @huggingface/transformers 后启用）：
+ *   registerLocalEmbeddingProvider(async (text) => {
+ *     const extractor = await pipeline('feature-extraction', 'Xenova/bge-small-zh-v1.5')
+ *     const output = await extractor(text, { pooling: 'mean', normalize: true })
+ *     return Array.from(output.data)
+ *   })
+ */
+export function registerLocalEmbeddingProvider(fn: LocalEmbeddingFn): void {
+  _localEmbeddingProvider = fn
+  _mockEmbeddingWarned = false
+  log.info('Local embedding provider registered')
+}
+
+/** 清除本地 embedding provider（测试用） */
+export function clearLocalEmbeddingProvider(): void {
+  _localEmbeddingProvider = null
+  _mockEmbeddingWarned = false
 }
 
 /**
@@ -940,16 +983,43 @@ export async function getRoundMemories(
 // ==================== 去重日志 API ====================
 
 /**
- * 获取去重日志列表（scope 级）。
- * 使用 scopeOnlyMemory 直接查询 scope DB。
+ * 获取去重日志列表。
+ * 合并查询 scopeDB + userDB（Profile 的去重日志写入 userDB，其余写入 scopeDB），
+ * 按 created_at 降序排列后截取。
  */
 export async function listDedupLog(
   userId: string,
   scope: string,
   limit?: number
 ): Promise<DedupLogEntry[]> {
+  const effectiveLimit = limit ?? 50
   try {
-    return await getScopeManagers(scope).scopeOnlyMemory.listDedupLog(userId, limit)
+    const scopeEntries = await getScopeManagers(scope).scopeOnlyMemory.listDedupLog(
+      userId,
+      effectiveLimit
+    )
+
+    // 也查询 userDB 中的去重日志（Profile 的 group_id=null → composite 路由到 userDB）
+    let userEntries: DedupLogEntry[] = []
+    try {
+      userEntries = await getUserManagers().memory.listDedupLog(userId, effectiveLimit)
+    } catch {
+      // user managers 未初始化或查询失败，忽略
+    }
+
+    if (userEntries.length === 0) return scopeEntries
+    if (scopeEntries.length === 0) return userEntries
+
+    // 按 id 去重（避免 composite 查询两个 DB 返回相同记录）
+    const seen = new Set<string>()
+    const merged: DedupLogEntry[] = []
+    for (const entry of [...scopeEntries, ...userEntries]) {
+      if (seen.has(entry.id)) continue
+      seen.add(entry.id)
+      merged.push(entry)
+    }
+    merged.sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
+    return merged.slice(0, effectiveLimit)
   } catch (e) {
     log.error('listDedupLog error:', e)
     return []
@@ -958,12 +1028,24 @@ export async function listDedupLog(
 
 /**
  * 回退一次去重：恢复被抑制的记忆。
- * 使用 scopeOnlyMemory（去重数据都在 scope DB 中）。
+ * 先尝试 scopeDB，再尝试 userDB（Profile 日志在 userDB 中）。
  * @returns 恢复的记忆 id，或 null 表示失败
  */
 export async function undoDedupLog(dedupLogId: string, scope: string): Promise<string | null> {
   try {
-    return await getScopeManagers(scope).scopeOnlyMemory.undoDedup(dedupLogId)
+    // 先尝试 scope DB
+    const scopeResult = await getScopeManagers(scope).scopeOnlyMemory.undoDedup(dedupLogId)
+    if (scopeResult) return scopeResult
+
+    // 再尝试 user DB（Profile 的去重日志在此）
+    try {
+      const userResult = await getUserManagers().memory.undoDedup(dedupLogId)
+      if (userResult) return userResult
+    } catch {
+      // user managers 未初始化
+    }
+
+    return null
   } catch (e) {
     log.error('undoDedupLog error:', e)
     return null
