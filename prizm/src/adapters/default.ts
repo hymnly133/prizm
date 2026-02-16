@@ -457,6 +457,8 @@ export class DefaultAgentAdapter implements IAgentAdapter {
       signal?: AbortSignal
       mcpEnabled?: boolean
       includeScopeContext?: boolean
+      activeSkillInstructions?: Array<{ name: string; instructions: string }>
+      rulesContent?: string
     }
   ): AsyncIterable<LLMStreamChunk> {
     const provider = getLLMProvider()
@@ -467,7 +469,9 @@ export class DefaultAgentAdapter implements IAgentAdapter {
     const systemContent = buildSystemPrompt({
       scope,
       sessionId,
-      includeScopeContext
+      includeScopeContext,
+      activeSkillInstructions: options?.activeSkillInstructions,
+      rulesContent: options?.rulesContent
     })
     const baseMessages: Array<{ role: string; content: string }> = [
       { role: 'system', content: systemContent }

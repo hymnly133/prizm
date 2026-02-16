@@ -29,12 +29,19 @@ import { SearchIndexService } from './search/searchIndexService'
 import { SQLiteAdapter } from '@prizm/evermemos'
 import { createAgentRoutes } from './routes/agent'
 import { createMcpConfigRoutes } from './routes/mcpConfig'
+import { createCommandsRoutes } from './routes/commands'
+import { createSkillsRoutes } from './routes/skills'
 import { createSettingsRoutes } from './routes/settings'
 import { createMemoryRoutes } from './routes/memory'
 import { mountMcpRoutes } from './mcp'
 import { WebSocketServer } from './websocket/WebSocketServer'
 import { initEverMemService } from './llm/EverMemService'
 import { migrateAppLevelStorage } from './core/migrate-scope-v2'
+import { getTerminalManager } from './terminal/TerminalSessionManager'
+import { TerminalWebSocketServer } from './terminal/TerminalWebSocketServer'
+import { createTerminalRoutes } from './routes/terminal'
+import { builtinToolEvents } from './llm/builtinToolEvents'
+import { EVENT_TYPES_OBJ } from '@prizm/shared'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -86,6 +93,8 @@ export function createPrizmServer(
   const app: Express = express()
   let server: Server | null = null
   let wsServer: WebSocketServer | undefined = undefined
+  let terminalWsServer: TerminalWebSocketServer | undefined = undefined
+  const terminalManager = getTerminalManager()
   let isRunning = false
 
   const clientRegistry = new ClientRegistry(dataDir)
@@ -139,7 +148,10 @@ export function createPrizmServer(
   createFilesRoutes(router)
   createSearchRoutes(router, adapters, searchIndex)
   createAgentRoutes(router, adapters.agent)
+  createTerminalRoutes(router, terminalManager)
   createMcpConfigRoutes(router)
+  createCommandsRoutes(router)
+  createSkillsRoutes(router)
   createSettingsRoutes(router)
   createMemoryRoutes(router)
   app.use('/', router)
@@ -204,10 +216,51 @@ export function createPrizmServer(
             }
 
             if (enableWebSocket && server) {
+              const terminalWsPath = '/ws/terminal'
+
               wsServer = new WebSocketServer(server, clientRegistry, {
                 path: websocketPath
               })
               log.info('WebSocket:', `ws://${host}:${port}${websocketPath}`)
+
+              terminalWsServer = new TerminalWebSocketServer(
+                server,
+                clientRegistry,
+                terminalManager,
+                { path: terminalWsPath }
+              )
+              log.info('Terminal WebSocket:', `ws://${host}:${port}${terminalWsPath}`)
+
+              // 桥接内置工具文件事件到 WebSocket 广播
+              builtinToolEvents.onFileEvent((evt) => {
+                if (!wsServer) return
+                const eventTypeMap: Record<string, string> = {
+                  'file:created': EVENT_TYPES_OBJ.FILE_CREATED,
+                  'file:moved': EVENT_TYPES_OBJ.FILE_MOVED,
+                  'file:deleted': EVENT_TYPES_OBJ.FILE_DELETED
+                }
+                const wsEventType = eventTypeMap[evt.eventType]
+                if (wsEventType) {
+                  wsServer.broadcast(
+                    wsEventType as import('@prizm/shared').EventType,
+                    { relativePath: evt.relativePath, fromPath: evt.fromPath, scope: evt.scope },
+                    evt.scope
+                  )
+                }
+              })
+
+              // 统一 upgrade 路由 — 两个 WSS 均为 noServer 模式，
+              // 需手动根据路径分发 upgrade 请求
+              server.on('upgrade', (req, socket, head) => {
+                const pathname = new URL(req.url ?? '/', 'ws://localhost').pathname
+                if (pathname === terminalWsPath && terminalWsServer) {
+                  terminalWsServer.handleUpgrade(req, socket, head)
+                } else if (pathname === websocketPath && wsServer) {
+                  wsServer.handleUpgrade(req, socket, head)
+                } else {
+                  socket.destroy()
+                }
+              })
             }
 
             log.info('Listening on', `http://${host}:${port}`)
@@ -229,7 +282,14 @@ export function createPrizmServer(
         return
       }
 
-      // 先关闭 WebSocket 服务器
+      // 先关闭 Terminal WebSocket 和终端管理器
+      if (terminalWsServer) {
+        terminalWsServer.destroy()
+        terminalWsServer = undefined
+      }
+      await terminalManager.shutdown()
+
+      // 关闭 WebSocket 服务器
       if (wsServer) {
         wsServer.destroy()
         wsServer = undefined

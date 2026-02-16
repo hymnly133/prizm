@@ -14,7 +14,7 @@ describe('deriveScopeActivities', () => {
     expect(activities[0]).toMatchObject({
       toolName: 'prizm_read_note',
       action: 'read',
-      itemKind: 'note',
+      itemKind: 'document',
       itemId: 'n1',
       timestamp: 1000
     })
@@ -36,7 +36,7 @@ describe('deriveScopeActivities', () => {
     expect(activities[0]).toMatchObject({
       toolName: 'prizm_create_note',
       action: 'create',
-      itemKind: 'note',
+      itemKind: 'document',
       itemId: 'abc-123',
       timestamp: 2000
     })

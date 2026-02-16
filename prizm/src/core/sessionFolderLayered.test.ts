@@ -115,7 +115,6 @@ describe('mdStore - Session 文件夹读写', () => {
     const sessions = [
       {
         id: 's1',
-        title: '会话1',
         scope: 'online',
         messages: [],
         createdAt: 1000,
@@ -128,14 +127,12 @@ describe('mdStore - Session 文件夹读写', () => {
     expect(fs.existsSync(fp)).toBe(true)
     const parsed = matter(fs.readFileSync(fp, 'utf-8'))
     expect(parsed.data.id).toBe('s1')
-    expect(parsed.data.title).toBe('会话1')
   })
 
   it('writeAgentSessions 写入 llmSummary 到 summary.md', () => {
     const sessions = [
       {
         id: 's2',
-        title: '会话2',
         scope: 'online',
         messages: [],
         llmSummary: '用户询问天气',
@@ -160,7 +157,6 @@ describe('mdStore - Session 文件夹读写', () => {
       matter.stringify('', {
         prizm_type: 'agent_session',
         id: 'dir-session',
-        title: '目录会话',
         scope: 'online',
         messages: [],
         createdAt: 3000,
@@ -174,7 +170,6 @@ describe('mdStore - Session 文件夹读写', () => {
       matter.stringify('', {
         prizm_type: 'agent_session',
         id: 'flat-session',
-        title: '平铺会话',
         scope: 'online',
         messages: [],
         createdAt: 1000,
@@ -252,8 +247,8 @@ describe('mdStore - Session 文件夹读写', () => {
 
   it('writeAgentSessions 删除列表中已移除的 session 目录', () => {
     const sessions1 = [
-      { id: 's1', title: 'A', scope: 'online', messages: [], createdAt: 1, updatedAt: 2 },
-      { id: 's2', title: 'B', scope: 'online', messages: [], createdAt: 1, updatedAt: 2 }
+      { id: 's1', scope: 'online', messages: [], createdAt: 1, updatedAt: 2 },
+      { id: 's2', scope: 'online', messages: [], createdAt: 1, updatedAt: 2 }
     ]
     writeAgentSessions(scopeRoot, sessions1, 'online')
     expect(fs.existsSync(getSessionDir(scopeRoot, 's1'))).toBe(true)
@@ -318,7 +313,6 @@ describe('ScopeStore - deleteSessionDir', () => {
     const data = store.getScopeData(scope)
     data.agentSessions.push({
       id: 's1',
-      title: 'T',
       scope,
       messages: [],
       createdAt: Date.now(),

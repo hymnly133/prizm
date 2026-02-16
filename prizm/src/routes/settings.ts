@@ -11,10 +11,23 @@ import {
   saveAgentTools,
   getTavilySettings,
   updateTavilySettings,
-  updateAgentLLMSettings
+  updateAgentLLMSettings,
+  updateCommandsSettings,
+  updateSkillsSettings,
+  updateRulesSettings,
+  updateTerminalSettings
 } from '../settings/agentToolsStore'
 import { getAvailableModels } from '../llm'
-import type { AgentToolsSettings, TavilySettings, AgentLLMSettings } from '../settings/types'
+import { getAvailableShells } from '../terminal/shellDetector'
+import type {
+  AgentToolsSettings,
+  TavilySettings,
+  AgentLLMSettings,
+  CommandsSettings,
+  SkillsSettings,
+  RulesSettings,
+  TerminalSettings
+} from '../settings/types'
 
 const log = createLogger('Settings')
 
@@ -40,6 +53,18 @@ export function createSettingsRoutes(router: Router): void {
       res.json({ provider, models })
     } catch (error) {
       log.error('get agent-models error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // GET /settings/available-shells - 获取当前系统可用的 Shell 列表
+  router.get('/settings/available-shells', (_req: Request, res: Response) => {
+    try {
+      const shells = getAvailableShells()
+      res.json({ shells })
+    } catch (error) {
+      log.error('get available-shells error:', error)
       const { status, body } = toErrorResponse(error)
       res.status(status).json(body)
     }
@@ -73,6 +98,18 @@ export function createSettingsRoutes(router: Router): void {
       }
       if (patch.mcpServers !== undefined) {
         saveAgentTools({ mcpServers: patch.mcpServers })
+      }
+      if (patch.commands !== undefined) {
+        updateCommandsSettings(patch.commands as Partial<CommandsSettings>)
+      }
+      if (patch.skills !== undefined) {
+        updateSkillsSettings(patch.skills as Partial<SkillsSettings>)
+      }
+      if (patch.rules !== undefined) {
+        updateRulesSettings(patch.rules as Partial<RulesSettings>)
+      }
+      if (patch.terminal !== undefined) {
+        updateTerminalSettings(patch.terminal as Partial<TerminalSettings>)
       }
 
       const settings = loadAgentTools()

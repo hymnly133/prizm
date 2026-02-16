@@ -13,7 +13,11 @@ import type {
   AgentLLMSettings,
   DocumentSummarySettings,
   ConversationSummarySettings,
-  ContextWindowSettings
+  ContextWindowSettings,
+  CommandsSettings,
+  SkillsSettings,
+  RulesSettings,
+  TerminalSettings
 } from './types'
 import type { McpServerConfig } from '../mcp-client/types'
 
@@ -196,4 +200,56 @@ export function updateAgentLLMSettings(update: Partial<AgentLLMSettings>): void 
   data.agent = { ...data.agent, ...update }
   saveRaw(data)
   log.info('Agent LLM settings updated')
+}
+
+// ============ Commands 设置 ============
+
+export function getCommandsSettings(): CommandsSettings {
+  return loadRaw().commands ?? { enabled: true }
+}
+
+export function updateCommandsSettings(update: Partial<CommandsSettings>): void {
+  const data = loadRaw()
+  data.commands = { ...data.commands, ...update }
+  saveRaw(data)
+  log.info('Commands settings updated')
+}
+
+// ============ Skills 设置 ============
+
+export function getSkillsSettings(): SkillsSettings {
+  return loadRaw().skills ?? { enabled: true, autoActivate: true, maxActiveSkills: 3 }
+}
+
+export function updateSkillsSettings(update: Partial<SkillsSettings>): void {
+  const data = loadRaw()
+  data.skills = { ...data.skills, ...update }
+  saveRaw(data)
+  log.info('Skills settings updated')
+}
+
+// ============ Rules 设置 ============
+
+export function getRulesSettings(): RulesSettings {
+  return loadRaw().rules ?? { enabled: true, maxTokens: 8000, autoDiscover: true }
+}
+
+export function updateRulesSettings(update: Partial<RulesSettings>): void {
+  const data = loadRaw()
+  data.rules = { ...data.rules, ...update }
+  saveRaw(data)
+  log.info('Rules settings updated')
+}
+
+// ============ Terminal 设置 ============
+
+export function getTerminalSettings(): TerminalSettings {
+  return loadRaw().terminal ?? {}
+}
+
+export function updateTerminalSettings(update: Partial<TerminalSettings>): void {
+  const data = loadRaw()
+  data.terminal = { ...data.terminal, ...update }
+  saveRaw(data)
+  log.info('Terminal settings updated')
 }

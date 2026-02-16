@@ -59,11 +59,69 @@ export interface BuiltinToolsSettings {
   tavily?: TavilySettings
 }
 
+/** 自定义命令全局设置 */
+export interface CommandsSettings {
+  /** 全局开关，默认 true */
+  enabled?: boolean
+  /** 自动导入配置 */
+  autoImport?: {
+    /** 自动导入 .cursor/commands/ */
+    cursor?: boolean
+    /** 自动导入 .claude/commands/ */
+    claudeCode?: boolean
+  }
+}
+
+/** Skills 全局设置 */
+export interface SkillsSettings {
+  /** 全局开关，默认 true */
+  enabled?: boolean
+  /** 自动激活，默认 true */
+  autoActivate?: boolean
+  /** 最大同时激活数，默认 3 */
+  maxActiveSkills?: number
+  /** per-skill 覆盖 */
+  skillOverrides?: SkillOverride[]
+}
+
+/** 单个 skill 的覆盖配置 */
+export interface SkillOverride {
+  name: string
+  enabled?: boolean
+  autoActivate?: boolean
+}
+
+/** 终端设置 */
+export interface TerminalSettings {
+  /** 用户选择的默认 shell（留空则自动检测） */
+  defaultShell?: string
+}
+
+/** Rules 全局设置 */
+export interface RulesSettings {
+  /** 全局开关，默认 true */
+  enabled?: boolean
+  /** token 预算，默认 8000 */
+  maxTokens?: number
+  /** 自动发现项目规则文件，默认 true */
+  autoDiscover?: boolean
+  /** 可选限制来源 */
+  enabledSources?: string[]
+}
+
 /** 统一 Agent 工具设置 */
 export interface AgentToolsSettings {
   builtin?: BuiltinToolsSettings
   /** Agent LLM 设置：摘要、默认模型、记忆 */
   agent?: AgentLLMSettings
   mcpServers?: McpServerConfig[]
+  /** 自定义命令设置 */
+  commands?: CommandsSettings
+  /** Skills 设置 */
+  skills?: SkillsSettings
+  /** Rules 设置 */
+  rules?: RulesSettings
+  /** 终端设置 */
+  terminal?: TerminalSettings
   updatedAt?: number
 }

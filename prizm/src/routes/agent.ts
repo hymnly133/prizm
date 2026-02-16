@@ -26,6 +26,9 @@ import { getSessionContext } from '../llm/contextTracker'
 import type { ScopeActivityRecord } from '../llm/scopeInteractionParser'
 import { deriveScopeActivities, collectToolCallsFromMessages } from '../llm/scopeInteractionParser'
 import { registerBuiltinSlashCommands, tryRunSlashCommand } from '../llm/slashCommands'
+import { autoActivateSkills, getActiveSkills, loadAllSkillMetadata } from '../llm/skillManager'
+import { loadRules, listDiscoveredRules } from '../llm/rulesLoader'
+import { loadAllCustomCommands } from '../llm/customCommandLoader'
 import { listSlashCommands } from '../llm/slashCommandRegistry'
 import { getAllToolMetadata } from '../llm/toolMetadata'
 import {
@@ -37,6 +40,7 @@ import {
   addSessionMemoryFromRounds
 } from '../llm/EverMemService'
 import { recordTokenUsage } from '../llm/tokenUsage'
+import { getTerminalManager } from '../terminal/TerminalSessionManager'
 import {
   appendSessionTokenUsage,
   appendSessionActivities,
@@ -172,11 +176,54 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
       const commands = listSlashCommands().map((c) => ({
         name: c.name,
         aliases: c.aliases ?? [],
-        description: c.description
+        description: c.description,
+        builtin: c.builtin,
+        mode: c.mode ?? 'action'
       }))
       res.json({ commands })
     } catch (error) {
       log.error('get slash-commands error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // GET /agent/capabilities - 聚合所有可用能力（工具 + 命令 + skills + rules）
+  router.get('/agent/capabilities', async (_req: Request, res: Response) => {
+    try {
+      registerBuiltinSlashCommands()
+      const slashCommands = listSlashCommands().map((c) => ({
+        name: c.name,
+        aliases: c.aliases ?? [],
+        description: c.description,
+        builtin: c.builtin,
+        mode: c.mode ?? 'action'
+      }))
+      const customCommands = loadAllCustomCommands().map((c) => ({
+        id: c.id,
+        name: c.name,
+        description: c.description,
+        mode: c.mode,
+        source: c.source,
+        enabled: c.enabled
+      }))
+      const skills = loadAllSkillMetadata().map((s) => ({
+        name: s.name,
+        description: s.description,
+        enabled: s.enabled,
+        source: s.source
+      }))
+      const rules = listDiscoveredRules()
+      const metadata = getAllToolMetadata()
+      res.json({
+        builtinTools: metadata,
+        slashCommands,
+        customCommands,
+        skills,
+        rules
+      })
+    } catch (error) {
+      log.error('get capabilities error:', error)
       const { status, body } = toErrorResponse(error)
       res.status(status).json(body)
     }
@@ -430,6 +477,17 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         return res.status(403).json({ error: 'scope access denied' })
       }
 
+      // 先 abort 正在进行的 chat stream
+      const key = chatKey(scope, id)
+      activeChats.get(key)?.abort()
+      activeChats.delete(key)
+
+      // 清理关联终端
+      try {
+        getTerminalManager().cleanupSession(id)
+      } catch (termErr) {
+        log.warn('terminal cleanup on session delete failed:', termErr)
+      }
       await adapter.deleteSession(scope, id)
       res.status(204).send()
     } catch (error) {
@@ -485,24 +543,35 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
       })
       scheduleTurnSummary(scope, id, content.trim(), memoryUserId)
 
-      // Slash 命令：若为首位 / 且命中注册命令，执行后直接返回结果，不调用 LLM
+      // Slash 命令：若为首位 / 且命中注册命令，根据 mode 决定行为
+      // - action 模式：直接返回结果，不调用 LLM
+      // - prompt 模式：将命令内容注入为 system message，继续 LLM 对话
+      let promptInjection: string | null = null
       if (content.trim().startsWith('/')) {
         const cmdResult = await tryRunSlashCommand(scope, id, content.trim())
         if (cmdResult != null) {
-          await adapter.appendMessage(scope, id, {
-            role: 'system',
-            content: cmdResult
-          })
-          res.setHeader('Content-Type', 'text/event-stream')
-          res.setHeader('Cache-Control', 'no-cache')
-          res.setHeader('Connection', 'keep-alive')
-          res.setHeader('X-Accel-Buffering', 'no')
-          res.flushHeaders?.()
-          res.write(`data: ${JSON.stringify({ type: 'command_result', value: cmdResult })}\n\n`)
-          res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`)
-          res.flush?.()
-          res.end()
-          return
+          if (cmdResult.mode === 'prompt') {
+            // prompt 模式：保存注入内容，后续作为 system message 发送给 LLM
+            promptInjection = cmdResult.text
+          } else {
+            // action 模式：直接返回结果
+            await adapter.appendMessage(scope, id, {
+              role: 'system',
+              content: cmdResult.text
+            })
+            res.setHeader('Content-Type', 'text/event-stream')
+            res.setHeader('Cache-Control', 'no-cache')
+            res.setHeader('Connection', 'keep-alive')
+            res.setHeader('X-Accel-Buffering', 'no')
+            res.flushHeaders?.()
+            res.write(
+              `data: ${JSON.stringify({ type: 'command_result', value: cmdResult.text })}\n\n`
+            )
+            res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`)
+            res.flush?.()
+            res.end()
+            return
+          }
         }
       }
 
@@ -558,6 +627,12 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
           .slice(2 * compressedThrough)
           .map((m) => ({ role: m.role, content: m.content }))
         history = [...systemPrefix, ...cacheRaw, currentUserMsg]
+      }
+
+      // ---- prompt 模式命令注入 ----
+      // 若当前消息是 prompt 模式的 slash 命令，将命令模板注入为 system message
+      if (promptInjection) {
+        history.push({ role: 'system', content: `[命令指令]\n${promptInjection}` })
       }
 
       // ---- 记忆注入策略 ----
@@ -660,6 +735,21 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         }
       }
 
+      // ---- Skill 自动激活 + Rules 加载 ----
+      autoActivateSkills(scope, id, trimmedContent)
+      const activeSkills = getActiveSkills(scope, id)
+      const activeSkillInstructions =
+        activeSkills.length > 0
+          ? activeSkills.map((a) => ({ name: a.skillName, instructions: a.instructions }))
+          : undefined
+
+      let rulesContent: string | undefined
+      try {
+        rulesContent = loadRules() || undefined
+      } catch (rulesErr) {
+        log.warn('Rules loading failed:', rulesErr)
+      }
+
       // 创建 AbortController，注册到 activeChats
       const key = chatKey(scope, id)
       // 若已有进行中的生成，先 abort 旧的
@@ -734,7 +824,9 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
           model,
           signal: ac.signal,
           mcpEnabled: mcpEnabled !== false,
-          includeScopeContext: includeScopeContext !== false
+          includeScopeContext: includeScopeContext !== false,
+          activeSkillInstructions,
+          rulesContent
         })) {
           if (ac.signal.aborted) break
           if (chunk.usage) lastUsage = chunk.usage

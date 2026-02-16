@@ -214,6 +214,10 @@ export interface IAgentAdapter {
       mcpEnabled?: boolean
       /** 是否注入 scope 上下文（便签、待办、文档等），默认 true */
       includeScopeContext?: boolean
+      /** 已激活的 skill 指令（注入系统提示） */
+      activeSkillInstructions?: Array<{ name: string; instructions: string }>
+      /** 外部项目规则内容 */
+      rulesContent?: string
     }
   ): AsyncIterable<LLMStreamChunk>
 }

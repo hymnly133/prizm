@@ -39,7 +39,9 @@ import type {
   FileReadResult
 } from '../types'
 import { scanUserFiles } from './MetadataCache'
+import { createLogger } from '../logger'
 
+const log = createLogger('mdStore')
 const EXT = '.md'
 
 // ============ 工具函数 ============
@@ -71,12 +73,48 @@ function resolveConflict(dir: string, baseName: string, ext: string, excludePath
   }
 }
 
+/**
+ * 递归移除对象中的 undefined 值，防止 js-yaml dump 报错。
+ * 作为序列化边界的防御层，上游应尽量避免传入 undefined。
+ * 返回清洗后的对象和检测到的 undefined 字段路径列表。
+ */
+function stripUndefined(obj: unknown, keyPath = '', undefinedPaths?: string[]): unknown {
+  if (obj === undefined) {
+    undefinedPaths?.push(keyPath || '(root)')
+    return null
+  }
+  if (obj === null || typeof obj !== 'object' || obj instanceof Date) return obj
+  if (Array.isArray(obj)) {
+    return obj.map((v, i) =>
+      stripUndefined(v, keyPath ? `${keyPath}[${i}]` : `[${i}]`, undefinedPaths)
+    )
+  }
+  const result: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+    const childPath = keyPath ? `${keyPath}.${key}` : key
+    if (value === undefined) {
+      undefinedPaths?.push(childPath)
+      continue
+    }
+    result[key] = stripUndefined(value, childPath, undefinedPaths)
+  }
+  return result
+}
+
 function writeMd(filePath: string, frontmatter: Record<string, unknown>, body = ''): void {
   const dir = path.dirname(filePath)
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true })
   }
-  const content = matter.stringify(body, frontmatter, { lineWidth: -1 } as any)
+  const undefinedPaths: string[] = []
+  const safeFrontmatter = stripUndefined(frontmatter, '', undefinedPaths) as Record<string, unknown>
+  if (undefinedPaths.length > 0) {
+    log.warn(`Frontmatter contains undefined values (stripped before write)`, {
+      file: path.basename(filePath),
+      paths: undefinedPaths
+    })
+  }
+  const content = matter.stringify(body, safeFrontmatter, { lineWidth: -1 } as any)
   fs.writeFileSync(filePath, content, 'utf-8')
 }
 
@@ -418,7 +456,8 @@ export function writeDocuments(scopeRoot: string, docs: Document[]): void {
     } else {
       // New file: place in specified directory or scopeRoot
       const dir = d.relativePath ? path.dirname(path.join(scopeRoot, d.relativePath)) : scopeRoot
-      fp = resolveConflict(fs.existsSync(dir) ? dir : scopeRoot, sanitizeFileName(d.title), EXT)
+      ensureDir(dir)
+      fp = resolveConflict(dir, sanitizeFileName(d.title), EXT)
     }
     writeMd(fp, frontmatter, d.content ?? '')
   }
@@ -471,7 +510,8 @@ export function writeSingleDocument(scopeRoot: string, doc: Document): string {
     }
   } else {
     const dir = doc.relativePath ? path.dirname(path.join(scopeRoot, doc.relativePath)) : scopeRoot
-    fp = resolveConflict(fs.existsSync(dir) ? dir : scopeRoot, sanitizeFileName(doc.title), EXT)
+    ensureDir(dir)
+    fp = resolveConflict(dir, sanitizeFileName(doc.title), EXT)
   }
 
   writeMd(fp, frontmatter, doc.content ?? '')
@@ -493,6 +533,18 @@ export function deleteSingleDocument(scopeRoot: string, docId: string): boolean 
     }
   }
   return false
+}
+
+/** Read a single document by ID from the given root directory */
+export function readSingleDocumentById(root: string, docId: string): Document | null {
+  const excludes = getScopeExcludePatterns(root)
+  for (const fp of scanUserFiles(root, excludes)) {
+    const p = readMd(fp)
+    if (p && readPrizmType(p.data) === 'document' && p.data.id === docId) {
+      return parseDocument(fp, p.data, p.content, root)
+    }
+  }
+  return null
 }
 
 // ============ Layer 1: TodoList (prizm_type: todo_list) ============
@@ -594,7 +646,8 @@ export function writeTodoLists(scopeRoot: string, lists: TodoList[]): void {
       const dir = list.relativePath
         ? path.dirname(path.join(scopeRoot, list.relativePath))
         : scopeRoot
-      fp = resolveConflict(fs.existsSync(dir) ? dir : scopeRoot, sanitizeFileName(list.title), EXT)
+      ensureDir(dir)
+      fp = resolveConflict(dir, sanitizeFileName(list.title), EXT)
     }
     writeMd(fp, frontmatter, '')
   }
@@ -605,6 +658,88 @@ export function writeTodoLists(scopeRoot: string, lists: TodoList[]): void {
       } catch {}
     }
   }
+}
+
+/** Read a single todo list by ID from the given root directory */
+export function readSingleTodoListById(root: string, listId: string): TodoList | null {
+  const excludes = getScopeExcludePatterns(root)
+  for (const fp of scanUserFiles(root, excludes)) {
+    const p = readMd(fp)
+    if (p && readPrizmType(p.data) === 'todo_list' && p.data.id === listId) {
+      return parseTodoList(fp, p.data, p.content, root)
+    }
+  }
+  return null
+}
+
+/** Write a single todo list (for create/update operations) */
+export function writeSingleTodoList(root: string, list: TodoList): string {
+  const frontmatter: Record<string, unknown> = {
+    prizm_type: 'todo_list',
+    id: list.id,
+    title: list.title,
+    createdAt: list.createdAt,
+    updatedAt: list.updatedAt,
+    items: list.items.map((it) => ({
+      id: it.id,
+      title: it.title,
+      status: it.status,
+      ...(it.description && { description: it.description }),
+      createdAt: it.createdAt ?? 0,
+      updatedAt: it.updatedAt ?? 0
+    }))
+  }
+
+  const excludes = getScopeExcludePatterns(root)
+  let existingPath: string | undefined
+  for (const fp of scanUserFiles(root, excludes)) {
+    const p = readMd(fp)
+    if (p && readPrizmType(p.data) === 'todo_list' && p.data.id === list.id) {
+      existingPath = fp
+      break
+    }
+  }
+
+  let fp: string
+  if (existingPath) {
+    const oldBaseName = path.basename(existingPath, EXT)
+    const expectedBaseName = sanitizeFileName(list.title)
+    if (oldBaseName !== expectedBaseName) {
+      const dir = path.dirname(existingPath)
+      fp = resolveConflict(dir, expectedBaseName, EXT, existingPath)
+      if (existingPath !== fp) {
+        try {
+          fs.unlinkSync(existingPath)
+        } catch {}
+      }
+    } else {
+      fp = existingPath
+    }
+  } else {
+    const dir = list.relativePath ? path.dirname(path.join(root, list.relativePath)) : root
+    ensureDir(dir)
+    fp = resolveConflict(dir, sanitizeFileName(list.title), EXT)
+  }
+
+  writeMd(fp, frontmatter, '')
+  return path.relative(root, fp).replace(/\\/g, '/')
+}
+
+/** Delete a single todo list by ID */
+export function deleteSingleTodoList(root: string, listId: string): boolean {
+  const excludes = getScopeExcludePatterns(root)
+  for (const fp of scanUserFiles(root, excludes)) {
+    const p = readMd(fp)
+    if (p && readPrizmType(p.data) === 'todo_list' && p.data.id === listId) {
+      try {
+        fs.unlinkSync(fp)
+        return true
+      } catch {
+        return false
+      }
+    }
+  }
+  return false
 }
 
 // ============ Clipboard (.prizm/clipboard/) ============
