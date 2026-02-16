@@ -68,6 +68,12 @@ electron_1.contextBridge.exposeInMainWorld('prizm', {
         return () => {
             electron_1.ipcRenderer.removeListener('execute-quick-action', handler);
         };
+    },
+    getPlatform() {
+        return electron_1.ipcRenderer.invoke('get_platform');
+    },
+    setTitleBarOverlay(options) {
+        return electron_1.ipcRenderer.invoke('set_titlebar_overlay', options);
     }
 });
 //# sourceMappingURL=preload.js.map

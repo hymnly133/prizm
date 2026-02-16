@@ -1,0 +1,49 @@
+---
+description: TypeScript 和 Node.js 编码规范
+alwaysApply: true
+---
+
+# TypeScript / Node.js 编码规范
+
+## 通用规范
+
+- 使用 TypeScript strict 模式，不允许 `any`（必要时使用 `unknown` 或泛型）
+- 优先使用 `interface` 定义对象结构，`type` 用于联合类型、交叉类型或工具类型
+- 适配器接口以 `I` 开头（如 `IStickyNotesAdapter`、`INotificationAdapter`）
+- 类型文件与模块同目录或统一放在 `types.ts`
+
+## 命名约定
+
+- 文件名：`camelCase.ts`（模块）或 `PascalCase.ts`（类/组件）
+- 变量/函数：`camelCase`
+- 类/接口/类型/枚举：`PascalCase`
+- 常量：`UPPER_SNAKE_CASE`
+- 私有属性：不加下划线前缀，使用 TypeScript `private` 修饰符
+
+## 错误处理
+
+- 异步函数使用 `try/catch`，不吞掉异常——至少 log 出来
+- 为可预见的业务错误创建自定义错误类（继承 `Error`）
+- Express 路由中捕获异步错误并传递给 `next(err)` 或返回标准错误响应
+- 错误响应统一格式：`{ error: string, details?: any }`
+
+## 导入规范
+
+- 导入顺序：Node.js 内置 → 第三方 → workspace 包（`@prizm/*`）→ 相对路径
+- 优先使用命名导入，避免 `import *`
+- 使用 workspace 包名引用而非相对路径跨包：`import { X } from '@prizm/shared'`
+
+## 适配器模式（项目核心架构）
+
+新增功能应遵循现有适配器模式：
+
+1. 在 `adapters/interfaces.ts` 定义接口
+2. 在 `adapters/default.ts` 提供默认实现
+3. 路由/服务通过构造注入使用适配器
+4. 所有适配器方法标记为 `optional`（用 `?`），调用前检查是否存在
+
+## 异步模式
+
+- 所有 I/O 操作使用 `async/await`，不使用回调
+- 并发操作使用 `Promise.all()` 或 `Promise.allSettled()`
+- 长时间运行的任务考虑使用流式处理（如 SSE）

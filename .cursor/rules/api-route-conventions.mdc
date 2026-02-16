@@ -1,0 +1,63 @@
+---
+description: Express API 路由开发规范
+globs: prizm/src/routes/**
+---
+
+# Express API 路由规范
+
+## 路由工厂模式
+
+所有路由文件导出工厂函数，签名遵循以下模式：
+
+```typescript
+export function createXxxRoutes(router: Router, adapter?: IXxxAdapter): void {
+  // 路由定义
+}
+```
+
+- 函数名以 `create` 开头 + 功能名 + `Routes`
+- `router` 参数由 `server.ts` 传入
+- `adapter` 参数可选，允许外部注入实现
+
+## Scope 中间件
+
+- 需要数据隔离的路由必须使用 Scope 中间件
+- Scope 从 `X-Prizm-Scope` header 或 `?scope=` query 参数获取
+- 默认 scope 为 `default`
+
+## 错误响应格式
+
+统一使用以下 JSON 格式：
+
+```typescript
+// 成功
+res.json({ data: result })
+
+// 错误
+res.status(4xx).json({ error: '描述信息' })
+
+// 带详情的错误
+res.status(4xx).json({ error: '描述信息', details: { ... } })
+```
+
+## 认证要求
+
+- 除 `/health` 和 `/auth/register` 外，所有端点需要认证
+- 使用 `authMiddleware` 中间件
+- Dashboard 请求通过 `X-Prizm-Panel: true` header 绕过认证
+
+## SSE 流式响应（Agent 路由模式）
+
+Agent 聊天使用 Server-Sent Events 流式返回：
+
+```typescript
+res.setHeader('Content-Type', 'text/event-stream')
+res.setHeader('Cache-Control', 'no-cache')
+res.setHeader('Connection', 'keep-alive')
+```
+
+## 数据持久化
+
+- 使用 `mdStore` 进行 Markdown 文件的读写（frontmatter 存元数据）
+- 使用 `ScopeStore` 进行 scope 级别的数据管理
+- 所有写操作后立即持久化，不做延迟批量写入

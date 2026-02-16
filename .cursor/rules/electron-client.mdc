@@ -1,0 +1,41 @@
+---
+description: Electron 客户端开发规范
+globs: prizm-electron-client/**
+---
+
+# Electron 客户端开发规范
+
+## 技术栈
+
+- **框架**: Electron 40 + Vite
+- **UI**: React 19 + Ant Design
+- **状态管理**: Zustand（优先 hooks 模式）
+- **服务端通信**: `@prizm/client-core` 提供的 HTTP/WebSocket 客户端
+
+## 组件规范
+
+- 使用函数组件 + hooks，不使用 class 组件
+- 组件文件名：`PascalCase.tsx`
+- 大型组件拆分到 `components/` 子目录（如 `components/agent/`）
+- 自定义 hooks 放在 `hooks/` 目录，命名 `useXxx.ts`
+
+## 主进程/渲染进程分离
+
+- 主进程代码在 `electron/` 目录
+- 渲染进程代码在 `src/` 目录
+- 通过 `preload` 脚本暴露 IPC API
+- 渲染进程通过 `window.electronAPI` 或 `global.d.ts` 中声明的接口调用主进程
+- 禁止在渲染进程直接使用 Node.js API
+
+## 状态管理
+
+- 全局状态使用 Zustand store
+- 组件内局部状态使用 `useState` / `useReducer`
+- 服务端数据使用自定义 hooks 封装（如 `useAgentOverviewData`、`useFileList`）
+- 避免 prop drilling，复杂数据流用 Zustand 或 Context
+
+## 样式
+
+- 优先使用 Ant Design 组件和其内置样式
+- 自定义样式使用 CSS Modules 或内联样式对象
+- 响应式布局使用 Ant Design Grid 系统

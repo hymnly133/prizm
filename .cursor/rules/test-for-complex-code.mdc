@@ -1,0 +1,56 @@
+---
+description: 
+alwaysApply: true
+---
+
+# 复杂功能必须编写并进行测试
+
+## 何时需要编写测试
+
+当编写以下类型的代码时，**必须**创建对应的 `.test.ts` 测试文件并执行测试：
+
+- **服务型模块**：Service 类、Adapter、Store、Manager 等对外提供接口的模块
+- **核心/底层逻辑**：数据持久化、状态管理、协议解析、迁移脚本等
+- **复杂业务逻辑**：包含多分支、异步流程、错误处理等非平凡逻辑的函数
+- **工具/纯函数**：解析器、格式化器、验证器等可独立测试的工具函数
+
+## 不需要测试的情况
+
+- 简单的类型定义、常量导出、配置文件
+- UI 组件的纯展示层（无复杂交互逻辑）
+- 一次性脚本或仅做简单转发的胶水代码
+
+## 测试文件约定
+
+- 测试文件与源文件同目录，命名为 `<源文件名>.test.ts`
+- 例：`ScopeStore.ts` -> `ScopeStore.test.ts`
+
+## 工作流程
+
+1. 编写或修改功能代码
+2. 在同目录创建/更新对应的 `.test.ts` 文件
+3. 使用项目的测试运行器执行测试（如 `vitest`、`jest`）
+4. 确保所有测试通过后再视为完成
+
+## 测试要求
+
+- 覆盖主要的正常路径和关键的边界/错误情况
+- 对外部依赖使用 mock/stub，保持测试独立性
+- 测试用例命名清晰，描述预期行为
+
+```typescript
+// 示例：为 CompositeStorageAdapter 编写测试
+describe('CompositeStorageAdapter', () => {
+  it('should read from primary adapter first', async () => {
+    // ...
+  });
+
+  it('should fallback to secondary when primary fails', async () => {
+    // ...
+  });
+
+  it('should write to all adapters', async () => {
+    // ...
+  });
+});
+```
