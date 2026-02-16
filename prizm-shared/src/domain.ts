@@ -384,6 +384,67 @@ export interface TokenUsageRecord {
   totalTokens: number
 }
 
+// ============ 终端 ============
+
+/** 终端会话类型：exec=一次性命令执行 interactive=持久交互终端 */
+export type TerminalSessionType = 'exec' | 'interactive'
+
+/** 终端会话状态 */
+export type TerminalSessionStatus = 'running' | 'exited'
+
+/** 终端会话（作为 Agent Session 的子资源） */
+export interface TerminalSession {
+  id: string
+  /** 所属 Agent Session ID */
+  agentSessionId: string
+  /** 所属 scope */
+  scope: string
+  /** 终端类型 */
+  sessionType: TerminalSessionType
+  /** Shell 程序路径或名称 */
+  shell: string
+  /** 当前工作目录 */
+  cwd: string
+  /** 列数 */
+  cols: number
+  /** 行数 */
+  rows: number
+  /** 进程 PID */
+  pid: number
+  /** 终端标题（用户设置或从进程名获取） */
+  title?: string
+  /** 终端状态 */
+  status: TerminalSessionStatus
+  /** 退出码（仅 exited 状态） */
+  exitCode?: number
+  /** 退出信号（仅 exited 状态） */
+  signal?: number
+  /** 创建时间戳 (ms) */
+  createdAt: number
+  /** 最后活动时间戳 (ms) */
+  lastActivityAt: number
+}
+
+/** 创建终端的请求参数 */
+export interface CreateTerminalOptions {
+  /** 所属 Agent Session ID */
+  agentSessionId: string
+  /** 所属 scope */
+  scope: string
+  /** 终端类型，默认 interactive */
+  sessionType?: TerminalSessionType
+  /** Shell 程序（默认系统默认 shell） */
+  shell?: string
+  /** 初始工作目录（相对 scope root 或绝对路径） */
+  cwd?: string
+  /** 列数，默认 80 */
+  cols?: number
+  /** 行数，默认 24 */
+  rows?: number
+  /** 终端标题 */
+  title?: string
+}
+
 // ============ 通知 ============
 
 export interface NotificationPayload {

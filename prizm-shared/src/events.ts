@@ -3,7 +3,13 @@
  * 单一数据源：数组为权威定义，对象形式供 server 键式访问
  */
 
-import type { NotificationPayload, ClipboardItem, Document, TodoItem } from './domain'
+import type {
+  NotificationPayload,
+  ClipboardItem,
+  Document,
+  TodoItem,
+  TerminalSession
+} from './domain'
 
 export const EVENT_TYPES = [
   'notification',
@@ -22,7 +28,10 @@ export const EVENT_TYPES = [
   'file:created',
   'file:updated',
   'file:deleted',
-  'file:moved'
+  'file:moved',
+  'terminal:created',
+  'terminal:exited',
+  'terminal:killed'
 ] as const
 
 export type EventType = (typeof EVENT_TYPES)[number]
@@ -45,7 +54,10 @@ export const EVENT_TYPES_OBJ = {
   FILE_CREATED: 'file:created',
   FILE_UPDATED: 'file:updated',
   FILE_DELETED: 'file:deleted',
-  FILE_MOVED: 'file:moved'
+  FILE_MOVED: 'file:moved',
+  TERMINAL_CREATED: 'terminal:created',
+  TERMINAL_EXITED: 'terminal:exited',
+  TERMINAL_KILLED: 'terminal:killed'
 } as const satisfies Record<string, EventType>
 
 /** 服务端全部事件类型（用于 subscribeEvents: "all"） */
@@ -145,6 +157,9 @@ export interface EventPayloadMap {
   'file:updated': FileEventPayload
   'file:deleted': FileEventPayload
   'file:moved': FileEventPayload
+  'terminal:created': TerminalSession & EventPayloadBase
+  'terminal:exited': { id: string; exitCode: number; signal?: number } & EventPayloadBase
+  'terminal:killed': { id: string } & EventPayloadBase
 }
 
 /** 类型安全的 EventPushMessage，payload 与 eventType 对应 */

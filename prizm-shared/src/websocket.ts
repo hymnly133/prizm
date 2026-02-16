@@ -80,6 +80,100 @@ export type ServerToClientMessage =
   | ErrorMessage
   | { type: 'pong' }
 
+// ============ 终端 WebSocket 消息（专用 /ws/terminal 通道） ============
+
+/** 终端附着消息 */
+export interface TerminalAttachMessage {
+  type: 'terminal:attach'
+  terminalId: string
+}
+
+/** 终端输入消息 */
+export interface TerminalInputMessage {
+  type: 'terminal:input'
+  terminalId: string
+  data: string
+}
+
+/** 终端尺寸调整消息 */
+export interface TerminalResizeMessage {
+  type: 'terminal:resize'
+  terminalId: string
+  cols: number
+  rows: number
+}
+
+/** 终端分离消息 */
+export interface TerminalDetachMessage {
+  type: 'terminal:detach'
+  terminalId: string
+}
+
+/** 终端 Ping 消息 */
+export interface TerminalPingMessage {
+  type: 'terminal:ping'
+}
+
+/** 客户端 -> 服务端的终端消息 */
+export type TerminalClientMessage =
+  | TerminalAttachMessage
+  | TerminalInputMessage
+  | TerminalResizeMessage
+  | TerminalDetachMessage
+  | TerminalPingMessage
+
+/** 终端输出消息 */
+export interface TerminalOutputMessage {
+  type: 'terminal:output'
+  terminalId: string
+  data: string
+}
+
+/** 终端退出消息 */
+export interface TerminalExitMessage {
+  type: 'terminal:exit'
+  terminalId: string
+  exitCode: number
+  signal?: number
+}
+
+/** 终端附着确认消息 */
+export interface TerminalAttachedMessage {
+  type: 'terminal:attached'
+  terminalId: string
+}
+
+/** 终端标题变更消息 */
+export interface TerminalTitleMessage {
+  type: 'terminal:title'
+  terminalId: string
+  title: string
+}
+
+/** 终端错误消息 */
+export interface TerminalErrorMessage {
+  type: 'terminal:error'
+  terminalId: string
+  message: string
+}
+
+/** 终端 Pong 消息 */
+export interface TerminalPongMessage {
+  type: 'terminal:pong'
+}
+
+/** 服务端 -> 客户端的终端消息 */
+export type TerminalServerMessage =
+  | TerminalOutputMessage
+  | TerminalExitMessage
+  | TerminalAttachedMessage
+  | TerminalTitleMessage
+  | TerminalErrorMessage
+  | TerminalPongMessage
+
+/** 所有终端 WebSocket 消息 */
+export type TerminalWebSocketMessage = TerminalClientMessage | TerminalServerMessage
+
 // ============ 通用 ============
 
 export type WebSocketMessage = ClientToServerMessage | ServerToClientMessage
