@@ -1,0 +1,19 @@
+diff --git a/node_modules/node-pty/lib/conpty_console_list_agent.js b/node_modules/node-pty/lib/conpty_console_list_agent.js
+index 8c4fca9..ee28620 100644
+--- a/node_modules/node-pty/lib/conpty_console_list_agent.js
++++ b/node_modules/node-pty/lib/conpty_console_list_agent.js
+@@ -10,7 +10,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
+ var utils_1 = require("./utils");
+ var getConsoleProcessList = utils_1.loadNativeModule('conpty_console_list').module.getConsoleProcessList;
+ var shellPid = parseInt(process.argv[2], 10);
+-var consoleProcessList = getConsoleProcessList(shellPid);
+-process.send({ consoleProcessList: consoleProcessList });
++try {
++    var consoleProcessList = getConsoleProcessList(shellPid);
++    process.send({ consoleProcessList: consoleProcessList });
++} catch (_e) {
++    process.send({ consoleProcessList: [shellPid] });
++}
+ process.exit(0);
+ //# sourceMappingURL=conpty_console_list_agent.js.map
+\ No newline at end of file

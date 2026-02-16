@@ -3,7 +3,6 @@
  * 工具定义与执行统一在此模块，供 DefaultAgentAdapter.chat 使用
  */
 
-import path from 'path'
 import type { LLMTool } from '../adapters/interfaces'
 import { scopeStore } from '../core/ScopeStore'
 import * as mdStore from '../core/mdStore'
@@ -15,7 +14,16 @@ import { recordActivity } from './contextTracker'
 import type { ScopeActivityItemKind, ScopeActivityAction } from '@prizm/shared'
 import { MEMORY_USER_ID } from '@prizm/shared'
 import { isMemoryEnabled, getAllMemories, searchMemoriesWithOptions } from './EverMemService'
-import { getSessionWorkspaceDir } from '../core/PathProviderCore'
+import {
+  createWorkspaceContext,
+  resolvePath,
+  resolveFolder,
+  resolveWorkspaceType,
+  wsTypeLabel,
+  OUT_OF_BOUNDS_MSG
+} from './workspaceResolver'
+import { getTerminalManager, stripAnsi } from '../terminal/TerminalSessionManager'
+import { builtinToolEvents } from './builtinToolEvents'
 
 /** 工具参数属性定义（支持 array 类型的 items） */
 interface ToolPropertyDef {
@@ -126,24 +134,24 @@ export function getBuiltinTools(): LLMTool[] {
     ),
     tool(
       'prizm_list_todos',
-      '列出当前工作区的所有待办项，含状态与标题，按列表分组。' +
-        '当需要查看待办全貌时使用。查找特定内容优先用 prizm_search。',
-      { properties: {}, required: [] }
+      '列出待办项，含状态与标题，按列表分组。workspace="session" 列出临时工作区的待办。',
+      { properties: { workspace: WORKSPACE_PARAM }, required: [] }
     ),
     tool(
       'prizm_list_todo_lists',
-      '列出所有待办列表的 id 与标题。' +
-        '在创建待办项前调用，以决定用已有 listId 还是用 listTitle 新建列表。',
-      { properties: {}, required: [] }
+      '列出所有待办列表的 id 与标题。在创建待办项前调用。workspace="session" 列出临时工作区。',
+      { properties: { workspace: WORKSPACE_PARAM }, required: [] }
     ),
-    tool('prizm_read_todo', '根据待办项 ID 读取详情（标题、描述、状态等）。', {
-      properties: { todoId: { type: 'string', description: '待办项 ID' } },
+    tool('prizm_read_todo', '根据待办项 ID 读取详情。workspace="session" 读取临时工作区。', {
+      properties: {
+        todoId: { type: 'string', description: '待办项 ID' },
+        workspace: WORKSPACE_PARAM
+      },
       required: ['todoId']
     }),
     tool(
       'prizm_create_todo',
-      '创建一条待办项。必须指定 listId（追加到已有列表）或 listTitle（新建列表并添加），二者必填其一。' +
-        '不确定有哪些列表时，先调用 prizm_list_todo_lists 查看。',
+      '创建一条待办项。必须指定 listId 或 listTitle。workspace="session" 创建到临时工作区（不入全局列表）。',
       {
         properties: {
           title: { type: 'string', description: '标题' },
@@ -156,63 +164,88 @@ export function getBuiltinTools(): LLMTool[] {
             type: 'string',
             description: '新建列表并添加，listTitle 作为新列表标题（与 listId 二选一）'
           },
+          folder: {
+            type: 'string',
+            description: '新建列表的存放目录，如 "projects"。不指定则放在工作区根目录。'
+          },
           status: {
             type: 'string',
             description: 'todo | doing | done',
             enum: ['todo', 'doing', 'done']
-          }
+          },
+          workspace: WORKSPACE_PARAM
         },
         required: ['title']
       }
     ),
-    tool('prizm_update_todo', '更新待办项状态、标题或描述。仅传入需要修改的字段。', {
+    tool('prizm_update_todo', '更新待办项状态、标题或描述。workspace="session" 更新临时工作区。', {
       properties: {
         todoId: { type: 'string', description: '待办项 ID' },
         status: { type: 'string', enum: ['todo', 'doing', 'done'] },
         title: { type: 'string' },
-        description: { type: 'string' }
+        description: { type: 'string' },
+        workspace: WORKSPACE_PARAM
       },
       required: ['todoId']
     }),
-    tool('prizm_delete_todo', '删除指定待办项。删除前需二次确认用户意图。', {
-      properties: { todoId: { type: 'string', description: '待办项 ID' } },
+    tool('prizm_delete_todo', '删除指定待办项。workspace="session" 删除临时工作区。', {
+      properties: {
+        todoId: { type: 'string', description: '待办项 ID' },
+        workspace: WORKSPACE_PARAM
+      },
       required: ['todoId']
     }),
     tool(
       'prizm_list_documents',
-      '列出当前工作区的所有文档（ID、标题、字数）。' +
-        '当需要浏览文档全貌或查找文档 ID 时使用。查找特定内容优先用 prizm_search。',
-      { properties: {}, required: [] }
+      '列出文档（ID、标题、字数）。workspace="session" 列出临时工作区的文档。',
+      { properties: { workspace: WORKSPACE_PARAM }, required: [] }
     ),
-    tool('prizm_get_document_content', '根据文档 ID 获取完整正文。当需要查看文档详细内容时调用。', {
-      properties: { documentId: { type: 'string', description: '文档 ID' } },
-      required: ['documentId']
-    }),
     tool(
-      'prizm_create_document',
-      '创建一篇文档。创建前应检查是否已有相关文档可更新。同一话题只建一篇，不要拆分。内容应精炼有价值，避免冗余重复。返回新建文档的 ID。',
+      'prizm_get_document_content',
+      '根据文档 ID 获取完整正文。workspace="session" 读取临时工作区。',
       {
         properties: {
-          title: { type: 'string', description: '标题' },
-          content: { type: 'string', description: '正文' }
+          documentId: { type: 'string', description: '文档 ID' },
+          workspace: WORKSPACE_PARAM
+        },
+        required: ['documentId']
+      }
+    ),
+    tool(
+      'prizm_create_document',
+      '创建文档。workspace="session" 创建到临时工作区（不入全局列表，session 删除时清除）。' +
+        '可通过 folder 指定嵌套目录。',
+      {
+        properties: {
+          title: { type: 'string', description: '标题（同时作为文件名）' },
+          content: { type: 'string', description: '正文' },
+          folder: {
+            type: 'string',
+            description: '存放目录，如 "research"。不指定则放在工作区根目录。'
+          },
+          workspace: WORKSPACE_PARAM
         },
         required: ['title']
       }
     ),
     tool(
       'prizm_update_document',
-      '更新文档标题或正文。修改前建议先 prizm_get_document_content 确认当前内容。仅传入需要修改的字段。',
+      '更新文档标题或正文。workspace="session" 更新临时工作区。仅传入需要修改的字段。',
       {
         properties: {
           documentId: { type: 'string', description: '文档 ID' },
           title: { type: 'string' },
-          content: { type: 'string' }
+          content: { type: 'string' },
+          workspace: WORKSPACE_PARAM
         },
         required: ['documentId']
       }
     ),
-    tool('prizm_delete_document', '删除指定文档。删除前需二次确认用户意图。', {
-      properties: { documentId: { type: 'string', description: '文档 ID' } },
+    tool('prizm_delete_document', '删除指定文档。workspace="session" 删除临时工作区。', {
+      properties: {
+        documentId: { type: 'string', description: '文档 ID' },
+        workspace: WORKSPACE_PARAM
+      },
       required: ['documentId']
     }),
     tool(
@@ -245,6 +278,84 @@ export function getBuiltinTools(): LLMTool[] {
         properties: { query: { type: 'string', description: '搜索问题或关键短语' } },
         required: ['query']
       }
+    ),
+    tool(
+      'prizm_promote_file',
+      '将临时工作区的 Prizm 文档或待办列表提升到主工作区（永久保留、全局可见、可搜索）。' +
+        '适用于在会话中创建的草稿文件，确认后需要保留时使用。',
+      {
+        properties: {
+          fileId: { type: 'string', description: '文档或待办列表的 ID' },
+          folder: {
+            type: 'string',
+            description: '目标目录（可选，默认根目录）'
+          }
+        },
+        required: ['fileId']
+      }
+    ),
+    // ---- 终端工具 ----
+    tool(
+      'prizm_terminal_execute',
+      '在工作区执行命令并返回输出。命令在 shell 中执行，完成或超时后自动返回结果。' +
+        '适用于一次性命令如 ls、git status、npm install 等。用户可在终端面板中查看实时输出。',
+      {
+        properties: {
+          command: { type: 'string', description: '要执行的 shell 命令' },
+          cwd: {
+            type: 'string',
+            description: '工作目录（相对工作区根目录的路径），默认为工作区根目录'
+          },
+          workspace: {
+            type: 'string',
+            description: '工作目录所在工作区："main"（默认，全局目录）或 "session"（会话临时目录）'
+          },
+          timeout: {
+            type: 'number',
+            description: '超时秒数，默认 30，最大 300'
+          }
+        },
+        required: ['command']
+      }
+    ),
+    tool(
+      'prizm_terminal_spawn',
+      '创建持久终端会话。用于需要交互或长时间运行的场景（如 dev server、watch 模式）。' +
+        '用户可在终端面板中查看和交互。返回终端 ID，后续可通过 prizm_terminal_send_keys 交互。',
+      {
+        properties: {
+          cwd: {
+            type: 'string',
+            description: '工作目录（相对工作区根目录的路径），默认为工作区根目录'
+          },
+          workspace: {
+            type: 'string',
+            description: '工作目录所在工作区："main"（默认，全局目录）或 "session"（会话临时目录）'
+          },
+          title: { type: 'string', description: '终端标题，便于用户识别' }
+        },
+        required: []
+      }
+    ),
+    tool(
+      'prizm_terminal_send_keys',
+      '向已有终端发送按键输入并等待返回输出。用于与 prizm_terminal_spawn 创建的持久终端交互。',
+      {
+        properties: {
+          terminalId: { type: 'string', description: '目标终端 ID' },
+          input: { type: 'string', description: '要发送的输入内容' },
+          pressEnter: {
+            type: 'boolean',
+            description:
+              '是否在输入后按下回车键。true = 执行命令（默认），false = 仅输入文本不按回车（用于交互式输入、密码、补全等场景）'
+          },
+          waitMs: {
+            type: 'number',
+            description: '等待输出的时间（毫秒），默认 2000'
+          }
+        },
+        required: ['terminalId', 'input']
+      }
     )
   ]
 }
@@ -267,54 +378,7 @@ export async function executeBuiltinTool(
 ): Promise<BuiltinToolResult> {
   const data = scopeStore.getScopeData(scope)
   const scopeRoot = scopeStore.getScopeRootPath(scope)
-  const sessionWorkspaceRoot = sessionId ? getSessionWorkspaceDir(scopeRoot, sessionId) : null
-
-  /**
-   * 解析路径参数：支持相对路径和绝对路径。
-   * - 相对路径：根据 workspace 参数选择根目录
-   * - 绝对路径：自动检测属于主工作区还是临时工作区，转换为相对路径
-   * 返回 { fileRoot, relativePath, wsType } 或 null（路径越界）
-   */
-  const resolvePath = (
-    rawPath: string,
-    wsArg: unknown
-  ): { fileRoot: string; relativePath: string; wsType: 'main' | 'session' } | null => {
-    if (path.isAbsolute(rawPath)) {
-      const normalized = path.resolve(rawPath)
-      // 优先匹配临时工作区（更精确的路径）
-      if (sessionWorkspaceRoot) {
-        const normalizedSession = path.resolve(sessionWorkspaceRoot)
-        if (
-          normalized === normalizedSession ||
-          normalized.startsWith(normalizedSession + path.sep)
-        ) {
-          mdStore.ensureSessionWorkspace(scopeRoot, sessionId!)
-          const rel =
-            normalized === normalizedSession ? '' : path.relative(normalizedSession, normalized)
-          return { fileRoot: sessionWorkspaceRoot, relativePath: rel, wsType: 'session' }
-        }
-      }
-      // 再匹配主工作区
-      const normalizedRoot = path.resolve(scopeRoot)
-      if (normalized === normalizedRoot || normalized.startsWith(normalizedRoot + path.sep)) {
-        const rel = normalized === normalizedRoot ? '' : path.relative(normalizedRoot, normalized)
-        return { fileRoot: scopeRoot, relativePath: rel, wsType: 'main' }
-      }
-      // 绝对路径不在任何已知工作区内
-      return null
-    }
-
-    // 相对路径：根据 workspace 参数决定根目录
-    if (wsArg === 'session' && sessionId && sessionWorkspaceRoot) {
-      mdStore.ensureSessionWorkspace(scopeRoot, sessionId)
-      return { fileRoot: sessionWorkspaceRoot, relativePath: rawPath, wsType: 'session' }
-    }
-    return { fileRoot: scopeRoot, relativePath: rawPath, wsType: 'main' }
-  }
-
-  /** 返回 workspace 标签，用于结果提示 */
-  const wsTypeLabel = (wsType: 'main' | 'session'): string =>
-    wsType === 'session' ? ' [临时工作区]' : ''
+  const wsCtx = createWorkspaceContext(scopeRoot, sessionId)
 
   const record = (itemId: string, itemKind: ScopeActivityItemKind, action: ScopeActivityAction) => {
     if (sessionId)
@@ -327,13 +391,13 @@ export async function executeBuiltinTool(
       })
   }
 
-  const OUT_OF_BOUNDS_MSG = '路径不在允许的工作区范围内。只能操作主工作区或会话临时工作区内的文件。'
+  const wsArg = typeof args.workspace === 'string' ? args.workspace : undefined
 
   try {
     switch (toolName) {
       case 'prizm_file_list': {
         const pathArg = typeof args.path === 'string' ? args.path : ''
-        const resolved = resolvePath(pathArg, args.workspace)
+        const resolved = resolvePath(wsCtx, pathArg, wsArg)
         if (!resolved) return { text: OUT_OF_BOUNDS_MSG, isError: true }
         const entries = mdStore.listDirectory(resolved.fileRoot, resolved.relativePath)
         if (!entries.length) return { text: `目录为空或不存在。${wsTypeLabel(resolved.wsType)}` }
@@ -347,7 +411,7 @@ export async function executeBuiltinTool(
 
       case 'prizm_file_read': {
         const pathArg = typeof args.path === 'string' ? args.path : ''
-        const resolved = resolvePath(pathArg, args.workspace)
+        const resolved = resolvePath(wsCtx, pathArg, wsArg)
         if (!resolved) return { text: OUT_OF_BOUNDS_MSG, isError: true }
         const result = mdStore.readFileByPath(resolved.fileRoot, resolved.relativePath)
         if (!result)
@@ -362,20 +426,25 @@ export async function executeBuiltinTool(
       case 'prizm_file_write': {
         const pathArg = typeof args.path === 'string' ? args.path : ''
         const content = typeof args.content === 'string' ? args.content : ''
-        const resolved = resolvePath(pathArg, args.workspace)
+        const resolved = resolvePath(wsCtx, pathArg, wsArg)
         if (!resolved) return { text: OUT_OF_BOUNDS_MSG, isError: true }
         const ok = mdStore.writeFileByPath(resolved.fileRoot, resolved.relativePath, content)
         if (!ok)
           return { text: `写入失败: ${pathArg}${wsTypeLabel(resolved.wsType)}`, isError: true }
         record(resolved.relativePath, 'file', 'create')
+        builtinToolEvents.emitFileEvent({
+          eventType: 'file:created',
+          scope,
+          relativePath: resolved.relativePath
+        })
         return { text: `已写入 ${pathArg}${wsTypeLabel(resolved.wsType)}` }
       }
 
       case 'prizm_file_move': {
         const from = typeof args.from === 'string' ? args.from : ''
         const to = typeof args.to === 'string' ? args.to : ''
-        const resolvedFrom = resolvePath(from, args.workspace)
-        const resolvedTo = resolvePath(to, args.workspace)
+        const resolvedFrom = resolvePath(wsCtx, from, wsArg)
+        const resolvedTo = resolvePath(wsCtx, to, wsArg)
         if (!resolvedFrom || !resolvedTo) return { text: OUT_OF_BOUNDS_MSG, isError: true }
         // move 操作要求源和目标在同一工作区内
         if (resolvedFrom.fileRoot !== resolvedTo.fileRoot)
@@ -393,23 +462,35 @@ export async function executeBuiltinTool(
             text: `移动失败: ${from} -> ${to}${wsTypeLabel(resolvedFrom.wsType)}`,
             isError: true
           }
+        builtinToolEvents.emitFileEvent({
+          eventType: 'file:moved',
+          scope,
+          relativePath: resolvedTo.relativePath,
+          fromPath: resolvedFrom.relativePath
+        })
         return { text: `已移动 ${from} -> ${to}${wsTypeLabel(resolvedFrom.wsType)}` }
       }
 
       case 'prizm_file_delete': {
         const pathArg = typeof args.path === 'string' ? args.path : ''
-        const resolved = resolvePath(pathArg, args.workspace)
+        const resolved = resolvePath(wsCtx, pathArg, wsArg)
         if (!resolved) return { text: OUT_OF_BOUNDS_MSG, isError: true }
         const ok = mdStore.deleteByPath(resolved.fileRoot, resolved.relativePath)
         if (!ok)
           return { text: `删除失败: ${pathArg}${wsTypeLabel(resolved.wsType)}`, isError: true }
         record(resolved.relativePath, 'file', 'delete')
+        builtinToolEvents.emitFileEvent({
+          eventType: 'file:deleted',
+          scope,
+          relativePath: resolved.relativePath
+        })
         return { text: `已删除 ${pathArg}${wsTypeLabel(resolved.wsType)}` }
       }
 
       case 'prizm_list_todos': {
-        const lists = data.todoLists ?? []
-        if (!lists.length) return { text: '当前无待办列表。' }
+        const { root: wsRoot, wsType: ws } = resolveWorkspaceType(wsCtx, wsArg)
+        const lists = ws === 'session' ? mdStore.readTodoLists(wsRoot) : data.todoLists ?? []
+        if (!lists.length) return { text: `当前无待办列表。${wsTypeLabel(ws)}` }
         const lines: string[] = []
         for (const list of lists) {
           if (list.items?.length) {
@@ -421,25 +502,37 @@ export async function executeBuiltinTool(
             lines.push(`[${list.title}] (listId: ${list.id}) 空`)
           }
         }
-        return { text: lines.length ? lines.join('\n') : '当前无待办项。' }
+        return { text: lines.join('\n') + wsTypeLabel(ws) }
       }
 
       case 'prizm_list_todo_lists': {
-        const lists = data.todoLists ?? []
-        if (!lists.length) return { text: '当前无待办列表。' }
+        const { root: wsRoot, wsType: ws } = resolveWorkspaceType(wsCtx, wsArg)
+        const lists = ws === 'session' ? mdStore.readTodoLists(wsRoot) : data.todoLists ?? []
+        if (!lists.length) return { text: `当前无待办列表。${wsTypeLabel(ws)}` }
         const lines = lists.map((l) => `- ${l.id}: ${l.title} (${l.items?.length ?? 0} 项)`)
-        return { text: lines.join('\n') }
+        return { text: lines.join('\n') + wsTypeLabel(ws) }
       }
 
       case 'prizm_read_todo': {
         const todoId = typeof args.todoId === 'string' ? args.todoId : ''
+        const { root: wsRoot, wsType: ws } = resolveWorkspaceType(wsCtx, wsArg)
+        if (ws === 'session') {
+          const lists = mdStore.readTodoLists(wsRoot)
+          for (const list of lists) {
+            const item = list.items.find((it) => it.id === todoId)
+            if (item) {
+              const desc = item.description ? `\n${item.description}` : ''
+              return { text: `[${item.status}] ${item.title}${desc} (列表: ${list.title})` }
+            }
+          }
+          return { text: `待办项不存在: ${todoId} [临时工作区]`, isError: true }
+        }
         const detail = getScopeRefItem(scope, 'todo', todoId)
         if (!detail) return { text: `待办项不存在: ${todoId}`, isError: true }
         return { text: detail.content || '(空)' }
       }
 
       case 'prizm_create_todo': {
-        if (!data.todoLists) data.todoLists = []
         const listTitle = typeof args.listTitle === 'string' ? args.listTitle.trim() : undefined
         const listId = typeof args.listId === 'string' ? args.listId : undefined
         if (!listId && !listTitle) {
@@ -448,14 +541,60 @@ export async function executeBuiltinTool(
             isError: true
           }
         }
+        const folderResult = resolveFolder(wsCtx, args.folder, wsArg)
+        if (!folderResult) return { text: OUT_OF_BOUNDS_MSG, isError: true }
+        const { folder: folderPath, wsType: todoWsType } = folderResult
+        const todoTitle = typeof args.title === 'string' ? args.title : '(无标题)'
+        const todoDesc = typeof args.description === 'string' ? args.description : undefined
+        const todoStatus = (
+          args.status === 'doing' || args.status === 'done' ? args.status : 'todo'
+        ) as TodoItemStatus
+        const now = Date.now()
+        const newItem = {
+          id: genUniqueId(),
+          title: todoTitle,
+          description: todoDesc,
+          status: todoStatus,
+          createdAt: now,
+          updatedAt: now
+        }
+
+        if (todoWsType === 'session' && wsCtx.sessionWorkspaceRoot) {
+          let list: TodoList
+          if (listId) {
+            const existing = mdStore.readSingleTodoListById(wsCtx.sessionWorkspaceRoot, listId)
+            if (!existing) return { text: `待办列表不存在: ${listId} [临时工作区]`, isError: true }
+            list = existing
+          } else {
+            const sanitizedName = mdStore.sanitizeFileName(listTitle!) + '.md'
+            const relativePath = folderPath ? `${folderPath}/${sanitizedName}` : ''
+            list = {
+              id: genUniqueId(),
+              title: listTitle!,
+              items: [],
+              relativePath,
+              createdAt: now,
+              updatedAt: now
+            }
+          }
+          list.items.push(newItem)
+          list.updatedAt = now
+          mdStore.writeSingleTodoList(wsCtx.sessionWorkspaceRoot, list)
+          record(newItem.id, 'todo', 'create')
+          const hint = listTitle ? `（新建列表「${listTitle}」）` : ''
+          return { text: `已创建待办项 ${newItem.id}${hint}${wsTypeLabel(todoWsType)}` }
+        }
+
+        if (!data.todoLists) data.todoLists = []
         let list: TodoList
         if (listTitle) {
-          const now = Date.now()
+          const sanitizedName = mdStore.sanitizeFileName(listTitle) + '.md'
+          const relativePath = folderPath ? `${folderPath}/${sanitizedName}` : ''
           list = {
             id: genUniqueId(),
             title: listTitle,
             items: [],
-            relativePath: '',
+            relativePath,
             createdAt: now,
             updatedAt: now
           }
@@ -465,37 +604,44 @@ export async function executeBuiltinTool(
           if (!found) return { text: `待办列表不存在: ${listId}`, isError: true }
           list = found
         }
-        const title = typeof args.title === 'string' ? args.title : '(无标题)'
-        const description = typeof args.description === 'string' ? args.description : undefined
-        const status = (
-          args.status === 'doing' || args.status === 'done' ? args.status : 'todo'
-        ) as TodoItemStatus
-        const now = Date.now()
-        const item = {
-          id: genUniqueId(),
-          title,
-          description,
-          status,
-          createdAt: now,
-          updatedAt: now
-        }
-        list.items.push(item)
+        list.items.push(newItem)
         list.updatedAt = now
         scopeStore.saveScope(scope)
-        record(item.id, 'todo', 'create')
+        record(newItem.id, 'todo', 'create')
         return {
-          text: `已创建待办项 ${item.id}` + (listTitle ? `（新建列表「${listTitle}」）` : '')
+          text: `已创建待办项 ${newItem.id}` + (listTitle ? `（新建列表「${listTitle}」）` : '')
         }
       }
 
       case 'prizm_update_todo': {
-        const lists = data.todoLists ?? []
         const todoId = typeof args.todoId === 'string' ? args.todoId : ''
-        const list = lists.find((l) => l.items.some((it) => it.id === todoId))
-        if (!list) return { text: `待办项不存在: ${todoId}`, isError: true }
-        const idx = list.items.findIndex((it) => it.id === todoId)
+        const { wsType: ws } = resolveWorkspaceType(wsCtx, wsArg)
+        if (ws === 'session' && wsCtx.sessionWorkspaceRoot) {
+          const lists = mdStore.readTodoLists(wsCtx.sessionWorkspaceRoot)
+          for (const list of lists) {
+            const item = list.items.find((it) => it.id === todoId)
+            if (item) {
+              if (args.status === 'todo' || args.status === 'doing' || args.status === 'done')
+                item.status = args.status
+              if (typeof args.title === 'string') item.title = args.title
+              if (args.description !== undefined)
+                (item as { description?: string }).description =
+                  typeof args.description === 'string' ? args.description : undefined
+              item.updatedAt = Date.now()
+              list.updatedAt = Date.now()
+              mdStore.writeSingleTodoList(wsCtx.sessionWorkspaceRoot, list)
+              record(todoId, 'todo', 'update')
+              return { text: `已更新待办项 ${todoId}${wsTypeLabel(ws)}` }
+            }
+          }
+          return { text: `待办项不存在: ${todoId} [临时工作区]`, isError: true }
+        }
+        const lists = data.todoLists ?? []
+        const todoList = lists.find((l) => l.items.some((it) => it.id === todoId))
+        if (!todoList) return { text: `待办项不存在: ${todoId}`, isError: true }
+        const idx = todoList.items.findIndex((it) => it.id === todoId)
         if (idx < 0) return { text: `待办项不存在: ${todoId}`, isError: true }
-        const cur = list.items[idx]
+        const cur = todoList.items[idx]
         if (args.status === 'todo' || args.status === 'doing' || args.status === 'done')
           cur.status = args.status
         if (typeof args.title === 'string') cur.title = args.title
@@ -503,27 +649,49 @@ export async function executeBuiltinTool(
           (cur as { description?: string }).description =
             typeof args.description === 'string' ? args.description : undefined
         cur.updatedAt = Date.now()
-        list.updatedAt = Date.now()
+        todoList.updatedAt = Date.now()
         scopeStore.saveScope(scope)
         record(todoId, 'todo', 'update')
         return { text: `已更新待办项 ${todoId}` }
       }
 
       case 'prizm_delete_todo': {
-        const lists = data.todoLists ?? []
         const todoId = typeof args.todoId === 'string' ? args.todoId : ''
-        const list = lists.find((l) => l.items.some((it) => it.id === todoId))
-        if (!list) return { text: `待办项不存在: ${todoId}`, isError: true }
-        const idx = list.items.findIndex((it) => it.id === todoId)
+        const { wsType: ws } = resolveWorkspaceType(wsCtx, wsArg)
+        if (ws === 'session' && wsCtx.sessionWorkspaceRoot) {
+          const lists = mdStore.readTodoLists(wsCtx.sessionWorkspaceRoot)
+          for (const list of lists) {
+            const idx = list.items.findIndex((it) => it.id === todoId)
+            if (idx >= 0) {
+              list.items.splice(idx, 1)
+              list.updatedAt = Date.now()
+              mdStore.writeSingleTodoList(wsCtx.sessionWorkspaceRoot, list)
+              record(todoId, 'todo', 'delete')
+              return { text: `已删除待办项 ${todoId} [临时工作区]` }
+            }
+          }
+          return { text: `待办项不存在: ${todoId} [临时工作区]`, isError: true }
+        }
+        const lists = data.todoLists ?? []
+        const todoList = lists.find((l) => l.items.some((it) => it.id === todoId))
+        if (!todoList) return { text: `待办项不存在: ${todoId}`, isError: true }
+        const idx = todoList.items.findIndex((it) => it.id === todoId)
         if (idx < 0) return { text: `待办项不存在: ${todoId}`, isError: true }
-        list.items.splice(idx, 1)
-        list.updatedAt = Date.now()
+        todoList.items.splice(idx, 1)
+        todoList.updatedAt = Date.now()
         scopeStore.saveScope(scope)
         record(todoId, 'todo', 'delete')
         return { text: `已删除待办项 ${todoId}` }
       }
 
       case 'prizm_list_documents': {
+        const { root: wsRoot, wsType: ws } = resolveWorkspaceType(wsCtx, wsArg)
+        if (ws === 'session') {
+          const docs = mdStore.readDocuments(wsRoot)
+          if (!docs.length) return { text: '当前无文档。 [临时工作区]' }
+          const lines = docs.map((d) => `- ${d.id}: ${d.title} (${d.content?.length ?? 0} 字)`)
+          return { text: lines.join('\n') + ' [临时工作区]' }
+        }
         const items = listRefItems(scope, 'document')
         if (!items.length) return { text: '当前无文档。' }
         const lines = items.map((r) => `- ${r.id}: ${r.title} (${r.charCount} 字)`)
@@ -532,6 +700,12 @@ export async function executeBuiltinTool(
 
       case 'prizm_get_document_content': {
         const documentId = typeof args.documentId === 'string' ? args.documentId : ''
+        const { root: wsRoot, wsType: ws } = resolveWorkspaceType(wsCtx, wsArg)
+        if (ws === 'session') {
+          const doc = mdStore.readSingleDocumentById(wsRoot, documentId)
+          if (!doc) return { text: `文档不存在: ${documentId} [临时工作区]`, isError: true }
+          return { text: doc.content || '(无正文)' }
+        }
         const detail = getScopeRefItem(scope, 'document', documentId)
         if (!detail) return { text: `文档不存在: ${documentId}`, isError: true }
         return { text: detail.content || '(无正文)' }
@@ -540,24 +714,47 @@ export async function executeBuiltinTool(
       case 'prizm_create_document': {
         const title = typeof args.title === 'string' ? args.title : '未命名文档'
         const content = typeof args.content === 'string' ? args.content : ''
+        const folderResult = resolveFolder(wsCtx, args.folder, wsArg)
+        if (!folderResult) return { text: OUT_OF_BOUNDS_MSG, isError: true }
+        const { folder: folderPath, wsType } = folderResult
+        const sanitizedName = mdStore.sanitizeFileName(title) + '.md'
+        const relativePath = folderPath ? `${folderPath}/${sanitizedName}` : ''
         const now = Date.now()
         const doc = {
           id: genUniqueId(),
           title,
           content,
-          relativePath: '',
+          relativePath,
           createdAt: now,
           updatedAt: now
+        }
+        if (wsType === 'session' && wsCtx.sessionWorkspaceRoot) {
+          mdStore.writeSingleDocument(wsCtx.sessionWorkspaceRoot, doc)
+          record(doc.id, 'document', 'create')
+          const folderHint = folderPath ? ` (${folderPath}/)` : ''
+          return { text: `已创建文档 ${doc.id}${folderHint}${wsTypeLabel(wsType)}` }
         }
         data.documents.push(doc)
         scopeStore.saveScope(scope)
         scheduleDocumentSummary(scope, doc.id)
         record(doc.id, 'document', 'create')
-        return { text: `已创建文档 ${doc.id}` }
+        const folderHint = folderPath ? ` (${folderPath}/)` : ''
+        return { text: `已创建文档 ${doc.id}${folderHint}` }
       }
 
       case 'prizm_update_document': {
         const documentId = typeof args.documentId === 'string' ? args.documentId : ''
+        const { wsType: ws } = resolveWorkspaceType(wsCtx, wsArg)
+        if (ws === 'session' && wsCtx.sessionWorkspaceRoot) {
+          const existing = mdStore.readSingleDocumentById(wsCtx.sessionWorkspaceRoot, documentId)
+          if (!existing) return { text: `文档不存在: ${documentId} [临时工作区]`, isError: true }
+          if (typeof args.title === 'string') existing.title = args.title
+          if (typeof args.content === 'string') existing.content = args.content
+          existing.updatedAt = Date.now()
+          mdStore.writeSingleDocument(wsCtx.sessionWorkspaceRoot, existing)
+          record(documentId, 'document', 'update')
+          return { text: `已更新文档 ${documentId} [临时工作区]` }
+        }
         const idx = data.documents.findIndex((d) => d.id === documentId)
         if (idx < 0) return { text: `文档不存在: ${documentId}`, isError: true }
         if (typeof args.title === 'string') data.documents[idx].title = args.title
@@ -571,12 +768,65 @@ export async function executeBuiltinTool(
 
       case 'prizm_delete_document': {
         const documentId = typeof args.documentId === 'string' ? args.documentId : ''
+        const { wsType: ws } = resolveWorkspaceType(wsCtx, wsArg)
+        if (ws === 'session' && wsCtx.sessionWorkspaceRoot) {
+          const ok = mdStore.deleteSingleDocument(wsCtx.sessionWorkspaceRoot, documentId)
+          if (!ok) return { text: `文档不存在: ${documentId} [临时工作区]`, isError: true }
+          record(documentId, 'document', 'delete')
+          return { text: `已删除文档 ${documentId} [临时工作区]` }
+        }
         const idx = data.documents.findIndex((d) => d.id === documentId)
         if (idx < 0) return { text: `文档不存在: ${documentId}`, isError: true }
         data.documents.splice(idx, 1)
         scopeStore.saveScope(scope)
         record(documentId, 'document', 'delete')
         return { text: `已删除文档 ${documentId}` }
+      }
+
+      case 'prizm_promote_file': {
+        if (!wsCtx.sessionWorkspaceRoot || !wsCtx.sessionId)
+          return { text: '当前没有活跃的临时工作区，无法执行提升操作。', isError: true }
+        const fileId = typeof args.fileId === 'string' ? args.fileId : ''
+        if (!fileId) return { text: '必须指定 fileId', isError: true }
+        const targetFolder = typeof args.folder === 'string' ? args.folder.trim() : ''
+
+        // 先尝试 document
+        const doc = mdStore.readSingleDocumentById(wsCtx.sessionWorkspaceRoot, fileId)
+        if (doc) {
+          if (targetFolder) {
+            const sanitized = mdStore.sanitizeFileName(doc.title) + '.md'
+            doc.relativePath = `${targetFolder}/${sanitized}`
+          } else {
+            doc.relativePath = ''
+          }
+          data.documents.push(doc)
+          scopeStore.saveScope(scope)
+          mdStore.deleteSingleDocument(wsCtx.sessionWorkspaceRoot, fileId)
+          scheduleDocumentSummary(scope, doc.id)
+          record(doc.id, 'document', 'create')
+          return { text: `已将文档「${doc.title}」(${doc.id}) 从临时工作区提升到主工作区。` }
+        }
+
+        // 再尝试 todo_list
+        const todoList = mdStore.readSingleTodoListById(wsCtx.sessionWorkspaceRoot, fileId)
+        if (todoList) {
+          if (targetFolder) {
+            const sanitized = mdStore.sanitizeFileName(todoList.title) + '.md'
+            todoList.relativePath = `${targetFolder}/${sanitized}`
+          } else {
+            todoList.relativePath = ''
+          }
+          if (!data.todoLists) data.todoLists = []
+          data.todoLists.push(todoList)
+          scopeStore.saveScope(scope)
+          mdStore.deleteSingleTodoList(wsCtx.sessionWorkspaceRoot, fileId)
+          record(todoList.id, 'todo', 'create')
+          return {
+            text: `已将待办列表「${todoList.title}」(${todoList.id}) 从临时工作区提升到主工作区。`
+          }
+        }
+
+        return { text: `在临时工作区中未找到 ID 为 ${fileId} 的文档或待办列表。`, isError: true }
       }
 
       case 'prizm_search': {
@@ -619,6 +869,93 @@ export async function executeBuiltinTool(
         return { text: lines.join('\n') }
       }
 
+      // ---- 终端工具 ----
+      case 'prizm_terminal_execute': {
+        const command = typeof args.command === 'string' ? args.command : ''
+        if (!command.trim()) return { text: '请提供要执行的命令。', isError: true }
+        const cwdArg = typeof args.cwd === 'string' ? args.cwd : undefined
+        const wsArg = typeof args.workspace === 'string' ? args.workspace : undefined
+        const timeoutSec = typeof args.timeout === 'number' ? Math.min(args.timeout, 300) : 30
+        const termMgr = getTerminalManager()
+        const wsCtx = createWorkspaceContext(scopeRoot, sessionId)
+        const { root: wsRoot, wsType } = resolveWorkspaceType(wsCtx, wsArg)
+        const resolvedCwd = cwdArg ? require('path').resolve(wsRoot, cwdArg) : wsRoot
+        if (!sessionId) return { text: '终端工具需要在会话中使用。', isError: true }
+        const result = await termMgr.executeCommand({
+          agentSessionId: sessionId,
+          scope,
+          command,
+          cwd: resolvedCwd,
+          timeoutMs: timeoutSec * 1000,
+          sessionType: 'exec',
+          title: `exec: ${command.slice(0, 40)}`,
+          workspaceType: wsType
+        })
+        const MAX_OUTPUT = 8192
+        let output = result.output
+        if (output.length > MAX_OUTPUT) {
+          const head = output.slice(0, MAX_OUTPUT / 2)
+          const tail = output.slice(-MAX_OUTPUT / 2)
+          output = head + '\n\n... (输出已截断) ...\n\n' + tail
+        }
+        const status = result.timedOut
+          ? `[超时 ${timeoutSec}s，进程已终止]`
+          : `[退出码: ${result.exitCode}]`
+        return { text: `${status}\n${output}` }
+      }
+
+      case 'prizm_terminal_spawn': {
+        if (!sessionId) return { text: '终端工具需要在会话中使用。', isError: true }
+        const cwdArg = typeof args.cwd === 'string' ? args.cwd : undefined
+        const wsArg = typeof args.workspace === 'string' ? args.workspace : undefined
+        const title = typeof args.title === 'string' ? args.title : undefined
+        const termMgr = getTerminalManager()
+        const wsCtx = createWorkspaceContext(scopeRoot, sessionId)
+        const { root: wsRoot } = resolveWorkspaceType(wsCtx, wsArg)
+        const resolvedCwd = cwdArg ? require('path').resolve(wsRoot, cwdArg) : wsRoot
+        const terminal = termMgr.createTerminal({
+          agentSessionId: sessionId,
+          scope,
+          cwd: resolvedCwd,
+          title,
+          sessionType: 'interactive'
+        })
+        return {
+          text: `已创建终端「${terminal.title}」(ID: ${terminal.id})，用户可在终端面板中查看和交互。`
+        }
+      }
+
+      case 'prizm_terminal_send_keys': {
+        const terminalId = typeof args.terminalId === 'string' ? args.terminalId : ''
+        const input = typeof args.input === 'string' ? args.input : ''
+        const pressEnter = args.pressEnter !== false // 默认 true
+        const waitMs = typeof args.waitMs === 'number' ? Math.min(args.waitMs, 10000) : 2000
+        if (!terminalId) return { text: '请提供 terminalId。', isError: true }
+        const termMgr = getTerminalManager()
+        const terminal = termMgr.getTerminal(terminalId)
+        if (!terminal) return { text: `终端不存在: ${terminalId}`, isError: true }
+        if (terminal.status !== 'running')
+          return { text: `终端已退出 (code: ${terminal.exitCode})`, isError: true }
+        // 记录发送前的输出长度
+        const prevOutput = termMgr.getRecentOutput(terminalId)
+        const prevLen = prevOutput.length
+        // 发送输入；pressEnter=true 时追加回车，否则仅输入文本
+        const dataToSend = pressEnter ? input + '\n' : input
+        termMgr.writeToTerminal(terminalId, dataToSend)
+        // 等待输出
+        await new Promise((resolve) => setTimeout(resolve, waitMs))
+        // 获取新输出
+        const currentOutput = termMgr.getRecentOutput(terminalId)
+        let newOutput = currentOutput.length > prevLen ? currentOutput.slice(prevLen) : '(无新输出)'
+        // 清理 ANSI 转义序列，避免不可读字符传递给 LLM
+        newOutput = stripAnsi(newOutput)
+        // 截断
+        if (newOutput.length > 8192) {
+          newOutput = newOutput.slice(-8192)
+        }
+        return { text: newOutput }
+      }
+
       default:
         return { text: `未知内置工具: ${toolName}`, isError: true }
     }
@@ -646,8 +983,12 @@ export const BUILTIN_TOOL_NAMES = new Set([
   'prizm_create_document',
   'prizm_update_document',
   'prizm_delete_document',
+  'prizm_promote_file',
   'prizm_search',
   'prizm_scope_stats',
   'prizm_list_memories',
-  'prizm_search_memories'
+  'prizm_search_memories',
+  'prizm_terminal_execute',
+  'prizm_terminal_spawn',
+  'prizm_terminal_send_keys'
 ])

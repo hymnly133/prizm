@@ -46,11 +46,8 @@ export class WebSocketServer {
       ...options
     }
 
-    // 创建 WebSocket 服务器，附加到 HTTP 服务器
-    this.wss = new WSServer({
-      server: httpServer,
-      path: this.options.path
-    })
+    // 创建 WebSocket 服务器（noServer 模式，由 server.ts 统一路由 upgrade）
+    this.wss = new WSServer({ noServer: true })
 
     this.setupConnectionHandlers()
     log.info('Initialized on path', this.options.path)
@@ -299,6 +296,19 @@ export class WebSocketServer {
     currentScope: string
   }> {
     return this.eventRegistry.getConnectedClients()
+  }
+
+  /**
+   * 处理 HTTP upgrade 请求（noServer 模式下由 server.ts 调用）
+   */
+  handleUpgrade(
+    req: http.IncomingMessage,
+    socket: import('stream').Duplex,
+    head: Buffer
+  ): void {
+    this.wss.handleUpgrade(req, socket, head, (ws) => {
+      this.wss.emit('connection', ws, req)
+    })
   }
 
   /**
