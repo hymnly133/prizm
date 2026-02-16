@@ -1,10 +1,11 @@
 /**
  * 用户页 - 当前用户 Token 用量、记忆查询等
  */
+import { memo } from 'react'
 import { TokenUsagePanel } from '../components/agent/TokenUsagePanel'
 import { MemoryInspector } from '../components/agent/MemoryInspector'
 
-export default function UserPage() {
+function UserPage() {
   return (
     <section className="page settings-page user-page">
       <div className="settings-section">
@@ -29,3 +30,5 @@ export default function UserPage() {
     </section>
   )
 }
+
+export default memo(UserPage)

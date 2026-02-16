@@ -242,9 +242,16 @@ const MentionSlashOverlay = memo(() => {
       return {
         key: cmd.name,
         title: `/${cmd.name}`,
-        addon: cmd.description ? (
-          <span className="mention-slash-desc">{cmd.description}</span>
-        ) : null,
+        addon: (
+          <span className="mention-slash-desc">
+            {!cmd.builtin && (
+              <Tag style={{ fontSize: 10, marginRight: 4 }}>
+                {cmd.mode === 'prompt' ? 'prompt' : 'action'}
+              </Tag>
+            )}
+            {cmd.description}
+          </span>
+        ),
         active: selectedIndex === i,
         onClick: () => selectItem(i),
         onMouseEnter: () => setSelectedIndex(i)

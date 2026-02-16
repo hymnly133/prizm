@@ -15,9 +15,17 @@ function ChatActionsBar(props: React.ComponentProps<typeof BaseChatActionsBar>) 
   }
   return <BaseChatActionsBar {...rest} />
 }
-import { FolderTree, LayoutDashboard, MessageSquare, Plus, Trash2, X } from 'lucide-react'
+import {
+  FolderTree,
+  LayoutDashboard,
+  MessageSquare,
+  Plus,
+  Trash2,
+  X,
+  Terminal as TerminalLucide
+} from 'lucide-react'
 import { FileTreePanel } from '../components/agent/FileTreePanel'
-import { useRef, useState, useMemo, useCallback, useEffect } from 'react'
+import { useRef, useState, useMemo, useCallback, useEffect, memo } from 'react'
 import { usePrizmContext } from '../context/PrizmContext'
 import { useChatWithFile } from '../context/ChatWithFileContext'
 import { WorkNavigationContext } from '../context/WorkNavigationContext'
@@ -40,6 +48,9 @@ import type { AgentMessage, MessagePart, MessagePartTool } from '@prizm/client-c
 import type { Document as PrizmDocument, TodoList } from '@prizm/client-core'
 import { ToolCallCard, MemoryGrowthTag } from '../components/agent'
 import { AgentOverviewPanel } from '../components/agent/AgentOverviewPanel'
+import { TerminalSidebarTab } from '../components/agent/TerminalSidebarTab'
+// 注册终端工具卡片渲染器（副作用导入）
+import '../components/agent/TerminalToolCards'
 
 /* ── 文件内嵌预览面板 ── */
 const KIND_LABELS: Record<FileKind, string> = {
@@ -284,7 +295,7 @@ function AssistantMessageExtra(props: ChatMessage) {
   )
 }
 
-export default function AgentPage({ hidden }: { hidden?: boolean }) {
+function AgentPage() {
   const { currentScope } = useScope()
   const { pendingPayload } = useChatWithFile()
   const { scopeItems, slashCommands } = useAgentScopeData(currentScope)
@@ -307,7 +318,7 @@ export default function AgentPage({ hidden }: { hidden?: boolean }) {
 
   const [overviewMode, setOverviewMode] = useState(!currentSession)
   const [previewFile, setPreviewFile] = useState<{ kind: FileKind; id: string } | null>(null)
-  const [sidebarTab, setSidebarTab] = useState<'context' | 'files'>('context')
+  const [sidebarTab, setSidebarTab] = useState<'context' | 'files' | 'terminal'>('context')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const pendingHandledRef = useRef<string | null>(null)
 
@@ -430,7 +441,7 @@ export default function AgentPage({ hidden }: { hidden?: boolean }) {
   }))
 
   return (
-    <section className="agent-page" style={hidden ? { display: 'none' } : undefined}>
+    <section className="agent-page">
       <ResizableSidebar side="left" storageKey="agent-sessions" defaultWidth={220}>
         <div className="agent-sidebar">
           <div className="agent-sidebar-header">
@@ -608,10 +619,11 @@ export default function AgentPage({ hidden }: { hidden?: boolean }) {
                     block
                     size="small"
                     value={sidebarTab}
-                    onChange={(v) => setSidebarTab(v as 'context' | 'files')}
+                    onChange={(v) => setSidebarTab(v as 'context' | 'files' | 'terminal')}
                     options={[
                       { label: '上下文', value: 'context', icon: <MessageSquare size={12} /> },
-                      { label: '文件', value: 'files', icon: <FolderTree size={12} /> }
+                      { label: '文件', value: 'files', icon: <FolderTree size={12} /> },
+                      { label: '终端', value: 'terminal', icon: <TerminalLucide size={12} /> }
                     ]}
                   />
                 </div>
@@ -625,7 +637,7 @@ export default function AgentPage({ hidden }: { hidden?: boolean }) {
                     onModelChange={setSelectedModel}
                     overviewMode={false}
                   />
-                ) : (
+                ) : sidebarTab === 'files' ? (
                   <FileTreePanel
                     scope={currentScope}
                     sessionId={currentSession?.id}
@@ -633,6 +645,8 @@ export default function AgentPage({ hidden }: { hidden?: boolean }) {
                       setPreviewFile({ kind: 'document', id: relativePath })
                     }}
                   />
+                ) : (
+                  <TerminalSidebarTab sessionId={currentSession?.id} scope={currentScope} />
                 )}
               </Flexbox>
             )}
@@ -642,3 +656,5 @@ export default function AgentPage({ hidden }: { hidden?: boolean }) {
     </section>
   )
 }
+
+export default memo(AgentPage)

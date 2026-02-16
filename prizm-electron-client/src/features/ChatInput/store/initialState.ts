@@ -36,6 +36,10 @@ export interface SlashCommandItem {
   name: string
   aliases: string[]
   description: string
+  /** 是否内置命令 */
+  builtin?: boolean
+  /** 命令模式：prompt | action */
+  mode?: 'prompt' | 'action'
 }
 
 export interface PublicState {

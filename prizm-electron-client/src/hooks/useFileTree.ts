@@ -76,13 +76,23 @@ export function useFileTree(scope: string, sessionId?: string) {
     }
   }, [refresh])
 
-  // Listen for file:* events to auto-refresh
+  // Listen for file:* events to auto-refresh (debounced)
+  // document:* events don't affect file system structure, only file:* events do
   useEffect(() => {
-    return subscribeSyncEvents((eventType) => {
-      if (eventType.startsWith('file:') || eventType.startsWith('document:')) {
-        void refresh()
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const unsub = subscribeSyncEvents((eventType) => {
+      if (eventType.startsWith('file:')) {
+        if (timer) clearTimeout(timer)
+        timer = setTimeout(() => {
+          timer = null
+          void refresh()
+        }, 500)
       }
     })
+    return () => {
+      unsub()
+      if (timer) clearTimeout(timer)
+    }
   }, [refresh])
 
   return { workspaceTree, sessionTree, loading, refresh }

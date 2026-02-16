@@ -4,9 +4,14 @@
  */
 import { Button, Checkbox, Form, Input, Text, toast } from '@lobehub/ui'
 import { Select } from './ui/Select'
-import type { AgentLLMSettings, AvailableModel } from '@prizm/client-core'
+import type {
+  AgentLLMSettings,
+  AvailableModel,
+  ShellInfo,
+  TerminalSettings
+} from '@prizm/client-core'
 import { createStaticStyles } from 'antd-style'
-import { Brain, Layers, MessageSquare } from 'lucide-react'
+import { Brain, Layers, MessageSquare, Terminal } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import type { PrizmClient } from '@prizm/client-core'
 
@@ -44,7 +49,9 @@ interface AgentGeneralSettingsProps {
 
 export function AgentGeneralSettings({ http, onLog }: AgentGeneralSettingsProps) {
   const [agent, setAgent] = useState<Partial<AgentLLMSettings>>({})
+  const [terminal, setTerminal] = useState<Partial<TerminalSettings>>({})
   const [models, setModels] = useState<AvailableModel[]>([])
+  const [shells, setShells] = useState<ShellInfo[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
 
@@ -52,11 +59,17 @@ export function AgentGeneralSettings({ http, onLog }: AgentGeneralSettingsProps)
     if (!http) return
     setLoading(true)
     try {
-      const [tools, modelsRes] = await Promise.all([http.getAgentTools(), http.getAgentModels()])
+      const [tools, modelsRes, shellsRes] = await Promise.all([
+        http.getAgentTools(),
+        http.getAgentModels(),
+        http.getAvailableShells()
+      ])
       setAgent(tools.agent ?? {})
+      setTerminal(tools.terminal ?? {})
       setModels(modelsRes.models ?? [])
+      setShells(shellsRes.shells ?? [])
     } catch (e) {
-      onLog?.(`加载 Agent LLM 配置失败: ${e}`, 'error')
+      onLog?.(`加载 Agent 配置失败: ${e}`, 'error')
     } finally {
       setLoading(false)
     }
@@ -70,7 +83,7 @@ export function AgentGeneralSettings({ http, onLog }: AgentGeneralSettingsProps)
     if (!http) return
     setSaving(true)
     try {
-      await http.updateAgentTools({ agent })
+      await http.updateAgentTools({ agent, terminal })
       toast.success('Agent 设置已保存')
       void load()
     } catch (e) {
@@ -267,6 +280,32 @@ export function AgentGeneralSettings({ http, onLog }: AgentGeneralSettingsProps)
                   }
                 }))
               }
+            />
+          </Form.Item>
+        </Form>
+      </div>
+
+      {/* 终端设置 */}
+      <div className={styles.serverCard} style={{ marginTop: 12 }}>
+        <div className={styles.sectionTitle}>
+          <Terminal size={16} />
+          终端
+        </div>
+        <p className="form-hint" style={{ marginTop: 6, marginBottom: 10 }}>
+          选择 Agent 创建终端时使用的默认 Shell
+        </p>
+        <Form className="compact-form" gap={8} layout="vertical">
+          <Form.Item label="默认 Shell" extra="留空则自动检测系统最佳 Shell">
+            <Select
+              options={[
+                { label: '自动检测', value: '' },
+                ...shells.map((s) => ({
+                  label: `${s.label}${s.isDefault ? '（推荐）' : ''}`,
+                  value: s.path
+                }))
+              ]}
+              value={terminal.defaultShell ?? ''}
+              onChange={(v) => setTerminal((t) => ({ ...t, defaultShell: v || undefined }))}
             />
           </Form.Item>
         </Form>

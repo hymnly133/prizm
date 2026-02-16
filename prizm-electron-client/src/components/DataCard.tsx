@@ -1,8 +1,8 @@
 /**
  * DataCard - 大卡片展示便签/任务/文档，支持点击、删除、完成等操作
  */
-import { memo } from 'react'
-import { Button, Markdown, Tag } from '@lobehub/ui'
+import { memo, useMemo } from 'react'
+import { Button, Tag } from '@lobehub/ui'
 import { Icon } from '@lobehub/ui'
 import type { FileItem } from '../hooks/useFileList'
 import type { TodoList, Document } from '@prizm/client-core'
@@ -28,10 +28,24 @@ interface DataCardProps {
   onDone?: () => void
 }
 
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/[#*_~`>|[\]()!-]/g, '')
+    .replace(/\n+/g, ' ')
+    .trim()
+}
+
 function DataCard({ file, onClick, onDelete, onDone }: DataCardProps) {
   const IconComponent = getKindIcon(file.kind)
   const isTodoList = file.kind === 'todoList'
   const todoList = file.raw as TodoList | undefined
+
+  const previewText = useMemo(() => {
+    if (file.kind !== 'document') return ''
+    const raw = ((file.raw as Document).content ?? '').slice(0, 200)
+    const stripped = stripMarkdown(raw)
+    return stripped.length > 120 ? stripped.slice(0, 120) + '…' : stripped || '(空)'
+  }, [file.kind, (file.raw as Document).content])
 
   return (
     <div
@@ -60,13 +74,7 @@ function DataCard({ file, onClick, onDelete, onDone }: DataCardProps) {
         {file.kind === 'document' && (
           <>
             <h3 className="data-card__title">{(file.raw as Document).title || '无标题'}</h3>
-            <div className="data-card__preview">
-              <Markdown>
-                {((file.raw as Document).content ?? '')
-                  .slice(0, 120)
-                  .concat(((file.raw as Document).content ?? '').length > 120 ? '…' : '') || '(空)'}
-              </Markdown>
-            </div>
+            <p className="data-card__preview data-card__desc">{previewText}</p>
           </>
         )}
         {file.kind === 'todoList' && (

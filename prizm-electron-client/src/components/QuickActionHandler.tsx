@@ -8,7 +8,7 @@ import { useLogsContext } from '../context/LogsContext'
 export function QuickActionHandler({
   setActivePage
 }: {
-  setActivePage: (page: 'work' | 'agent' | 'settings' | 'test' | 'user') => void
+  setActivePage: (page: 'home' | 'work' | 'agent' | 'settings' | 'test' | 'user') => void
 }) {
   const { manager } = usePrizmContext()
   const { currentScope } = useScope()
@@ -26,7 +26,10 @@ export function QuickActionHandler({
             return
           }
           try {
-            const doc = await http.createDocument({ title: '未命名文档', content: '' }, currentScope)
+            const doc = await http.createDocument(
+              { title: '未命名文档', content: '' },
+              currentScope
+            )
             openFileAtWork('document', doc.id)
             setActivePage('work')
             addLog('已创建文档', 'success')

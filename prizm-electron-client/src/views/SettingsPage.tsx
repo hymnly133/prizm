@@ -1,6 +1,9 @@
+import { memo } from 'react'
 import { Button, Checkbox, Form, Input, Segmented } from '@lobehub/ui'
 import { McpSettings } from '../components/McpSettings'
 import { AgentGeneralSettings } from '../components/AgentGeneralSettings'
+import { CommandsSettings } from '../components/CommandsSettings'
+import { SkillsSettings } from '../components/SkillsSettings'
 import { ScopeManagement } from '../components/ScopeManagement'
 import { useClientSettings } from '../context/ClientSettingsContext'
 import { EVENT_TYPES, buildServerUrl, getEventLabel } from '@prizm/client-core'
@@ -9,7 +12,7 @@ import { useEffect, useState } from 'react'
 import { useLogsContext } from '../context/LogsContext'
 import { usePrizmContext } from '../context/PrizmContext'
 
-export default function SettingsPage() {
+function SettingsPage() {
   const {
     config,
     manager,
@@ -268,6 +271,12 @@ export default function SettingsPage() {
 
       {config?.api_key && <McpSettings http={manager?.getHttpClient() ?? null} onLog={addLog} />}
 
+      {config?.api_key && (
+        <CommandsSettings http={manager?.getHttpClient() ?? null} onLog={addLog} />
+      )}
+
+      {config?.api_key && <SkillsSettings http={manager?.getHttpClient() ?? null} onLog={addLog} />}
+
       <div className="settings-section">
         <div className="settings-section-header">
           <h2>快捷操作</h2>
@@ -332,3 +341,5 @@ export default function SettingsPage() {
     </section>
   )
 }
+
+export default memo(SettingsPage)

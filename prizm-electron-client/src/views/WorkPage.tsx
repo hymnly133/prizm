@@ -1,7 +1,7 @@
 /**
  * WorkPage - 工作页：中间大卡片展示便签/任务/文档，现代交互
  */
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback, memo } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import {
   ActionIcon,
@@ -21,7 +21,7 @@ import FileDetailView from '../components/FileDetailView'
 import DataCard from '../components/DataCard'
 import { CardHoverOverlay, type HoveredCardState } from '../components/DataCardHoverMenu'
 import { useScope } from '../hooks/useScope'
-import { useFileList } from '../hooks/useFileList'
+import { useFileList, docToFileItem, todoToFileItem } from '../hooks/useFileList'
 import { usePrizmContext } from '../context/PrizmContext'
 import { useLogsContext } from '../context/LogsContext'
 import { useWorkNavigation } from '../context/WorkNavigationContext'
@@ -39,12 +39,13 @@ const VIEW_MODE_KEY = 'prizm-work-view-mode'
 const EASE_SMOOTH = [0.33, 1, 0.68, 1] as const
 const EASE_OUT_SMOOTH = [0.16, 1, 0.3, 1] as const
 
-export default function WorkPage() {
+function WorkPage() {
   const { modal } = App.useApp()
   const { manager } = usePrizmContext()
   const { addLog } = useLogsContext()
   const { currentScope, scopes, scopesLoading, getScopeLabel, setScope } = useScope()
-  const { fileList, fileListLoading, refreshFileList } = useFileList(currentScope)
+  const { fileList, fileListLoading, refreshFileList, optimisticAdd, optimisticRemove } =
+    useFileList(currentScope)
   const { pendingWorkFile, consumePendingWorkFile } = useWorkNavigation()
 
   const [activeTab, setActiveTab] = useState('files')
@@ -71,6 +72,7 @@ export default function WorkPage() {
     content?: string
     loading?: boolean
   } | null>(null)
+  const filePreviewFetchingRef = useRef<string | null>(null)
   const [hoveredCard, setHoveredCard] = useState<HoveredCardState | null>(null)
   const hoverHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -81,10 +83,12 @@ export default function WorkPage() {
     }
   }, [])
 
+  const clearHoveredCard = useCallback(() => setHoveredCard(null), [])
+
   const scheduleHoverHide = useCallback(() => {
     clearHoverHideTimeout()
-    hoverHideTimeoutRef.current = setTimeout(() => setHoveredCard(null), 200)
-  }, [clearHoverHideTimeout])
+    hoverHideTimeoutRef.current = setTimeout(clearHoveredCard, 200)
+  }, [clearHoverHideTimeout, clearHoveredCard])
 
   useEffect(() => {
     return () => clearHoverHideTimeout()
@@ -97,24 +101,32 @@ export default function WorkPage() {
 
   useEffect(() => {
     if (!genericFilePreview || genericFilePreview.content !== undefined) return
+    if (filePreviewFetchingRef.current === genericFilePreview.path) return
     const http = manager?.getHttpClient()
     if (!http) return
+    const targetPath = genericFilePreview.path
+    filePreviewFetchingRef.current = targetPath
     setGenericFilePreview((prev) => prev && { ...prev, loading: true })
     http
-      .fileRead(genericFilePreview.path, currentScope)
+      .fileRead(targetPath, currentScope)
       .then((result) => {
         setGenericFilePreview((prev) =>
-          prev && prev.path === genericFilePreview.path
+          prev && prev.path === targetPath
             ? { ...prev, content: result.content, loading: false }
             : prev
         )
       })
       .catch(() => {
         setGenericFilePreview((prev) =>
-          prev && prev.path === genericFilePreview.path
+          prev && prev.path === targetPath
             ? { ...prev, content: '(无法读取文件内容)', loading: false }
             : prev
         )
+      })
+      .finally(() => {
+        if (filePreviewFetchingRef.current === targetPath) {
+          filePreviewFetchingRef.current = null
+        }
       })
   }, [genericFilePreview, manager, currentScope])
 
@@ -137,6 +149,15 @@ export default function WorkPage() {
     return fileList.filter((f) => categoryFilter[f.kind])
   }, [fileList, categoryFilter])
 
+  const todoItems = useMemo(
+    () => filteredFileList.filter((f) => f.kind === 'todoList'),
+    [filteredFileList]
+  )
+  const docItems = useMemo(
+    () => filteredFileList.filter((f) => f.kind !== 'todoList'),
+    [filteredFileList]
+  )
+
   const selectedFileData = useMemo(() => {
     if (!selectedFile) return null
     const { kind, id } = selectedFile
@@ -152,7 +173,7 @@ export default function WorkPage() {
     if (!http) return
     try {
       const doc = await http.createDocument({ title: '未命名', content: '' }, currentScope)
-      await refreshFileList(currentScope, { silent: true })
+      optimisticAdd(docToFileItem(doc))
       setSelectedFile({ kind: 'document', id: doc.id })
       addLog('已创建文档', 'success')
     } catch (e) {
@@ -165,7 +186,7 @@ export default function WorkPage() {
     if (!http) return
     try {
       const doc = await http.createDocument({ title: '未命名文档', content: '' }, currentScope)
-      await refreshFileList(currentScope, { silent: true })
+      optimisticAdd(docToFileItem(doc))
       setSelectedFile({ kind: 'document', id: doc.id })
       addLog('已创建文档', 'success')
     } catch (e) {
@@ -178,7 +199,7 @@ export default function WorkPage() {
     if (!http) return
     try {
       const todoList = await http.createTodoList(currentScope, { title: '待办' })
-      await refreshFileList(currentScope, { silent: true })
+      optimisticAdd(todoToFileItem(todoList))
       setSelectedFile({ kind: 'todoList', id: todoList.id })
       addLog('已新建待办列表', 'success')
     } catch (e) {
@@ -201,7 +222,6 @@ export default function WorkPage() {
         await http.updateTodoListTitle(currentScope, f.id, payload.title)
         await http.replaceTodoItems(currentScope, f.id, payload.items)
       }
-      await refreshFileList(currentScope, { silent: true })
       addLog('已保存', 'success')
     } catch (e) {
       addLog(`保存失败: ${String(e)}`, 'error')
@@ -212,16 +232,23 @@ export default function WorkPage() {
   async function doDeleteFile(file: FileItem) {
     if (!manager) return
     const http = manager.getHttpClient()
-    if (file.kind === 'todoList') {
-      await http.deleteTodoList(currentScope, file.id)
-    } else {
-      await http.deleteDocument(file.id, currentScope)
-    }
+    // 乐观删除：立即从 UI 移除
+    optimisticRemove(file.kind, file.id)
     if (selectedFile?.kind === file.kind && selectedFile?.id === file.id) {
       setSelectedFile(null)
     }
-    await refreshFileList(currentScope, { silent: true })
-    addLog('已删除', 'success')
+    try {
+      if (file.kind === 'todoList') {
+        await http.deleteTodoList(currentScope, file.id)
+      } else {
+        await http.deleteDocument(file.id, currentScope)
+      }
+      addLog('已删除', 'success')
+    } catch (e) {
+      // 删除失败时恢复
+      optimisticAdd(file)
+      throw e
+    }
   }
 
   async function onDeleteFile() {
@@ -277,7 +304,10 @@ export default function WorkPage() {
     handleViewModeChange('folder')
   }, [handleViewModeChange])
 
-  const refreshScope = () => refreshFileList(currentScope)
+  const refreshScope = useCallback(
+    () => refreshFileList(currentScope),
+    [currentScope, refreshFileList]
+  )
   const shouldReduceMotion = useReducedMotion()
 
   async function onTodoItemStatus(itemId: string, status: string) {
@@ -286,7 +316,6 @@ export default function WorkPage() {
       await manager
         .getHttpClient()
         .updateTodoItem(itemId, { status: status as TodoItemStatus }, currentScope)
-      await refreshFileList(currentScope, { silent: true })
       toast.success(`已设为 ${STATUS_LABELS[status as TodoItemStatus] ?? status}`)
       addLog('已更新 TODO 状态', 'success')
     } catch (e) {
@@ -299,36 +328,27 @@ export default function WorkPage() {
     () => ({
       enter: {
         opacity: 0,
-        scale: 0.96,
-        ...(shouldReduceMotion ? {} : { y: 8 })
+        scale: 0.95,
+        ...(shouldReduceMotion ? {} : { y: 6 })
       },
       animate: {
         opacity: 1,
         scale: 1,
         y: 0,
         transition: {
-          duration: shouldReduceMotion ? 0.1 : 0.28,
+          duration: shouldReduceMotion ? 0.1 : 0.22,
           ease: EASE_SMOOTH
         }
       },
       exit: {
         opacity: 0,
-        scale: 0.96,
-        ...(shouldReduceMotion ? {} : { y: -8 }),
+        scale: 0.95,
         transition: {
-          duration: shouldReduceMotion ? 0.05 : 0.36,
+          duration: shouldReduceMotion ? 0.05 : 0.2,
           ease: EASE_OUT_SMOOTH
         }
       }
     }),
-    [shouldReduceMotion]
-  )
-
-  const layoutTransition = useMemo(
-    () =>
-      shouldReduceMotion
-        ? { layout: { duration: 0 } }
-        : { layout: { duration: 0.32, ease: EASE_SMOOTH } },
     [shouldReduceMotion]
   )
 
@@ -425,17 +445,15 @@ export default function WorkPage() {
             ) : (
               <CardHoverOverlay
                 hoveredCard={hoveredCard}
-                onClose={() => setHoveredCard(null)}
+                onClose={clearHoveredCard}
                 onMenuEnter={clearHoverHideTimeout}
               >
                 <div className="work-page__cards-grid work-page__cards-grid--variable">
-                  <AnimatePresence mode="popLayout" initial={false}>
-                    {filteredFileList.map((file) => (
+                  <AnimatePresence initial={false}>
+                    {todoItems.map((file) => (
                       <motion.div
                         key={`${file.kind}-${file.id}`}
                         className={`work-page__card-item work-page__card-item--${file.kind}`}
-                        layout
-                        transition={layoutTransition}
                         variants={cardVariants}
                         initial="enter"
                         animate="animate"
@@ -451,11 +469,50 @@ export default function WorkPage() {
                             mouseY: e.clientY
                           })
                         }}
-                        onMouseMove={(e) => {
-                          setHoveredCard((prev) => {
-                            if (!prev || prev.file !== file) return prev
-                            if (Math.abs(prev.mouseY - e.clientY) < 4) return prev
-                            return { ...prev, mouseY: e.clientY }
+                        onMouseLeave={scheduleHoverHide}
+                      >
+                        <DataCard
+                          file={file}
+                          onClick={() => onSelectFile({ kind: file.kind, id: file.id })}
+                          onDelete={() => handleDeleteFile(file)}
+                        />
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                </div>
+
+                <AnimatePresence initial={false}>
+                  {todoItems.length > 0 && docItems.length > 0 && (
+                    <motion.div
+                      key="section-divider"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1, transition: { duration: 0.18 } }}
+                      exit={{ opacity: 0, transition: { duration: 0.2 } }}
+                    >
+                      <div className="work-page__section-divider" />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <div className="work-page__cards-grid work-page__cards-grid--variable">
+                  <AnimatePresence initial={false}>
+                    {docItems.map((file) => (
+                      <motion.div
+                        key={`${file.kind}-${file.id}`}
+                        className={`work-page__card-item work-page__card-item--${file.kind}`}
+                        variants={cardVariants}
+                        initial="enter"
+                        animate="animate"
+                        exit="exit"
+                        style={{ position: 'relative' }}
+                        onMouseEnter={(e) => {
+                          clearHoverHideTimeout()
+                          const rect = e.currentTarget.getBoundingClientRect()
+                          setHoveredCard({
+                            file,
+                            scope: currentScope,
+                            anchorRect: rect,
+                            mouseY: e.clientY
                           })
                         }}
                         onMouseLeave={scheduleHoverHide}
@@ -549,3 +606,5 @@ export default function WorkPage() {
     </section>
   )
 }
+
+export default memo(WorkPage)

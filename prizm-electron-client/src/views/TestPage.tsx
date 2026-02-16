@@ -1,12 +1,12 @@
 import { Button, Flexbox, Input } from '@lobehub/ui'
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { useLogsContext } from '../context/LogsContext'
 import { usePrizmContext, useSyncEventContext } from '../context/PrizmContext'
 import { useScope } from '../hooks/useScope'
 import type { EventType } from '@prizm/client-core'
 import { setLastSyncEvent } from '../events/syncEventStore'
 
-export default function TestPage() {
+function TestPage() {
   const { manager } = usePrizmContext()
   const { currentScope } = useScope()
   const { lastSyncEvent } = useSyncEventContext()
@@ -229,3 +229,5 @@ export default function TestPage() {
     </section>
   )
 }
+
+export default memo(TestPage)

@@ -20,7 +20,7 @@ import {
   ChevronDown,
   type LucideIcon
 } from 'lucide-react'
-import { useState } from 'react'
+import { useState, memo } from 'react'
 import type { ToolCallRecord } from '@prizm/client-core'
 import { getToolDisplayName, getToolMetadata, getToolRender, isPrizmTool } from '@prizm/client-core'
 import type { FileKind } from '../../hooks/useFileList'
@@ -105,7 +105,8 @@ function parseArgsSummary(argsStr: string): string {
     const obj = JSON.parse(argsStr || '{}') as Record<string, unknown>
     if (obj.query) return `搜索: ${String(obj.query).slice(0, 30)}`
     if (obj.path) return String(obj.path).slice(0, 40)
-    if (obj.from && obj.to) return `${String(obj.from).slice(0, 20)} → ${String(obj.to).slice(0, 20)}`
+    if (obj.from && obj.to)
+      return `${String(obj.from).slice(0, 20)} → ${String(obj.to).slice(0, 20)}`
     if (obj.title) return String(obj.title).slice(0, 30)
     if (obj.content) return String(obj.content).slice(0, 40)
     if (obj.documentId) return `文档 ${String(obj.documentId).slice(0, 12)}…`
@@ -117,7 +118,7 @@ function parseArgsSummary(argsStr: string): string {
   }
 }
 
-export function ToolCallCard({ tc }: ToolCallCardProps) {
+export const ToolCallCard = memo(function ToolCallCard({ tc }: ToolCallCardProps) {
   /* 外部注册的自定义渲染器优先（MCP 扩展等） */
   const customRender = getToolRender(tc.name)
   if (customRender) return <>{customRender({ tc })}</>
@@ -185,6 +186,20 @@ export function ToolCallCard({ tc }: ToolCallCardProps) {
       fileRef={fileRef}
       onOpenFile={openFileAtWork}
     />
+  )
+}, toolCallPropsEqual)
+
+/** 浅比较 ToolCallCard 的关键属性，避免流式更新时不必要的重渲染 */
+function toolCallPropsEqual(prev: ToolCallCardProps, next: ToolCallCardProps): boolean {
+  const a = prev.tc
+  const b = next.tc
+  return (
+    a.id === b.id &&
+    a.name === b.name &&
+    a.arguments === b.arguments &&
+    a.result === b.result &&
+    a.status === b.status &&
+    a.isError === b.isError
   )
 }
 

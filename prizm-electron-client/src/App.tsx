@@ -1,7 +1,7 @@
 import { ActionIcon, Icon, Segmented } from '@lobehub/ui'
 import type { NotificationPayload } from '@prizm/client-core'
 import type { LucideIcon } from 'lucide-react'
-import { Bot, FlaskConical, Gem, LayoutDashboard, Settings, User } from 'lucide-react'
+import { Bot, FlaskConical, Gem, Home, LayoutDashboard, Settings, User } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { ClientSettingsProvider } from './context/ClientSettingsContext'
 import { LogsProvider, useLogsContext } from './context/LogsContext'
@@ -13,12 +13,13 @@ import { useAgentSending } from './events/agentBackgroundStore'
 import { AppHeader } from './components/layout'
 import { QuickActionHandler } from './components/QuickActionHandler'
 import AgentPage from './views/AgentPage'
+import HomePage from './views/HomePage'
 import SettingsPage from './views/SettingsPage'
 import TestPage from './views/TestPage'
 import UserPage from './views/UserPage'
 import WorkPage from './views/WorkPage'
 
-type PageKey = 'work' | 'agent' | 'user' | 'settings' | 'test'
+type PageKey = 'home' | 'work' | 'agent' | 'user' | 'settings' | 'test'
 
 const STATUS_LABELS: Record<'connected' | 'disconnected' | 'connecting' | 'error', string> = {
   connected: '已连接',
@@ -28,6 +29,7 @@ const STATUS_LABELS: Record<'connected' | 'disconnected' | 'connecting' | 'error
 }
 
 const NAV_ITEMS: Array<{ key: PageKey; label: string; icon: LucideIcon }> = [
+  { key: 'home', label: '主页', icon: Home },
   { key: 'work', label: '工作', icon: LayoutDashboard },
   { key: 'agent', label: 'Agent', icon: Bot },
   { key: 'user', label: '用户', icon: User }
@@ -36,7 +38,7 @@ const NAV_ITEMS: Array<{ key: PageKey; label: string; icon: LucideIcon }> = [
 function AppContent() {
   const { status, loadConfig, initializePrizm, disconnect } = usePrizmContext()
   const { addLog } = useLogsContext()
-  const [activePage, setActivePage] = useState<PageKey>('work')
+  const [activePage, setActivePage] = useState<PageKey>('home')
   const navigateToWork = useCallback(() => setActivePage('work'), [])
   const navigateToAgent = useCallback(() => setActivePage('agent'), [])
   const agentSending = useAgentSending()
@@ -73,7 +75,8 @@ function AppContent() {
     }
   }, [addLog, loadConfig, initializePrizm, disconnect])
 
-  /** Segmented 导航选项（带图标 + Agent 后台指示器） */
+  /** Segmented 导航选项（带图标 + Agent 后台指示器）
+   *  仅依赖 agentSending，不依赖 activePage，避免每次切页重建 JSX 导致 Segmented 重渲染 */
   const navOptions = useMemo(
     () =>
       NAV_ITEMS.map((item) => ({
@@ -81,14 +84,12 @@ function AppContent() {
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
             <Icon icon={item.icon} size={14} />
             {item.label}
-            {item.key === 'agent' && agentSending && activePage !== 'agent' && (
-              <span className="agent-bg-indicator" />
-            )}
+            {item.key === 'agent' && agentSending && <span className="agent-bg-indicator" />}
           </span>
         ),
         value: item.key
       })),
-    [agentSending, activePage]
+    [agentSending]
   )
 
   /** Segmented value：仅在主导航页时高亮，设置/测试页不匹配任何选项 */
@@ -138,13 +139,26 @@ function AppContent() {
           <div className="app-main">
             <div
               className={`page-keep-alive${
+                activePage !== 'home' ? ' page-keep-alive--hidden' : ''
+              }`}
+            >
+              <HomePage onNavigateToAgent={navigateToAgent} onNavigateToWork={navigateToWork} />
+            </div>
+            <div
+              className={`page-keep-alive${
                 activePage !== 'work' ? ' page-keep-alive--hidden' : ''
               }`}
             >
               <WorkPage />
             </div>
             <SyncEventProvider>
-              <AgentPage hidden={activePage !== 'agent'} />
+              <div
+                className={`page-keep-alive${
+                  activePage !== 'agent' ? ' page-keep-alive--hidden' : ''
+                }`}
+              >
+                <AgentPage />
+              </div>
             </SyncEventProvider>
             <div
               className={`page-keep-alive${
