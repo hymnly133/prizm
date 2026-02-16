@@ -62,21 +62,16 @@ export class ClientRegistry {
       this.clients.clear()
       let migrated = false
       for (const r of arr) {
-        // 迁移：仅有 default 的客户端补充 online，以支持 scope 切换
-        if (
-          Array.isArray(r.allowedScopes) &&
-          r.allowedScopes.length === 1 &&
-          r.allowedScopes[0] === 'default' &&
-          !r.allowedScopes.includes(ONLINE_SCOPE)
-        ) {
-          r.allowedScopes = ['default', ONLINE_SCOPE]
+        // 迁移：online 是公共 scope，确保所有客户端都包含
+        if (Array.isArray(r.allowedScopes) && !r.allowedScopes.includes(ONLINE_SCOPE)) {
+          r.allowedScopes.push(ONLINE_SCOPE)
           migrated = true
         }
         this.clients.set(r.clientId, r)
       }
       if (migrated) {
         this.save()
-        log.info("Migrated clients: added 'online' scope to clients with only 'default'")
+        log.info("Migrated clients: ensured all clients have 'online' scope")
       }
     } catch (e) {
       log.error('Failed to load:', e)
@@ -89,14 +84,40 @@ export class ClientRegistry {
   }
 
   /**
-   * 注册新客户端
+   * 按名称查找已有客户端（用于复用 clientId，避免记忆丢失）
+   */
+  findByName(name: string): ClientRecord | null {
+    for (const record of this.clients.values()) {
+      if (record.name === name) return record
+    }
+    return null
+  }
+
+  /**
+   * 注册客户端。
+   * 如果同名客户端已存在，则复用其 clientId（重新生成 apiKey、更新 scopes），
+   * 避免因 clientId 变化导致记忆等用户数据丢失。
    */
   register(name: string, requestedScopes: string[]): RegisterResult {
+    const scopes = requestedScopes.length > 0 ? requestedScopes : ['default']
+
+    // 检查同名客户端是否已存在
+    const existing = this.findByName(name)
+    if (existing) {
+      // 复用已有 clientId，只重新生成 apiKey 并更新 scopes
+      const apiKey = generateApiKey()
+      existing.apiKeyHash = hashApiKey(apiKey)
+      existing.allowedScopes = scopes
+      this.save()
+      log.info(`Re-registered existing client "${name}" (clientId=${existing.clientId}), apiKey refreshed`)
+      return { clientId: existing.clientId, apiKey }
+    }
+
+    // 新客户端
     const clientId = generateId()
     const apiKey = generateApiKey()
     const apiKeyHash = hashApiKey(apiKey)
 
-    const scopes = requestedScopes.length > 0 ? requestedScopes : ['default']
     const record: ClientRecord = {
       clientId,
       apiKeyHash,

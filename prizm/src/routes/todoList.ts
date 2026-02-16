@@ -10,7 +10,7 @@ import type { TodoItem, TodoItemStatus, TodoList } from '../types'
 import { EVENT_TYPES } from '../websocket/types'
 import { toErrorResponse } from '../errors'
 import { createLogger } from '../logger'
-import { getScopeForCreate, requireScopeForList } from '../scopeUtils'
+import { ensureStringParam, getScopeForCreate, requireScopeForList } from '../scopeUtils'
 import { parseTodoItemsFromInput } from '../utils/todoItems'
 
 const log = createLogger('TodoList')
@@ -196,7 +196,7 @@ export function createTodoListRoutes(router: Router, adapter?: ITodoListAdapter)
       }
       const scope = requireScopeForList(req, res)
       if (!scope) return
-      const listId = req.params.listId
+      const listId = ensureStringParam(req.params.listId)
       if (!listId) return res.status(400).json({ error: 'listId required' })
       const todoList = await adapter.getTodoList(scope, listId)
       if (!todoList) return res.status(404).json({ error: 'TodoList not found' })
@@ -215,7 +215,7 @@ export function createTodoListRoutes(router: Router, adapter?: ITodoListAdapter)
         return res.status(503).json({ error: 'TodoList adapter not available' })
       }
       const scope = getScopeForCreate(req)
-      const listId = req.params.listId
+      const listId = ensureStringParam(req.params.listId)
       if (!listId) return res.status(400).json({ error: 'listId required' })
       const { title } = req.body ?? {}
       if (typeof title !== 'string') {
@@ -239,7 +239,7 @@ export function createTodoListRoutes(router: Router, adapter?: ITodoListAdapter)
       }
       const scope = requireScopeForList(req, res)
       if (!scope) return
-      const listId = req.params.listId
+      const listId = ensureStringParam(req.params.listId)
       if (!listId) return res.status(400).json({ error: 'listId required' })
       await adapter.deleteTodoList(scope, listId)
       broadcastTodoListDeleted(req, scope, listId)
@@ -258,7 +258,7 @@ export function createTodoListRoutes(router: Router, adapter?: ITodoListAdapter)
         return res.status(503).json({ error: 'TodoList adapter not available' })
       }
       const scope = getScopeForCreate(req)
-      const listId = req.params.listId
+      const listId = ensureStringParam(req.params.listId)
       if (!listId) return res.status(400).json({ error: 'listId required' })
       const { title, description, status } = req.body ?? {}
       if (typeof title !== 'string' || !title.trim()) {
@@ -288,7 +288,7 @@ export function createTodoListRoutes(router: Router, adapter?: ITodoListAdapter)
         return res.status(503).json({ error: 'TodoList adapter not available' })
       }
       const scope = getScopeForCreate(req)
-      const listId = req.params.listId
+      const listId = ensureStringParam(req.params.listId)
       if (!listId) return res.status(400).json({ error: 'listId required' })
       const { items } = req.body ?? {}
       if (!Array.isArray(items)) {
@@ -313,7 +313,7 @@ export function createTodoListRoutes(router: Router, adapter?: ITodoListAdapter)
         return res.status(503).json({ error: 'TodoList adapter not available' })
       }
       const scope = getScopeForCreate(req)
-      const itemId = req.params.itemId
+      const itemId = ensureStringParam(req.params.itemId)
       if (!itemId) return res.status(400).json({ error: 'item id required' })
       const { status, title, description } = req.body ?? {}
       const payload: { status?: TodoItemStatus; title?: string; description?: string } = {}
@@ -340,7 +340,7 @@ export function createTodoListRoutes(router: Router, adapter?: ITodoListAdapter)
         return res.status(503).json({ error: 'TodoList adapter not available' })
       }
       const scope = getScopeForCreate(req)
-      const itemId = req.params.itemId
+      const itemId = ensureStringParam(req.params.itemId)
       if (!itemId) return res.status(400).json({ error: 'item id required' })
       const todoList = await adapter.deleteTodoItem(scope, itemId)
       broadcastTodoItemDeleted(req, scope, itemId)

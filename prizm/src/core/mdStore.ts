@@ -518,7 +518,6 @@ function parseAgentSession(
   sessionIdHint?: string
 ): AgentSession | null {
   const id = typeof d.id === 'string' ? d.id : sessionIdHint ?? path.basename(fp, EXT)
-  const title = typeof d.title === 'string' ? d.title : '新会话'
   const scope = typeof d.scope === 'string' ? d.scope : ''
   const createdAt = (d.createdAt as number) ?? 0
   const updatedAt = (d.updatedAt as number) ?? 0
@@ -532,7 +531,6 @@ function parseAgentSession(
     typeof d.compressedThroughRound === 'number' ? d.compressedThroughRound : undefined
   return {
     id,
-    title,
     scope,
     messages,
     createdAt,
@@ -616,7 +614,6 @@ export function writeAgentSessions(
     const frontmatter: Record<string, unknown> = {
       prizm_type: 'agent_session',
       id: s.id,
-      title: s.title ?? '新会话',
       scope: scope || s.scope,
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
@@ -714,7 +711,7 @@ export function readSessionActivities(
 export function appendSessionActivities(
   scopeRoot: string,
   sessionId: string,
-  activities: Array<Record<string, unknown> | { [key: string]: unknown }>
+  activities: unknown[]
 ): void {
   const existing = readSessionActivities(scopeRoot, sessionId)
   const merged = [...existing, ...activities]

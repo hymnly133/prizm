@@ -54,6 +54,18 @@ const log = createLogger('Adapter')
 const TOOL_RESULT_STREAM_THRESHOLD = 500
 const TOOL_RESULT_CHUNK_SIZE = 200
 
+/** 判断是否为瞬态网络错误（可重试） */
+function isTransientError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return (
+    msg.includes('ECONNRESET') ||
+    msg.includes('ETIMEDOUT') ||
+    msg.includes('ECONNREFUSED') ||
+    msg.includes('socket hang up') ||
+    msg.includes('network timeout')
+  )
+}
+
 // ============ 默认 Sticky Notes 适配器 ============
 
 export class DefaultStickyNotesAdapter implements IStickyNotesAdapter {
@@ -288,7 +300,11 @@ export class DefaultTodoListAdapter implements ITodoListAdapter {
     return updated
   }
 
-  async replaceTodoItems(scope: string, listId: string, items: TodoItem[]): Promise<TodoList> {
+  async replaceTodoItems(
+    scope: string,
+    listId: string,
+    items: Pick<TodoItem, 'id' | 'title' | 'status' | 'description'>[]
+  ): Promise<TodoList> {
     const data = scopeStore.getScopeData(scope)
     const listIdx = (data.todoLists ?? []).findIndex((l) => l.id === listId)
     if (listIdx < 0) throw new Error(`TodoList not found: ${listId}`)
@@ -487,7 +503,6 @@ export class DefaultAgentAdapter implements IAgentAdapter {
     const now = Date.now()
     const session: AgentSession = {
       id: genUniqueId(),
-      title: '新会话',
       scope,
       messages: [],
       createdAt: now,
@@ -518,15 +533,12 @@ export class DefaultAgentAdapter implements IAgentAdapter {
   async updateSession(
     scope: string,
     id: string,
-    update: { title?: string; llmSummary?: string; compressedThroughRound?: number }
+    update: { llmSummary?: string; compressedThroughRound?: number }
   ): Promise<AgentSession> {
     const data = scopeStore.getScopeData(scope)
     const session = data.agentSessions.find((s) => s.id === id)
     if (!session) throw new Error(`Session not found: ${id}`)
 
-    if (update.title !== undefined) {
-      session.title = update.title
-    }
     if (update.llmSummary !== undefined) {
       session.llmSummary = update.llmSummary
     }
@@ -711,8 +723,9 @@ export class DefaultAgentAdapter implements IAgentAdapter {
       ]
 
       const manager = getMcpClientManager()
+
+      // 先发出所有 running 状态
       for (const tc of toolCalls) {
-        // running: 开始执行（preparing 已在 LLM 流式阶段由 toolCallPreparing 发出）
         yield {
           toolCall: {
             id: tc.id,
@@ -722,77 +735,102 @@ export class DefaultAgentAdapter implements IAgentAdapter {
             status: 'running' as const
           }
         }
-        try {
-          const args = JSON.parse(tc.arguments || '{}') as Record<string, unknown>
-          let text: string
-          let isError = false
-          if (BUILTIN_TOOL_NAMES.has(tc.name)) {
-            const result = await executeBuiltinTool(scope, tc.name, args, sessionId)
-            text = result.text
-            isError = result.isError ?? false
-          } else if (tc.name === 'tavily_web_search') {
-            const query = typeof args.query === 'string' ? args.query : ''
-            const results = await searchTavily(query)
-            text =
-              results.length > 0
-                ? results
-                    .map((r, i) => `[${i + 1}] ${r.title}\nURL: ${r.url}\n${r.content}`)
-                    .join('\n\n---\n\n')
-                : '未找到相关结果'
-          } else {
-            const toolResult = await manager.callTool(tc.name, args)
-            text =
-              toolResult.content
-                ?.map((c) => ('text' in c ? c.text : JSON.stringify(c)))
-                .join('\n') ?? ''
-            if (toolResult.isError) {
-              isError = true
-              text = `Error: ${text}`
+      }
+
+      // 并行执行所有工具调用
+      const execResults = await Promise.all(
+        toolCalls.map(async (tc) => {
+          try {
+            const args = JSON.parse(tc.arguments || '{}') as Record<string, unknown>
+            let text: string
+            let isError = false
+            if (BUILTIN_TOOL_NAMES.has(tc.name)) {
+              const result = await executeBuiltinTool(scope, tc.name, args, sessionId)
+              text = result.text
+              isError = result.isError ?? false
+            } else if (tc.name === 'tavily_web_search') {
+              const query = typeof args.query === 'string' ? args.query : ''
+              const results = await searchTavily(query)
+              text =
+                results.length > 0
+                  ? results
+                      .map((r, i) => `[${i + 1}] ${r.title}\nURL: ${r.url}\n${r.content}`)
+                      .join('\n\n---\n\n')
+                  : '未找到相关结果'
+            } else {
+              const toolResult = await manager.callTool(tc.name, args)
+              text =
+                toolResult.content
+                  ?.map((c) => ('text' in c ? c.text : JSON.stringify(c)))
+                  .join('\n') ?? ''
+              if (toolResult.isError) {
+                isError = true
+                text = `Error: ${text}`
+              }
             }
-          }
-          if (text.length >= TOOL_RESULT_STREAM_THRESHOLD) {
-            for (let i = 0; i < text.length; i += TOOL_RESULT_CHUNK_SIZE) {
-              yield {
-                toolResultChunk: {
-                  id: tc.id,
-                  chunk: text.slice(i, i + TOOL_RESULT_CHUNK_SIZE)
+            return { tc, text, isError }
+          } catch (err) {
+            // 瞬态网络错误重试一次
+            if (isTransientError(err)) {
+              await new Promise((r) => setTimeout(r, 500))
+              try {
+                const args = JSON.parse(tc.arguments || '{}') as Record<string, unknown>
+                let text: string
+                let isError = false
+                if (BUILTIN_TOOL_NAMES.has(tc.name)) {
+                  const result = await executeBuiltinTool(scope, tc.name, args, sessionId)
+                  text = result.text
+                  isError = result.isError ?? false
+                } else {
+                  const toolResult = await manager.callTool(tc.name, args)
+                  text =
+                    toolResult.content
+                      ?.map((c) => ('text' in c ? c.text : JSON.stringify(c)))
+                      .join('\n') ?? ''
+                  if (toolResult.isError) {
+                    isError = true
+                    text = `Error: ${text}`
+                  }
                 }
+                return { tc, text, isError }
+              } catch (retryErr) {
+                const errText = retryErr instanceof Error ? retryErr.message : String(retryErr)
+                return { tc, text: `Error: ${errText}`, isError: true }
+              }
+            }
+            const errText = err instanceof Error ? err.message : String(err)
+            return { tc, text: `Error: ${errText}`, isError: true }
+          }
+        })
+      )
+
+      // 按原始顺序 yield 结果（保持消息顺序一致性）
+      for (const { tc, text, isError } of execResults) {
+        if (text.length >= TOOL_RESULT_STREAM_THRESHOLD) {
+          for (let i = 0; i < text.length; i += TOOL_RESULT_CHUNK_SIZE) {
+            yield {
+              toolResultChunk: {
+                id: tc.id,
+                chunk: text.slice(i, i + TOOL_RESULT_CHUNK_SIZE)
               }
             }
           }
-          yield {
-            toolCall: {
-              id: tc.id,
-              name: tc.name,
-              arguments: tc.arguments,
-              result: text,
-              isError,
-              status: 'done' as const
-            }
-          }
-          currentMessages.push({
-            role: 'tool',
-            tool_call_id: tc.id,
-            content: text
-          })
-        } catch (err) {
-          const errText = err instanceof Error ? err.message : String(err)
-          yield {
-            toolCall: {
-              id: tc.id,
-              name: tc.name,
-              arguments: tc.arguments,
-              result: `Error: ${errText}`,
-              isError: true,
-              status: 'done' as const
-            }
-          }
-          currentMessages.push({
-            role: 'tool',
-            tool_call_id: tc.id,
-            content: `Error: ${errText}`
-          })
         }
+        yield {
+          toolCall: {
+            id: tc.id,
+            name: tc.name,
+            arguments: tc.arguments,
+            result: text,
+            isError,
+            status: 'done' as const
+          }
+        }
+        currentMessages.push({
+          role: 'tool',
+          tool_call_id: tc.id,
+          content: text
+        })
       }
     }
   }

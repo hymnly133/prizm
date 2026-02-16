@@ -112,11 +112,11 @@ export interface ITodoListAdapter {
 
   deleteTodoItem(scope: string, itemId: string): Promise<TodoList | null>
 
-  /** 全量替换指定 list 的 items */
+  /** 全量替换指定 list 的 items（items 可以是部分字段，adapter 负责补充 createdAt/updatedAt） */
   replaceTodoItems(
     scope: string,
     listId: string,
-    items: Array<Pick<TodoItem, 'id' | 'title' | 'description' | 'status'>>
+    items: Pick<TodoItem, 'id' | 'title' | 'status' | 'description'>[]
   ): Promise<TodoList>
 }
 
@@ -256,11 +256,11 @@ export interface IAgentAdapter {
 
   getMessages?(scope: string, sessionId: string): Promise<AgentMessage[]>
 
-  /** 更新会话（标题、对话摘要、压缩轮次等） */
+  /** 更新会话（对话摘要、压缩轮次等） */
   updateSession?(
     scope: string,
     id: string,
-    update: { title?: string; llmSummary?: string; compressedThroughRound?: number }
+    update: { llmSummary?: string; compressedThroughRound?: number }
   ): Promise<AgentSession>
 
   /** 流式对话，返回 SSE 流 */

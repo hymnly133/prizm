@@ -168,6 +168,8 @@ export function createAuthRoutes(router: Router, clientRegistry: ClientRegistry)
         ? requestedScopes.filter((s: unknown) => typeof s === 'string')
         : ['default']
       const scopes = rawScopes.length > 0 ? rawScopes : ['default']
+      // online 是公共 scope，始终包含
+      if (!scopes.includes(ONLINE_SCOPE)) scopes.push(ONLINE_SCOPE)
 
       const result = clientRegistry.register(name.trim(), scopes)
       res.status(201).json(result)
