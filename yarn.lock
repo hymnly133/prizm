@@ -2511,6 +2511,7 @@ __metadata:
   resolution: "@prizm/server@workspace:prizm"
   dependencies:
     "@modelcontextprotocol/sdk": "npm:^1.26.0"
+    "@node-rs/jieba": "npm:^2.0.1"
     "@prizm/evermemos": "workspace:*"
     "@prizm/shared": "workspace:*"
     "@types/compression": "npm:^1"
@@ -2519,6 +2520,7 @@ __metadata:
     "@types/node": "npm:^25.2.3"
     "@types/supertest": "npm:^6.0.3"
     "@types/ws": "npm:^8.18.1"
+    "@vscode/ripgrep": "npm:^1.17.0"
     better-sqlite3: "npm:^12.6.2"
     compression: "npm:^1.8.1"
     concurrently: "npm:^9.2.1"
@@ -5113,6 +5115,17 @@ __metadata:
     path-browserify: "npm:^1.0.1"
     vscode-uri: "npm:^3.0.8"
   checksum: 10c0/63127dc16c5f2eb346f53d62b6414418935cd48b81f82152c755e8bac61d28eb17ee47e6adcea535c74b84830ca5b78862b9f8fa1574dcd4abec1c50ae935a7a
+  languageName: node
+  linkType: hard
+
+"@vscode/ripgrep@npm:^1.17.0":
+  version: 1.17.0
+  resolution: "@vscode/ripgrep@npm:1.17.0"
+  dependencies:
+    https-proxy-agent: "npm:^7.0.2"
+    proxy-from-env: "npm:^1.1.0"
+    yauzl: "npm:^2.9.2"
+  checksum: 10c0/8cf41015209cf149ae6f4dd694ce375860f6b7329de71e3ee5857029b9513ee88d331d301b75de39938f7d87b79e70edd3f9789f38bfbc5da9eab56b5baea7a4
   languageName: node
   linkType: hard
 
@@ -8392,7 +8405,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"https-proxy-agent@npm:^7.0.1":
+"https-proxy-agent@npm:^7.0.1, https-proxy-agent@npm:^7.0.2":
   version: 7.0.6
   resolution: "https-proxy-agent@npm:7.0.6"
   dependencies:
@@ -13989,7 +14002,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"yauzl@npm:^2.10.0":
+"yauzl@npm:^2.10.0, yauzl@npm:^2.9.2":
   version: 2.10.0
   resolution: "yauzl@npm:2.10.0"
   dependencies:
