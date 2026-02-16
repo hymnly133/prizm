@@ -4,12 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Structure
 
-This is a monorepo containing two main packages:
+This is a Yarn workspace monorepo containing the following packages:
 
-1. **`prizm/`** - HTTP API server (`@prizm/server`) with built-in Vue 3 dashboard
-2. **`prizm-tauri-client/`** - Tauri 2.x desktop WebSocket client
+1. **`prizm/`** - HTTP API server (`@prizm/server`) with built-in Vue 3 dashboard and MCP server
+2. **`prizm-electron-client/`** - Electron 40 desktop client (`@prizm/electron-client`), React 19 + Ant Design
+3. **`prizm-client-core/`** - Shared client SDK (`@prizm/client-core`), HTTP/WebSocket client and agent tooling
+4. **`prizm-shared/`** - Shared types and constants (`@prizm/shared`), domain models, events, auth types
+5. **`packages/evermemos/`** - TypeScript memory system (`@prizm/evermemos`), LanceDB + SQLite storage
+6. **`EverMemOS/`** - Python FastAPI long-term memory system (standalone, not in TS workspace)
 
-The server provides an API layer for desktop efficiency tools including sticky notes and system notifications. It can run standalone with default adapters or integrate into larger applications.
+The server provides an API layer for desktop efficiency tools including sticky notes, todo lists, documents, clipboard history, pomodoro timer, memory management, and AI agent chat. It can run standalone with default adapters or integrate into larger applications.
 
 ## Development Commands
 
@@ -69,22 +73,31 @@ yarn dev:panel
 yarn build:panel
 ```
 
-### Tauri Client (`prizm-tauri-client/`)
+### Electron Client (`prizm-electron-client/`)
 
 ```bash
-cd prizm-tauri-client
+cd prizm-electron-client
 
-# Development mode (Tauri + frontend hot-reload)
-yarn tauri:dev
+# Development mode (Electron + Vite hot-reload)
+yarn dev
 
 # Build desktop app
-yarn tauri:build
-
-# Frontend-only dev
-yarn dev
+yarn build:electron
 
 # Type checking
 yarn typecheck
+```
+
+### Evermemos (`packages/evermemos/`)
+
+```bash
+cd packages/evermemos
+
+# Build (CJS + ESM via tsup)
+yarn build
+
+# Run tests (vitest)
+yarn test
 ```
 
 ### Environment Variables
@@ -121,29 +134,107 @@ prizm/src/
 ├── adapters/          # Adapter pattern implementations
 │   ├── interfaces.ts  # IStickyNotesAdapter, INotificationAdapter, IAgentAdapter
 │   └── default.ts     # In-memory/Console implementations
-├── llm/               # LLM providers (Zhipu, XiaomiMiMo, OpenAILike)
+├── llm/               # LLM providers and AI services
+│   ├── EverMemService.ts          # Memory system integration
+│   ├── OpenAILikeProvider.ts      # OpenAI-compatible provider
+│   ├── ZhipuProvider.ts           # Zhipu AI provider
+│   ├── XiaomiMiMoProvider.ts      # Xiaomi MiMo provider
+│   ├── builtinTools.ts            # Built-in agent tools
+│   ├── conversationSummaryService.ts
+│   └── documentSummaryService.ts
 ├── routes/            # Express route handlers
 │   ├── auth.ts        # Client registration, listing, revocation
-│   ├── agent.ts       # Agent sessions, stream chat
+│   ├── agent.ts       # Agent sessions, stream chat (SSE)
 │   ├── notes.ts       # Sticky notes CRUD with groups
-│   └── notify.ts      # Notification sending
+│   ├── notify.ts      # Notification sending
+│   ├── todoList.ts    # Todo list management
+│   ├── documents.ts   # Document CRUD
+│   ├── memory.ts      # Memory management
+│   ├── clipboard.ts   # Clipboard history
+│   ├── pomodoro.ts    # Pomodoro timer
+│   ├── search.ts      # Unified search across data types
+│   ├── settings.ts    # Settings management
+│   └── mcpConfig.ts   # MCP server configuration
 ├── auth/
 │   ├── ClientRegistry.ts   # API key management, persistence
 │   └── authMiddleware.ts   # JWT-like auth, scope validation
 ├── core/
-│   └── ScopeStore.ts  # Scope-based data isolation (JSON file storage)
+│   ├── ScopeStore.ts  # Scope-based data isolation (Markdown file storage)
+│   ├── mdStore.ts     # Markdown file read/write with frontmatter
+│   ├── PathProvider.ts
+│   ├── UserStore.ts
+│   ├── MetadataCache.ts
+│   └── ScopeRegistry.ts
+├── mcp/               # MCP (Model Context Protocol) server
+│   ├── index.ts       # MCP tool definitions (notes, todos, docs, clipboard, memories)
+│   └── stdio-bridge.ts
+├── mcp-client/        # External MCP server connections
+│   ├── McpClientManager.ts  # Connection management
+│   ├── configStore.ts
+│   └── types.ts
+├── search/            # Search service
+│   ├── searchIndexService.ts
+│   ├── miniSearchRunner.ts
+│   └── keywordSearch.ts
+├── settings/          # Agent tools configuration
 ├── websocket/
 │   ├── WebSocketServer.ts  # WS server for real-time event push
 │   ├── EventRegistry.ts    # Event subscription management
 │   └── WebSocketContext.ts # Per-connection context
 ├── server.ts          # Express app creation
 ├── index.ts           # Main exports
-└── types.ts           # TypeScript definitions
+├── types.ts           # TypeScript definitions
+├── config.ts          # Configuration
+└── logger.ts          # Logging
 
 panel/                  # Vue 3 Dashboard (served at /dashboard/)
 ├── dist/              # Built static assets
 └── ... (Vue components)
 ```
+
+### Electron Client Package (`@prizm/electron-client`)
+
+**Core Technologies:**
+
+- Electron 40 with Vite for build tooling
+- React 19 + Ant Design for UI
+- Zustand for state management
+- WebSocket for real-time server connection
+
+**Key components:**
+
+- `electron/main.ts` - Electron main process
+- `src/` - React frontend (components, hooks, views, utils)
+- IPC bridge between main process and renderer
+
+### Client Core Package (`@prizm/client-core`)
+
+Shared SDK consumed by Electron client:
+
+- `src/http/client.ts` - HTTP client for Prizm Server API
+- `src/websocket/connection.ts` - WebSocket connection management
+- `src/agent/` - Tool metadata and render registries
+- `src/types.ts` - Client-side type definitions
+
+### Shared Package (`@prizm/shared`)
+
+Cross-package type definitions and constants:
+
+- `src/constants.ts` - Shared constants
+- `src/domain.ts` - Domain models
+- `src/events.ts` - Event type definitions
+- `src/auth.ts` - Auth-related types
+- `src/websocket.ts` - WebSocket message types
+
+### Evermemos Package (`@prizm/evermemos`)
+
+TypeScript port of the EverMemOS memory system:
+
+- `src/core/MemoryManager.ts` - Memory creation, update, deletion
+- `src/core/RetrievalManager.ts` - Memory retrieval with rank fusion
+- `src/extractors/` - Memory extractors (Unified, Foresight, Profile, EventLog, Episode)
+- `src/storage/` - Storage backends (SQLite for metadata, LanceDB for vector search)
+- `src/utils/` - Rank fusion, query expansion, LLM utilities
 
 ### Adapter Pattern
 
@@ -151,6 +242,7 @@ The server decouples from underlying services via adapters. When integrating int
 
 - **IStickyNotesAdapter**: Sticky notes CRUD operations (notes and groups) - all methods optional
 - **INotificationAdapter**: System notifications - single `notify(title, body)` method
+- **IAgentAdapter**: Agent/LLM integration
 
 **Default adapters** (`src/adapters/default.ts`):
 
@@ -221,12 +313,6 @@ export function createNotesRoutes(router: Router, adapter?: IStickyNotesAdapter)
 
 Auth routes mounted separately at `/auth/*` to avoid path conflicts with the main router.
 
-### Data Persistence
-
-- Client registry: `.prizm-data/clients.json`
-- Scope data: `.prizm-data/scopes/{scope}/` 下 notes/、groups/、todo/、documents/ 等 .md 单文件
-- Auto-save: Mutations trigger immediate disk write via `ScopeStore.saveScope()`
-
 ### Server Lifecycle
 
 `PrizmServer` interface provides:
@@ -238,16 +324,28 @@ Auth routes mounted separately at `/auth/*` to avoid path conflicts with the mai
 
 Server created via `createPrizmServer(adapters, options)` with options for `port`, `host`, `enableCors`, `authEnabled`, `enableWebSocket`, `websocketPath`.
 
-### Tauri Client
+### Data Persistence
 
-**Purpose:** Desktop application that connects to Prizm Server via WebSocket for real-time notifications
+- Client registry: `.prizm-data/clients.json`
+- Scope data: `.prizm-data/scopes/{scope}/` 下 notes/、groups/、todo/、documents/ 等 .md 单文件
+- Markdown with frontmatter: Metadata stored in YAML frontmatter, content in Markdown body
+- Auto-save: Mutations trigger immediate disk write via `ScopeStore` / `mdStore`
 
-**Key components:**
+### MCP Server
 
-- `src/websocket/connection.ts` - `PrizmWebSocketClient` class for WS connection management
-- `src/notification/handler.ts` - Tauri notification integration
-- Auto-reconnect on disconnect (5s delay)
-- Auto-registers for `notification` event on connect
+The server exposes a Model Context Protocol (MCP) server providing tools for:
+
+- Sticky notes management
+- Todo list operations
+- Document operations
+- Clipboard history
+- Memory management
+
+Connected via stdio bridge (`src/mcp/stdio-bridge.ts`).
+
+### MCP Client
+
+`McpClientManager` (`src/mcp-client/`) manages connections to external MCP servers, allowing the agent to use third-party tools.
 
 ## API Endpoints
 
@@ -255,27 +353,47 @@ Server created via `createPrizmServer(adapters, options)` with options for `port
 - `/auth/*` - Register, list clients, revoke clients, list scopes (no auth)
 - `/notes` - CRUD for notes and groups (auth + scope)
 - `/notify` - Send notifications (auth, scope not applicable)
-- `/agent/*` - Agent sessions and stream chat (auth + scope)
+- `/agent/*` - Agent sessions and stream chat via SSE (auth + scope)
+- `/todo/*` - Todo list CRUD (auth + scope)
+- `/documents/*` - Document management (auth + scope)
+- `/memory/*` - Memory system operations (auth + scope)
+- `/clipboard/*` - Clipboard history (auth + scope)
+- `/pomodoro/*` - Pomodoro timer (auth + scope)
+- `/search/*` - Unified search across data types (auth + scope)
+- `/settings/*` - Settings management (auth)
+- `/mcp-config/*` - MCP server configuration (auth)
 - `/dashboard/*` - Vue 3 SPA (no auth with `X-Prizm-Panel: true`)
 
 ## TypeScript Configuration
 
-**Server:**
+**Server (`prizm/`):**
 
 - Target: ES2022
 - Module: CommonJS
 - Strict mode enabled
 - Output: `dist/` directory with `.js` and `.d.ts` files
 
-**Tauri Client:**
+**Electron Client (`prizm-electron-client/`):**
+
+- Vite + TypeScript for React frontend
+- Electron 40 for desktop shell
+- Ant Design component library
+- Zustand for state management
+
+**Shared packages (`prizm-shared/`, `prizm-client-core/`, `packages/evermemos/`):**
 
 - ES modules
-- Vite + TypeScript for frontend
-- Tauri 2.x for native desktop
+- Built with `tsup` (CJS + ESM dual output)
 
 ## Network Notes
 
 For WSL/Docker access, server must listen on `0.0.0.0` (via `--host 0.0.0.0` CLI flag or `host` option) and Windows firewall rules may need configuration.
+
+## Testing
+
+- **Server**: `cd prizm && yarn test`
+- **Evermemos**: `cd packages/evermemos && yarn test` (vitest)
+- Test files are co-located with source: `<SourceFile>.test.ts`
 
 ## Git Submodule
 

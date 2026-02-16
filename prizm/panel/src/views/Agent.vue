@@ -78,7 +78,7 @@
               "
               @click="selectSession(s)"
             >
-              {{ s.title || `会话 ${s.id.slice(0, 8)}` }}
+              {{ s.llmSummary?.trim() || `会话 ${s.id.slice(0, 8)}` }}
             </button>
             <p v-if="sessions.length === 0" class="text-sm text-zinc-500">暂无会话</p>
           </div>
