@@ -5,7 +5,7 @@
 import MiniSearch from 'minisearch'
 import type { SearchableItem, ScoredItem } from './keywordSearch'
 export type { ScoredItem } from './keywordSearch'
-import { parseKeywords } from './keywordSearch'
+import { parseKeywords, cjkTokenize } from './keywordSearch'
 
 export interface MiniSearchOptions {
   /** 匹配模式：'any' 任一关键词命中，'all' 需全部命中 */
@@ -46,6 +46,7 @@ export function miniSearch<T extends SearchableItem>(
   const ms = new MiniSearch({
     fields: ['title', 'text'],
     storeFields: [],
+    tokenize: cjkTokenize,
     searchOptions: {
       fuzzy: fuzzy > 0 ? fuzzy : undefined,
       prefix: true,

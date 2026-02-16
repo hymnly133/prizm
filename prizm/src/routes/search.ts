@@ -59,11 +59,18 @@ export function createSearchRoutes(
         return res.status(400).json({ error: 'keywords is required (string or string[])' })
       }
 
+      const tags = Array.isArray(body.tags) ? body.tags : undefined
+      const dateFrom = typeof body.dateFrom === 'number' ? body.dateFrom : undefined
+      const dateTo = typeof body.dateTo === 'number' ? body.dateTo : undefined
       const results = await searchIndex.search(scope, keywords, {
         types: body.types,
         limit: body.limit,
         mode: body.mode,
-        fuzzy: body.fuzzy
+        fuzzy: body.fuzzy,
+        complete: body.complete === true,
+        tags,
+        dateFrom,
+        dateTo
       })
       res.json({ results })
     } catch (error) {
@@ -90,10 +97,19 @@ export function createSearchRoutes(
       const limit = req.query.limit ? Number(req.query.limit) : 50
       const fuzzyParam = req.query.fuzzy
       const fuzzy = fuzzyParam != null ? Number(fuzzyParam) : 0.2
+      const complete = req.query.complete === 'true' || req.query.complete === '1'
+      const tagsParam = req.query.tags
+      const tags = typeof tagsParam === 'string' && tagsParam ? tagsParam.split(',') : undefined
+      const dateFrom = req.query.dateFrom ? Number(req.query.dateFrom) : undefined
+      const dateTo = req.query.dateTo ? Number(req.query.dateTo) : undefined
       const results = await searchIndex.search(scope, q.trim(), {
         limit: Number.isNaN(limit) ? 50 : Math.min(limit, 100),
         mode: 'any',
-        fuzzy: Number.isNaN(fuzzy) ? 0.2 : Math.max(0, Math.min(1, fuzzy))
+        fuzzy: Number.isNaN(fuzzy) ? 0.2 : Math.max(0, Math.min(1, fuzzy)),
+        complete,
+        tags,
+        dateFrom: dateFrom && !Number.isNaN(dateFrom) ? dateFrom : undefined,
+        dateTo: dateTo && !Number.isNaN(dateTo) ? dateTo : undefined
       })
       res.json({ results })
     } catch (error) {

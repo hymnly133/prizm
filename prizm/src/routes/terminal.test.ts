@@ -47,6 +47,8 @@ function createMockManager(): TerminalSessionManager {
     listTerminals: vi.fn().mockReturnValue([createMockSession()]),
     getTerminal: vi.fn().mockReturnValue(createMockSession()),
     getRecentOutput: vi.fn().mockReturnValue('recent terminal output'),
+    getExecWorkerInfos: vi.fn().mockReturnValue([]),
+    getExecHistory: vi.fn().mockReturnValue([]),
     resizeTerminal: vi.fn(),
     writeToTerminal: vi.fn(),
     killTerminal: vi.fn(),
@@ -194,7 +196,7 @@ describe('Terminal Routes', () => {
     it('should support maxBytes query parameter', async () => {
       await request(app).get('/agent/sessions/session-1/terminals/term-1?maxBytes=1024').expect(200)
 
-      expect(manager.getRecentOutput).toHaveBeenCalledWith('term-1', 1024)
+      expect(manager.getRecentOutput).toHaveBeenCalledWith('term-1', 1024, true)
     })
 
     it('should return 404 for non-existent terminal', async () => {

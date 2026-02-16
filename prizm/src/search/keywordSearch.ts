@@ -8,6 +8,44 @@
  * - 高宽容度：子串匹配、OR 逻辑、大模型可对结果二次理解
  */
 
+import { Jieba } from '@node-rs/jieba'
+import { dict } from '@node-rs/jieba/dict.js'
+
+/** 全局 jieba 实例（带内置词典，Rust 原生性能） */
+const jieba = Jieba.withDict(dict)
+
+/** CJK 统一表意文字 Unicode 范围（基本区 + 扩展A + 兼容表意） */
+const CJK_SEQ_RE = /([\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]+)/
+const CJK_CHAR_RE = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/
+
+/**
+ * CJK-aware tokenizer for MiniSearch，基于 jieba 中文分词
+ * - CJK text: 使用 jieba cutForSearch（搜索引擎模式，更细粒度）
+ * - Non-CJK text: splits on word boundaries (spaces, punctuation) like default MiniSearch
+ *
+ * Example: "Prizm产品定位" → ["Prizm", "产品", "定位"]
+ */
+export function cjkTokenize(text: string): string[] {
+  if (!text) return []
+  const tokens: string[] = []
+  const segments = text.split(CJK_SEQ_RE)
+
+  for (const seg of segments) {
+    if (!seg) continue
+    if (CJK_CHAR_RE.test(seg)) {
+      const words = jieba.cutForSearch(seg, true)
+      for (const w of words) {
+        const trimmed = w.trim()
+        if (trimmed.length > 0) tokens.push(trimmed)
+      }
+    } else {
+      const words = seg.split(/[^\w]+/).filter((w) => w.length > 0)
+      tokens.push(...words)
+    }
+  }
+  return tokens
+}
+
 export interface SearchableItem {
   /** 用于匹配的文本（标题 + 正文拼接） */
   text: string
