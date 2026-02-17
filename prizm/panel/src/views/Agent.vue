@@ -146,6 +146,26 @@
               >
                 {{ msg.reasoning }}
               </div>
+              <!-- 记忆引用标签 -->
+              <div
+                v-if="msg.memoryRefs && countMemoryRefs(msg.memoryRefs) > 0"
+                class="mt-1.5 flex flex-wrap items-center gap-2 text-xs"
+              >
+                <span
+                  v-if="countLayerIds(msg.memoryRefs.injected) > 0"
+                  class="inline-flex items-center gap-1 rounded-full bg-blue-900/40 px-2 py-0.5 text-blue-300"
+                  :title="memoryRefsSummary(msg.memoryRefs.injected)"
+                >
+                  🧠 上下文 {{ countLayerIds(msg.memoryRefs.injected) }}
+                </span>
+                <span
+                  v-if="countLayerIds(msg.memoryRefs.created) > 0"
+                  class="inline-flex items-center gap-1 rounded-full bg-purple-900/40 px-2 py-0.5 text-purple-300"
+                  :title="memoryRefsSummary(msg.memoryRefs.created)"
+                >
+                  ✨ 新增 {{ countLayerIds(msg.memoryRefs.created) }}
+                </span>
+              </div>
             </div>
             <div v-if="streamingContent" class="mr-8 rounded bg-zinc-700/50 px-3 py-2 text-left">
               <p class="text-xs text-zinc-500">Agent</p>
@@ -296,6 +316,15 @@ const sending = ref(false)
 const chatError = ref('')
 const streamingContent = ref('')
 
+interface MemoryIdsByLayer {
+  user: string[]
+  scope: string[]
+  session: string[]
+}
+interface MemoryRefs {
+  injected: MemoryIdsByLayer
+  created: MemoryIdsByLayer
+}
 interface DisplayMessage {
   id: string
   role: string
@@ -303,6 +332,7 @@ interface DisplayMessage {
   model?: string
   usage?: { totalTokens?: number; totalInputTokens?: number; totalOutputTokens?: number }
   reasoning?: string
+  memoryRefs?: MemoryRefs | null
 }
 const displayedMessages = ref<DisplayMessage[]>([])
 const debugPanelOpen = ref(false)
@@ -472,10 +502,14 @@ async function loadSelectedSession() {
     displayedMessages.value = res.session.messages.map((m) => ({
       id: m.id,
       role: m.role,
-      content: m.content,
+      content: m.parts
+        .filter((p: { type: string }) => p.type === 'text')
+        .map((p: { type: string; content?: string }) => p.content ?? '')
+        .join(''),
       model: m.model,
       usage: m.usage,
-      reasoning: m.reasoning
+      reasoning: m.reasoning,
+      memoryRefs: m.memoryRefs ?? null
     }))
   } catch (e) {
     chatError.value = e instanceof Error ? e.message : String(e)
@@ -582,6 +616,22 @@ async function copySessionJson() {
   } catch (e) {
     alert('复制失败: ' + (e instanceof Error ? e.message : String(e)))
   }
+}
+
+function countLayerIds(layer: MemoryIdsByLayer): number {
+  return (layer.user?.length ?? 0) + (layer.scope?.length ?? 0) + (layer.session?.length ?? 0)
+}
+
+function countMemoryRefs(refs: MemoryRefs): number {
+  return countLayerIds(refs.injected) + countLayerIds(refs.created)
+}
+
+function memoryRefsSummary(layer: MemoryIdsByLayer): string {
+  const parts: string[] = []
+  if (layer.user?.length) parts.push(`User(画像) ${layer.user.length}`)
+  if (layer.scope?.length) parts.push(`Scope(叙事/文档) ${layer.scope.length}`)
+  if (layer.session?.length) parts.push(`Session(事件) ${layer.session.length}`)
+  return parts.join(' · ')
 }
 
 onMounted(() => {
