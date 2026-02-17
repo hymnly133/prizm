@@ -8,6 +8,11 @@
   "bin": {
     "prizm-server": "./dist/cli.js"
   },
+  "files": [
+    "dist",
+    "assets",
+    "panel/dist"
+  ],
   "scripts": {
     "kill-port": "powershell -ExecutionPolicy Bypass -File scripts/kill-port.ps1",
     "build": "yarn workspace @prizm/shared build && tsup && yarn build:panel",
@@ -34,6 +39,7 @@
   "author": "Prizm Team",
   "license": "MIT",
   "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@node-rs/jieba": "^2.0.1",
     "@prizm/evermemos": "workspace:*",
