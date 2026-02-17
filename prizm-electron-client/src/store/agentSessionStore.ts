@@ -16,6 +16,7 @@ import type {
   InteractRequestPayload,
   PrizmClient
 } from '@prizm/client-core'
+import { getTextContent } from '@prizm/client-core'
 import type { MemoryItem, FilePathRef } from '@prizm/shared'
 
 function tmpId(prefix: string): string {
@@ -369,13 +370,13 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
     const userMsg: AgentMessage = {
       id: tmpId('user'),
       role: 'user',
-      content: content.trim(),
+      parts: [{ type: 'text', content: content.trim() }],
       createdAt: now
     }
     const assistantMsg: AgentMessage = {
       id: tmpId('assistant'),
       role: 'assistant',
-      content: '',
+      parts: [],
       createdAt: now
     }
 
@@ -389,10 +390,8 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
     let lastMessageId: string | undefined
 
     try {
-      let fullContent = ''
       let segmentContent = ''
       let fullReasoning = ''
-      const fullToolCalls: ToolCallRecord[] = []
       const parts: MessagePart[] = []
       let wasStopped = false
       let commandResultContent: string | null = null
@@ -461,7 +460,7 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
                 {
                   id: tmpId('cmd'),
                   role: 'system',
-                  content: chunk.value as string,
+                  parts: [{ type: 'text' as const, content: chunk.value as string }],
                   createdAt: Date.now()
                 }
               ]
@@ -470,18 +469,11 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
 
           // text
           if (chunk.type === 'text' && chunk.value) {
-            fullContent += chunk.value
             segmentContent += chunk.value
             updateOptimisticMessages(set, get, sessionId, (prev) => {
               if (prev.length < 2) return prev
-              const assistant = {
-                ...prev[1],
-                content: fullContent,
-                ...(parts.length > 0
-                  ? { parts: [...parts, { type: 'text' as const, content: segmentContent }] }
-                  : {})
-              }
-              return [prev[0], assistant]
+              const liveParts = [...parts, { type: 'text' as const, content: segmentContent }]
+              return [prev[0], { ...prev[1], parts: liveParts }]
             })
           }
 
@@ -490,12 +482,7 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
             fullReasoning += chunk.value
             updateOptimisticMessages(set, get, sessionId, (prev) => {
               if (prev.length < 2) return prev
-              const assistant = {
-                ...prev[1],
-                content: prev[1].content,
-                reasoning: fullReasoning
-              }
-              return [prev[0], assistant]
+              return [prev[0], { ...prev[1], reasoning: fullReasoning }]
             })
           }
 
@@ -527,15 +514,7 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
             parts.push(...newParts)
             updateOptimisticMessages(set, get, sessionId, (prev) => {
               if (prev.length < 2) return prev
-              return [
-                prev[0],
-                {
-                  ...prev[1],
-                  content: fullContent,
-                  toolCalls: [...fullToolCalls],
-                  parts: [...newParts]
-                }
-              ]
+              return [prev[0], { ...prev[1], parts: [...newParts] }]
             })
           }
 
