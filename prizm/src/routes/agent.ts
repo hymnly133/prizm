@@ -1224,26 +1224,25 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
             usageSent = true
             res.flush?.()
           }
-        } else if (fullContent) {
+        } else if (segmentContent || parts.length > 0) {
           flushSegment()
           chatCompletedAt = Date.now()
           const usedModel = typeof model === 'string' && model.trim() ? model.trim() : undefined
           const appendedMsg = await adapter.appendMessage(scope, id, {
             role: 'assistant',
-            content: fullContent,
+            parts: [...parts],
             model: usedModel,
             usage: lastUsage,
-            ...(fullReasoning && { reasoning: fullReasoning }),
-            ...(fullToolCalls.length > 0 && { toolCalls: fullToolCalls }),
-            ...(parts.length > 0 && { parts })
+            ...(fullReasoning && { reasoning: fullReasoning })
           })
+          const errFullContent = getTextContent({ parts })
           let errCreatedByLayer: import('@prizm/shared').MemoryIdsByLayer | null = null
-          if (isMemoryEnabled() && fullContent) {
+          if (isMemoryEnabled() && errFullContent) {
             try {
               errCreatedByLayer = await addMemoryInteraction(
                 [
                   { role: 'user', content: content.trim() },
-                  { role: 'assistant', content: fullContent }
+                  { role: 'assistant', content: errFullContent }
                 ],
                 memoryUserId,
                 scope,
@@ -1310,9 +1309,12 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
           } catch (e) {
             log.warn('Failed to write session token usage:', id, e)
           }
-          if (fullToolCalls.length > 0) {
+          const toolCallParts = parts.filter(
+            (p): p is import('@prizm/shared').MessagePartTool => p.type === 'tool'
+          )
+          if (toolCallParts.length > 0) {
             try {
-              const activities = deriveScopeActivities(fullToolCalls, chatCompletedAt)
+              const activities = deriveScopeActivities(toolCallParts, chatCompletedAt)
               if (activities.length > 0) {
                 const scopeRoot = scopeStore.getScopeRootPath(scope)
                 appendSessionActivities(scopeRoot, id, activities)

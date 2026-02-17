@@ -117,19 +117,11 @@ export interface IDocumentsAdapter {
 
 // ============ Agent  LLM 提供商 ============
 
-/** 工具调用状态：preparing=参数填写中 running=执行中 awaiting_interact=等待用户交互 done=已完成 */
-export type ToolCallStatus = 'preparing' | 'running' | 'awaiting_interact' | 'done'
+/** 工具调用状态 —— 统一使用 @prizm/shared 定义 */
+export type { ToolCallStatus } from '@prizm/shared'
 
-/** 单次工具调用记录（用于 SSE 下发客户端展示） */
-export interface ToolCallRecord {
-  id: string
-  name: string
-  arguments: string
-  result: string
-  isError?: boolean
-  /** 调用状态，默认 'done' 向后兼容 */
-  status?: ToolCallStatus
-}
+/** 单次工具调用记录 —— 统一使用 @prizm/shared 的 MessagePartTool */
+export type { MessagePartTool as ToolCallRecord } from '@prizm/shared'
 
 /** 流式 LLM 响应块（usage 在 done 时由 LLM 提供商回传，与 lobehub FinishData.usage 一致） */
 export interface LLMStreamChunk {

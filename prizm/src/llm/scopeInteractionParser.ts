@@ -231,65 +231,36 @@ export function deriveScopeActivities(
 }
 
 /**
- * 从会话消息中收集所有 toolCalls（parts 优先，否则用 toolCalls，按 id 去重）
+ * 从会话消息中收集所有 tool 段落（从 parts 提取，按 id 去重）
  */
 export function collectToolCallsFromMessages(
   messages: Array<{
-    toolCalls?: unknown[]
-    parts?: Array<{ type: string; id?: string; name?: string; arguments?: string; result?: string }>
+    parts: Array<{ type: string; id?: string; name?: string; arguments?: string; result?: string }>
     createdAt?: number
   }>
 ): Array<{ tc: ToolCallInput; createdAt?: number }> {
   const seen = new Set<string>()
   const collected: Array<{ tc: ToolCallInput; createdAt?: number }> = []
 
-  function add(t: ToolCallInput, createdAt?: number) {
-    if (t.id && t.name && !seen.has(t.id)) {
-      seen.add(t.id)
-      collected.push({ tc: t, createdAt })
-    }
-  }
-
   for (const msg of messages) {
     const ts = msg.createdAt
-    const parts = msg.parts ?? []
-    const fromParts = parts.filter(
+    const toolParts = msg.parts.filter(
       (p): p is { type: 'tool'; id: string; name: string; arguments: string; result: string } =>
         p.type === 'tool' && 'name' in p && 'id' in p
     )
-    if (fromParts.length > 0) {
-      for (const p of fromParts) {
-        add(
-          {
+    for (const p of toolParts) {
+      if (!seen.has(p.id)) {
+        seen.add(p.id)
+        collected.push({
+          tc: {
             id: p.id,
             name: p.name,
             arguments:
               typeof p.arguments === 'string' ? p.arguments : JSON.stringify(p.arguments ?? {}),
             result: typeof p.result === 'string' ? p.result : ''
           },
-          ts
-        )
-      }
-    } else {
-      const fromToolCalls = (msg.toolCalls ?? []) as Array<{
-        id?: string
-        name?: string
-        arguments?: string
-        result?: string
-      }>
-      for (const t of fromToolCalls) {
-        if (t?.name && t.id) {
-          add(
-            {
-              id: t.id,
-              name: t.name,
-              arguments:
-                typeof t.arguments === 'string' ? t.arguments : JSON.stringify(t.arguments ?? {}),
-              result: typeof t.result === 'string' ? t.result : ''
-            },
-            ts
-          )
-        }
+          createdAt: ts
+        })
       }
     }
   }
