@@ -1,6 +1,6 @@
 export * from './types'
 export * from './websocket/connection'
-export * from './http/client'
+export * from './http'
 export * from './utils'
 export * from './manager'
 export * from './agent'
