@@ -22,7 +22,8 @@
     "dev:electron": "yarn build:evermemos && yarn workspace @prizm/electron-client dev",
     "clean": "yarn workspace @prizm/server clean",
     "start": "yarn workspace @prizm/server start",
-    "test": "yarn workspace @prizm/server test"
+    "test": "yarn workspace @prizm/server test",
+    "analyze": "node scripts/analyze.js"
   },
   "devDependencies": {
     "patch-package": "^8.0.1",

@@ -1,0 +1,56 @@
+---
+description: 大型文件应拆分为模块化子文件，提升可读性、可维护性和协作效率
+alwaysApply: true
+---
+
+# 模块化拆分原则
+
+当一个文件超过 **300 行**，或包含 **3 个以上独立职责**时，应将其拆分为子模块目录。
+
+## 拆分标准
+
+满足以下任一条件即应拆分：
+
+- 文件超过 300 行
+- 包含多个不相关的 class / function 集合
+- 文件内有明显的逻辑分区（如用注释 `// --- section ---` 分隔）
+- 多人频繁修改同一文件导致冲突
+
+## 拆分方式
+
+将 `foo.ts` 拆分为 `foo/` 目录：
+
+```
+# 拆分前
+src/
+  foo.ts          # 500+ 行大文件
+
+# 拆分后
+src/
+  foo/
+    index.ts      # 统一导出，保持外部引用不变
+    barLogic.ts   # 职责 A
+    bazLogic.ts   # 职责 B
+    types.ts      # 模块内部类型（如需要）
+```
+
+## 关键要求
+
+- **`index.ts` 只做 re-export**，不包含业务逻辑
+- 拆分后外部 `import` 路径不变（`import { x } from './foo'` 仍然有效）
+- 子文件按职责命名（`camelCase.ts`），名称体现功能而非泛称
+- 模块内部类型放在模块目录的 `types.ts`，跨模块类型仍放在上层 `types.ts`
+
+## 反例
+
+```typescript
+// ❌ BAD: 500 行大文件混合多种职责
+// builtinTools.ts — 同时包含 tool 定义、执行逻辑、结果格式化
+
+// ✅ GOOD: 拆分为目录
+// builtinTools/
+//   index.ts        — re-export
+//   definitions.ts  — tool schema 定义
+//   executor.ts     — tool 执行逻辑
+//   formatters.ts   — 结果格式化
+```
