@@ -2805,6 +2805,7 @@ __metadata:
     concurrently: "npm:^9.2.1"
     cors: "npm:^2.8.6"
     dotenv: "npm:^17.3.1"
+    emittery: "npm:^1.2.0"
     express: "npm:^5.2.1"
     gray-matter: "npm:^4.0.3"
     minisearch: "npm:^7.0.0"
@@ -7479,6 +7480,13 @@ __metadata:
   bin:
     electron: cli.js
   checksum: 10c0/3298a6ff8b2b20e144a158c72c80697dc0f352b5a78e4911089f928d0cb175f2f90b6cf11b8b9d98e6024e1df7860024ca78fb72ca949de907f1fd4c33904e75
+  languageName: node
+  linkType: hard
+
+"emittery@npm:^1.2.0":
+  version: 1.2.0
+  resolution: "emittery@npm:1.2.0"
+  checksum: 10c0/3b16d67b2cbbc19d44fa124684039956dc94c376cefa8c7b29f4c934d9d370e6819f642cddaa343b83b1fc03fda554a1498e12f5861caf9d6f6394ff4b6e808a
   languageName: node
   linkType: hard
 

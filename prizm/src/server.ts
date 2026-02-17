@@ -38,6 +38,8 @@ import { mountMcpRoutes } from './mcp'
 import { WebSocketServer } from './websocket/WebSocketServer'
 import { initEverMemService } from './llm/EverMemService'
 import { initTokenUsageDb, closeTokenUsageDb } from './core/tokenUsageDb'
+import { lockManager } from './core/resourceLockManager'
+import { auditManager } from './core/agentAuditLog'
 import { migrateAppLevelStorage } from './core/migrate-scope-v2'
 import { getTerminalManager } from './terminal/TerminalSessionManager'
 import { TerminalWebSocketServer } from './terminal/TerminalWebSocketServer'
@@ -230,6 +232,16 @@ export function createPrizmServer(
             } catch (e) {
               log.warn('Token usage DB init failed:', e)
             }
+            try {
+              lockManager.init()
+            } catch (e) {
+              log.warn('Resource lock manager init failed:', e)
+            }
+            try {
+              auditManager.init()
+            } catch (e) {
+              log.warn('Audit manager init failed:', e)
+            }
 
             if (enableWebSocket && server) {
               const terminalWsPath = '/ws/terminal'
@@ -263,6 +275,22 @@ export function createPrizmServer(
                     evt.scope
                   )
                 }
+              })
+
+              // 桥接内置工具锁事件到 WebSocket 广播
+              builtinToolEvents.onLockEvent((evt) => {
+                if (!wsServer) return
+                wsServer.broadcast(
+                  evt.eventType as import('@prizm/shared').EventType,
+                  {
+                    resourceType: evt.resourceType,
+                    resourceId: evt.resourceId,
+                    sessionId: evt.sessionId,
+                    reason: evt.reason,
+                    scope: evt.scope
+                  },
+                  evt.scope
+                )
               })
 
               // 统一 upgrade 路由 — 两个 WSS 均为 noServer 模式，
@@ -313,6 +341,10 @@ export function createPrizmServer(
 
       // 关闭 Token Usage DB
       closeTokenUsageDb()
+
+      // 关闭锁管理器和审计管理器
+      lockManager.shutdown()
+      auditManager.shutdown()
 
       return new Promise((resolve, reject) => {
         server!.close((error) => {

@@ -116,8 +116,10 @@ export function queryTokenUsage(filter?: TokenUsageFilter): TokenUsageRecord[] {
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
-  const limit = filter?.limit ? `LIMIT ${filter.limit}` : ''
-  const offset = filter?.offset ? `OFFSET ${filter.offset}` : ''
+  const safeLimit = filter?.limit ? Math.max(0, Math.floor(Number(filter.limit) || 0)) : 0
+  const safeOffset = filter?.offset ? Math.max(0, Math.floor(Number(filter.offset) || 0)) : 0
+  const limit = safeLimit > 0 ? `LIMIT ${safeLimit}` : ''
+  const offset = safeOffset > 0 ? `OFFSET ${safeOffset}` : ''
 
   const rows = db
     .prepare(`SELECT * FROM token_usage ${where} ORDER BY timestamp DESC ${limit} ${offset}`)

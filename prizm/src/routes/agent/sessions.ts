@@ -12,6 +12,7 @@ import {
   hasScopeAccess
 } from '../../scopeUtils'
 import { getTextContent } from '@prizm/shared'
+import type { TokenUsageCategory } from '../../types'
 import { getSessionContext } from '../../llm/contextTracker'
 import type { ScopeActivityRecord } from '../../llm/scopeInteractionParser'
 import {
@@ -22,6 +23,7 @@ import { isMemoryEnabled, flushSessionBuffer } from '../../llm/EverMemService'
 import { queryTokenUsage } from '../../core/tokenUsageDb'
 import { getTerminalManager } from '../../terminal/TerminalSessionManager'
 import { interactManager } from '../../llm/interactManager'
+import { emit } from '../../core/eventBus'
 import { log, getScopeFromQuery, activeChats, chatKey } from './_shared'
 
 export function registerSessionRoutes(router: Router, adapter?: IAgentAdapter): void {
@@ -95,9 +97,11 @@ export function registerSessionRoutes(router: Router, adapter?: IAgentAdapter): 
           string,
           { input: number; output: number; total: number; count: number }
         >,
-        byCategory: {} as Record<
-          string,
-          { input: number; output: number; total: number; count: number }
+        byCategory: {} as Partial<
+          Record<
+            TokenUsageCategory,
+            { input: number; output: number; total: number; count: number }
+          >
         >
       }
       for (const r of tokenRecords) {
@@ -112,14 +116,15 @@ export function registerSessionRoutes(router: Router, adapter?: IAgentAdapter): 
         tokenSummary.byModel[m].output += r.outputTokens
         tokenSummary.byModel[m].total += r.totalTokens
         tokenSummary.byModel[m].count += 1
-        const cat = r.category || 'chat'
+        const cat = (r.category || 'chat') as TokenUsageCategory
         if (!tokenSummary.byCategory[cat]) {
           tokenSummary.byCategory[cat] = { input: 0, output: 0, total: 0, count: 0 }
         }
-        tokenSummary.byCategory[cat].input += r.inputTokens
-        tokenSummary.byCategory[cat].output += r.outputTokens
-        tokenSummary.byCategory[cat].total += r.totalTokens
-        tokenSummary.byCategory[cat].count += 1
+        const catBucket = tokenSummary.byCategory[cat]!
+        catBucket.input += r.inputTokens
+        catBucket.output += r.outputTokens
+        catBucket.total += r.totalTokens
+        catBucket.count += 1
       }
 
       const memoryCreatedIds: { user: string[]; scope: string[]; session: string[] } = {
@@ -195,6 +200,9 @@ export function registerSessionRoutes(router: Router, adapter?: IAgentAdapter): 
       }
       const scope = getScopeForCreate(req)
       const session = await adapter.createSession(scope)
+
+      emit('agent:session.created', { scope, sessionId: session.id }).catch(() => {})
+
       res.status(201).json({ session })
     } catch (error) {
       log.error('create agent session error:', error)
@@ -349,23 +357,73 @@ export function registerSessionRoutes(router: Router, adapter?: IAgentAdapter): 
       if (!hasScopeAccess(req, scope)) {
         return res.status(403).json({ error: 'scope access denied' })
       }
-      const key = chatKey(scope, id)
-      activeChats.get(key)?.abort()
-      activeChats.delete(key)
-      interactManager.cancelSession(id, scope)
+
+      // 清理报告：记录每步是否成功
+      const cleanupReport: Record<string, boolean> = {}
+
+      // 1. 中止活跃聊天
+      try {
+        const key = chatKey(scope, id)
+        activeChats.get(key)?.abort()
+        activeChats.delete(key)
+        cleanupReport.abortChat = true
+      } catch (err) {
+        log.warn('abort active chat on session delete failed:', err)
+        cleanupReport.abortChat = false
+      }
+
+      // 2. 取消交互请求
+      try {
+        interactManager.cancelSession(id, scope)
+        cleanupReport.cancelInteracts = true
+      } catch (err) {
+        log.warn('cancel interacts on session delete failed:', err)
+        cleanupReport.cancelInteracts = false
+      }
+
+      // 3. 刷新记忆缓冲
       if (isMemoryEnabled()) {
         try {
           await flushSessionBuffer(scope, id)
+          cleanupReport.flushMemory = true
         } catch (memErr) {
           log.warn('memory buffer flush on session delete failed:', memErr)
+          cleanupReport.flushMemory = false
         }
       }
+
+      // 4. 清理终端
       try {
         getTerminalManager().cleanupSession(id)
+        cleanupReport.terminalCleanup = true
       } catch (termErr) {
         log.warn('terminal cleanup on session delete failed:', termErr)
+        cleanupReport.terminalCleanup = false
       }
+
+      // 5. 释放该会话持有的所有资源锁
+      try {
+        const sessionLocks = lockManager.listSessionLocks(scope, id)
+        lockManager.releaseSessionLocks(scope, id)
+        for (const lk of sessionLocks) {
+          builtinToolEvents.emitLockEvent({
+            eventType: 'resource:unlocked',
+            scope,
+            resourceType: lk.resourceType,
+            resourceId: lk.resourceId,
+            sessionId: id
+          })
+        }
+        cleanupReport.lockRelease = true
+      } catch (lockErr) {
+        log.warn('lock cleanup on session delete failed:', lockErr)
+        cleanupReport.lockRelease = false
+      }
+
+      // 6. 最后删除会话数据（核心操作，失败则抛出）
       await adapter.deleteSession(scope, id)
+      cleanupReport.deleteSession = true
+
       res.status(204).send()
     } catch (error) {
       log.error('delete agent session error:', error)

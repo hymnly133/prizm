@@ -8,9 +8,11 @@ import type { IAgentAdapter } from '../adapters/interfaces'
 import { registerMetadataRoutes } from './agent/metadata'
 import { registerSessionRoutes } from './agent/sessions'
 import { registerChatRoutes } from './agent/chat'
+import { registerAuditRoutes } from './agent/audit'
 
 export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void {
   registerMetadataRoutes(router)
   registerSessionRoutes(router, adapter)
   registerChatRoutes(router, adapter)
+  registerAuditRoutes(router)
 }

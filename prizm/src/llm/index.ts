@@ -37,6 +37,14 @@ export function resetLLMProvider(): void {
   _defaultProvider = null
 }
 
+/** 返回当前 LLM 提供商名称（用于 token 统计记录） */
+export function getLLMProviderName(): string {
+  const provider = getLLMProvider()
+  if (provider instanceof XiaomiMiMoLLMProvider) return 'xiaomi'
+  if (provider instanceof ZhipuLLMProvider) return 'zhipu'
+  return 'openai'
+}
+
 /** 可用模型项，供客户端模型选择器使用 */
 export interface AvailableModel {
   id: string
