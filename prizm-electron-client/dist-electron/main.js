@@ -48,6 +48,12 @@ const trayManager_1 = require("./trayManager");
 const shortcuts_1 = require("./shortcuts");
 const clipboardSync_1 = require("./clipboardSync");
 main_1.default.initialize();
+process.on('uncaughtException', (err) => {
+    main_1.default.error('[UncaughtException]', err);
+});
+process.on('unhandledRejection', (reason) => {
+    main_1.default.error('[UnhandledRejection]', reason);
+});
 /** 日志路径：开发时在项目根目录，运行时在 exe 所在目录 */
 main_1.default.transports.file.resolvePathFn = () => {
     const isDev = !electron_1.app.isPackaged;
@@ -103,10 +109,12 @@ electron_1.app.on('window-all-closed', () => {
     }
 });
 electron_1.app.on('before-quit', () => {
+    main_1.default.info('[Electron] before-quit');
     config_1.sharedState.isQuitting = true;
     (0, clipboardSync_1.stopClipboardSync)();
 });
 electron_1.app.on('will-quit', () => {
+    main_1.default.info('[Electron] will-quit');
     electron_1.globalShortcut.unregisterAll();
     (0, shortcuts_1.stopQuickPanelHook)();
 });

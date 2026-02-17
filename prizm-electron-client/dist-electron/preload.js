@@ -59,6 +59,9 @@ electron_1.contextBridge.exposeInMainWorld('prizm', {
     logFromRenderer(message, type) {
         return electron_1.ipcRenderer.invoke('log_from_renderer', { message, type });
     },
+    writeLog(level, module, message) {
+        return electron_1.ipcRenderer.invoke('write_log', { level, module, message });
+    },
     selectFolder() {
         return electron_1.ipcRenderer.invoke('select_folder');
     },

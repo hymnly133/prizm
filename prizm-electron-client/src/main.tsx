@@ -6,8 +6,26 @@ import { ConfigProvider, ThemeProvider, ToastHost } from '@lobehub/ui'
 import { App } from 'antd'
 import { motion } from 'motion/react'
 import { createRoot } from 'react-dom/client'
+import { createClientLogger, addTransport } from '@prizm/client-core'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import RootApp from './App'
-import './styles.css'
+import './styles/index.css'
+
+// 注册 IPC transport：将渲染进程日志通过 IPC 写入 electron-log 文件
+if (typeof window !== 'undefined' && window.prizm?.writeLog) {
+  addTransport((level, module, message) => {
+    window.prizm?.writeLog(level, module, message).catch(() => {})
+  })
+}
+
+// 全局错误捕获：未处理的异常和 Promise rejection
+const globalErrorLog = createClientLogger('GlobalError')
+window.addEventListener('error', (event) => {
+  globalErrorLog.error('Uncaught error:', event.error?.stack || event.message)
+})
+window.addEventListener('unhandledrejection', (event) => {
+  globalErrorLog.error('Unhandled rejection:', event.reason)
+})
 
 // 平台检测：为自定义标题栏设置 CSS 适配
 const platform = navigator.platform
@@ -44,11 +62,13 @@ root.render(
       <ThemeProvider themeMode="auto" defaultAppearance={initialAppearance}>
         <App>
           <ToastHost position="bottom-right" duration={4000} />
-          <div className="app-root__content">
-            <div className="app-root__content-inner">
-              <RootApp />
+          <ErrorBoundary>
+            <div className="app-root__content">
+              <div className="app-root__content-inner">
+                <RootApp />
+              </div>
             </div>
-          </div>
+          </ErrorBoundary>
         </App>
       </ThemeProvider>
     </ConfigProvider>

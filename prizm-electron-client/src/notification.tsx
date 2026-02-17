@@ -6,7 +6,7 @@ import { ConfigProvider, ThemeProvider } from '@lobehub/ui'
 import { motion } from 'motion/react'
 import { createRoot } from 'react-dom/client'
 import NotificationApp from './NotificationApp'
-import './styles.css'
+import './styles/index.css'
 
 declare global {
   interface Window {

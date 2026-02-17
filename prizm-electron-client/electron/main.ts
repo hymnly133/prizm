@@ -8,10 +8,21 @@ import { loadTraySettings } from './config'
 import { registerIpcHandlers } from './ipcHandlers'
 import { createMainWindow, createQuickPanelWindow } from './windowManager'
 import { createTray } from './trayManager'
-import { registerGlobalShortcuts, registerQuickPanelDoubleTap, stopQuickPanelHook } from './shortcuts'
+import {
+  registerGlobalShortcuts,
+  registerQuickPanelDoubleTap,
+  stopQuickPanelHook
+} from './shortcuts'
 import { stopClipboardSync } from './clipboardSync'
 
 log.initialize()
+
+process.on('uncaughtException', (err) => {
+  log.error('[UncaughtException]', err)
+})
+process.on('unhandledRejection', (reason) => {
+  log.error('[UnhandledRejection]', reason)
+})
 
 /** 日志路径：开发时在项目根目录，运行时在 exe 所在目录 */
 log.transports.file.resolvePathFn = () => {
@@ -78,11 +89,13 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  log.info('[Electron] before-quit')
   sharedState.isQuitting = true
   stopClipboardSync()
 })
 
 app.on('will-quit', () => {
+  log.info('[Electron] will-quit')
   globalShortcut.unregisterAll()
   stopQuickPanelHook()
 })

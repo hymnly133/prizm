@@ -329,6 +329,18 @@ export function registerIpcHandlers(): void {
     return true
   })
 
+  ipcMain.handle(
+    'write_log',
+    (_event, payload: { level: string; module: string; message: string }) => {
+      const { level, message } = payload
+      if (level === 'error') log.error(message)
+      else if (level === 'warn') log.warn(message)
+      else if (level === 'debug') log.debug(message)
+      else log.info(message)
+      return true
+    }
+  )
+
   ipcMain.handle('select_folder', async () => {
     const opts = {
       properties: ['openDirectory' as const],

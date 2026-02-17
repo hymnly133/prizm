@@ -308,6 +308,18 @@ function registerIpcHandlers() {
             main_1.default.info(message);
         return true;
     });
+    electron_1.ipcMain.handle('write_log', (_event, payload) => {
+        const { level, message } = payload;
+        if (level === 'error')
+            main_1.default.error(message);
+        else if (level === 'warn')
+            main_1.default.warn(message);
+        else if (level === 'debug')
+            main_1.default.debug(message);
+        else
+            main_1.default.info(message);
+        return true;
+    });
     electron_1.ipcMain.handle('select_folder', async () => {
         const opts = {
             properties: ['openDirectory'],

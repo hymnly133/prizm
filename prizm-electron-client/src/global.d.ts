@@ -36,6 +36,7 @@ declare global {
         }) => void
       ): () => void
       logFromRenderer(message: string, type: string): Promise<boolean>
+      writeLog(level: string, module: string, message: string): Promise<boolean>
       selectFolder(): Promise<string | null>
       readFiles(paths: string[]): Promise<
         Array<{

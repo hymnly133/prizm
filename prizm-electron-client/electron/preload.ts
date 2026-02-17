@@ -81,6 +81,10 @@ contextBridge.exposeInMainWorld('prizm', {
     return ipcRenderer.invoke('log_from_renderer', { message, type })
   },
 
+  writeLog(level: string, module: string, message: string) {
+    return ipcRenderer.invoke('write_log', { level, module, message })
+  },
+
   selectFolder() {
     return ipcRenderer.invoke('select_folder')
   },
