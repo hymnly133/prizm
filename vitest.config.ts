@@ -14,6 +14,7 @@ export default defineConfig({
       '**/research/**',
       '**/EverMemOS/**',
       '**/docs/**'
-    ]
+    ],
+    setupFiles: ['./prizm/vitest.setup.ts']
   }
 })

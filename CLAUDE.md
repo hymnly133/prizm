@@ -114,6 +114,13 @@ yarn test
 - `ZHIPU_API_KEY` - 智谱 AI，可选 `ZHIPU_MODEL`（默认 glm-4-flash）
 - `OPENAI_API_KEY` - OpenAI 兼容，可选 `OPENAI_API_URL`、`OPENAI_MODEL`（默认 gpt-4o-mini）
 
+**Local Embedding：** 本地向量模型，默认启用
+
+- `PRIZM_EMBEDDING_ENABLED` - 是否启用本地 embedding（默认 true）
+- `PRIZM_EMBEDDING_MODEL` - HuggingFace 模型 ID（默认 TaylorAI/bge-micro-v2，384 维）
+- `PRIZM_EMBEDDING_CACHE_DIR` - 模型缓存目录（默认 {dataDir}/models）
+- `PRIZM_EMBEDDING_MAX_CONCURRENCY` - 最大并发推理数（默认 1）
+
 ## Architecture Overview
 
 ### Server Package (`@prizm/server`)
@@ -136,6 +143,7 @@ prizm/src/
 │   └── default.ts     # In-memory/Console implementations
 ├── llm/               # LLM providers and AI services
 │   ├── EverMemService.ts          # Memory system integration
+│   ├── localEmbedding.ts          # Local embedding model (TaylorAI/bge-micro-v2)
 │   ├── OpenAILikeProvider.ts      # OpenAI-compatible provider
 │   ├── ZhipuProvider.ts           # Zhipu AI provider
 │   ├── XiaomiMiMoProvider.ts      # Xiaomi MiMo provider
@@ -154,6 +162,7 @@ prizm/src/
 │   ├── pomodoro.ts    # Pomodoro timer
 │   ├── search.ts      # Unified search across data types
 │   ├── settings.ts    # Settings management
+│   ├── embedding.ts   # Embedding model status, test, reload
 │   └── mcpConfig.ts   # MCP server configuration
 ├── auth/
 │   ├── ClientRegistry.ts   # API key management, persistence
@@ -361,6 +370,7 @@ Connected via stdio bridge (`src/mcp/stdio-bridge.ts`).
 - `/pomodoro/*` - Pomodoro timer (auth + scope)
 - `/search/*` - Unified search across data types (auth + scope)
 - `/settings/*` - Settings management (auth)
+- `/embedding/*` - Embedding model status, test, reload (auth)
 - `/mcp-config/*` - MCP server configuration (auth)
 - `/dashboard/*` - Vue 3 SPA (no auth with `X-Prizm-Panel: true`)
 
