@@ -31,18 +31,25 @@ interface SessionStats {
   }
   memoryCreated: {
     totalCount: number
-    byType: Record<string, number>
-    memories: Array<{ id: string; memory: string; memory_type?: string; messageId: string }>
+    ids: { user: string[]; scope: string[]; session: string[] }
   }
+  memoryInjectedTotal: number
 }
 
 const TOKEN_SCOPE_LABELS: Record<string, string> = {
   chat: '对话',
   document_summary: '文档摘要',
+  document_memory: '文档记忆',
   conversation_summary: '对话摘要',
   memory: '记忆'
 }
-const TOKEN_SCOPE_ORDER = ['chat', 'document_summary', 'conversation_summary', 'memory']
+const TOKEN_SCOPE_ORDER = [
+  'chat',
+  'document_summary',
+  'document_memory',
+  'conversation_summary',
+  'memory'
+]
 
 /** 统一活动记录（与 API 返回一致） */
 interface ActivityItem {
@@ -309,7 +316,8 @@ export function AgentRightSidebar({
 
   const MEMORY_TYPE_LABELS: Record<string, string> = {
     episodic_memory: '情景记忆',
-    user_profile: '用户画像',
+    profile: '用户画像',
+    group_profile: '群组画像',
     foresight: '前瞻',
     event_log: '事件日志',
     document_memory: '文档记忆'
@@ -813,54 +821,53 @@ export function AgentRightSidebar({
                       </div>
                     </div>
 
-                    {/* 创建的记忆 */}
+                    {/* 记忆引用统计 */}
                     <div className="agent-stats-group">
                       <span className="agent-stats-group-label">
                         <Sparkles size={12} />
-                        创建的记忆
+                        记忆引用
                       </span>
-                      {sessionStats.memoryCreated.totalCount === 0 ? (
-                        <p className="agent-right-empty">本会话暂未产生记忆</p>
+                      {sessionStats.memoryCreated.totalCount === 0 &&
+                      sessionStats.memoryInjectedTotal === 0 ? (
+                        <p className="agent-right-empty">本会话暂未产生记忆引用</p>
                       ) : (
                         <div className="agent-stats-rows">
                           <div className="agent-stats-row">
-                            <span className="agent-stats-key">总数</span>
+                            <span className="agent-stats-key">新增记忆</span>
                             <span className="agent-stats-value">
                               {sessionStats.memoryCreated.totalCount} 条
                             </span>
                           </div>
-                          {Object.entries(sessionStats.memoryCreated.byType).map(([type, cnt]) => (
-                            <div key={type} className="agent-stats-row agent-stats-row-sub">
-                              <span className="agent-stats-key">
-                                {MEMORY_TYPE_LABELS[type] ?? type}
-                              </span>
+                          {sessionStats.memoryCreated.ids.user.length > 0 && (
+                            <div className="agent-stats-row agent-stats-row-sub">
+                              <span className="agent-stats-key">User 层</span>
                               <span className="agent-stats-value agent-stats-value-secondary">
-                                {cnt}
+                                {sessionStats.memoryCreated.ids.user.length}
                               </span>
                             </div>
-                          ))}
-                          {sessionStats.memoryCreated.memories.length > 0 && (
-                            <ul className="agent-stats-memory-list">
-                              {sessionStats.memoryCreated.memories.map((mem) => (
-                                <li
-                                  key={mem.id}
-                                  className="agent-stats-memory-item"
-                                  title={mem.memory}
-                                >
-                                  <span className="agent-stats-memory-type">
-                                    {MEMORY_TYPE_LABELS[mem.memory_type ?? ''] ??
-                                      mem.memory_type ??
-                                      ''}
-                                  </span>
-                                  <span className="agent-stats-memory-text">
-                                    {mem.memory.length > 60
-                                      ? `${mem.memory.slice(0, 60)}…`
-                                      : mem.memory}
-                                  </span>
-                                </li>
-                              ))}
-                            </ul>
                           )}
+                          {sessionStats.memoryCreated.ids.scope.length > 0 && (
+                            <div className="agent-stats-row agent-stats-row-sub">
+                              <span className="agent-stats-key">Scope 层</span>
+                              <span className="agent-stats-value agent-stats-value-secondary">
+                                {sessionStats.memoryCreated.ids.scope.length}
+                              </span>
+                            </div>
+                          )}
+                          {sessionStats.memoryCreated.ids.session.length > 0 && (
+                            <div className="agent-stats-row agent-stats-row-sub">
+                              <span className="agent-stats-key">Session 层</span>
+                              <span className="agent-stats-value agent-stats-value-secondary">
+                                {sessionStats.memoryCreated.ids.session.length}
+                              </span>
+                            </div>
+                          )}
+                          <div className="agent-stats-row">
+                            <span className="agent-stats-key">注入上下文</span>
+                            <span className="agent-stats-value">
+                              {sessionStats.memoryInjectedTotal} 次
+                            </span>
+                          </div>
                         </div>
                       )}
                     </div>

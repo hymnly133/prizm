@@ -548,8 +548,8 @@ export function McpSettings({ http, onLog }: McpSettingsProps) {
                           {r.transport === 'stdio'
                             ? 'STDIO'
                             : r.transport === 'streamable-http'
-                              ? 'Streamable HTTP'
-                              : 'SSE'}
+                            ? 'Streamable HTTP'
+                            : 'SSE'}
                         </Text>
                       </Flexbox>
                     </div>
@@ -597,7 +597,7 @@ export function McpSettings({ http, onLog }: McpSettingsProps) {
 
       {/* 添加/编辑 Modal - 参照 LobeChat McpSettingsModal */}
       <Modal
-        destroyOnClose
+        destroyOnHidden
         footer={
           <Flexbox horizontal justify="flex-end" gap={8}>
             <Button onClick={closeModal}>取消</Button>

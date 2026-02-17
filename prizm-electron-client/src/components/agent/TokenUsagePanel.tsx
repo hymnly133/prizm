@@ -63,6 +63,7 @@ const useStyles = createStyles(({ css, token }) => ({
 const SCOPE_LABELS: Record<TokenUsageScope, string> = {
   chat: '对话',
   document_summary: '文档摘要',
+  document_memory: '文档记忆',
   conversation_summary: '对话摘要',
   memory: '记忆'
 }
@@ -127,7 +128,13 @@ export function TokenUsagePanel() {
     )
   }
 
-  const scopes: TokenUsageScope[] = ['chat', 'document_summary', 'conversation_summary', 'memory']
+  const scopes: TokenUsageScope[] = [
+    'chat',
+    'document_summary',
+    'document_memory',
+    'conversation_summary',
+    'memory'
+  ]
 
   if (records.length === 0 && !error) {
     return <div className={styles.empty}>暂无 token 使用记录</div>

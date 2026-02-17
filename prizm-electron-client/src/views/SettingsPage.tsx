@@ -5,6 +5,7 @@ import { AgentGeneralSettings } from '../components/AgentGeneralSettings'
 import { CommandsSettings } from '../components/CommandsSettings'
 import { SkillsSettings } from '../components/SkillsSettings'
 import { ScopeManagement } from '../components/ScopeManagement'
+import { EmbeddingStatus } from '../components/EmbeddingStatus'
 import { useClientSettings } from '../context/ClientSettingsContext'
 import { EVENT_TYPES, buildServerUrl, getEventLabel } from '@prizm/client-core'
 import type { EventType, PrizmConfig } from '@prizm/client-core'
@@ -267,6 +268,10 @@ function SettingsPage() {
 
       {config?.api_key && (
         <AgentGeneralSettings http={manager?.getHttpClient() ?? null} onLog={addLog} />
+      )}
+
+      {config?.api_key && (
+        <EmbeddingStatus http={manager?.getHttpClient() ?? null} onLog={addLog} />
       )}
 
       {config?.api_key && <McpSettings http={manager?.getHttpClient() ?? null} onLog={addLog} />}

@@ -49,7 +49,7 @@ import type { AgentMessage, MessagePart, MessagePartTool } from '@prizm/client-c
 import type { Document as PrizmDocument, TodoList } from '@prizm/client-core'
 import {
   ToolCallCard,
-  MemoryGrowthTag,
+  MemoryRefsTag,
   GrantPathProvider,
   InteractProvider
 } from '../components/agent'
@@ -250,7 +250,7 @@ function toChatMessage(m: AgentMessage & { streaming?: boolean }): ChatMessage {
       reasoning: m.reasoning,
       toolCalls: m.toolCalls,
       parts: getMessageParts(m),
-      memoryGrowth: m.memoryGrowth,
+      memoryRefs: m.memoryRefs,
       messageId: m.id
     }
   }
@@ -267,7 +267,7 @@ function AssistantMessageExtra(props: ChatMessage) {
         reasoning?: string
         toolCalls?: Array<MessagePartTool & { id: string }>
         parts?: MessagePart[]
-        memoryGrowth?: import('@prizm/shared').RoundMemoryGrowth | null
+        memoryRefs?: import('@prizm/shared').MemoryRefs | null
         messageId?: string
       }
     | undefined
@@ -278,10 +278,10 @@ function AssistantMessageExtra(props: ChatMessage) {
   const hasToolCalls = !hasInlineTools && toolCalls.length > 0
   const http = manager?.getHttpClient()
 
-  const handleFetchRoundMemories = useCallback(
-    async (messageId: string) => {
-      if (!http) return null
-      return http.getRoundMemories(messageId, currentScope)
+  const handleResolve = useCallback(
+    async (byLayer: import('@prizm/shared').MemoryIdsByLayer) => {
+      if (!http) return {}
+      return http.resolveMemoryIds(byLayer, currentScope)
     },
     [http, currentScope]
   )
@@ -308,14 +308,11 @@ function AssistantMessageExtra(props: ChatMessage) {
       )}
       <Flexbox horizontal align="center" gap={4} wrap="wrap">
         <MessageUsage model={extra?.model} usage={extra?.usage} />
-        {extra?.messageId && (
-          <MemoryGrowthTag
-            messageId={extra.messageId}
-            memoryGrowth={extra.memoryGrowth}
-            onFetch={handleFetchRoundMemories}
-            scope={currentScope}
-          />
-        )}
+        <MemoryRefsTag
+          memoryRefs={extra?.memoryRefs}
+          onResolve={handleResolve}
+          scope={currentScope}
+        />
       </Flexbox>
     </div>
   )

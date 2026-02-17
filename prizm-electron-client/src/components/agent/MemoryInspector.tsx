@@ -58,6 +58,24 @@ function partitionMemories(
   return { user, scope: scopeList, session }
 }
 
+/** 统一记忆类型标签 */
+const MEMORY_TYPE_LABELS: Record<string, string> = {
+  episodic_memory: '情景记忆',
+  foresight: '前瞻记忆',
+  event_log: '事件日志',
+  profile: '用户画像',
+  group_profile: '群组画像'
+}
+
+/** 记忆类型 → Tag 颜色 */
+const MEMORY_TYPE_COLORS: Record<string, string> = {
+  episodic_memory: 'blue',
+  foresight: 'purple',
+  event_log: 'cyan',
+  profile: 'gold',
+  group_profile: 'orange'
+}
+
 /** User 层子类别：按 memory_type 细分 */
 const USER_SUBCAT_LABELS: Record<string, string> = {
   profile: '用户画像',
@@ -80,20 +98,56 @@ function subdivideUser(
   }))
 }
 
-/** Scope 层子类别：按 group_id 细分 scope vs scope:docs */
+/** Scope 层子类别：先按 group_id 分组（narrative / docs），再按 memory_type 细分 */
 function subdivideScope(
   list: MemoryItemWithGroup[],
   scope: string
 ): { key: string; label: string; list: MemoryItemWithGroup[] }[] {
-  const narrative: MemoryItemWithGroup[] = []
-  const docs: MemoryItemWithGroup[] = []
+  const narrativeByType: Record<string, MemoryItemWithGroup[]> = {}
+  const docsByType: Record<string, MemoryItemWithGroup[]> = {}
+
   for (const m of list) {
-    if (m.group_id === `${scope}:docs`) docs.push(m)
-    else narrative.push(m)
+    const isDoc = m.group_id === `${scope}:docs`
+    const type = m.memory_type || 'episodic_memory'
+    const target = isDoc ? docsByType : narrativeByType
+    if (!target[type]) target[type] = []
+    target[type].push(m)
   }
+
+  /** 文档记忆子类型标签 */
+  const DOC_TYPE_LABELS: Record<string, string> = {
+    episodic_memory: '文档总览',
+    event_log: '文档事实',
+    foresight: '文档前瞻'
+  }
+
+  /** 固定排序：情景 → 前瞻 → 事件日志 → 其它 */
+  const TYPE_ORDER = ['episodic_memory', 'foresight', 'event_log']
+
+  const sortedKeys = (obj: Record<string, MemoryItemWithGroup[]>) => {
+    const known = TYPE_ORDER.filter((t) => obj[t]?.length)
+    const rest = Object.keys(obj).filter((t) => !TYPE_ORDER.includes(t) && obj[t]?.length)
+    return [...known, ...rest]
+  }
+
   const out: { key: string; label: string; list: MemoryItemWithGroup[] }[] = []
-  if (narrative.length) out.push({ key: 'narrative', label: '工作区叙事/计划', list: narrative })
-  if (docs.length) out.push({ key: 'docs', label: '文档记忆', list: docs })
+
+  for (const type of sortedKeys(narrativeByType)) {
+    out.push({
+      key: `narrative:${type}`,
+      label: MEMORY_TYPE_LABELS[type] || type,
+      list: narrativeByType[type]
+    })
+  }
+
+  for (const type of sortedKeys(docsByType)) {
+    out.push({
+      key: `docs:${type}`,
+      label: DOC_TYPE_LABELS[type] || `文档${MEMORY_TYPE_LABELS[type] || type}`,
+      list: docsByType[type]
+    })
+  }
+
   return out
 }
 
@@ -556,6 +610,14 @@ export function MemoryInspector() {
                             <div style={{ flex: 1 }}>
                               <div className={styles.content}>{item.memory}</div>
                               <div className={styles.meta}>
+                                {item.memory_type && (
+                                  <Tag
+                                    bordered={false}
+                                    color={MEMORY_TYPE_COLORS[item.memory_type] ?? 'default'}
+                                  >
+                                    {MEMORY_TYPE_LABELS[item.memory_type] ?? item.memory_type}
+                                  </Tag>
+                                )}
                                 <span title={item.created_at}>
                                   {item.created_at
                                     ? new Date(item.created_at).toLocaleString()
@@ -565,6 +627,22 @@ export function MemoryInspector() {
                                   <Tag bordered={false}>
                                     相似度: {Number(item.score).toFixed(2)}
                                   </Tag>
+                                )}
+                                {item.ref_count != null && item.ref_count > 0 && (
+                                  <Tag bordered={false} color="geekblue">
+                                    引用: {item.ref_count}次
+                                  </Tag>
+                                )}
+                                {item.last_ref_at && (
+                                  <span
+                                    title={`最近引用: ${item.last_ref_at}`}
+                                    style={{
+                                      fontSize: 11,
+                                      color: 'var(--ant-color-text-quaternary)'
+                                    }}
+                                  >
+                                    最近引用: {new Date(item.last_ref_at).toLocaleDateString()}
+                                  </span>
                                 )}
                               </div>
                             </div>

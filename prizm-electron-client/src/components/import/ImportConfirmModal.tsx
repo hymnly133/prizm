@@ -398,7 +398,7 @@ const ImportConfirmModal = memo(() => {
       onCancel={closeImport}
       footer={null}
       width={isSingle ? 520 : 600}
-      destroyOnClose
+      destroyOnHidden
       afterClose={() => {}}
     >
       {isSingle && items[0] ? (

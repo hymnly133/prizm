@@ -385,7 +385,7 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
 
     let lastUsage: AgentMessage['usage'] | undefined
     let lastModel: string | undefined
-    let lastMemoryGrowth: AgentMessage['memoryGrowth'] | undefined
+    let lastMemoryRefs: AgentMessage['memoryRefs'] | undefined
     let lastMessageId: string | undefined
 
     try {
@@ -615,7 +615,7 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
               parts.push({ type: 'text', content: segmentContent })
               segmentContent = ''
             }
-            lastMemoryGrowth = chunk.memoryGrowth ?? undefined
+            lastMemoryRefs = chunk.memoryRefs ?? undefined
             lastMessageId = chunk.messageId
             if (!commandResultContent) {
               updateOptimisticMessages(set, get, sessionId, (prev) => {
@@ -631,7 +631,7 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
                     toolCalls: fullToolCalls.length > 0 ? fullToolCalls : prev[1].toolCalls,
                     ...(parts.length > 0 && { parts: [...parts] }),
                     ...(fullReasoning && { reasoning: fullReasoning }),
-                    ...(lastMemoryGrowth && { memoryGrowth: lastMemoryGrowth })
+                    ...(lastMemoryRefs && { memoryRefs: lastMemoryRefs })
                   }
                 ]
               })
@@ -666,7 +666,7 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
             }
           ]
         } else {
-          const assistantWithGrowth: AgentMessage = {
+          const assistantFinal: AgentMessage = {
             ...assistantMsg,
             id: lastMessageId ?? assistantMsg.id,
             content: fullContent,
@@ -675,9 +675,9 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
             ...(fullReasoning && { reasoning: fullReasoning }),
             ...(fullToolCalls.length > 0 && { toolCalls: fullToolCalls }),
             ...(parts.length > 0 && { parts: [...parts] }),
-            ...(lastMemoryGrowth && { memoryGrowth: lastMemoryGrowth })
+            ...(lastMemoryRefs && { memoryRefs: lastMemoryRefs })
           }
-          newMessages = [...baseSession.messages, userMsg, assistantWithGrowth]
+          newMessages = [...baseSession.messages, userMsg, assistantFinal]
         }
 
         return {

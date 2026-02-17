@@ -547,7 +547,7 @@ function WorkPage() {
       </div>
 
       <Modal
-        destroyOnClose
+        destroyOnHidden
         open={!!selectedFile}
         title={selectedFileData ? getKindLabel(selectedFileData.kind) : ''}
         width={800}
@@ -574,7 +574,7 @@ function WorkPage() {
       </Modal>
 
       <Modal
-        destroyOnClose
+        destroyOnHidden
         open={!!genericFilePreview}
         title={genericFilePreview?.name ?? '文件预览'}
         width={800}
