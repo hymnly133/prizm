@@ -120,6 +120,29 @@ export interface UpdateDocumentPayload {
   tags?: string[]
 }
 
+// ============ 文档版本 ============
+
+/** 文档版本快照 */
+export interface DocumentVersion {
+  /** 自增版本号 */
+  version: number
+  /** 快照时间 ISO */
+  timestamp: string
+  /** 文档标题（快照时） */
+  title: string
+  /** 内容 hash（用于快速判断是否有变更） */
+  contentHash: string
+  /** 文档完整内容（仅单版本查询时返回，列表查询省略） */
+  content?: string
+}
+
+/** 单个文档的版本历史 */
+export interface DocumentVersionHistory {
+  documentId: string
+  /** 版本列表，按 version 升序 */
+  versions: DocumentVersion[]
+}
+
 // ============ Agent ============
 
 /** Token 使用量（供后端流式完成后回传） */
@@ -330,7 +353,7 @@ export interface MemorySettings {
 export interface MemoryIdsByLayer {
   /** User DB 中的记忆 ID（Profile 等） */
   user: string[]
-  /** Scope DB 中的记忆 ID（Episodic / Foresight / EventLog / Document） */
+  /** Scope DB 中的记忆 ID（Narrative / Foresight / Document） */
   scope: string[]
   /** Scope DB 中 Session 级别的记忆 ID */
   session: string[]
@@ -359,10 +382,20 @@ export interface MemoryItem {
   metadata?: Record<string, unknown>
   /** 搜索时的相似度/得分，仅搜索接口返回 */
   score?: number
-  /** 分区：null/undefined=User 层；scope=Scope 层；scope:docs=文档记忆；scope:session:id=Session 层（列表接口返回用于 UI 分区） */
+  /** 分区：null/undefined=User 层；scope=Scope 层；scope:session:id=Session 层 */
   group_id?: string | null
-  /** 记忆类型（列表接口返回） */
+  /** 记忆类型：profile / narrative / foresight / document / event_log */
   memory_type?: string
+  /** 记忆层级：user / scope / session */
+  memory_layer?: string
+  /** 记忆来源类型：conversation / document / compression / manual */
+  source_type?: string
+  /** 来源会话 ID */
+  source_session_id?: string
+  /** 来源轮次消息 ID */
+  source_round_id?: string
+  /** 文档子类型：overview / fact / migration（仅 type=document 时有值） */
+  sub_type?: string
   /** 累计被注入到对话上下文的次数（引用索引） */
   ref_count?: number
   /** 最近一次被引用的时间 ISO（引用索引） */
@@ -402,18 +435,27 @@ export interface DedupLogEntry {
 
 // ============ Token Usage ============
 
-/** 功能 scope：区分不同功能消耗的 token（与数据 scope 无关） */
-export type TokenUsageScope =
+/** Token 使用的功能类别，细粒度区分不同操作 */
+export type TokenUsageCategory =
   | 'chat' // 对话
+  | 'conversation_summary' // 对话轮次摘要
+  | 'memory:conversation_extract' // 对话记忆提取（profile+narrative+foresight+event_log）
+  | 'memory:document_extract' // 文档记忆提取（overview+fact）
+  | 'memory:document_migration' // 文档迁移记忆
+  | 'memory:dedup' // 记忆语义去重
+  | 'memory:profile_merge' // 画像合并
+  | 'memory:query_expansion' // 记忆查询扩展
   | 'document_summary' // 文档摘要（兼容旧数据）
-  | 'document_memory' // 文档记忆（总览+事实+迁移）
-  | 'conversation_summary' // 对话摘要
-  | 'memory' // 记忆
 
 export interface TokenUsageRecord {
+  /** UUID，唯一标识 */
   id: string
-  /** 功能维度，用于按功能统计 */
-  usageScope: TokenUsageScope
+  /** 功能类别 */
+  category: TokenUsageCategory
+  /** 数据 scope（'default' 等），用于按工作区统计 */
+  dataScope: string
+  /** 关联的 agent session ID（可选） */
+  sessionId?: string
   timestamp: number
   model: string
   inputTokens: number

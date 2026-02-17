@@ -12,7 +12,8 @@ export const ONLINE_SCOPE = 'online'
 export const BUILTIN_SCOPES = [DEFAULT_SCOPE, ONLINE_SCOPE] as const
 
 /**
- * 记忆系统统一 userId。
- * 记忆不按客户端隔离，所有客户端共享同一份记忆数据。
+ * 统一 userId（用于 token 统计等非记忆场景）。
+ * 记忆系统已迁移到 @prizm/evermemos 的 DEFAULT_USER_ID，不再需要显式传递。
+ * @see DEFAULT_USER_ID from @prizm/evermemos
  */
 export const MEMORY_USER_ID = 'default'
