@@ -60,129 +60,6 @@ export const EPISODE_MEMORY_PROMPT =
   '}\n' +
   '若对话无实质内容，返回 {} 空对象。\n'
 
-export const PROFILE_PART1_PROMPT =
-  '你是个人画像抽取专家。\n\n' +
-  '<input>\n' +
-  '- 对话内容 conversation_transcript：\n{{CONVERSATION_TEXT}}\n' +
-  '- 参与者当前画像 participants_current_profiles：{{EXISTING_PROFILES}}\n' +
-  '</input>\n\n' +
-  '<output_format>\n' +
-  '你必须输出单个 JSON 对象，顶层键为 "user_profiles"。键名保持英文。\n\n' +
-  '```json\n' +
-  '{\n' +
-  '  "user_profiles": [\n' +
-  '    {\n' +
-  '      "user_name": "",\n' +
-  '      "output_reasoning": "",\n' +
-  '      "working_habit_preference": [\n' +
-  '        {"value": "", "evidences": ["conversation_id"]}\n' +
-  '      ],\n' +
-  '      "hard_skills": [\n' +
-  '        {"value": "", "level": "", "evidences": ["conversation_id"]}\n' +
-  '      ],\n' +
-  '      "soft_skills": [\n' +
-  '        {"value": "", "level": "", "evidences": ["conversation_id"]}\n' +
-  '      ],\n' +
-  '      "personality": [\n' +
-  '        {"value": "Extraversion", "evidences": ["conversation_id"]}\n' +
-  '      ],\n' +
-  '      "way_of_decision_making": [\n' +
-  '        {"value": "SystematicThinking", "evidences": ["conversation_id"]}\n' +
-  '      ]\n' +
-  '    }\n' +
-  '  ]\n' +
-  '}\n' +
-  '```\n' +
-  '</output_format>\n\n' +
-  '规则：1. 仅抽取显式信息。2. 除非被推翻否则保留现有画像。3. 输出合法 JSON。\n'
-
-export const PROFILE_PART2_PROMPT =
-  '你是项目经历抽取专家。\n\n' +
-  '<input>\n' +
-  '- 对话内容 conversation_transcript：\n{{CONVERSATION_TEXT}}\n' +
-  '- 参与者当前画像 participants_current_profiles：{{EXISTING_PROFILES}}\n' +
-  '</input>\n\n' +
-  '<output_format>\n' +
-  '你必须输出单个 JSON 对象，顶层键为 "user_profiles"。键名保持英文。\n\n' +
-  '```json\n' +
-  '{\n' +
-  '  "user_profiles": [\n' +
-  '    {\n' +
-  '      "user_name": "",\n' +
-  '      "role_responsibility": [\n' +
-  '        {"value": "", "evidences": ["conversation_id"]}\n' +
-  '      ],\n' +
-  '      "opinion_tendency":[\n' +
-  '        {"value": "", "evidences": ["conversation_id"], "type":""}\n' +
-  '      ],      \n' +
-  '      "projects_participated": [\n' +
-  '        {\n' +
-  '          "project_id": "",\n' +
-  '          "project_name": "",\n' +
-  '          "subtasks": [\n' +
-  '            {"value": "", "evidences": ["conversation_id"], "type":""}\n' +
-  '          ],\n' +
-  '          "user_objective": [\n' +
-  '            {"value": "", "evidences": ["conversation_id"]}\n' +
-  '          ],\n' +
-  '          "contributions": [\n' +
-  '            {"value": "", "evidences": ["conversation_id"], "type":""}                          \n' +
-  '          ],\n' +
-  '          "user_concerns": [\n' +
-  '            {"value": "", "evidences": ["conversation_id"]}\n' +
-  '          ],\n' +
-  '          "entry_date": "YYYY-MM-DD"\n' +
-  '        }\n' +
-  '      ]\n' +
-  '    }\n' +
-  '  ]\n' +
-  '}\n' +
-  '```\n' +
-  '</output_format>\n'
-
-export const PROFILE_PART3_PROMPT =
-  '你是专注深层心理特质与扩展属性的个人画像抽取专家。\n\n' +
-  '<input>\n' +
-  '- 对话内容 conversation_transcript：\n{{CONVERSATION_TEXT}}\n' +
-  '- 参与者当前画像 participants_current_profiles：{{EXISTING_PROFILES}}\n' +
-  '</input>\n\n' +
-  '<output_format>\n' +
-  '你必须输出单个 JSON 对象，顶层键为 "user_profiles"。键名保持英文。\n\n' +
-  '```json\n' +
-  '{\n' +
-  '  "user_profiles": [\n' +
-  '    {\n' +
-  '      "user_name": "",\n' +
-  '      "sensory_preference": [\n' +
-  '         {"value": "", "evidences": ["conversation_id"]}\n' +
-  '      ],\n' +
-  '      "interest_preference": [\n' +
-  '         {"value": "", "evidences": ["conversation_id"]}\n' +
-  '      ],\n' +
-  '      "social_interaction_preference": [\n' +
-  '         {"value": "", "evidences": ["conversation_id"]}\n' +
-  '      ],\n' +
-  '      "activity_time_preference": [\n' +
-  '         {"value": "", "evidences": ["conversation_id"]}\n' +
-  '      ],\n' +
-  '      "consumption_preference": [\n' +
-  '         {"value": "", "evidences": ["conversation_id"]}\n' +
-  '      ],\n' +
-  '      "health_status": [\n' +
-  '         {"value": "", "evidences": ["conversation_id"]}\n' +
-  '      ],\n' +
-  '      "education_experience": [\n' +
-  '         {"value": "", "evidences": ["conversation_id"]}\n' +
-  '      ],\n' +
-  '      "career_trajectory": [\n' +
-  '         {"value": "", "evidences": ["conversation_id"]}\n' +
-  '      ]\n' +
-  '    }\n' +
-  '  ]\n' +
-  '}\n' +
-  '```\n' +
-  '</output_format>\n'
-
 /** 单次调用完成 episode / event_log / foresight / profile 抽取，使用分段文本格式（非 JSON）。与分类型抽取语义等价；小节标题与键名必须保持英文以便解析。 */
 export const UNIFIED_MEMORY_EXTRACTION_PROMPT =
   '你是记忆抽取专家，从对话中一次性完成四类抽取：情景记忆、事件日志、前瞻、用户画像。当前时间：{{TIME}}\n\n' +
@@ -208,26 +85,41 @@ export const UNIFIED_MEMORY_EXTRACTION_PROMPT =
   '## FORESIGHT\n（用户明确表达或强烈暗示的意图推导出的未来可能行为；必须有对话中的具体证据支撑）\n' +
   'CONTENT: <前瞻描述>\nSTART: YYYY-MM-DD\nEND: YYYY-MM-DD\nEVIDENCE: <支撑该条的前文引用>\n---\nCONTENT: <下一条>\n\n' +
   '## PROFILE\n（用户**持久性**个人画像：仅提取能跨会话复用的、反映"用户是谁"的个性化信息）\n' +
-  '**原子化描述：每条 ITEM 仅描述一个独立事实，不可将多个事实合并到一条中。**\n' +
-  '✅ 应提取（持久特征）：称呼偏好、兴趣爱好、擅长技能、职业角色、性格特点、长期习惯、审美偏好、沟通风格\n' +
+  '**已有画像：** {{EXISTING_PROFILE}}\n' +
+  '**重要：仅提取本次对话中出现的、已有画像中尚未包含的新增信息。已有画像中已记录的内容请勿重复输出。**\n' +
+  '**原子化描述：每条 ITEM 仅描述一个独立事实，不可将多个事实合并到一条中。**\n\n' +
+  '可参考的画像维度（仅作为观察方向，不要求每个都填，仅输出对话中有依据的）：\n' +
+  '  · 称呼/名字 — 用户希望怎样被称呼\n' +
+  '  · 硬技能 — 编程语言、框架、工具、专业领域及熟练度\n' +
+  '  · 软技能 — 沟通、协作、领导力等\n' +
+  '  · 性格特点 — 内向/外向、乐观/谨慎、幽默风格等\n' +
+  '  · 决策风格 — 数据驱动、直觉型、共识型等\n' +
+  '  · 职业角色与职责 — 岗位、团队角色、日常工作内容\n' +
+  '  · 目标与动机 — 长期职业目标、学习方向、核心驱动力\n' +
+  '  · 兴趣爱好 — 非工作领域的持久兴趣\n' +
+  '  · 工作习惯与偏好 — 时间偏好、工具偏好、协作方式、审美倾向\n' +
+  '  · 价值观与倾向 — 技术选型偏好、审美取向、处事原则\n' +
+  '  · 恐惧/顾虑 — 明确表达的担忧或回避事项\n\n' +
   '❌ 不应提取（临时动作）：本次对话的具体请求、一次性操作需求、对工具功能的使用、通用能力描述、对话中的临时状态\n' +
+  '❌ 不应提取（已知信息）：已有画像中已记录的信息，即使本次对话再次提及也不输出\n' +
   '判断标准：如果换一个用户也可能提出同样的请求，那就不是画像；画像必须是**这个用户独有的、持久的**特征。\n' +
   'ITEM: <关于用户的一条原子事实，如"用户希望被称为老大">\n' +
-  'ITEM: <另一条原子事实，如"用户喜欢华语流行音乐">\n' +
-  'ITEM: <再一条，如"用户特别喜爱周杰伦">\n' +
+  'ITEM: <另一条原子事实，如"用户熟练使用 TypeScript，偏好函数式风格">\n' +
+  'ITEM: <再一条，如"用户特别喜爱周杰伦的音乐">\n' +
   '（每条 ITEM 只描述一个维度：一个称呼、一个偏好、一项技能、一个习惯等，不可用逗号或"并且"串联多个事实）\n' +
   '</output_format>\n\n' +
   '<rules>\n' +
-  '1. 键名必须为上述英文（CONTENT/SUMMARY/KEYWORDS/TIME/FACT/START/END/EVIDENCE/ITEM）。\n' +
+  '1. 键名必须为上述英文（CONTENT/SUMMARY/KEYWORDS/TIME/FACT/START/END/EVIDENCE/ITEM），不要输出 USER_NAME 等未列出的键。\n' +
   '2. EVENT_LOG：FACT 最多 10 条；无事件则省略 ## EVENT_LOG。FACT 必须是有信息量的事实，不得包含"用户打招呼"、"用户问好"、"AI回复了用户"等无实质内容的记录。\n' +
   '3. FORESIGHT：最多 10 条，条与条之间用单独一行 --- 分隔；每条必须有 EVIDENCE 且证据来自用户的明确表达。不可仅基于 AI 单方面提供的信息（如 AI 播报的工作区状态）来推测用户意图。\n' +
-  '4. PROFILE（高门槛）：仅提取反映用户持久个性特征的信息，严格过滤以下噪音：\n' +
+  '4. PROFILE（高门槛 + 增量原则）：仅提取反映用户持久个性特征的**新增**信息，严格过滤以下噪音：\n' +
   '   - ❌ 当次对话的操作请求（如"用户需要管理文件""用户想搜索记忆"）→ 这是 EVENT_LOG 而非画像\n' +
   '   - ❌ 对工具/系统功能的使用（如"用户使用了便签功能""用户查看了文档"）→ 行为日志，不是画像\n' +
   '   - ❌ 从 AI 回复或系统上下文推断的信息（如"用户的工作区有3个便签"）→ 不是用户自述\n' +
   '   - ❌ 任何人都可能有的通用描述（如"用户有操作需求""用户会编程"）→ 无个性化区分度\n' +
-  '   - ✅ 仅保留：用户自述的称呼/名字、明确表达的兴趣爱好、专业领域、性格偏好、长期工作习惯、审美倾向、沟通风格\n' +
-  '   每条 ITEM 必须是原子描述（一条一事实），严禁用逗号或"并且"合并多个事实。无高质量画像信息时整段省略。\n' +
+  '   - ❌ 已有画像中已记录的信息 → 即使本次对话再次提及也不输出，避免重复\n' +
+  '   - ✅ 仅保留：上方维度列表中有对话证据支撑的持久特征（称呼、技能、性格、兴趣、习惯、价值观等）\n' +
+  '   每条 ITEM 必须是原子描述（一条一事实），严禁用逗号或"并且"合并多个事实。无**新增**高质量画像信息时整段省略。\n' +
   '5. EPISODE：摘要必须反映有意义的交互内容。如果对话的实质只是打招呼或闲聊而无具体话题展开，则省略整个 ## EPISODE 段。\n' +
   '6. 宁可不产出记忆，也不要产出低质量/无信息量的记忆。对话信息量不足时，输出空文本即可。\n' +
   '</rules>'
@@ -249,3 +141,121 @@ export const DEDUP_CONFIRM_PROMPT =
 export const QUERY_EXPANSION_PROMPT =
   '针对下列用户问题，生成 2～3 种不同表述或子问题，用于从记忆库中检索相关信息。' +
   '仅返回 JSON 字符串数组，不要其他文字。示例：["问题1", "问题2"]。\n用户问题：{{QUERY}}'
+
+/** Agentic 检索：LLM 判断检索结果是否充分回答用户查询 */
+export const SUFFICIENCY_CHECK_PROMPT =
+  '你是一个记忆检索评估专家。请判断当前检索到的记忆是否足以回答用户的查询。\n\n' +
+  '用户查询：\n{{QUERY}}\n\n' +
+  '检索到的记忆：\n{{RETRIEVED_DOCS}}\n\n' +
+  '请判断这些记忆是否足以回答用户的查询。\n\n' +
+  '输出 JSON 格式：\n' +
+  '{\n' +
+  '  "is_sufficient": true/false,\n' +
+  '  "reasoning": "你的判断理由",\n' +
+  '  "missing_information": ["缺失信息1", "缺失信息2"]\n' +
+  '}\n\n' +
+  '要求：\n' +
+  '1. 如果记忆包含回答查询所需的关键信息，判断为 sufficient (true)\n' +
+  '2. 如果缺少关键信息，判断为 insufficient (false)，并列出缺失的信息\n' +
+  '3. reasoning 应简明扼要\n' +
+  '4. missing_information 仅在 insufficient 时填写，otherwise 空数组\n'
+
+/** Agentic 检索：基于缺失信息生成 2-3 条补充查询 */
+export const REFINED_QUERY_PROMPT =
+  '你是一个查询优化专家。用户的原始查询未能检索到足够的信息，请生成多条互补的改进查询。\n\n' +
+  '原始查询：\n{{ORIGINAL_QUERY}}\n\n' +
+  '当前检索到的记忆：\n{{RETRIEVED_DOCS}}\n\n' +
+  '缺失的信息：\n{{MISSING_INFO}}\n\n' +
+  '请生成 2-3 条互补查询来帮助找到缺失的信息。这些查询应当：\n' +
+  '1. 针对不同的缺失信息点\n' +
+  '2. 使用不同的表述方式\n' +
+  '3. 避免与原始查询完全相同\n' +
+  '4. 保持简洁明确\n\n' +
+  '输出 JSON 格式：\n' +
+  '{\n' +
+  '  "queries": ["改进查询1", "改进查询2", "改进查询3"],\n' +
+  '  "reasoning": "查询生成策略说明"\n' +
+  '}\n'
+
+/**
+ * 文档记忆抽取 prompt（文档创建/更新时使用）。
+ * 输出两段：OVERVIEW（总览记忆，仅 1 条）+ FACTS（原子事实记忆，多条）。
+ * 针对低维向量模型（<400 维）优化：每条记忆独立可检索，不依赖上下文。
+ */
+export const DOCUMENT_MEMORY_EXTRACTION_PROMPT =
+  '你是文档记忆抽取专家，从文档内容中提取结构化记忆条目。当前时间：{{TIME}}\n\n' +
+  '<input>\n文档标题：{{TITLE}}\n\n文档内容：\n{{INPUT_TEXT}}\n</input>\n\n' +
+  '<format_convention>\n' +
+  '1. 小节标题：仅使用 ## OVERVIEW 或 ## FACTS，单独占一行，不可翻译或改写。无内容的小节整节省略。\n' +
+  '2. 键值行：每行一条，格式为「英文键名: 值」。键名与值之间用英文冒号+空格分隔。\n' +
+  '</format_convention>\n\n' +
+  '<output_format>\n' +
+  '## OVERVIEW\n' +
+  '（文档总览：一段 200-400 字的详细摘要，涵盖文档主题、结构、核心论点和关键结论。' +
+  '应当让读者无需阅读原文即可了解文档全貌。）\n' +
+  'CONTENT: <文档总览，一行，200-400 字>\n\n' +
+  '## FACTS\n' +
+  '（从文档中提取的原子事实列表。每条事实必须：' +
+  '1）独立可理解，不依赖上下文；' +
+  '2）包含足够的主语和限定词，如「文档《X》中提到 Y」；' +
+  '3）不超过 80 字。）\n' +
+  'FACT: <原子事实一>\n' +
+  'FACT: <原子事实二>\n' +
+  '</output_format>\n\n' +
+  '<rules>\n' +
+  '1. 键名必须为英文：CONTENT、FACT。\n' +
+  '2. OVERVIEW 必须输出且仅 1 条 CONTENT。总览应准确反映文档核心内容，不可遗漏重要信息。\n' +
+  '3. FACTS 中的 FACT 最多 20 条。提取文档中的关键事实、数据、定义、结论、要点。\n' +
+  '4. 每条 FACT 必须是原子的（不可再分的单一事实），包含足够的上下文使其可被独立检索和理解。\n' +
+  '5. 避免提取过于宽泛或无信息量的内容（如"文档讨论了某个话题"）。\n' +
+  '6. 文档内容过短或无实质信息时，OVERVIEW 简短概括即可，FACTS 可省略。\n' +
+  '</rules>'
+
+/**
+ * 文档迁移记忆抽取 prompt（文档更新时使用）。
+ * 从文本 diff 中提取语义层面的变更条目。
+ */
+export const DOCUMENT_MIGRATION_PROMPT =
+  '你是文档变更分析专家，从文档更新的 diff 中提取有意义的语义变更记录。当前时间：{{TIME}}\n\n' +
+  '<input>\n文档标题：{{TITLE}}\n\n' +
+  '{{OLD_OVERVIEW_SECTION}}' +
+  '本次更新的文本差异：\n{{DIFF_TEXT}}\n</input>\n\n' +
+  '<output_format>\n' +
+  '## MIGRATION\n' +
+  '（本次更新的语义变更列表。每条 CHANGE 描述一个有意义的变更，如新增了什么内容、修改了什么定义、删除了什么章节。）\n' +
+  'CHANGE: <语义变更描述一>\n' +
+  'CHANGE: <语义变更描述二>\n' +
+  '</output_format>\n\n' +
+  '<rules>\n' +
+  '1. 键名必须为英文：CHANGE。\n' +
+  '2. 每条 CHANGE 不超过 100 字，应当包含文档标题引用和具体变更内容。\n' +
+  '3. CHANGE 最多 10 条。聚焦于有实质意义的变更，忽略格式调整、拼写修正等琐碎改动。\n' +
+  '4. 变更描述应当独立可理解，如「文档《X》新增了关于 Y 的结论」而非「新增了一段内容」。\n' +
+  '5. 若 diff 中无有意义的语义变更（如仅格式调整），输出空文本即可。\n' +
+  '</rules>'
+
+/**
+ * Profile 增量合并 prompt：LLM 智能合并新旧画像。
+ *
+ * 输入/输出格式均为：
+ *   { "items": ["原子事实1", "原子事实2"] }
+ *
+ * LLM 负责：items 语义去重、冲突解决。
+ */
+export const PROFILE_MERGE_PROMPT =
+  '你是用户画像合并专家。请将新抽取的用户画像信息增量合并到已有画像中。\n\n' +
+  '已有画像：\n{{EXISTING_PROFILE}}\n\n' +
+  '新抽取画像：\n{{INCOMING_PROFILE}}\n\n' +
+  '合并规则：\n' +
+  '1. items（原子事实列表）：\n' +
+  '   - 语义相同的条目只保留一个（如「喜欢 TS」和「喜欢 TypeScript」合并为一条）\n' +
+  '   - 新旧互补的条目全部保留\n' +
+  '   - 有矛盾的条目，优先保留新信息（用户最新表达）\n' +
+  '2. 不要丢失任何已有的有效信息\n\n' +
+  '输出严格 JSON 格式：\n' +
+  '{\n' +
+  '  "merged_profile": {\n' +
+  '    "items": ["合并去重后的原子事实1", "原子事实2", ...]\n' +
+  '  },\n' +
+  '  "changes_summary": "一句话描述合并了什么"\n' +
+  '}\n'

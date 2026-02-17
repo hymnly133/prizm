@@ -107,55 +107,22 @@ export const ForesightSchema = BaseMemorySchema.extend({
 
 export type Foresight = z.infer<typeof ForesightSchema>
 
-export const ProjectInfoSchema = z.object({
-  project_id: z.string(),
-  project_name: z.string(),
-  entry_date: z.string(),
-  subtasks: z.array(z.record(z.any())).optional(),
-  user_objective: z.array(z.record(z.any())).optional(),
-  contributions: z.array(z.record(z.any())).optional(),
-  user_concerns: z.array(z.record(z.any())).optional()
-})
-
-export type ProjectInfo = z.infer<typeof ProjectInfoSchema>
-
-export const ImportanceEvidenceSchema = z.object({
-  user_id: z.string(),
-  group_id: z.string(),
-  speak_count: z.number().default(0),
-  refer_count: z.number().default(0),
-  conversation_count: z.number().default(0)
-})
-
-export type ImportanceEvidence = z.infer<typeof ImportanceEvidenceSchema>
-
-export const GroupImportanceEvidenceSchema = z.object({
-  group_id: z.string(),
-  evidence_list: z.array(ImportanceEvidenceSchema),
-  is_important: z.boolean()
-})
-
-export type GroupImportanceEvidence = z.infer<typeof GroupImportanceEvidenceSchema>
-
+/**
+ * Profile 记忆 Schema — 原子化事实列表。
+ *
+ * UnifiedExtractor 输出 `ITEM: <一句原子描述>`，同一用户的所有 ITEM 收集到 `items` 数组。
+ * 每个用户只维护一条 Profile memories 行：
+ * - `content` = 所有 items 用换行拼接（用于全文搜索和 embedding）
+ * - `metadata.items` = 完整原子事实列表
+ * - `metadata.merge_history` = 合并追踪记录
+ *
+ * 注：Python 原版 EverMemOS 的 ProfileMemory 包含 hard_skills/personality 等 15 个结构化字段，
+ * 依赖专用的 3 段 LLM prompt（Part1/2/3）填充。TS Unified 路径仅使用原子化 items，已移除。
+ * 如需恢复结构化抽取，可添加专用 ProfileStructuredExtractor 并在 metadata 中扩展字段。
+ */
 export const ProfileMemorySchema = BaseMemorySchema.extend({
-  user_name: z.string().optional(),
-  hard_skills: z.array(z.record(z.any())).optional(),
-  soft_skills: z.array(z.record(z.any())).optional(),
-  output_reasoning: z.string().optional(),
-  way_of_decision_making: z.array(z.record(z.any())).optional(),
-  personality: z.array(z.record(z.any())).optional(),
-  projects_participated: z.array(ProjectInfoSchema).optional(),
-  user_goal: z.array(z.record(z.any())).optional(),
-  work_responsibility: z.array(z.record(z.any())).optional(),
-  working_habit_preference: z.array(z.record(z.any())).optional(),
-  interests: z.array(z.record(z.any())).optional(),
-  tendency: z.array(z.record(z.any())).optional(),
-  motivation_system: z.array(z.record(z.any())).optional(),
-  fear_system: z.array(z.record(z.any())).optional(),
-  value_system: z.array(z.record(z.any())).optional(),
-  humor_use: z.array(z.record(z.any())).optional(),
-  colloquialism: z.array(z.record(z.any())).optional(),
-  group_importance_evidence: GroupImportanceEvidenceSchema.optional()
+  /** 原子化描述列表（每条为一个独立的持久性画像事实，包括称呼偏好） */
+  items: z.array(z.string()).optional()
 })
 
 export type ProfileMemory = z.infer<typeof ProfileMemorySchema>
@@ -182,6 +149,11 @@ export interface UnifiedExtractionResult {
   profile?: { user_profiles?: Array<Record<string, unknown>> } | null
 }
 
+/** 文档迁移记忆抽取结果 */
+export interface MigrationExtractionResult {
+  changes: string[]
+}
+
 // Retrieval Types
 
 /** 用于 agentic 检索：将用户 query 扩展为多条子查询（仅在有需要时使用） */
@@ -195,6 +167,12 @@ export interface SearchResult {
   content: string
   metadata: Record<string, any>
   type: MemoryType
+  /** 来自 SQL 列，可选 */
+  group_id?: string | null
+  /** 来自 SQL 列，可选 */
+  created_at?: string
+  /** 来自 SQL 列，可选 */
+  updated_at?: string
 }
 
 export interface RetrieveRequest {

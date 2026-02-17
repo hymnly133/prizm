@@ -48,6 +48,14 @@ function createMockStorage(opts?: {
       deletes.push({ table, id })
     },
     query: async (sql: string, params?: any[]) => {
+      // Profile 增量合并查询：SELECT * FROM memories WHERE type = ? AND user_id = ? AND group_id IS NULL ...
+      if (sql.includes('group_id IS NULL') && sql.includes('ORDER BY updated_at DESC')) {
+        const typeParam = params?.[0]
+        const userParam = params?.[1]
+        return existingMemories.filter(
+          (m) => (!typeParam || m.type === typeParam) && (!userParam || m.user_id === userParam)
+        )
+      }
       // 文本去重查询：SELECT id, content FROM memories WHERE type = ? AND user_id = ? ...
       if (sql.includes('SELECT id, content FROM memories')) {
         const typeParam = params?.[0]
@@ -573,10 +581,19 @@ describe('MemoryManager', () => {
       expect(inserts.filter((i) => i.item.type === MemoryType.EPISODIC_MEMORY)).toHaveLength(1)
     })
 
-    it('should dedup PROFILE when vector match + LLM confirms SAME', async () => {
-      const { storage, inserts, updates, setVectorSearchResults } = createMockStorage()
-      setVectorSearchResults([
-        { id: 'existing-profile-1', content: '用户希望被称为老大', _distance: 0.08 }
+    it('should merge PROFILE into existing when profile already exists', async () => {
+      const { storage, inserts, updates, setVectorSearchResults, setExistingMemories } =
+        createMockStorage()
+      setVectorSearchResults([])
+      // 已有 profile 记忆（metadata 含 items 数组）
+      setExistingMemories([
+        {
+          id: 'existing-profile-1',
+          content: '用户希望被称为老大',
+          type: MemoryType.PROFILE,
+          user_id: 'user1',
+          metadata: JSON.stringify({ items: ['用户希望被称为老大'] })
+        }
       ])
 
       const llm = createMockLLMProvider('SAME 两条都描述用户希望被称为老大')
@@ -584,7 +601,7 @@ describe('MemoryManager', () => {
       const mockUnifiedExtractor = {
         extractAll: async () => ({
           profile: {
-            user_profiles: [{ summary: '用户希望被称呼为"老大"' }]
+            user_profiles: [{ items: ['用户希望被称为老大'] }]
           }
         })
       } as any
@@ -608,22 +625,11 @@ describe('MemoryManager', () => {
 
       const created = await manager.processMemCell(memcell, { userId: 'user1', scope: 'online' })
 
-      // PROFILE should NOT be inserted (deduped)
+      // PROFILE should NOT be inserted (no changes after merge)
       expect(inserts.filter((i) => i.item.type === MemoryType.PROFILE)).toHaveLength(0)
-      // Existing memory touched
-      expect(
-        updates.filter((u) => u.table === 'memories' && u.id === 'existing-profile-1')
-      ).toHaveLength(1)
-      // Dedup log written
-      const dedupLogs = inserts.filter((i) => i.table === 'dedup_log')
-      expect(dedupLogs).toHaveLength(1)
-      expect(dedupLogs[0].item.kept_memory_id).toBe('existing-profile-1')
-      expect(dedupLogs[0].item.new_memory_type).toBe(MemoryType.PROFILE)
-      // Not reported as created
-      expect(created.filter((c) => c.type === MemoryType.PROFILE)).toHaveLength(0)
     })
 
-    it('should insert PROFILE when no vector match (first profile)', async () => {
+    it('should insert PROFILE when no existing profile (first profile)', async () => {
       const { storage, inserts, setVectorSearchResults } = createMockStorage()
       setVectorSearchResults([])
 
@@ -631,7 +637,7 @@ describe('MemoryManager', () => {
       const mockUnifiedExtractor = {
         extractAll: async () => ({
           profile: {
-            user_profiles: [{ summary: '用户喜欢周杰伦的音乐' }]
+            user_profiles: [{ items: ['用户喜欢周杰伦的音乐'] }]
           }
         })
       } as any
@@ -662,24 +668,30 @@ describe('MemoryManager', () => {
       expect(created.filter((c) => c.type === MemoryType.PROFILE)).toHaveLength(1)
     })
 
-    it('should NOT dedup PROFILE when LLM says DIFF', async () => {
-      const { storage, inserts, setVectorSearchResults } = createMockStorage()
-      setVectorSearchResults([
-        { id: 'existing-profile-2', content: '用户希望被称为老大', _distance: 0.3 }
+    it('should merge PROFILE with new items into existing profile', async () => {
+      const { storage, inserts, updates, setVectorSearchResults, setExistingMemories } =
+        createMockStorage()
+      setVectorSearchResults([])
+      setExistingMemories([
+        {
+          id: 'existing-profile-2',
+          content: '用户希望被称为老大',
+          type: MemoryType.PROFILE,
+          user_id: 'user1',
+          metadata: JSON.stringify({ items: ['用户希望被称为老大'] })
+        }
       ])
 
-      const llm = createMockLLMProvider('DIFF 新记忆是关于用户的音乐偏好，与称呼无关')
       const embeddingProvider = { getEmbedding: async () => [0.4, 0.5, 0.6] }
       const mockUnifiedExtractor = {
         extractAll: async () => ({
           profile: {
-            user_profiles: [{ summary: '用户喜欢听摇滚乐' }]
+            user_profiles: [{ items: ['用户喜欢听摇滚乐'] }]
           }
         })
       } as any
 
       const manager = new MemoryManager(storage, {
-        llmProvider: llm,
         unifiedExtractor: mockUnifiedExtractor,
         embeddingProvider
       })
@@ -697,11 +709,13 @@ describe('MemoryManager', () => {
 
       const created = await manager.processMemCell(memcell, { userId: 'user1', scope: 'online' })
 
-      // PROFILE should be inserted (LLM rejected dedup)
-      expect(inserts.filter((i) => i.item.type === MemoryType.PROFILE)).toHaveLength(1)
-      // No dedup log
-      expect(inserts.filter((i) => i.table === 'dedup_log')).toHaveLength(0)
-      // Reported as created
+      // PROFILE should NOT be inserted (merged into existing)
+      expect(inserts.filter((i) => i.item.type === MemoryType.PROFILE)).toHaveLength(0)
+      // Existing memory should be updated
+      expect(
+        updates.filter((u) => u.table === 'memories' && u.id === 'existing-profile-2')
+      ).toHaveLength(1)
+      // Reported as created (merge produces output)
       expect(created.filter((c) => c.type === MemoryType.PROFILE)).toHaveLength(1)
     })
 
@@ -903,7 +917,7 @@ describe('MemoryManager', () => {
       })
     })
 
-    describe('Profile text dedup via unified extractor', () => {
+    describe('Profile incremental merge via unified extractor', () => {
       function createMockLLMProvider(response: string) {
         return {
           generate: async () => response,
@@ -914,13 +928,14 @@ describe('MemoryManager', () => {
         } as any
       }
 
-      it('should dedup Profile via text similarity + LLM confirmation', async () => {
+      it('should skip update when incoming items are identical to existing', async () => {
         const existingMemories = [
           {
             id: 'existing-profile-text-1',
             content: '用户希望被称为老大',
             type: MemoryType.PROFILE,
-            user_id: 'user1'
+            user_id: 'user1',
+            metadata: JSON.stringify({ items: ['用户希望被称为老大'] })
           }
         ]
         const { storage, inserts, updates } = createMockStorage({
@@ -928,12 +943,12 @@ describe('MemoryManager', () => {
           existingMemories
         })
 
-        const llm = createMockLLMProvider('SAME 语义完全一致')
+        const llm = createMockLLMProvider('SAME')
         const embeddingProvider = { getEmbedding: async () => new Array(384).fill(0.01) }
         const mockUnifiedExtractor = {
           extractAll: async () => ({
             profile: {
-              user_profiles: [{ summary: '用户希望被称呼为"老大"' }]
+              user_profiles: [{ items: ['用户希望被称为老大'] }]
             }
           })
         } as any
@@ -960,34 +975,24 @@ describe('MemoryManager', () => {
           scope: 'online'
         })
 
-        // PROFILE 应被去重（文本匹配 + LLM 确认），不插入新记忆
+        // 无变化 → 不插入也不更新
         expect(inserts.filter((i) => i.item.type === MemoryType.PROFILE)).toHaveLength(0)
-        // 已有记忆被 touch
         expect(
           updates.filter((u) => u.table === 'memories' && u.id === 'existing-profile-text-1')
-        ).toHaveLength(1)
-        // 去重日志写入
-        const dedupLogs = inserts.filter((i) => i.table === 'dedup_log')
-        expect(dedupLogs).toHaveLength(1)
-        expect(dedupLogs[0].item.kept_memory_id).toBe('existing-profile-text-1')
-        expect(String(dedupLogs[0].item.llm_reasoning)).toContain('text-sim')
-        // LLM 确认结果也写入 reasoning
-        expect(String(dedupLogs[0].item.llm_reasoning)).toContain('SAME')
-        // 双分数都记录
-        expect(dedupLogs[0].item.text_similarity).toBeGreaterThan(0.5)
-        expect(dedupLogs[0].item.vector_distance).toBe(-1) // mock embedding 无向量候选
+        ).toHaveLength(0)
       })
 
-      it('should NOT text-dedup Profile when content is different', async () => {
+      it('should merge new items into existing profile', async () => {
         const existingMemories = [
           {
             id: 'existing-profile-diff',
-            content: '用户倾向于使用受管理文档进行工作',
+            content: '用户倾向于使用文档管理工作',
             type: MemoryType.PROFILE,
-            user_id: 'user1'
+            user_id: 'user1',
+            metadata: JSON.stringify({ items: ['用户倾向于使用文档管理工作'] })
           }
         ]
-        const { storage, inserts } = createMockStorage({
+        const { storage, inserts, updates } = createMockStorage({
           vectorSearchResults: [],
           existingMemories
         })
@@ -996,7 +1001,7 @@ describe('MemoryManager', () => {
         const mockUnifiedExtractor = {
           extractAll: async () => ({
             profile: {
-              user_profiles: [{ summary: '用户希望被称为老大' }]
+              user_profiles: [{ items: ['用户希望被称为老大'] }]
             }
           })
         } as any
@@ -1022,18 +1027,24 @@ describe('MemoryManager', () => {
           scope: 'online'
         })
 
-        // 内容不同，PROFILE 应正常插入
-        expect(inserts.filter((i) => i.item.type === MemoryType.PROFILE)).toHaveLength(1)
+        // 新 items 合并 → update 已有记录
+        expect(inserts.filter((i) => i.item.type === MemoryType.PROFILE)).toHaveLength(0)
+        expect(
+          updates.filter((u) => u.table === 'memories' && u.id === 'existing-profile-diff')
+        ).toHaveLength(1)
+        expect(created.filter((c) => c.type === MemoryType.PROFILE)).toHaveLength(1)
       })
 
-      it('should dedup Profile with medium text similarity + LLM confirmation', async () => {
-        // 已有记忆比新记忆多几个 token，sim 在 0.5~0.75 的中等区间
+      it('should merge with LLM when available and items differ', async () => {
         const existingMemories = [
           {
             id: 'existing-profile-medium',
-            content: '用户是一名资深程序员，希望被称为老大',
+            content: '用户是一名资深程序员\n用户希望被称为老大',
             type: MemoryType.PROFILE,
-            user_id: 'user1'
+            user_id: 'user1',
+            metadata: JSON.stringify({
+              items: ['用户是一名资深程序员', '用户希望被称为老大']
+            })
           }
         ]
         const { storage, inserts, updates } = createMockStorage({
@@ -1041,12 +1052,19 @@ describe('MemoryManager', () => {
           existingMemories
         })
 
-        const llm = createMockLLMProvider('SAME 两条都描述用户希望被称为老大')
+        const llm = createMockLLMProvider(
+          JSON.stringify({
+            merged_profile: {
+              items: ['用户是一名资深程序员', '用户希望被称为老大', '用户喜欢摇滚乐']
+            },
+            changes_summary: '新增"用户喜欢摇滚乐"'
+          })
+        )
         const embeddingProvider = { getEmbedding: async () => new Array(384).fill(0.01) }
         const mockUnifiedExtractor = {
           extractAll: async () => ({
             profile: {
-              user_profiles: [{ summary: '用户希望被称为老大' }]
+              user_profiles: [{ items: ['用户喜欢摇滚乐'] }]
             }
           })
         } as any
@@ -1059,7 +1077,7 @@ describe('MemoryManager', () => {
 
         const memcell: MemCell = {
           original_data: [
-            { role: 'user', content: '叫我老大' },
+            { role: 'user', content: '我喜欢摇滚乐' },
             { role: 'assistant', content: '好的！' }
           ],
           type: RawDataType.CONVERSATION,
@@ -1073,11 +1091,12 @@ describe('MemoryManager', () => {
           scope: 'online'
         })
 
-        // LLM 确认相同 → 去重
+        // 合并到已有 → update
         expect(inserts.filter((i) => i.item.type === MemoryType.PROFILE)).toHaveLength(0)
         expect(
           updates.filter((u) => u.table === 'memories' && u.id === 'existing-profile-medium')
         ).toHaveLength(1)
+        expect(created.filter((c) => c.type === MemoryType.PROFILE)).toHaveLength(1)
       })
     })
   })

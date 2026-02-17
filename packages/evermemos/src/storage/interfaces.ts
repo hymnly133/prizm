@@ -2,6 +2,8 @@ export interface VectorStoreAdapter {
   add(collection: string, items: any[]): Promise<void>
   search(collection: string, vector: number[], limit: number, filter?: any): Promise<any[]>
   delete(collection: string, id: string): Promise<void>
+  /** 删除整个集合（可选实现） */
+  dropCollection?(collection: string): Promise<void>
 }
 
 export interface RelationalStoreAdapter {

@@ -106,50 +106,33 @@ export function parseUnifiedMemoryText(text: string): UnifiedExtractionResult | 
   const profileBody = sections.get('PROFILE')
   if (profileBody) {
     const kv = parseSectionKeyValues(profileBody)
-    const userName = getFirst(kv, 'USER_NAME')
     const items = getAll(kv, 'ITEM').filter(Boolean)
 
-    // 新格式：每条 ITEM 生成一个独立的 profile 记录（原子化描述）
-    // USER_NAME 不再单独处理，称呼偏好作为普通 ITEM 由 LLM 自行输出
+    // 输出格式：{ items: string[] }
+    // 每条 ITEM 是一个原子画像事实（包括称呼偏好），同一用户的所有 ITEM 合并到一条 profile 记录
     if (items.length > 0) {
-      const profiles: Array<Record<string, unknown>> = items.map((item) => ({ summary: item }))
-      if (profiles.length > 0) {
-        result.profile = { user_profiles: profiles }
-      }
-    } else {
-      // 向后兼容旧格式：SUMMARY / 结构化字段
-      const record: Record<string, unknown> = {
-        user_name: userName,
-        summary: getFirst(kv, 'SUMMARY'),
-        output_reasoning: getFirst(kv, 'OUTPUT_REASONING') ?? getFirst(kv, 'SUMMARY'),
-        hard_skills: getFirst(kv, 'HARD_SKILLS')
-          ?.split(',')
-          .map((s) => s.trim())
-          .filter(Boolean),
-        soft_skills: getFirst(kv, 'SOFT_SKILLS')
-          ?.split(',')
-          .map((s) => s.trim())
-          .filter(Boolean),
-        work_responsibility: getFirst(kv, 'WORK_RESPONSIBILITY')
-          ?.split(',')
-          .map((s) => s.trim())
-          .filter(Boolean),
-        interests: getFirst(kv, 'INTERESTS')
-          ?.split(',')
-          .map((s) => s.trim())
-          .filter(Boolean),
-        tendency: getFirst(kv, 'TENDENCY')
-          ?.split(',')
-          .map((s) => s.trim())
-          .filter(Boolean)
-      }
-      const legacyUserId = getFirst(kv, 'USER_ID')
-      if (legacyUserId) record.user_id = legacyUserId
-      const hasContent = Object.values(record).some(
-        (v) => v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && v.length === 0)
-      )
-      if (hasContent) {
-        result.profile = { user_profiles: [record] }
+      result.profile = { user_profiles: [{ items }] }
+    }
+  }
+
+  // 文档场景：## OVERVIEW 映射到 episode.content，## FACTS 映射到 event_log.atomic_fact
+  const overviewBody = sections.get('OVERVIEW')
+  if (overviewBody && !result.episode) {
+    const kv = parseSectionKeyValues(overviewBody)
+    const content = getFirst(kv, 'CONTENT')
+    if (content) {
+      result.episode = { content, summary: content.slice(0, 200) }
+    }
+  }
+
+  const factsBody = sections.get('FACTS')
+  if (factsBody && !result.event_log) {
+    const kv = parseSectionKeyValues(factsBody)
+    const facts = getAll(kv, 'FACT').filter(Boolean)
+    if (facts.length) {
+      result.event_log = {
+        time: new Date().toISOString().slice(0, 10),
+        atomic_fact: facts.slice(0, 20)
       }
     }
   }
@@ -163,4 +146,34 @@ export function parseUnifiedMemoryText(text: string): UnifiedExtractionResult | 
     return null
   }
   return result
+}
+
+/**
+ * 解析迁移记忆抽取文本（## MIGRATION 段），返回变更条目列表。
+ */
+export function parseMigrationText(text: string): string[] {
+  if (!text || typeof text !== 'string') return []
+  const normalized = text.trim()
+  const matches: Array<{ name: string; headerStart: number; bodyStart: number }> = []
+  let m: RegExpExecArray | null
+  const re = /^##\s*(\w+)\s*$/gm
+  while ((m = re.exec(normalized)) !== null) {
+    matches.push({
+      name: m[1].toUpperCase(),
+      headerStart: m.index,
+      bodyStart: m.index + m[0].length
+    })
+  }
+  const sections = new Map<string, string>()
+  for (let i = 0; i < matches.length; i++) {
+    const bodyEnd = i + 1 < matches.length ? matches[i + 1].headerStart : normalized.length
+    const body = normalized.slice(matches[i].bodyStart, bodyEnd).trim()
+    sections.set(matches[i].name, body)
+  }
+
+  const migrationBody = sections.get('MIGRATION')
+  if (!migrationBody) return []
+
+  const kv = parseSectionKeyValues(migrationBody)
+  return getAll(kv, 'CHANGE').filter(Boolean).slice(0, 10)
 }

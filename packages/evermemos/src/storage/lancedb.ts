@@ -69,4 +69,13 @@ export class LanceDBAdapter implements VectorStoreAdapter {
       // ignore if table doesn't exist
     }
   }
+
+  async dropCollection(collectionName: string): Promise<void> {
+    const db = await this.getDb()
+    try {
+      await db.dropTable(collectionName)
+    } catch {
+      // ignore if table doesn't exist
+    }
+  }
 }

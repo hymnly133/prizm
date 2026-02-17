@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { parseUnifiedMemoryText } from './unifiedMemoryParser.js'
 
 describe('parseUnifiedMemoryText', () => {
-  /** 与提示词中 output_format 一致的期望输出样本（新格式：无 USER_ID，使用 SUMMARY） */
+  /** 与提示词中 output_format 一致的期望输出样本（PROFILE 使用 ITEM 原子画像） */
   const fullExpectedOutput = `
 ## EPISODE
 CONTENT: 用户讨论了项目进度与下周计划，约定周三前完成设计稿。
@@ -26,13 +26,9 @@ END: 2025-02-17
 EVIDENCE: 约定下周一下午开会评审
 
 ## PROFILE
-USER_NAME: 张三
-SUMMARY: 用户张三擅长 TypeScript 和 Node.js，负责前端开发与需求对接
-HARD_SKILLS: TypeScript, Node.js
-SOFT_SKILLS: 沟通, 协作
-WORK_RESPONSIBILITY: 前端开发, 需求对接
-INTERESTS: 技术分享
-TENDENCY: 务实
+ITEM: 用户擅长 TypeScript 和 Node.js
+ITEM: 用户负责前端开发与需求对接
+ITEM: 用户热爱技术分享
 `
 
   it('完整解析四类小节：EPISODE / EVENT_LOG / FORESIGHT / PROFILE', () => {
@@ -57,17 +53,16 @@ TENDENCY: 务实
     expect(result!.foresight![1].content).toBe('下周一下午进行评审会议')
     expect(result!.foresight![1].evidence).toBe('约定下周一下午开会评审')
 
+    // Profile: 单条记录，items 包含所有 ITEM
     expect(result!.profile?.user_profiles).toHaveLength(1)
     const p = result!.profile!.user_profiles![0] as Record<string, unknown>
-    expect(p.user_id).toBeUndefined()
-    expect(p.user_name).toBe('张三')
-    expect(p.summary).toBe('用户张三擅长 TypeScript 和 Node.js，负责前端开发与需求对接')
-    expect(p.output_reasoning).toBe('用户张三擅长 TypeScript 和 Node.js，负责前端开发与需求对接')
-    expect(p.hard_skills).toEqual(['TypeScript', 'Node.js'])
-    expect(p.soft_skills).toEqual(['沟通', '协作'])
-    expect(p.work_responsibility).toEqual(['前端开发', '需求对接'])
-    expect(p.interests).toEqual(['技术分享'])
-    expect(p.tendency).toEqual(['务实'])
+    const items = p.items as string[]
+    expect(items).toHaveLength(3)
+    expect(items).toContain('用户擅长 TypeScript 和 Node.js')
+    expect(items).toContain('用户负责前端开发与需求对接')
+    expect(items).toContain('用户热爱技术分享')
+    // 不应有 user_name 字段（不区分用户，称呼作为 ITEM）
+    expect(p.user_name).toBeUndefined()
   })
 
   it('值内包含英文冒号时仍按第一冒号切分键值', () => {
@@ -111,33 +106,49 @@ ${blocks}
     expect(result?.foresight![9].content).toBe('前瞻10')
   })
 
-  it('PROFILE 无需 USER_ID；有任意有效字段即可', () => {
+  it('PROFILE 仅有 ITEM 时有效', () => {
     const text = `
 ## PROFILE
-USER_NAME: 李四
+ITEM: 用户偏好暗色主题
 `
     const result = parseUnifiedMemoryText(text)
     expect(result?.profile?.user_profiles).toHaveLength(1)
     const p = result!.profile!.user_profiles![0] as Record<string, unknown>
-    expect(p.user_id).toBeUndefined()
-    expect(p.user_name).toBe('李四')
-    expect(p.hard_skills).toBeUndefined()
-    expect(p.soft_skills).toBeUndefined()
+    expect((p.items as string[])[0]).toBe('用户偏好暗色主题')
   })
 
-  it('PROFILE 兼容旧格式 USER_ID + OUTPUT_REASONING', () => {
+  it('PROFILE 多个 ITEM 收集到单条记录的 items 数组', () => {
     const text = `
 ## PROFILE
-USER_ID: u1
-USER_NAME: 李四
-OUTPUT_REASONING: 用户提到了自己的名字
+ITEM: 用户希望被称为"老大"
+ITEM: 用户喜欢华语流行音乐
+ITEM: 用户特别喜爱周杰伦
+ITEM: 用户正在开发名为"Prizm"的项目
+ITEM: 用户习惯使用便签记录项目和想法
 `
     const result = parseUnifiedMemoryText(text)
     expect(result?.profile?.user_profiles).toHaveLength(1)
     const p = result!.profile!.user_profiles![0] as Record<string, unknown>
-    expect(p.user_id).toBe('u1')
-    expect(p.user_name).toBe('李四')
-    expect(p.output_reasoning).toBe('用户提到了自己的名字')
+    const items = p.items as string[]
+    expect(items).toHaveLength(5)
+    expect(items[0]).toBe('用户希望被称为"老大"')
+    expect(items[1]).toBe('用户喜欢华语流行音乐')
+    expect(items[2]).toBe('用户特别喜爱周杰伦')
+  })
+
+  it('PROFILE 忽略 USER_NAME（已废弃，称呼作为 ITEM）', () => {
+    const text = `
+## PROFILE
+USER_NAME: 张三
+ITEM: 用户名叫张三
+ITEM: 用户喜欢跑步
+`
+    const result = parseUnifiedMemoryText(text)
+    expect(result?.profile?.user_profiles).toHaveLength(1)
+    const p = result!.profile!.user_profiles![0] as Record<string, unknown>
+    // USER_NAME 不再被解析为字段
+    expect(p.user_name).toBeUndefined()
+    expect(p.items).toEqual(['用户名叫张三', '用户喜欢跑步'])
   })
 
   it('仅有 EPISODE 时仍返回有效结果', () => {
@@ -165,89 +176,15 @@ KEYWORDS: x
     expect(result?.episode).toBeUndefined()
   })
 
-  it('PROFILE 无 USER_ID 时仍可写入（不再依赖 USER_ID）', () => {
-    const text = `
-## PROFILE
-USER_NAME: 无名
-HARD_SKILLS: 无
-`
-    const result = parseUnifiedMemoryText(text)
-    expect(result?.profile?.user_profiles).toHaveLength(1)
-    const p = result!.profile!.user_profiles![0] as Record<string, unknown>
-    expect(p.user_name).toBe('无名')
-    expect(p.hard_skills).toEqual(['无'])
+  it('PROFILE 无 ITEM 时不写入', () => {
+    expect(parseUnifiedMemoryText('## PROFILE\n')).toBeNull()
+    expect(parseUnifiedMemoryText('## PROFILE\nUSER_NAME: 张三')).toBeNull()
   })
 
   it('无任何有效内容时返回 null', () => {
     expect(parseUnifiedMemoryText('')).toBeNull()
     expect(parseUnifiedMemoryText('   \n  \n')).toBeNull()
     expect(parseUnifiedMemoryText('## EPISODE\nSUMMARY: 无 CONTENT')).toBeNull()
-  })
-
-  it('PROFILE 仅有空字段时不写入', () => {
-    expect(parseUnifiedMemoryText('## PROFILE\n')).toBeNull()
-  })
-
-  it('PROFILE 仅含 SUMMARY 时有效（如称呼偏好场景）', () => {
-    const text = `
-## PROFILE
-SUMMARY: 用户希望被称呼为"老大"
-`
-    const result = parseUnifiedMemoryText(text)
-    expect(result?.profile?.user_profiles).toHaveLength(1)
-    const p = result!.profile!.user_profiles![0] as Record<string, unknown>
-    expect(p.summary).toBe('用户希望被称呼为"老大"')
-    expect(p.output_reasoning).toBe('用户希望被称呼为"老大"')
-    expect(p.user_name).toBeUndefined()
-  })
-
-  it('PROFILE 新格式：多个 ITEM 生成多条原子画像', () => {
-    const text = `
-## PROFILE
-ITEM: 用户希望被称为"老大"
-ITEM: 用户喜欢华语流行音乐
-ITEM: 用户特别喜爱周杰伦
-ITEM: 用户正在开发名为"Prizm"的项目
-ITEM: 用户习惯使用便签记录项目和想法
-`
-    const result = parseUnifiedMemoryText(text)
-    expect(result?.profile?.user_profiles).toHaveLength(5)
-    const profiles = result!.profile!.user_profiles! as Array<Record<string, unknown>>
-    expect(profiles[0].summary).toBe('用户希望被称为"老大"')
-    expect(profiles[1].summary).toBe('用户喜欢华语流行音乐')
-    expect(profiles[2].summary).toBe('用户特别喜爱周杰伦')
-    expect(profiles[3].summary).toBe('用户正在开发名为"Prizm"的项目')
-    expect(profiles[4].summary).toBe('用户习惯使用便签记录项目和想法')
-  })
-
-  it('PROFILE 新格式：单条 ITEM 也有效', () => {
-    const text = `
-## PROFILE
-ITEM: 用户偏好暗色主题
-`
-    const result = parseUnifiedMemoryText(text)
-    expect(result?.profile?.user_profiles).toHaveLength(1)
-    expect((result!.profile!.user_profiles![0] as Record<string, unknown>).summary).toBe(
-      '用户偏好暗色主题'
-    )
-  })
-
-  it('PROFILE 有 ITEM 时忽略旧格式字段（SUMMARY/USER_NAME 等）', () => {
-    const text = `
-## PROFILE
-USER_NAME: 张三
-SUMMARY: 这条应该被忽略
-ITEM: 用户名叫张三
-ITEM: 用户喜欢跑步
-`
-    const result = parseUnifiedMemoryText(text)
-    // 有 ITEM 时走新格式分支，USER_NAME 和 SUMMARY 被忽略
-    expect(result?.profile?.user_profiles).toHaveLength(2)
-    const profiles = result!.profile!.user_profiles! as Array<Record<string, unknown>>
-    expect(profiles[0].summary).toBe('用户名叫张三')
-    expect(profiles[1].summary).toBe('用户喜欢跑步')
-    // 不应有 user_name 字段
-    expect(profiles[0].user_name).toBeUndefined()
   })
 
   it('小节标题大小写不敏感（解析器转大写）', () => {
@@ -273,5 +210,7 @@ KEYWORDS: k
     const result = parseUnifiedMemoryText('\n  \n' + fullExpectedOutput + '\n  ')
     expect(result?.episode?.content).toBe('用户讨论了项目进度与下周计划，约定周三前完成设计稿。')
     expect(result?.profile?.user_profiles?.[0]).toBeDefined()
+    const p = result!.profile!.user_profiles![0] as Record<string, unknown>
+    expect(p.items).toBeDefined()
   })
 })

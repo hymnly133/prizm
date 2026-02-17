@@ -13,6 +13,7 @@ import { IExtractor } from '../extractors/BaseExtractor.js'
 import type { UnifiedExtractor } from '../extractors/UnifiedExtractor.js'
 import type { ICompletionProvider } from '../utils/llm.js'
 import { DEDUP_CONFIRM_PROMPT } from '../prompts.js'
+import { mergeProfilesSimple, mergeProfilesWithLLM } from '../utils/profileMerger.js'
 import { Jieba } from '@node-rs/jieba'
 
 const jieba = new Jieba()
@@ -48,24 +49,30 @@ export interface MemoryManagerOptions {
   llmProvider?: ICompletionProvider
 }
 
-/** LanceDB 只能推断简单类型，将 metadata 等复杂字段序列化为字符串 */
-function toVectorRow(memory: Record<string, unknown>, vector: number[]): Record<string, unknown> {
-  const { embedding: _, ...rest } = memory
-  // LanceDB 无法为 undefined 推断数据类型，统一转为 null
-  const sanitized: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(rest)) {
-    sanitized[key] = value === undefined ? null : value
-  }
+/**
+ * 构造 LanceDB 向量行。
+ * 只存搜索/过滤所需的最小字段集，不冗余存储 SQLite 已有的元信息。
+ * LanceDB 列：id, content, user_id, group_id, vector
+ */
+function toVectorRow(
+  id: string,
+  content: string,
+  userId: string | undefined | null,
+  groupId: string | undefined | null,
+  vector: number[]
+): Record<string, unknown> {
   return {
-    ...sanitized,
-    vector,
-    metadata:
-      typeof memory.metadata === 'string' ? memory.metadata : JSON.stringify(memory.metadata ?? {})
+    id,
+    content: content ?? '',
+    user_id: userId ?? null,
+    group_id: groupId ?? null,
+    vector
   }
 }
 
 export class MemoryManager {
-  private storage: StorageAdapter
+  /** 存储适配器（SQLite + LanceDB），暴露为 public 以便外部直接写入已抽取的记忆 */
+  public readonly storage: StorageAdapter
   private extractors: Map<MemoryType, IExtractor>
   private unifiedExtractor?: UnifiedExtractor
   private embeddingProvider?: IEmbeddingProvider
@@ -94,7 +101,7 @@ export class MemoryManager {
   /**
    * 处理 MemCell 并按三层路由写入记忆。
    * 若配置了 unifiedExtractor，则一次 LLM 调用完成所有抽取；否则走原有分步 extractor。
-   * @returns 本轮新创建的记忆列表（用于 RoundMemoryGrowth）
+   * @returns 本轮新创建的记忆列表（用于 MemoryIdsByLayer）
    */
   async processMemCell(
     memcell: MemCell,
@@ -112,7 +119,16 @@ export class MemoryManager {
     if (useUnified && this.unifiedExtractor && this.embeddingProvider) {
       const unified = this.unifiedExtractor
       try {
-        const result = await unified.extractAll(memcell)
+        // 在抽取前获取已有 profile 摘要，传入 LLM 让其只抽取增量
+        let existingProfileSummary: string | undefined
+        if (isAssistant && routing?.userId) {
+          try {
+            existingProfileSummary = await this.getExistingProfileSummary(routing.userId)
+          } catch {
+            // 查询失败不阻塞抽取
+          }
+        }
+        const result = await unified.extractAll(memcell, existingProfileSummary)
         if (result) await this.saveFromUnifiedResult(memcell, result, routing)
       } catch (error) {
         console.error(
@@ -138,12 +154,8 @@ export class MemoryManager {
 
   // ==================== 语义去重系统 ====================
 
-  /** 需要语义去重的记忆类型 */
-  private static readonly DEDUP_TYPES = new Set([
-    MemoryType.EPISODIC_MEMORY,
-    MemoryType.FORESIGHT,
-    MemoryType.PROFILE
-  ])
+  /** 需要语义去重的记忆类型（Profile 使用增量合并而非去重） */
+  private static readonly DEDUP_TYPES = new Set([MemoryType.EPISODIC_MEMORY, MemoryType.FORESIGHT])
 
   /** L2 距离阈值：低于此值进入去重流程（cosine sim ≈ 0.90） */
   private static readonly DEDUP_L2_THRESHOLD = 0.45
@@ -473,6 +485,7 @@ export class MemoryManager {
 
   /**
    * 回退一次去重：重新插入被抑制的记忆，并标记日志为已回退。
+   * 向量需调用方后续通过 backfillVector 补全。
    * @returns 被恢复的记忆 id，或 null 表示回退失败
    */
   async undoDedup(dedupLogId: string): Promise<string | null> {
@@ -496,7 +509,7 @@ export class MemoryManager {
         }
       }
 
-      // 重新插入被抑制的记忆
+      // 重新插入被抑制的记忆（仅 SQLite，向量由 backfill 流程补全）
       await this.storage.relational.insert('memories', {
         id: newId,
         type: entry.new_memory_type,
@@ -505,21 +518,8 @@ export class MemoryManager {
         group_id: entry.group_id,
         created_at: now,
         updated_at: now,
-        metadata: JSON.stringify({ ...metadata, id: newId, restored_from_dedup: dedupLogId })
+        metadata: JSON.stringify({ ...metadata, restored_from_dedup: dedupLogId })
       })
-
-      // 恢复向量（如果 metadata 中有 embedding）
-      const emb = metadata.embedding as number[] | undefined
-      if (emb && Array.isArray(emb)) {
-        try {
-          const { embedding: _, ...rest } = metadata
-          const vecRow: Record<string, unknown> = { ...rest, id: newId, vector: emb }
-          vecRow.metadata = JSON.stringify(vecRow.metadata ?? {})
-          await this.storage.vector.add(entry.new_memory_type, [vecRow])
-        } catch {
-          // vector restore is best-effort
-        }
-      }
 
       // 标记日志为已回退
       await this.storage.relational.update('dedup_log', dedupLogId, {
@@ -589,23 +589,13 @@ export class MemoryManager {
       const groupId = memcell.scene === 'document' ? `${routing!.scope}:docs` : routing?.scope
 
       const id = uuidv4()
-      const memory = {
-        id,
-        memory_type: MemoryType.EPISODIC_MEMORY,
-        user_id: userId,
-        group_id: groupId,
-        created_at: now,
-        updated_at: now,
-        timestamp,
-        deleted: false,
-        content,
+
+      // SQLite metadata：只存类型特有字段，不重复 SQL 列
+      const episodeMeta: Record<string, unknown> = {
         summary: result.episode.summary,
         keywords: result.episode.keywords,
-        embedding,
-        metadata: {
-          original_data: memcell.original_data,
-          ...(roundMsgId && { round_message_id: roundMsgId })
-        }
+        original_data: memcell.original_data,
+        ...(roundMsgId && { round_message_id: roundMsgId })
       }
 
       // 语义去重：向量匹配 + LLM 二次确认
@@ -615,7 +605,7 @@ export class MemoryManager {
         content,
         groupId,
         userId,
-        memory
+        episodeMeta
       )
       if (!dedupId) {
         await this.storage.relational.insert('memories', {
@@ -626,11 +616,11 @@ export class MemoryManager {
           group_id: groupId ?? null,
           created_at: now,
           updated_at: now,
-          metadata: JSON.stringify(memory)
+          metadata: JSON.stringify(episodeMeta)
         })
         if (embedding?.length) {
           await this.storage.vector.add(MemoryType.EPISODIC_MEMORY, [
-            toVectorRow(memory, embedding)
+            toVectorRow(id, content, userId, groupId, embedding)
           ])
         }
         this.pushCreated(id, content, MemoryType.EPISODIC_MEMORY, groupId)
@@ -653,25 +643,15 @@ export class MemoryManager {
         } catch (e) {
           console.warn('EventLog embedding failed:', e)
         }
-        const memory = {
-          id,
-          memory_type: MemoryType.EVENT_LOG,
-          user_id: userId,
-          group_id: groupId,
-          created_at: now,
-          updated_at: now,
-          timestamp,
-          deleted: false,
-          content: fact.trim(),
+        // SQLite metadata：只存类型特有字段
+        const eventLogMeta: Record<string, unknown> = {
+          time: result.event_log.time,
           event_type: 'atomic',
-          embedding,
-          metadata: {
-            time: result.event_log.time,
-            parent_type: 'memcell',
-            parent_id: memcell.event_id,
-            ...(roundMsgId && { round_message_id: roundMsgId })
-          }
+          parent_type: 'memcell',
+          parent_id: memcell.event_id,
+          ...(roundMsgId && { round_message_id: roundMsgId })
         }
+
         await this.storage.relational.insert('memories', {
           id,
           type: MemoryType.EVENT_LOG,
@@ -680,10 +660,12 @@ export class MemoryManager {
           group_id: groupId ?? null,
           created_at: now,
           updated_at: now,
-          metadata: JSON.stringify(memory)
+          metadata: JSON.stringify(eventLogMeta)
         })
         if (embedding?.length) {
-          await this.storage.vector.add(MemoryType.EVENT_LOG, [toVectorRow(memory, embedding)])
+          await this.storage.vector.add(MemoryType.EVENT_LOG, [
+            toVectorRow(id, fact.trim(), userId, groupId, embedding)
+          ])
         }
         this.pushCreated(id, fact.trim(), MemoryType.EVENT_LOG, groupId)
       }
@@ -702,24 +684,14 @@ export class MemoryManager {
         }
 
         const id = uuidv4()
-        const memory = {
-          id,
-          memory_type: MemoryType.FORESIGHT,
-          user_id: userId,
-          group_id: groupId,
-          created_at: now,
-          updated_at: now,
-          timestamp,
-          deleted: false,
-          content: item.content,
+
+        // SQLite metadata：只存类型特有字段
+        const foresightMeta: Record<string, unknown> = {
           valid_start: item.start_time,
           valid_end: item.end_time,
-          embedding,
-          metadata: {
-            evidence: item.evidence,
-            duration_days: item.duration_days,
-            ...(roundMsgId && { round_message_id: roundMsgId })
-          }
+          evidence: item.evidence,
+          duration_days: item.duration_days,
+          ...(roundMsgId && { round_message_id: roundMsgId })
         }
 
         // 语义去重：向量匹配 + LLM 二次确认
@@ -729,7 +701,7 @@ export class MemoryManager {
           item.content,
           groupId,
           userId,
-          memory
+          foresightMeta
         )
         if (dedupId) continue
 
@@ -741,71 +713,143 @@ export class MemoryManager {
           group_id: groupId ?? null,
           created_at: now,
           updated_at: now,
-          metadata: JSON.stringify(memory)
+          metadata: JSON.stringify(foresightMeta)
         })
         if (embedding?.length) {
-          await this.storage.vector.add(MemoryType.FORESIGHT, [toVectorRow(memory, embedding)])
+          await this.storage.vector.add(MemoryType.FORESIGHT, [
+            toVectorRow(id, item.content, userId, groupId, embedding)
+          ])
         }
         this.pushCreated(id, item.content, MemoryType.FORESIGHT, groupId)
       }
     }
 
     if (!sessionOnly && isAssistantScene && result.profile?.user_profiles?.length) {
+      // Profile 增量合并 — 先查已有 profile，合并后更新；无已有则插入新记录
+      // parser 输出: { items: string[], user_name? } — 每个 user_profiles 条目
       for (const p of result.profile.user_profiles) {
-        const id = uuidv4()
-        const content = this.buildProfileContent(p)
-        if (!content) continue
+        const profileData = p as Record<string, unknown>
+        const incomingContent = this.buildProfileContent(profileData)
+        if (!incomingContent) continue
 
-        // 为 PROFILE 生成 embedding 以支持语义去重
-        let embedding: number[] | undefined
-        try {
-          embedding = await this.embeddingProvider!.getEmbedding(content)
-        } catch (e) {
-          console.warn('Profile embedding failed:', e)
-        }
-
-        // 语义去重：向量匹配 + LLM 二次确认
-        const { user_id: _llmUserId, ...profileData } = p as Record<string, unknown>
-        const memory: Record<string, unknown> = {
-          ...profileData,
-          id,
-          memory_type: MemoryType.PROFILE,
-          user_id: userId,
-          group_id: null,
-          created_at: now,
-          updated_at: now,
-          timestamp,
-          deleted: false,
-          content,
-          embedding
-        }
-        const dedupId = await this.tryDedup(
-          MemoryType.PROFILE,
-          embedding,
-          content,
-          undefined,
-          userId,
-          memory
+        // 查找该用户的已有 PROFILE 记忆（最新一条）
+        const existingRows = await this.storage.relational.query(
+          'SELECT * FROM memories WHERE type = ? AND user_id = ? AND group_id IS NULL ORDER BY updated_at DESC LIMIT 1',
+          [MemoryType.PROFILE, userId]
         )
-        if (dedupId) continue
 
-        await this.storage.relational.insert('memories', {
-          id,
-          type: MemoryType.PROFILE,
-          content,
-          user_id: userId,
-          group_id: null,
-          created_at: now,
-          updated_at: now,
-          metadata: JSON.stringify({
-            ...memory,
+        if (existingRows.length > 0) {
+          // ===== 增量合并到已有 Profile =====
+          const existing = existingRows[0]
+          let existingMeta: Record<string, unknown> = {}
+          try {
+            existingMeta =
+              typeof existing.metadata === 'string'
+                ? JSON.parse(existing.metadata)
+                : existing.metadata ?? {}
+          } catch {
+            existingMeta = {}
+          }
+
+          // 先用零 token 的 simple merge 检测是否有实质变化
+          const quickCheck = mergeProfilesSimple(existingMeta, profileData)
+          if (!quickCheck.hasChanges) {
+            console.log(`[Profile] No changes (simple check) for user=${userId}, skipping`)
+            continue
+          }
+
+          // 有变化 → 用 LLM 做高质量合并（语义去重、冲突解决）
+          let mergeResult = quickCheck
+          if (this.llmProvider) {
+            try {
+              mergeResult = await mergeProfilesWithLLM(existingMeta, profileData, this.llmProvider)
+            } catch {
+              // LLM 失败回退到 simple merge 结果（已计算好）
+            }
+          }
+
+          if (!mergeResult.hasChanges) {
+            console.log(`[Profile] No changes (LLM confirmed) for user=${userId}, skipping update`)
+            continue
+          }
+
+          const mergedContent = this.buildProfileContent(mergeResult.merged)
+          const finalContent = mergedContent || incomingContent
+
+          // 更新 embedding
+          let embedding: number[] | undefined
+          try {
+            embedding = await this.embeddingProvider!.getEmbedding(finalContent)
+          } catch (e) {
+            console.warn('Profile embedding failed:', e)
+          }
+
+          // metadata 只存 profile 特有字段 + 追踪字段
+          const updatedMeta: Record<string, unknown> = {
+            items: mergeResult.merged.items,
+            merge_history: [
+              ...((existingMeta.merge_history as string[]) ?? []),
+              `${now}: ${mergeResult.changesSummary}`
+            ].slice(-20),
             ...(roundMsgId && { round_message_id: roundMsgId })
+          }
+
+          await this.storage.relational.update('memories', existing.id, {
+            content: finalContent,
+            updated_at: now,
+            metadata: JSON.stringify(updatedMeta)
           })
-        })
-        if (embedding?.length) {
-          await this.storage.vector.add(MemoryType.PROFILE, [toVectorRow(memory, embedding)])
+
+          // 更新向量索引：删旧加新
+          if (embedding?.length) {
+            try {
+              await this.storage.vector.delete(MemoryType.PROFILE, existing.id)
+            } catch {
+              /* 可能不存在 */
+            }
+            await this.storage.vector.add(MemoryType.PROFILE, [
+              toVectorRow(existing.id, finalContent, userId, null, embedding)
+            ])
+          }
+
+          console.log(
+            `[Profile] Merged into existing id=${existing.id}: ${mergeResult.changesSummary}`
+          )
+          this.pushCreated(existing.id, finalContent, MemoryType.PROFILE, null)
+        } else {
+          // ===== 无已有 Profile → 新建记录 =====
+          const id = uuidv4()
+
+          let embedding: number[] | undefined
+          try {
+            embedding = await this.embeddingProvider!.getEmbedding(incomingContent)
+          } catch (e) {
+            console.warn('Profile embedding failed:', e)
+          }
+
+          // metadata 只存 profile 特有字段
+          const meta: Record<string, unknown> = {
+            items: profileData.items,
+            ...(roundMsgId && { round_message_id: roundMsgId })
+          }
+
+          await this.storage.relational.insert('memories', {
+            id,
+            type: MemoryType.PROFILE,
+            content: incomingContent,
+            user_id: userId,
+            group_id: null,
+            created_at: now,
+            updated_at: now,
+            metadata: JSON.stringify(meta)
+          })
+          if (embedding?.length) {
+            await this.storage.vector.add(MemoryType.PROFILE, [
+              toVectorRow(id, incomingContent, userId, null, embedding)
+            ])
+          }
+          this.pushCreated(id, incomingContent, MemoryType.PROFILE, null)
         }
-        this.pushCreated(id, content, MemoryType.PROFILE, null)
       }
     }
   }
@@ -885,6 +929,27 @@ export class MemoryManager {
             )
             if (dedupId) continue
           }
+
+          // 构建精简 metadata：排除 SQL 列字段，仅保留类型特有字段
+          const fullObj = memory as Record<string, unknown>
+          const excludeKeys = new Set([
+            'id',
+            'memory_type',
+            'user_id',
+            'group_id',
+            'created_at',
+            'updated_at',
+            'deleted',
+            'content',
+            'embedding'
+          ])
+          const cleanMeta: Record<string, unknown> = {}
+          for (const [k, v] of Object.entries(fullObj)) {
+            if (!excludeKeys.has(k) && v !== undefined) {
+              cleanMeta[k] = v
+            }
+          }
+
           await this.storage.relational.insert('memories', {
             id: memory.id,
             type: type,
@@ -893,12 +958,12 @@ export class MemoryManager {
             group_id: memory.group_id ?? null,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
-            metadata: JSON.stringify(memory)
+            metadata: JSON.stringify(cleanMeta)
           })
 
           if (memory.embedding) {
             await this.storage.vector.add(type, [
-              toVectorRow(memory as Record<string, unknown>, memory.embedding)
+              toVectorRow(memory.id, contentStr, memory.user_id, memory.group_id, memory.embedding)
             ])
           }
           this.pushCreated(memory.id, contentStr, type, memory.group_id)
@@ -910,39 +975,46 @@ export class MemoryManager {
   }
 
   /**
-   * 从 profile 字段生成描述性 content（替代泛化的 "Profile update for X"）。
-   * 优先使用 LLM 生成的摘要，其次从各字段拼接，确保记忆可读可搜索。
+   * 从 profile 的 items 列表生成 content 文本（用于全文搜索和 embedding）。
+   * 格式：每条 item 一行，前面加用户称呼（如有）。
+   */
+  /**
+   * 从 profile 的 items 列表生成 content 文本（用于全文搜索和 embedding）。
+   * 每条 item 一行。
    */
   private buildProfileContent(profile: Record<string, unknown>): string {
-    // 优先使用 summary（新 prompt）或 output_reasoning（旧 prompt）
-    const summary = (profile.summary ?? profile.output_reasoning) as string | undefined
-    if (summary?.trim()) return summary.trim()
+    const items = Array.isArray(profile.items) ? (profile.items as string[]) : []
+    return items
+      .filter((item) => typeof item === 'string' && item.trim())
+      .map((item) => item.trim())
+      .join('\n')
+  }
 
-    // 回退：从各字段拼接
-    const parts: string[] = []
-    const name = profile.user_name as string | undefined
-    if (name) parts.push(`用户称呼: ${name}`)
-    const fields: Array<[string, string]> = [
-      ['hard_skills', '技能'],
-      ['soft_skills', '软技能'],
-      ['work_responsibility', '职责'],
-      ['interests', '兴趣'],
-      ['tendency', '倾向']
-    ]
-    for (const [key, label] of fields) {
-      const val = profile[key]
-      if (!val) continue
-      if (Array.isArray(val) && val.length > 0) {
-        const strs = val.map((v: unknown) =>
-          typeof v === 'string' ? v : (v as any)?.value ?? String(v)
-        )
-        parts.push(`${label}: ${strs.join(', ')}`)
-      } else if (typeof val === 'string' && val.trim()) {
-        parts.push(`${label}: ${val}`)
-      }
+  /**
+   * 获取已有用户画像的 items 列表文本，注入抽取 prompt 让 LLM 跳过已知信息只抽取增量。
+   * 轻量查询（单条 SQL），不消耗 LLM token。
+   * 返回格式：每条 item 一行，截断到 ~500 字符。
+   */
+  private async getExistingProfileSummary(userId: string): Promise<string | undefined> {
+    const rows = await this.storage.relational.query(
+      'SELECT metadata FROM memories WHERE type = ? AND user_id = ? AND group_id IS NULL ORDER BY updated_at DESC LIMIT 1',
+      [MemoryType.PROFILE, userId]
+    )
+    if (rows.length === 0) return undefined
+
+    let meta: Record<string, unknown> = {}
+    try {
+      const raw = rows[0].metadata
+      meta = typeof raw === 'string' ? JSON.parse(raw) : raw ?? {}
+    } catch {
+      return undefined
     }
-    if (parts.length > 0) return parts.join('；')
-    return ''
+
+    const items = Array.isArray(meta.items) ? (meta.items as string[]) : []
+    if (items.length === 0) return undefined
+
+    const text = items.map((s) => `- ${s}`).join('\n')
+    return text.length > 500 ? text.slice(0, 500) + '...' : text
   }
 
   private getMemoryContent(memory: any): string {
@@ -1047,6 +1119,183 @@ export class MemoryManager {
     } catch {
       return 0
     }
+  }
+
+  /**
+   * 按 metadata JSON 字段的 key-value 批量删除记忆。
+   * 可选按 groupId 和 type 进一步过滤。用于清除特定文档的记忆。
+   * @param key metadata 中的字段名（如 "documentId"）
+   * @param value 要匹配的值
+   * @param groupId 可选，限定 group_id
+   * @param types 可选，限定 memory_type 列表
+   * @returns 删除的记忆数量
+   */
+  async deleteMemoriesByMetadata(
+    key: string,
+    value: string,
+    groupId?: string,
+    types?: string[]
+  ): Promise<number> {
+    try {
+      const conditions: string[] = [`json_extract(metadata, '$.${key}') = ?`]
+      const params: unknown[] = [value]
+
+      if (groupId !== undefined) {
+        conditions.push('group_id = ?')
+        params.push(groupId)
+      }
+      if (types && types.length > 0) {
+        const placeholders = types.map(() => '?').join(', ')
+        conditions.push(`type IN (${placeholders})`)
+        params.push(...types)
+      }
+
+      const where = conditions.join(' AND ')
+      const rows = await this.storage.relational.query(
+        `SELECT id, type FROM memories WHERE ${where}`,
+        params
+      )
+      for (const row of rows) {
+        const r = row as { id: string; type: string }
+        await this.storage.relational.delete('memories', r.id)
+      }
+      return rows.length
+    } catch (e) {
+      console.error('deleteMemoriesByMetadata error:', e)
+      return 0
+    }
+  }
+
+  /**
+   * 按 metadata JSON 字段的 key-value 列出记忆。
+   * 可选按 groupId 和 type 进一步过滤。用于查询特定文档的记忆。
+   */
+  async listMemoriesByMetadata(
+    key: string,
+    value: string,
+    groupId?: string,
+    type?: string,
+    limit = 100
+  ): Promise<Array<{ id: string; type: string; content: string; metadata: string }>> {
+    try {
+      const conditions: string[] = [`json_extract(metadata, '$.${key}') = ?`]
+      const params: unknown[] = [value]
+
+      if (groupId !== undefined) {
+        conditions.push('group_id = ?')
+        params.push(groupId)
+      }
+      if (type) {
+        conditions.push('type = ?')
+        params.push(type)
+      }
+      params.push(limit)
+
+      const where = conditions.join(' AND ')
+      const rows = await this.storage.relational.query(
+        `SELECT id, type, content, metadata FROM memories WHERE ${where} ORDER BY created_at DESC LIMIT ?`,
+        params
+      )
+      return rows as Array<{ id: string; type: string; content: string; metadata: string }>
+    } catch (e) {
+      console.error('listMemoriesByMetadata error:', e)
+      return []
+    }
+  }
+
+  /**
+   * 列出所有记忆（供向量补全使用）。
+   * embedding 不存在 SQLite 中，无法在 DB 层判断是否缺失向量。
+   * 调用方应直接对返回结果执行 backfillVector（LanceDB add 是幂等的）。
+   */
+  async listAllMemories(user_id: string): Promise<
+    Array<{
+      id: string
+      type: string
+      content: string
+      user_id: string | null
+      group_id: string | null
+    }>
+  > {
+    const rows = await this.storage.relational.query(
+      'SELECT id, type, content, user_id, group_id FROM memories WHERE user_id = ?',
+      [user_id]
+    )
+    return rows as Array<{
+      id: string
+      type: string
+      content: string
+      user_id: string | null
+      group_id: string | null
+    }>
+  }
+
+  /**
+   * 为单条记忆补全向量。
+   * 从 content 生成 embedding 并写入 LanceDB。SQLite 不受影响（embedding 不存 SQLite）。
+   */
+  async backfillVector(
+    memoryId: string,
+    type: string,
+    content: string,
+    userId: string | null,
+    groupId: string | null,
+    embeddingProvider: IEmbeddingProvider
+  ): Promise<boolean> {
+    try {
+      const embedding = await embeddingProvider.getEmbedding(content)
+      if (!embedding?.length) return false
+
+      await this.storage.vector.add(type, [
+        toVectorRow(memoryId, content, userId, groupId, embedding)
+      ])
+
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * 清空所有记忆（SQLite + 向量索引）。
+   * 返回删除的 SQLite 行数。
+   */
+  async clearAllMemories(): Promise<number> {
+    // 统计删除数量
+    const countRows = await this.storage.relational.query(
+      'SELECT COUNT(*) as cnt FROM memories',
+      []
+    )
+    const count = (countRows[0] as { cnt: number })?.cnt ?? 0
+
+    // 清空 SQLite memories 表
+    await this.storage.relational.query('DELETE FROM memories', [])
+
+    // 清空去重日志
+    try {
+      await this.storage.relational.query('DELETE FROM dedup_log', [])
+    } catch {
+      // table may not exist
+    }
+
+    // 删除所有向量集合
+    const vectorTypes = [
+      MemoryType.EPISODIC_MEMORY,
+      MemoryType.FORESIGHT,
+      MemoryType.EVENT_LOG,
+      MemoryType.PROFILE
+    ]
+    for (const type of vectorTypes) {
+      try {
+        if (this.storage.vector.dropCollection) {
+          await this.storage.vector.dropCollection(type)
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    return count
   }
 }
 

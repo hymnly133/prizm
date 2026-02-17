@@ -4,7 +4,7 @@ import type { ICompletionProvider } from '../utils/llm.js'
 import type { MemCell } from '../types.js'
 import { RawDataType } from '../types.js'
 
-/** 模拟默认模型返回的统一抽取格式（与提示词 output_format 一致，不含 USER_ID） */
+/** 模拟默认模型返回的统一抽取格式（PROFILE 使用 ITEM 原子画像） */
 const mockUnifiedModelOutput = `
 ## EPISODE
 CONTENT: 用户讨论了项目进度与下周计划，约定周三前完成设计稿。
@@ -28,13 +28,12 @@ END: 2025-02-17
 EVIDENCE: 约定下周一下午开会评审
 
 ## PROFILE
-USER_NAME: 张三
-SUMMARY: 用户擅长 TypeScript 和 Node.js，负责前端开发与需求对接，注重协作
-HARD_SKILLS: TypeScript, Node.js
-SOFT_SKILLS: 沟通, 协作
-WORK_RESPONSIBILITY: 前端开发, 需求对接
-INTERESTS: 技术分享
-TENDENCY: 务实
+ITEM: 用户名叫张三
+ITEM: 用户擅长 TypeScript 和 Node.js
+ITEM: 用户负责前端开发与需求对接
+ITEM: 用户注重协作
+ITEM: 用户热爱技术分享
+ITEM: 用户行事风格务实
 `
 
 /** 模拟默认模型：收到抽取 prompt 后返回上述统一格式文本 */
@@ -105,11 +104,12 @@ describe('UnifiedExtractor 集成：模拟对话 + 默认模型输出', () => {
     expect(result!.profile).toBeDefined()
     expect(result!.profile!.user_profiles).toHaveLength(1)
     const p = result!.profile!.user_profiles![0] as Record<string, unknown>
-    expect(p.user_id).toBeUndefined()
-    expect(p.user_name).toBe('张三')
-    expect(p.summary).toBe('用户擅长 TypeScript 和 Node.js，负责前端开发与需求对接，注重协作')
-    expect(p.hard_skills).toEqual(['TypeScript', 'Node.js'])
-    expect(p.soft_skills).toEqual(['沟通', '协作'])
+    expect(p.user_name).toBeUndefined()
+    const items = p.items as string[]
+    expect(items).toHaveLength(6)
+    expect(items).toContain('用户名叫张三')
+    expect(items).toContain('用户擅长 TypeScript 和 Node.js')
+    expect(items).toContain('用户负责前端开发与需求对接')
   })
 
   it('MemCell 仅含 text 时也能跑通（formatInputText 走 text 分支）', async () => {
