@@ -4,6 +4,7 @@
  */
 import { useState, useCallback, useMemo } from 'react'
 import { Popover, Text } from '@lobehub/ui'
+import { createStyles } from 'antd-style'
 import { Brain, Sparkles, User, Layers, MessageSquare } from 'lucide-react'
 import type { MemoryRefs, MemoryIdsByLayer, MemoryItem } from '@prizm/shared'
 
@@ -129,6 +130,127 @@ function groupByTypeAndSource(
   return all
 }
 
+const useStyles = createStyles(({ css, token }) => ({
+  layerGroup: css`
+    margin-bottom: 10px;
+  `,
+  layerHeader: css`
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 6px;
+    padding-bottom: 3px;
+    border-bottom: 1px solid ${token.colorBorderSecondary};
+  `,
+  layerLabel: css`
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  `,
+  layerCount: css`
+    font-size: 10px;
+    margin-left: auto;
+  `,
+  typeGroup: css`
+    margin-bottom: 6px;
+  `,
+  typeHeader: css`
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 2px;
+    padding-left: 4px;
+  `,
+  typeDot: css`
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  `,
+  typeLabel: css`
+    font-size: 10px;
+    font-weight: 500;
+  `,
+  typeCount: css`
+    font-size: 10px;
+  `,
+  memoryItem: css`
+    padding: 4px 8px;
+    margin-bottom: 2px;
+    margin-left: 10px;
+    background: ${token.colorFillQuaternary};
+    border-radius: 5px;
+    font-size: 12px;
+    color: ${token.colorText};
+    line-height: 1.4;
+  `,
+  deletedItem: css`
+    padding: 3px 8px;
+    margin-bottom: 2px;
+    margin-left: 10px;
+    background: ${token.colorFillQuaternary};
+    border-radius: 5px;
+    font-size: 11px;
+    color: ${token.colorTextQuaternary};
+    font-style: italic;
+  `,
+  popoverContent: css`
+    padding: 10px;
+    max-width: 400px;
+    min-width: 260px;
+  `,
+  popoverTitle: css`
+    margin-bottom: 8px;
+  `,
+  popoverTitleText: css`
+    font-size: 12px;
+    font-weight: 600;
+    display: block;
+  `,
+  popoverLayerStats: css`
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+    font-size: 11px;
+    color: ${token.colorTextTertiary};
+  `,
+  loadingText: css`
+    font-size: 12px;
+    color: ${token.colorTextQuaternary};
+    padding: 8px;
+  `,
+  resolvedList: css`
+    max-height: 300px;
+    overflow: auto;
+  `,
+  popoverButton: css`
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 7px;
+    font-size: 11px;
+    color: ${token.colorTextTertiary};
+    background: ${token.colorFillQuaternary};
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+
+    &:hover {
+      background: ${token.colorFillTertiary};
+      color: ${token.colorTextSecondary};
+    }
+  `,
+  rootTag: css`
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 4px;
+    font-size: 11px;
+    color: ${token.colorTextTertiary};
+  `
+}))
+
 /** 按层分组、内部按类型细分的记忆列表 */
 function LayerGroup({
   layerKey,
@@ -139,98 +261,44 @@ function LayerGroup({
   ids: string[]
   resolved: Record<string, MemoryItem | null>
 }) {
+  const { styles } = useStyles()
   if (ids.length === 0) return null
   const config = LAYER_CONFIG[layerKey]
   const Icon = config.icon
   const typeGroups = groupByTypeAndSource(ids, resolved, layerKey)
 
   return (
-    <div style={{ marginBottom: 10 }}>
-      {/* 层级标题 */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 4,
-          marginBottom: 6,
-          paddingBottom: 3,
-          borderBottom: `1px solid var(--ant-color-border-secondary)`
-        }}
-      >
+    <div className={styles.layerGroup}>
+      <div className={styles.layerHeader}>
         <Icon size={11} style={{ color: config.color }} />
-        <Text
-          type="secondary"
-          style={{ fontSize: 11, fontWeight: 600, color: config.color, letterSpacing: 0.3 }}
-        >
+        <Text type="secondary" className={styles.layerLabel} style={{ color: config.color }}>
           {config.label}
         </Text>
-        <Text type="secondary" style={{ fontSize: 10, marginLeft: 'auto' }}>
+        <Text type="secondary" className={styles.layerCount}>
           {ids.length}
         </Text>
       </div>
 
-      {/* 按类型+来源分组 */}
       {typeGroups.map((group) => (
-        <div key={group.key} style={{ marginBottom: 6 }}>
-          {/* 类型子标题 */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              marginBottom: 2,
-              paddingLeft: 4
-            }}
-          >
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                background: group.color,
-                flexShrink: 0
-              }}
-            />
-            <Text style={{ fontSize: 10, color: group.color, fontWeight: 500 }}>{group.label}</Text>
-            <Text type="secondary" style={{ fontSize: 10 }}>
+        <div key={group.key} className={styles.typeGroup}>
+          <div className={styles.typeHeader}>
+            <span className={styles.typeDot} style={{ background: group.color }} />
+            <Text className={styles.typeLabel} style={{ color: group.color }}>
+              {group.label}
+            </Text>
+            <Text type="secondary" className={styles.typeCount}>
               {group.items.length}
             </Text>
           </div>
 
-          {/* 已删除项 */}
           {group.deleted.map((id) => (
-            <div
-              key={id}
-              style={{
-                padding: '3px 8px',
-                marginBottom: 2,
-                marginLeft: 10,
-                background: 'var(--ant-color-fill-quaternary)',
-                borderRadius: 5,
-                fontSize: 11,
-                color: 'var(--ant-color-text-quaternary)',
-                fontStyle: 'italic'
-              }}
-            >
+            <div key={id} className={styles.deletedItem}>
               已删除
             </div>
           ))}
 
-          {/* 记忆内容 */}
           {group.items.map(({ id, mem }) => (
-            <div
-              key={id}
-              style={{
-                padding: '4px 8px',
-                marginBottom: 2,
-                marginLeft: 10,
-                background: 'var(--ant-color-fill-quaternary)',
-                borderRadius: 5,
-                fontSize: 12,
-                color: 'var(--ant-color-text)',
-                lineHeight: 1.4
-              }}
-            >
+            <div key={id} className={styles.memoryItem}>
               {mem.memory?.slice(0, 100)}
               {mem.memory && mem.memory.length > 100 ? '...' : ''}
             </div>
@@ -256,6 +324,7 @@ function MemoryRefsPopoverButton({
   onResolve?: MemoryRefsTagProps['onResolve']
   title: string
 }) {
+  const { styles } = useStyles()
   const [resolved, setResolved] = useState<Record<string, MemoryItem | null> | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -274,7 +343,6 @@ function MemoryRefsPopoverButton({
     [byLayer, onResolve, resolved]
   )
 
-  /** 按层统计 */
   const layerCounts = useMemo(
     () => ({
       user: byLayer.user?.length ?? 0,
@@ -288,21 +356,12 @@ function MemoryRefsPopoverButton({
     <Popover
       onOpenChange={handleOpen}
       content={
-        <div style={{ padding: 10, maxWidth: 400, minWidth: 260 }}>
-          {/* 标题 + 层统计 */}
-          <div style={{ marginBottom: 8 }}>
-            <Text type="secondary" style={{ fontSize: 12, fontWeight: 600, display: 'block' }}>
+        <div className={styles.popoverContent}>
+          <div className={styles.popoverTitle}>
+            <Text type="secondary" className={styles.popoverTitleText}>
               {title}
             </Text>
-            <div
-              style={{
-                display: 'flex',
-                gap: 8,
-                marginTop: 4,
-                fontSize: 11,
-                color: 'var(--ant-color-text-tertiary)'
-              }}
-            >
+            <div className={styles.popoverLayerStats}>
               {layerCounts.user > 0 && (
                 <span style={{ color: LAYER_CONFIG.user.color }}>User {layerCounts.user}</span>
               )}
@@ -317,13 +376,9 @@ function MemoryRefsPopoverButton({
             </div>
           </div>
 
-          {loading && !resolved && (
-            <div style={{ fontSize: 12, color: 'var(--ant-color-text-quaternary)', padding: 8 }}>
-              加载中...
-            </div>
-          )}
+          {loading && !resolved && <div className={styles.loadingText}>加载中...</div>}
           {resolved && (
-            <div style={{ maxHeight: 300, overflow: 'auto' }}>
+            <div className={styles.resolvedList}>
               <LayerGroup layerKey="user" ids={byLayer.user ?? []} resolved={resolved} />
               <LayerGroup layerKey="scope" ids={byLayer.scope ?? []} resolved={resolved} />
               <LayerGroup layerKey="session" ids={byLayer.session ?? []} resolved={resolved} />
@@ -332,30 +387,7 @@ function MemoryRefsPopoverButton({
         </div>
       }
     >
-      <button
-        type="button"
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 3,
-          padding: '2px 7px',
-          fontSize: 11,
-          color: 'var(--ant-color-text-tertiary)',
-          background: 'var(--ant-color-fill-quaternary)',
-          border: 'none',
-          borderRadius: 10,
-          cursor: 'pointer',
-          transition: 'all 0.2s'
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'var(--ant-color-fill-tertiary)'
-          e.currentTarget.style.color = 'var(--ant-color-text-secondary)'
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = 'var(--ant-color-fill-quaternary)'
-          e.currentTarget.style.color = 'var(--ant-color-text-tertiary)'
-        }}
-      >
+      <button type="button" className={styles.popoverButton}>
         {icon}
         <span>
           {label} {count}
@@ -366,6 +398,7 @@ function MemoryRefsPopoverButton({
 }
 
 export function MemoryRefsTag({ memoryRefs, onResolve }: MemoryRefsTagProps) {
+  const { styles } = useStyles()
   if (!memoryRefs) return null
 
   const injectedCount = countLayer(memoryRefs.injected)
@@ -373,16 +406,7 @@ export function MemoryRefsTag({ memoryRefs, onResolve }: MemoryRefsTagProps) {
   if (injectedCount === 0 && createdCount === 0) return null
 
   return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 4,
-        marginLeft: 4,
-        fontSize: 11,
-        color: 'var(--ant-color-text-tertiary)'
-      }}
-    >
+    <span className={styles.rootTag}>
       {injectedCount > 0 && (
         <MemoryRefsPopoverButton
           icon={<Brain size={11} />}

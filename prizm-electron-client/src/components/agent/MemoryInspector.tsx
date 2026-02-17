@@ -1,4 +1,4 @@
-import { ActionIcon, Modal } from '@lobehub/ui'
+import { ActionIcon } from '@lobehub/ui'
 import {
   Button,
   Empty,
@@ -11,15 +11,18 @@ import {
   Select,
   InputNumber,
   Checkbox,
-  Tooltip
+  Tooltip,
+  Drawer
 } from 'antd'
-import { Brain, Trash2, Search, Undo2, History } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { Brain, Trash2, Search, Undo2, History, X } from 'lucide-react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import type { ReactNode } from 'react'
+import { motion, AnimatePresence } from 'motion/react'
 import { usePrizmContext } from '../../context/PrizmContext'
 import { useScope } from '../../hooks/useScope'
 import type { MemoryItem, DedupLogEntry } from '@prizm/client-core'
 import { createStyles } from 'antd-style'
+import { EASE_SMOOTH } from '../../theme/motionPresets'
 
 type SearchMethod = 'keyword' | 'vector' | 'hybrid' | 'rrf' | 'agentic'
 
@@ -217,8 +220,10 @@ const useStyles = createStyles(({ css, token }) => ({
     display: flex;
     flex-direction: column;
     gap: 16px;
-    height: 70vh;
-    min-height: 320px;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    padding: 16px;
   `,
   header: css`
     display: flex;
@@ -405,12 +410,80 @@ const useStyles = createStyles(({ css, token }) => ({
     font-size: 12px;
     color: ${token.colorTextDescription};
     align-items: center;
+  `,
+  triggerButton: css`
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: center;
+    padding: 10px 16px;
+    width: 100%;
+    border: 1px solid ${token.colorBorderSecondary};
+    border-radius: 10px;
+    background: transparent;
+    color: ${token.colorTextSecondary};
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-top: 8px;
+
+    &:hover {
+      border-color: ${token.colorPrimaryBorder};
+      color: ${token.colorPrimary};
+      background: ${token.colorPrimaryBg};
+    }
+  `,
+  drawerTitle: css`
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+  `,
+  tabsWrap: css`
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  `,
+  tabLabel: css`
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  `,
+  summaryBar: css`
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    font-size: 12px;
+    color: ${token.colorTextDescription};
+    flex-shrink: 0;
+  `,
+  smallTag: css`
+    font-size: 11px;
+  `,
+  updatedAt: css`
+    font-size: 11px;
+    color: ${token.colorTextQuaternary};
+  `,
+  dedupHintText: css`
+    font-size: 13px;
+    color: ${token.colorTextSecondary};
   `
 }))
 
-export function MemoryInspector() {
+export function MemoryInspector({
+  externalOpen,
+  onExternalClose
+}: { externalOpen?: boolean; onExternalClose?: () => void } = {}) {
   const { styles } = useStyles()
-  const [open, setOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = externalOpen ?? internalOpen
+  const setOpen = onExternalClose
+    ? (v: boolean) => {
+        if (!v) onExternalClose()
+      }
+    : setInternalOpen
   const [activeTab, setActiveTab] = useState<'memories' | 'dedup'>('memories')
   const [loading, setLoading] = useState(false)
   const [memories, setMemories] = useState<MemoryItem[]>([])
@@ -425,6 +498,7 @@ export function MemoryInspector() {
   const { manager } = usePrizmContext()
   const { currentScope } = useScope()
   const http = manager?.getHttpClient()
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const loadMemories = useCallback(
     async (overrideQuery?: string) => {
@@ -540,39 +614,43 @@ export function MemoryInspector() {
 
   return (
     <>
-      <div
-        className="agent-context-preview agent-context-clickable"
-        role="button"
-        tabIndex={0}
-        onClick={() => setOpen(true)}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          justifyContent: 'center',
-          padding: '8px 0',
-          marginTop: 8
-        }}
-      >
-        <Brain size={14} />
-        <span>查看/管理记忆库</span>
-      </div>
+      {/* Trigger button — only rendered when not externally controlled */}
+      {externalOpen == null && (
+        <button
+          type="button"
+          onClick={() => setInternalOpen(true)}
+          className={styles.triggerButton}
+        >
+          <Brain size={14} />
+          <span>查看/管理记忆库</span>
+        </button>
+      )}
 
-      <Modal
+      <Drawer
         open={open}
-        onCancel={() => setOpen(false)}
-        title="Agent 记忆库"
-        footer={null}
-        width={800}
+        onClose={() => setOpen(false)}
+        title={
+          <span className={styles.drawerTitle}>
+            <Brain size={18} />
+            Agent 记忆库
+          </span>
+        }
+        width={Math.min(900, window.innerWidth * 0.8)}
+        placement="right"
+        styles={{
+          body: { padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }
+        }}
       >
         <Tabs
           activeKey={activeTab}
           onChange={(k) => setActiveTab(k as 'memories' | 'dedup')}
+          className={styles.tabsWrap}
+          tabBarStyle={{ padding: '0 16px', marginBottom: 0 }}
           items={[
             {
               key: 'memories',
               label: (
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span className={styles.tabLabel}>
                   <Brain size={14} /> 记忆列表
                 </span>
               ),
@@ -584,7 +662,14 @@ export function MemoryInspector() {
                         className={styles.queryInput}
                         placeholder="输入关键词或描述进行记忆查询（留空则列出全部）"
                         value={query}
-                        onChange={(e) => setQuery(e.target.value)}
+                        onChange={(e) => {
+                          const v = e.target.value
+                          setQuery(v)
+                          if (debounceRef.current) clearTimeout(debounceRef.current)
+                          debounceRef.current = setTimeout(() => {
+                            if (v.trim()) void loadMemories(v)
+                          }, 300)
+                        }}
                         onPressEnter={() => handleManualQuery()}
                         allowClear
                       />
@@ -674,8 +759,14 @@ export function MemoryInspector() {
                         } = partitionMemories(memories, currentScope)
 
                         const renderItem = (item: MemoryItemWithGroup) => (
-                          <div key={item.id} className={styles.item}>
-                            <div style={{ flex: 1 }}>
+                          <motion.div
+                            key={item.id}
+                            className={styles.item}
+                            initial={{ opacity: 0, y: 4 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.2, ease: EASE_SMOOTH }}
+                          >
+                            <div style={{ flex: 1, minWidth: 0 }}>
                               <div className={styles.content}>{item.memory}</div>
                               <div className={styles.meta}>
                                 {item.memory_type && (
@@ -693,7 +784,7 @@ export function MemoryInspector() {
                                   </Tag>
                                 )}
                                 {(item as any).source_type && (
-                                  <Tag bordered={false} style={{ fontSize: 11 }}>
+                                  <Tag bordered={false} className={styles.smallTag}>
                                     来源:{' '}
                                     {SOURCE_TYPE_LABELS[(item as any).source_type] ??
                                       (item as any).source_type}
@@ -729,10 +820,7 @@ export function MemoryInspector() {
                                 {item.updated_at && item.updated_at !== item.created_at && (
                                   <span
                                     title={`更新于: ${item.updated_at}`}
-                                    style={{
-                                      fontSize: 11,
-                                      color: 'var(--ant-color-text-quaternary)'
-                                    }}
+                                    className={styles.updatedAt}
                                   >
                                     更新: {new Date(item.updated_at).toLocaleDateString()}
                                   </span>
@@ -749,7 +837,7 @@ export function MemoryInspector() {
                                 <ActionIcon icon={Trash2} size="small" title="删除" />
                               </Popconfirm>
                             </div>
-                          </div>
+                          </motion.div>
                         )
 
                         const renderSubList = (
@@ -822,30 +910,20 @@ export function MemoryInspector() {
 
                         return (
                           <>
-                            <div
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 8,
-                                padding: '4px 8px',
-                                fontSize: 12,
-                                color: 'var(--ant-color-text-description)',
-                                flexShrink: 0
-                              }}
-                            >
+                            <div className={styles.summaryBar}>
                               <span>共 {totalCount} 条记忆</span>
                               {userList.length > 0 && (
-                                <Tag bordered={false} color="gold" style={{ fontSize: 11 }}>
+                                <Tag bordered={false} color="gold" className={styles.smallTag}>
                                   User {userList.length}
                                 </Tag>
                               )}
                               {scopeList.length > 0 && (
-                                <Tag bordered={false} color="blue" style={{ fontSize: 11 }}>
+                                <Tag bordered={false} color="blue" className={styles.smallTag}>
                                   Scope {scopeList.length}
                                 </Tag>
                               )}
                               {sessionList.length > 0 && (
-                                <Tag bordered={false} color="cyan" style={{ fontSize: 11 }}>
+                                <Tag bordered={false} color="cyan" className={styles.smallTag}>
                                   Session {sessionList.length}
                                 </Tag>
                               )}
@@ -868,7 +946,7 @@ export function MemoryInspector() {
             {
               key: 'dedup',
               label: (
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span className={styles.tabLabel}>
                   <History size={14} /> 去重日志
                   {dedupEntries.length > 0 && (
                     <Tag bordered={false} color="orange" style={{ marginLeft: 2 }}>
@@ -880,7 +958,7 @@ export function MemoryInspector() {
               children: (
                 <div className={styles.container}>
                   <div className={styles.header}>
-                    <span style={{ fontSize: 13, color: 'var(--ant-color-text-secondary)' }}>
+                    <span className={styles.dedupHintText}>
                       当记忆被判定为重复时，系统会抑制新记忆并保留已有记忆。你可以在此查看并回退。
                     </span>
                     <Button size="small" onClick={() => void loadDedupLog()} loading={dedupLoading}>
@@ -973,7 +1051,7 @@ export function MemoryInspector() {
             }
           ]}
         />
-      </Modal>
+      </Drawer>
     </>
   )
 }

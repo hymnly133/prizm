@@ -16,10 +16,40 @@ import {
 } from 'lucide-react'
 import { useState, memo } from 'react'
 import { Button } from 'antd'
+import { createStyles } from 'antd-style'
 import type { ToolCallRecord } from '@prizm/client-core'
 import { getToolDisplayName, registerToolRender } from '@prizm/client-core'
 
 const ACCENT_COLOR = '#a855f7'
+
+const useStyles = createStyles(({ css, token }) => ({
+  terminalPre: css`
+    background: #1a1a2e;
+    color: #e2e8f0;
+    padding: 8px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: 'Cascadia Code', 'Fira Code', Menlo, Monaco, monospace;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 300px;
+    overflow: auto;
+    margin: 4px 0;
+    line-height: 1.5;
+  `,
+  cardPadding: css`
+    padding: 10px 14px;
+  `,
+  fullWidth: css`
+    width: 100%;
+  `,
+  noShrink: css`
+    min-width: 0;
+  `,
+  monoDesc: css`
+    font-family: monospace;
+  `
+}))
 
 const TOOL_ICONS: Record<string, LucideIcon> = {
   prizm_terminal_execute: Play,
@@ -96,6 +126,7 @@ function SendKeysModeBadge({ argsStr }: { argsStr: string }) {
 
 /** 终端输出显示组件 — 暗色背景 + 等宽字体 */
 function TerminalOutput({ text, maxLines = 30 }: { text: string; maxLines?: number }) {
+  const { styles } = useStyles()
   const cleaned = clientStripAnsi(text)
   const lines = cleaned.split('\n')
   const truncated = lines.length > maxLines
@@ -107,26 +138,7 @@ function TerminalOutput({ text, maxLines = 30 }: { text: string; maxLines?: numb
       ].join('\n')
     : cleaned
 
-  return (
-    <pre
-      style={{
-        background: '#1a1a2e',
-        color: '#e2e8f0',
-        padding: '8px 10px',
-        borderRadius: 4,
-        fontSize: 12,
-        fontFamily: '"Cascadia Code", "Fira Code", Menlo, Monaco, monospace',
-        whiteSpace: 'pre-wrap',
-        wordBreak: 'break-all',
-        maxHeight: 300,
-        overflow: 'auto',
-        margin: '4px 0',
-        lineHeight: 1.5
-      }}
-    >
-      {displayText || '(无输出)'}
-    </pre>
-  )
+  return <pre className={styles.terminalPre}>{displayText || '(无输出)'}</pre>
 }
 
 /** Done 状态卡片 */
@@ -141,6 +153,7 @@ function TerminalToolCardDone({
   CategoryIcon: LucideIcon
   isError: boolean
 }) {
+  const { styles } = useStyles()
   const [expanded, setExpanded] = useState(false)
   const argsSummary = getArgsSummary(tc.name, tc.arguments)
   const accentColor = isError ? 'var(--ant-color-error)' : ACCENT_COLOR
@@ -167,11 +180,11 @@ function TerminalToolCardDone({
           }
         }}
       >
-        <Flexbox gap={8} horizontal align="center" style={{ width: '100%' }}>
+        <Flexbox gap={8} horizontal align="center" className={styles.fullWidth}>
           <div className="tool-card__icon-wrap" style={{ '--tc-accent': accentColor } as never}>
             <Icon icon={isError ? AlertCircle : CategoryIcon} size={15} />
           </div>
-          <Flexbox flex={1} gap={2} style={{ minWidth: 0 }}>
+          <Flexbox flex={1} gap={2} className={styles.noShrink}>
             <Flexbox horizontal align="center" gap={6}>
               <span className="tool-card__name">{displayName}</span>
               {isError && (
@@ -194,9 +207,7 @@ function TerminalToolCardDone({
               )}
             </Flexbox>
             {argsSummary && (
-              <span className="tool-card__desc" style={{ fontFamily: 'monospace' }}>
-                {argsSummary}
-              </span>
+              <span className={`tool-card__desc ${styles.monoDesc}`}>{argsSummary}</span>
             )}
           </Flexbox>
           <ChevronDown
@@ -226,6 +237,7 @@ function TerminalToolCardDone({
 /** 通用终端工具卡片 */
 const TerminalToolCard = memo(
   function TerminalToolCard({ tc }: { tc: ToolCallRecord }) {
+    const { styles } = useStyles()
     const status = tc.status ?? 'done'
     const displayName = getToolDisplayName(tc.name)
     const CategoryIcon = getIcon(tc.name)
@@ -236,7 +248,7 @@ const TerminalToolCard = memo(
       return (
         <div className="tool-card" data-status="preparing">
           <div className="tool-card__indicator" style={{ background: ACCENT_COLOR }} />
-          <Flexbox gap={8} horizontal align="center" style={{ padding: '10px 14px' }}>
+          <Flexbox gap={8} horizontal align="center" className={styles.cardPadding}>
             <div className="tool-card__icon-wrap" style={{ '--tc-accent': ACCENT_COLOR } as never}>
               <Icon icon={CategoryIcon} size={15} />
             </div>
@@ -254,7 +266,7 @@ const TerminalToolCard = memo(
       return (
         <div className="tool-card" data-status="running">
           <div className="tool-card__indicator" style={{ background: ACCENT_COLOR }} />
-          <Flexbox gap={8} horizontal align="center" style={{ padding: '10px 14px' }}>
+          <Flexbox gap={8} horizontal align="center" className={styles.cardPadding}>
             <div className="tool-card__icon-wrap" style={{ '--tc-accent': ACCENT_COLOR } as never}>
               <Icon icon={CategoryIcon} size={15} />
             </div>
@@ -266,9 +278,7 @@ const TerminalToolCard = memo(
                 )}
               </Flexbox>
               {argsSummary && (
-                <span className="tool-card__desc" style={{ fontFamily: 'monospace' }}>
-                  {argsSummary}
-                </span>
+                <span className={`tool-card__desc ${styles.monoDesc}`}>{argsSummary}</span>
               )}
               <span className="tool-card__status-text">执行中…</span>
             </Flexbox>

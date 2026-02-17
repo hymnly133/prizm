@@ -1,11 +1,11 @@
 /**
- * Agent 页面 - 会话列表 + 消息区（lobe-ui ChatList/ChatItem）+ 输入框
- * 参照 lobehub 对话逻辑，使用 lobe-ui 对话框组件，显示 token 等信息
- * 支持停止生成、错误提示、会话重命名
- * 输入框使用 @lobehub/editor ChatInput，悬浮面板样式
+ * Agent 页面 - 现代化 UI 重构
+ * 三栏布局：会话列表 + 消息区(ChatList) + 智能右侧栏
+ * 使用 motion 动画、LobeUI 组件、CSS-in-JS 主题
  */
 import { ActionIcon, Empty, Flexbox, List, Markdown, Segmented } from '@lobehub/ui'
 import { ChatActionsBar as BaseChatActionsBar, ChatList, type ChatMessage } from '@lobehub/ui/chat'
+import { motion, AnimatePresence } from 'motion/react'
 
 /** 过滤 createAt/updateAt 等非 DOM 属性，避免 React 警告 */
 function ChatActionsBar(props: React.ComponentProps<typeof BaseChatActionsBar>) {
@@ -21,7 +21,8 @@ import {
   MessageSquare,
   Plus,
   Trash2,
-  Terminal as TerminalLucide
+  Terminal as TerminalLucide,
+  Brain
 } from 'lucide-react'
 import { useRef, useState, useMemo, useCallback, useEffect, memo } from 'react'
 import { usePrizmContext } from '../context/PrizmContext'
@@ -41,17 +42,16 @@ import {
   type ActionKeys
 } from '../features/ChatInput'
 import type { AgentMessage, MessagePart, MessagePartTool } from '@prizm/client-core'
-import {
-  ToolCallCard,
-  GrantPathProvider,
-  InteractProvider
-} from '../components/agent'
+import { ToolCallCard, GrantPathProvider, InteractProvider } from '../components/agent'
 import type { GrantPathContextValue, InteractContextValue } from '../components/agent'
 import { AgentOverviewPanel } from '../components/agent/AgentOverviewPanel'
 import { AssistantMessageExtra } from '../components/agent/AssistantMessageExtra'
 import { FilePreviewPanel } from '../components/agent/FilePreviewPanel'
 import { FileTreePanel } from '../components/agent/FileTreePanel'
 import { TerminalSidebarTab } from '../components/agent/TerminalSidebarTab'
+import { ThinkingDots } from '../components/agent/ThinkingDots'
+import { ScrollToBottom } from '../components/agent/ScrollToBottom'
+import { EmptyConversation } from '../components/agent/EmptyConversation'
 import {
   toChatMessage,
   DRAFT_KEY_NEW,
@@ -59,6 +59,12 @@ import {
   setSkipNextDraftRestore,
   DraftCacheManager
 } from '../components/agent/chatMessageAdapter'
+import {
+  fadeUp,
+  panelCrossfade,
+  panelCrossfadeTransition,
+  EASE_SMOOTH
+} from '../theme/motionPresets'
 // 注册终端工具卡片渲染器（副作用导入）
 import '../components/agent/TerminalToolCards'
 
@@ -92,7 +98,22 @@ function AgentPage() {
   const [previewFile, setPreviewFile] = useState<{ kind: FileKind; id: string } | null>(null)
   const [sidebarTab, setSidebarTab] = useState<'context' | 'files' | 'terminal'>('context')
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
   const pendingHandledRef = useRef<string | null>(null)
+  const [showScrollBtn, setShowScrollBtn] = useState(false)
+
+  /** 滚动到底部 */
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [])
+
+  /** 检测是否滚到底部 */
+  const handleMessagesScroll = useCallback(() => {
+    const el = messagesContainerRef.current
+    if (!el) return
+    const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    setShowScrollBtn(!isNearBottom)
+  }, [])
 
   /** Sync draft content to module-level cache for cross-page / cross-session persistence */
   const handleMarkdownContentChange = useCallback(
@@ -109,20 +130,11 @@ function AgentPage() {
 
   useEffect(() => {
     if (!pendingPayload) return
-    // 不因 loading 阻塞：有 pendingPayload 时应立即切换至输入视图并应用内容
     const filesKey = pendingPayload.files?.map((f) => `${f.kind}:${f.id}`).join(',') ?? ''
     const fileRefsKey = pendingPayload.fileRefs?.map((f) => f.path).join(',') ?? ''
     const key = `${filesKey}|${fileRefsKey}|${pendingPayload.text ?? ''}|${
       pendingPayload.sessionId ?? 'new'
     }|${pendingPayload.forceNew ? 'force' : ''}`
-    console.log('[ImportAI-Chip] AgentPage pendingPayload 效果', {
-      hasPendingPayload: true,
-      fileRefsCount: pendingPayload.fileRefs?.length ?? 0,
-      fileRefs: pendingPayload.fileRefs,
-      filesCount: pendingPayload.files?.length ?? 0,
-      skipDueToDedup: pendingHandledRef.current === key,
-      key
-    })
     if (pendingHandledRef.current === key) return
     pendingHandledRef.current = key
     setOverviewMode(false)
@@ -132,8 +144,6 @@ function AgentPage() {
     } else if (pendingPayload.sessionId) {
       loadSession(pendingPayload.sessionId)
     }
-    console.log('[ImportAI-Chip] AgentPage 已 setOverviewMode(false)，ChatInputProvider 将挂载')
-    // No need to create session here - lazy creation on send handles it
   }, [pendingPayload, loadSession, setCurrentSession])
 
   useEffect(() => {
@@ -162,11 +172,8 @@ function AgentPage() {
         if (!session) return
       }
 
-      // Combine: prepend ref markdown tags before user text
       const refParts = refs.map((r) => r.markdown)
       const combined = [...refParts, rawText].filter(Boolean).join('\n')
-
-      // Derive FilePathRef[] for file-type refs (server needs these for grantedPaths)
       const fileRefs: import('@prizm/shared').FilePathRef[] = refs
         .filter((r) => r.type === 'file')
         .map((r) => ({
@@ -189,9 +196,21 @@ function AgentPage() {
     setCurrentSession(null)
   }, [setCurrentSession])
 
+  /** 快捷 prompt 从空状态发送 */
+  const handleQuickPrompt = useCallback(
+    (text: string) => {
+      // 直接 navigate to chat mode then rely on input
+      setOverviewMode(false)
+      setCurrentSession(null)
+      // 设置 draft 以便在输入框中自动填入
+      draftCache.set(DRAFT_KEY_NEW, text)
+    },
+    [setCurrentSession]
+  )
+
   const leftActions: ActionKeys[] = ['fileUpload', 'clear']
 
-  /** 单一消息源：服务器消息 + 乐观更新（流式过程中原地更新 assistant） */
+  /** 单一消息源：服务器消息 + 乐观更新 */
   const chatData: ChatMessage[] = useMemo(() => {
     if (!currentSession) return []
 
@@ -203,7 +222,6 @@ function AgentPage() {
       }))
     ]
 
-    // 按 ID 去重：同一 ID 出现多次时保留后者（乐观/流式版本优先）
     const lastIdx = new Map<string, number>()
     messages.forEach((m, i) => lastIdx.set(m.id, i))
     const deduped = messages.filter((m, i) => lastIdx.get(m.id) === i)
@@ -211,9 +229,6 @@ function AgentPage() {
     return deduped.map(toChatMessage)
   }, [currentSession, optimisticMessages, sending])
 
-  // 显示 loading 的场景：
-  // 1. 流式进行中但还没有任何内容（初始等待阶段）
-  // 2. thinking=true：收到心跳但无可见事件（LLM 在生成长工具参数）
   const lastMsg = chatData[chatData.length - 1]
   const lastExtra = lastMsg?.extra as { parts?: MessagePart[] } | undefined
   const lastMsgHasContent =
@@ -278,6 +293,7 @@ function AgentPage() {
     <GrantPathProvider value={grantPathValue}>
       <InteractProvider value={interactValue}>
         <section className="agent-page">
+          {/* ── 左侧会话列表 ── */}
           <ResizableSidebar side="left" storageKey="agent-sessions" defaultWidth={220}>
             <div className="agent-sidebar">
               <div className="agent-sidebar-header">
@@ -297,9 +313,7 @@ function AgentPage() {
                   className={`agent-overview-tab${overviewMode ? ' active' : ''}`}
                   role="button"
                   tabIndex={0}
-                  onClick={() => {
-                    setOverviewMode(true)
-                  }}
+                  onClick={() => setOverviewMode(true)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') setOverviewMode(true)
                   }}
@@ -321,6 +335,7 @@ function AgentPage() {
             </div>
           </ResizableSidebar>
 
+          {/* ── 中间内容区 ── */}
           <WorkNavigationContext.Provider
             value={{
               openFileAtWork: (kind: FileKind, id: string) => setPreviewFile({ kind, id }),
@@ -329,18 +344,40 @@ function AgentPage() {
             }}
           >
             <div className="agent-content">
-              {overviewMode ? (
-                <div className="agent-main">
-                  <AgentOverviewPanel
-                    selectedModel={selectedModel}
-                    onModelChange={setSelectedModel}
-                  />
-                </div>
-              ) : (
-                <>
-                  <div className="agent-main">
+              <AnimatePresence mode="wait">
+                {overviewMode ? (
+                  <motion.div
+                    key="overview"
+                    className="agent-main"
+                    {...panelCrossfade}
+                    transition={panelCrossfadeTransition}
+                  >
+                    <AgentOverviewPanel
+                      selectedModel={selectedModel}
+                      onModelChange={setSelectedModel}
+                    />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key={currentSession?.id ?? 'new'}
+                    className="agent-main"
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      flex: 1,
+                      minHeight: 0,
+                      overflow: 'hidden'
+                    }}
+                    {...panelCrossfade}
+                    transition={panelCrossfadeTransition}
+                  >
                     {currentSession ? (
-                      <div className="agent-messages">
+                      <div
+                        className="agent-messages"
+                        ref={messagesContainerRef}
+                        onScroll={handleMessagesScroll}
+                        style={{ position: 'relative' }}
+                      >
                         <ChatList
                           data={chatData}
                           variant="bubble"
@@ -380,74 +417,102 @@ function AgentPage() {
                             assistant: AssistantMessageExtra
                           }}
                         />
-                        {pendingInteract && sending && (
-                          <div
-                            className="agent-thinking-indicator"
-                            style={{ color: 'var(--ant-color-warning)' }}
-                          >
-                            <span
-                              className="agent-thinking-dot"
-                              style={{ background: 'var(--ant-color-warning)' }}
-                            />
-                            AI 正在等待您的确认…
-                          </div>
-                        )}
-                        {thinking && sending && !pendingInteract && (
-                          <div className="agent-thinking-indicator">
-                            <span className="agent-thinking-dot" />
-                            AI 正在生成工具参数…
-                          </div>
-                        )}
+
+                        {/* Thinking indicators with motion */}
+                        <AnimatePresence>
+                          {pendingInteract && sending && (
+                            <motion.div
+                              key="interact-indicator"
+                              initial={{ opacity: 0, y: 8 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: -8 }}
+                              transition={{ duration: 0.2, ease: EASE_SMOOTH }}
+                              style={{ padding: '8px 48px' }}
+                            >
+                              <ThinkingDots
+                                color="var(--ant-color-warning)"
+                                label="AI 正在等待您的确认…"
+                              />
+                            </motion.div>
+                          )}
+                          {thinking && sending && !pendingInteract && (
+                            <motion.div
+                              key="thinking-indicator"
+                              initial={{ opacity: 0, y: 8 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: -8 }}
+                              transition={{ duration: 0.2, ease: EASE_SMOOTH }}
+                              style={{ padding: '8px 48px' }}
+                            >
+                              <ThinkingDots label="AI 正在生成工具参数…" />
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+
                         <div ref={messagesEndRef} />
+
+                        {/* Scroll to bottom button */}
+                        <ScrollToBottom visible={showScrollBtn} onClick={scrollToBottom} />
                       </div>
                     ) : (
-                      <div className="agent-empty">
-                        <Empty
-                          title="新对话"
-                          description={loading ? '加载中...' : '在下方输入开始对话，会话将自动创建'}
-                        />
-                      </div>
+                      <EmptyConversation onSendPrompt={handleQuickPrompt} loading={loading} />
                     )}
-                  </div>
 
-                  {error && <div className="agent-error-banner">{error}</div>}
+                    {/* Error banner */}
+                    <AnimatePresence>
+                      {error && (
+                        <motion.div
+                          className="agent-error-banner"
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          transition={{ duration: 0.2 }}
+                        >
+                          {error}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
 
-                  <div className="agent-input-wrap agent-input-floating">
-                    <ChatInputProvider
-                      leftActions={leftActions}
-                      rightActions={[]}
-                      scopeItems={scopeItems}
-                      scopeSlashCommands={slashCommands}
-                      sendButtonProps={{
-                        disabled: sending,
-                        generating: sending,
-                        onStop: () => {
-                          stopGeneration()
-                        },
-                        shape: 'round'
-                      }}
-                      onSend={handleSend}
-                      onMarkdownContentChange={handleMarkdownContentChange}
-                      allowExpand
-                    >
-                      <DraftCacheManager sessionId={currentSession?.id ?? DRAFT_KEY_NEW} />
-                      <PendingChatPayloadApplicator />
-                      <DesktopChatInput
-                        onClear={handleClear}
-                        inputContainerProps={{
-                          minHeight: 88,
-                          style: {
-                            borderRadius: 20,
-                            boxShadow: '0 12px 32px rgba(0,0,0,.04)'
-                          }
+                    {/* Input area */}
+                    <div className="agent-input-wrap agent-input-floating">
+                      <ChatInputProvider
+                        leftActions={leftActions}
+                        rightActions={[]}
+                        scopeItems={scopeItems}
+                        scopeSlashCommands={slashCommands}
+                        sendButtonProps={{
+                          disabled: sending,
+                          generating: sending,
+                          onStop: () => {
+                            stopGeneration()
+                          },
+                          shape: 'round'
                         }}
-                      />
-                    </ChatInputProvider>
-                  </div>
-                </>
-              )}
+                        onSend={handleSend}
+                        onMarkdownContentChange={handleMarkdownContentChange}
+                        allowExpand
+                      >
+                        <DraftCacheManager sessionId={currentSession?.id ?? DRAFT_KEY_NEW} />
+                        <PendingChatPayloadApplicator />
+                        <DesktopChatInput
+                          onClear={handleClear}
+                          inputContainerProps={{
+                            minHeight: 88,
+                            style: {
+                              borderRadius: 20,
+                              boxShadow: '0 12px 32px rgba(0,0,0,.04)',
+                              transition: 'box-shadow 0.3s, border-color 0.3s'
+                            }
+                          }}
+                        />
+                      </ChatInputProvider>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
+            {/* ── 右侧智能面板 ── */}
             {!overviewMode && (
               <ResizableSidebar
                 side="right"
@@ -475,27 +540,61 @@ function AgentPage() {
                         ]}
                       />
                     </div>
-                    {sidebarTab === 'context' ? (
-                      <AgentRightSidebar
-                        sending={sending}
-                        error={error}
-                        currentSession={currentSession}
-                        optimisticMessages={optimisticMessages}
-                        selectedModel={selectedModel}
-                        onModelChange={setSelectedModel}
-                        overviewMode={false}
-                      />
-                    ) : sidebarTab === 'files' ? (
-                      <FileTreePanel
-                        scope={currentScope}
-                        sessionId={currentSession?.id}
-                        onPreviewFile={(relativePath) => {
-                          setPreviewFile({ kind: 'document', id: relativePath })
-                        }}
-                      />
-                    ) : (
-                      <TerminalSidebarTab sessionId={currentSession?.id} scope={currentScope} />
-                    )}
+                    <AnimatePresence mode="wait">
+                      {sidebarTab === 'context' ? (
+                        <motion.div
+                          key="context"
+                          style={{
+                            flex: 1,
+                            overflow: 'hidden',
+                            display: 'flex',
+                            flexDirection: 'column'
+                          }}
+                          initial={{ opacity: 0, x: 8 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{ opacity: 0, x: -8 }}
+                          transition={{ duration: 0.15 }}
+                        >
+                          <AgentRightSidebar
+                            sending={sending}
+                            error={error}
+                            currentSession={currentSession}
+                            optimisticMessages={optimisticMessages}
+                            selectedModel={selectedModel}
+                            onModelChange={setSelectedModel}
+                            overviewMode={false}
+                          />
+                        </motion.div>
+                      ) : sidebarTab === 'files' ? (
+                        <motion.div
+                          key="files"
+                          style={{ flex: 1, overflow: 'hidden' }}
+                          initial={{ opacity: 0, x: 8 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{ opacity: 0, x: -8 }}
+                          transition={{ duration: 0.15 }}
+                        >
+                          <FileTreePanel
+                            scope={currentScope}
+                            sessionId={currentSession?.id}
+                            onPreviewFile={(relativePath) => {
+                              setPreviewFile({ kind: 'document', id: relativePath })
+                            }}
+                          />
+                        </motion.div>
+                      ) : (
+                        <motion.div
+                          key="terminal"
+                          style={{ flex: 1, overflow: 'hidden' }}
+                          initial={{ opacity: 0, x: 8 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{ opacity: 0, x: -8 }}
+                          transition={{ duration: 0.15 }}
+                        >
+                          <TerminalSidebarTab sessionId={currentSession?.id} scope={currentScope} />
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </Flexbox>
                 )}
               </ResizableSidebar>

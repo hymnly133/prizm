@@ -1,7 +1,9 @@
 /**
- * Agent 右侧边栏 - 会话模式：状态、活动、系统提示词、记忆、会话统计
+ * Agent 右侧边栏 - 会话模式：状态、活动、系统提示词、记忆面板、会话统计
+ * 增强版：集成 MemorySidebarPanel + motion 动画
  */
 import { Modal } from '@lobehub/ui'
+import { motion } from 'motion/react'
 import {
   AlertCircle,
   BarChart3,
@@ -11,6 +13,7 @@ import {
   MessageSquare,
   Activity
 } from 'lucide-react'
+import { useState } from 'react'
 import type { AgentSession, AvailableModel } from '@prizm/client-core'
 import type { SessionStats } from './agentSidebarTypes'
 import type { ActivityItem } from './agentSidebarTypes'
@@ -19,6 +22,9 @@ import { Select } from '../ui/Select'
 import { MEMORY_LAYER_DESCRIPTIONS } from './agentSidebarTypes'
 import { SessionActivityTimeline } from './SessionActivityTimeline'
 import { SessionStatsPanel } from './SessionStatsPanel'
+import { MemorySidebarPanel } from './MemorySidebarPanel'
+import { MemoryInspector } from './MemoryInspector'
+import { fadeUp, STAGGER_DELAY } from '../../theme/motionPresets'
 
 export interface AgentSessionSidebarProps {
   sending: boolean
@@ -72,11 +78,14 @@ export function AgentSessionSidebar({
   scopeMemoryCount,
   memoryCountsLoading
 }: AgentSessionSidebarProps) {
+  const [memoryInspectorOpen, setMemoryInspectorOpen] = useState(false)
+  let idx = 0
+
   return (
     <>
       {/* 模型选择 */}
       {onModelChange && (
-        <section className="agent-right-section">
+        <motion.section className="agent-right-section" {...fadeUp(idx++ * STAGGER_DELAY)}>
           <h3 className="agent-right-section-title">模型</h3>
           <Select
             options={[
@@ -87,11 +96,11 @@ export function AgentSessionSidebar({
             onChange={(v) => onModelChange(v || undefined)}
             style={{ width: '100%' }}
           />
-        </section>
+        </motion.section>
       )}
 
       {/* 状态 */}
-      <section className="agent-right-section">
+      <motion.section className="agent-right-section" {...fadeUp(idx++ * STAGGER_DELAY)}>
         <h3 className="agent-right-section-title">状态</h3>
         <div className="agent-status-row">
           {sending ? (
@@ -116,11 +125,11 @@ export function AgentSessionSidebar({
             </>
           )}
         </div>
-      </section>
+      </motion.section>
 
       {/* 系统提示词 - 仅会话模式显示 */}
       {!isNewConversationReady && (
-        <section className="agent-right-section">
+        <motion.section className="agent-right-section" {...fadeUp(idx++ * STAGGER_DELAY)}>
           <h3 className="agent-right-section-title">
             <MessageSquare size={14} className="agent-right-section-icon" />
             系统提示词
@@ -145,9 +154,7 @@ export function AgentSessionSidebar({
             ) : systemPrompt ? (
               <>
                 <pre className="agent-context-text agent-system-prompt-preview">
-                  {systemPrompt.length > 200
-                    ? `${systemPrompt.slice(0, 200)}…`
-                    : systemPrompt}
+                  {systemPrompt.length > 200 ? `${systemPrompt.slice(0, 200)}…` : systemPrompt}
                 </pre>
                 <span className="agent-context-click-hint">点击查看完整内容</span>
               </>
@@ -165,12 +172,12 @@ export function AgentSessionSidebar({
           >
             <pre className="agent-context-modal-text">{systemPrompt}</pre>
           </Modal>
-        </section>
+        </motion.section>
       )}
 
       {/* 会话活动 - 仅会话模式显示 */}
       {!isNewConversationReady && (
-        <section className="agent-right-section">
+        <motion.section className="agent-right-section" {...fadeUp(idx++ * STAGGER_DELAY)}>
           <h3 className="agent-right-section-title">
             <Activity size={14} className="agent-right-section-icon" />
             会话活动
@@ -182,63 +189,23 @@ export function AgentSessionSidebar({
             latestToolCalls={latestToolCalls}
             provisionsSummary={provisionsSummary}
           />
-        </section>
+        </motion.section>
       )}
 
-      {/* 记忆状态（scope 级别，始终显示） */}
-      <section className="agent-right-section">
-        <h3 className="agent-right-section-title">
-          <Brain size={14} className="agent-right-section-icon" />
-          记忆状态
-        </h3>
-        {memoryCountsLoading ? (
-          <div className="agent-right-loading">
-            <Loader2 size={14} className="spinning" />
-            <span>加载中</span>
-          </div>
-        ) : memoryEnabled ? (
-          <div className="agent-memory-state">
-            <div className="agent-memory-tier">
-              <span
-                className="agent-memory-tier-label"
-                title={MEMORY_LAYER_DESCRIPTIONS.user}
-              >
-                User 层
-              </span>
-              <span className="agent-memory-tier-count">{userMemoryCount}</span>
-            </div>
-            <div className="agent-memory-tier">
-              <span
-                className="agent-memory-tier-label"
-                title={MEMORY_LAYER_DESCRIPTIONS.scope}
-              >
-                Scope 层
-              </span>
-              <span className="agent-memory-tier-count">{scopeMemoryCount}</span>
-            </div>
-            <div
-              className="agent-memory-tier"
-              style={{ borderTop: 'none', paddingTop: 0, marginTop: -2 }}
-            >
-              <span
-                className="agent-memory-tier-label"
-                style={{ fontSize: 11, opacity: 0.7 }}
-              >
-                合计
-              </span>
-              <span className="agent-memory-tier-count" style={{ fontWeight: 600 }}>
-                {userMemoryCount + scopeMemoryCount}
-              </span>
-            </div>
-          </div>
-        ) : (
-          <p className="agent-right-empty">暂无记忆或未启用</p>
-        )}
-      </section>
+      {/* 记忆面板（替代纯计数展示） */}
+      <motion.section className="agent-right-section" {...fadeUp(idx++ * STAGGER_DELAY)}>
+        <MemorySidebarPanel
+          memoryEnabled={memoryEnabled}
+          userMemoryCount={userMemoryCount}
+          scopeMemoryCount={scopeMemoryCount}
+          memoryCountsLoading={memoryCountsLoading}
+          onOpenInspector={() => setMemoryInspectorOpen(true)}
+        />
+      </motion.section>
 
       {/* 会话统计 - 仅会话模式显示 */}
       {!isNewConversationReady && (
-        <section className="agent-right-section">
+        <motion.section className="agent-right-section" {...fadeUp(idx++ * STAGGER_DELAY)}>
           <h3 className="agent-right-section-title">
             <BarChart3 size={14} className="agent-right-section-icon" />
             会话统计
@@ -248,8 +215,14 @@ export function AgentSessionSidebar({
             sessionStats={sessionStats}
             sessionStatsLoading={sessionStatsLoading}
           />
-        </section>
+        </motion.section>
       )}
+
+      {/* Memory Inspector Drawer */}
+      <MemoryInspector
+        externalOpen={memoryInspectorOpen}
+        onExternalClose={() => setMemoryInspectorOpen(false)}
+      />
     </>
   )
 }

@@ -9,7 +9,10 @@
  * - 通过 WebSocket 实时 I/O
  */
 
+import { createClientLogger } from '@prizm/client-core'
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+
+const log = createClientLogger('TerminalUI')
 import { Button, Tabs, Tooltip, Badge, Dropdown, Empty } from 'antd'
 import {
   PlusOutlined,
@@ -139,7 +142,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
       })
       setActiveKey(terminal.id)
     } catch (err) {
-      console.error('Failed to create terminal:', err)
+      log.error('Failed to create terminal:', err)
     }
   }, [http, sessionId, scope, onTerminalsChange])
 

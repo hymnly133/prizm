@@ -9,7 +9,10 @@
  * - 终端切换与多终端支持
  */
 
+import { createClientLogger } from '@prizm/client-core'
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+
+const log = createClientLogger('TerminalUI')
 import { Button, Tooltip, Badge, Empty } from 'antd'
 import {
   PlusOutlined,
@@ -322,7 +325,7 @@ export const TerminalSidebarTab: React.FC<TerminalSidebarTabProps> = ({ sessionI
       setTerminals((prev) => [...prev, terminal])
       setActiveTerminalId(terminal.id)
     } catch (err) {
-      console.error('Failed to create terminal:', err)
+      log.error('Failed to create terminal:', err)
     }
   }, [http, sessionId, scope])
 

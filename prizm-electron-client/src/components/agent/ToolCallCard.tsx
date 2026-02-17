@@ -4,7 +4,10 @@
  * 支持 preparing → running → done 三阶段，preparing/running 阶段即时渲染
  * 支持检测 OUT_OF_BOUNDS 错误并显示授权按钮
  */
+import { createClientLogger } from '@prizm/client-core'
 import { Flexbox, Icon, Tag } from '@lobehub/ui'
+
+const log = createClientLogger('ToolCall')
 import {
   AlertCircle,
   Brain,
@@ -22,11 +25,25 @@ import {
   ShieldCheck,
   type LucideIcon
 } from 'lucide-react'
+import { motion, AnimatePresence } from 'motion/react'
 import { useState, memo, createContext, useContext, useCallback } from 'react'
 import type { ToolCallRecord, InteractRequestPayload } from '@prizm/client-core'
 import { getToolDisplayName, getToolMetadata, getToolRender, isPrizmTool } from '@prizm/client-core'
+import { createStyles } from 'antd-style'
 import type { FileKind } from '../../hooks/useFileList'
 import { useWorkNavigation } from '../../context/WorkNavigationContext'
+
+const useStyles = createStyles(({ css }) => ({
+  cardPadding: css`
+    padding: 10px 14px;
+  `,
+  fullWidth: css`
+    width: 100%;
+  `,
+  noShrink: css`
+    min-width: 0;
+  `
+}))
 
 /** OUT_OF_BOUNDS 错误标识符 */
 const OUT_OF_BOUNDS_ERROR_CODE = 'OUT_OF_BOUNDS'
@@ -141,13 +158,14 @@ function parseArgsSummary(argsStr: string): string {
 }
 
 export const ToolCallCard = memo(function ToolCallCard({ tc }: ToolCallCardProps) {
+  const { styles } = useStyles()
   /* 外部注册的自定义渲染器优先（MCP 扩展等） */
   const customRender = getToolRender(tc.name)
   if (customRender) return <>{customRender({ tc })}</>
 
   const status = tc.status ?? 'done'
   if (status === 'preparing' || status === 'running') {
-    console.debug('[ToolCallCard] render status=%s id=%s name=%s', status, tc.id, tc.name)
+    log.debug('Render:', status, tc.id, tc.name)
   }
   const displayName = getToolDisplayName(tc.name)
   const CategoryIcon = getCategoryIcon(tc.name)
@@ -165,7 +183,7 @@ export const ToolCallCard = memo(function ToolCallCard({ tc }: ToolCallCardProps
     return (
       <div className="tool-card" data-status="preparing">
         <div className="tool-card__indicator" style={{ background: accentColor }} />
-        <Flexbox gap={8} horizontal align="center" style={{ padding: '10px 14px' }}>
+        <Flexbox gap={8} horizontal align="center" className={styles.cardPadding}>
           <div className="tool-card__icon-wrap" style={{ '--tc-accent': accentColor } as never}>
             <Icon icon={CategoryIcon} size={15} />
           </div>
@@ -184,7 +202,7 @@ export const ToolCallCard = memo(function ToolCallCard({ tc }: ToolCallCardProps
     return (
       <div className="tool-card" data-status="running">
         <div className="tool-card__indicator" style={{ background: accentColor }} />
-        <Flexbox gap={8} horizontal align="center" style={{ padding: '10px 14px' }}>
+        <Flexbox gap={8} horizontal align="center" className={styles.cardPadding}>
           <div className="tool-card__icon-wrap" style={{ '--tc-accent': accentColor } as never}>
             <Icon icon={CategoryIcon} size={15} />
           </div>
@@ -273,6 +291,7 @@ function ToolCardDone({
   fileRef: { kind: FileKind; id: string } | null
   onOpenFile: (kind: FileKind, id: string) => void
 }) {
+  const { styles } = useStyles()
   const [expanded, setExpanded] = useState(false)
   const [granting, setGranting] = useState(false)
   const [granted, setGranted] = useState(false)
@@ -314,11 +333,11 @@ function ToolCardDone({
           }
         }}
       >
-        <Flexbox gap={8} horizontal align="center" style={{ width: '100%' }}>
+        <Flexbox gap={8} horizontal align="center" className={styles.fullWidth}>
           <div className="tool-card__icon-wrap" style={{ '--tc-accent': accentColor } as never}>
             <Icon icon={CategoryIcon} size={15} />
           </div>
-          <Flexbox flex={1} gap={2} style={{ minWidth: 0 }}>
+          <Flexbox flex={1} gap={2} className={styles.noShrink}>
             <Flexbox horizontal align="center" gap={6}>
               <span className="tool-card__name">{displayName}</span>
               {isError && !isOutOfBounds && (
@@ -375,23 +394,32 @@ function ToolCardDone({
           />
         </Flexbox>
       </div>
-      {/* 展开内容 */}
-      {expanded && (
-        <div className="tool-card__body">
-          {tc.arguments && tc.arguments !== '{}' && (
+      {/* 展开内容 - 带动画 */}
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            className="tool-card__body"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.25, ease: [0.33, 1, 0.68, 1] }}
+            style={{ overflow: 'hidden' }}
+          >
+            {tc.arguments && tc.arguments !== '{}' && (
+              <div>
+                <div className="tool-card__section-label">参数</div>
+                <pre className="tool-card__pre">{tc.arguments}</pre>
+              </div>
+            )}
             <div>
-              <div className="tool-card__section-label">参数</div>
-              <pre className="tool-card__pre">{tc.arguments}</pre>
+              <div className="tool-card__section-label">{isError ? '错误信息' : '结果'}</div>
+              <pre className={`tool-card__pre${isError ? ' tool-card__pre--error' : ''}`}>
+                {tc.result || '(无返回)'}
+              </pre>
             </div>
-          )}
-          <div>
-            <div className="tool-card__section-label">{isError ? '错误信息' : '结果'}</div>
-            <pre className={`tool-card__pre${isError ? ' tool-card__pre--error' : ''}`}>
-              {tc.result || '(无返回)'}
-            </pre>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
@@ -410,6 +438,7 @@ function ToolCardAwaitingInteract({
   accentColor: string
   argsSummary: string
 }) {
+  const { styles } = useStyles()
   const interactCtx = useContext(InteractContext)
   const [responding, setResponding] = useState(false)
   const warningColor = 'var(--ant-color-warning, #faad14)'
@@ -443,7 +472,7 @@ function ToolCardAwaitingInteract({
   return (
     <div className="tool-card tool-card--interact" data-status="awaiting_interact">
       <div className="tool-card__indicator" style={{ background: warningColor }} />
-      <div style={{ padding: '10px 14px' }}>
+      <div className={styles.cardPadding}>
         <Flexbox gap={8} horizontal align="center">
           <div className="tool-card__icon-wrap" style={{ '--tc-accent': warningColor } as never}>
             <Icon icon={ShieldCheck} size={15} />
