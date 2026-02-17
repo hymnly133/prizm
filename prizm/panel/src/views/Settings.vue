@@ -84,17 +84,17 @@
         </div>
         <div class="flex items-center gap-2">
           <input v-model="docSummaryEnabled" type="checkbox" class="rounded border-zinc-600" />
-          <label class="text-sm text-zinc-300">文档摘要</label>
+          <label class="text-sm text-zinc-300">文档记忆</label>
         </div>
         <div v-if="docSummaryEnabled">
-          <label class="mb-1 block text-sm text-zinc-400">文档摘要模型</label>
-          <select
-            v-model="docSummaryModel"
+          <label class="mb-1 block text-sm text-zinc-400">最小字符数</label>
+          <input
+            v-model.number="docSummaryMinLen"
+            type="number"
+            min="100"
+            max="10000"
             class="w-full rounded border border-zinc-600 bg-zinc-900 px-3 py-2 text-zinc-100 focus:border-emerald-500 focus:outline-none"
-          >
-            <option value="">默认</option>
-            <option v-for="m in agentModels" :key="m.id" :value="m.id">{{ m.label }}</option>
-          </select>
+          />
         </div>
         <div class="flex items-center gap-2">
           <input v-model="convSummaryEnabled" type="checkbox" class="rounded border-zinc-600" />
@@ -302,7 +302,6 @@ const agentSaving = ref(false)
 const agentModels = ref<Array<{ id: string; label: string }>>([])
 const agentDefaultModel = ref('')
 const docSummaryEnabled = ref(true)
-const docSummaryModel = ref('')
 const docSummaryMinLen = ref(500)
 const convSummaryEnabled = ref(true)
 const convSummaryInterval = ref(10)
@@ -315,7 +314,6 @@ async function loadAgent() {
     agentModels.value = modelsRes.models ?? []
     agentDefaultModel.value = tools.agent?.defaultModel ?? ''
     docSummaryEnabled.value = tools.agent?.documentSummary?.enabled !== false
-    docSummaryModel.value = tools.agent?.documentSummary?.model ?? ''
     docSummaryMinLen.value = tools.agent?.documentSummary?.minLen ?? 500
     convSummaryEnabled.value = tools.agent?.conversationSummary?.enabled !== false
     convSummaryInterval.value = tools.agent?.conversationSummary?.interval ?? 10
@@ -333,7 +331,6 @@ async function saveAgent() {
         defaultModel: agentDefaultModel.value || undefined,
         documentSummary: {
           enabled: docSummaryEnabled.value,
-          model: docSummaryModel.value || undefined,
           minLen: docSummaryMinLen.value
         },
         conversationSummary: {

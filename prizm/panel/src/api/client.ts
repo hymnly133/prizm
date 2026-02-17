@@ -338,7 +338,6 @@ export interface TavilySettings {
 export interface DocumentSummarySettings {
   enabled?: boolean
   minLen?: number
-  model?: string
 }
 
 export interface ConversationSummarySettings {
