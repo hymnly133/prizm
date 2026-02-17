@@ -18,8 +18,54 @@ import {
 import type { SearchIndexService } from '../search/searchIndexService'
 import { getVersionHistory, computeDiff, saveVersion } from '../core/documentVersionStore'
 import { scopeStore } from '../core/ScopeStore'
+import { lockManager } from '../core/resourceLockManager'
+import { emit } from '../core/eventBus'
 
 const log = createLogger('Documents')
+
+/**
+ * 检查文档是否被 agent 锁定。
+ * 返回 true 表示请求应被阻断（已发送 423 响应），false 表示可继续。
+ */
+function checkDocumentLock(
+  req: Request,
+  res: Response,
+  scope: string,
+  documentId: string
+): boolean {
+  const lock = lockManager.getLock(scope, 'document', documentId)
+  if (!lock) return false
+
+  const force = req.query.force === 'true'
+  if (force) {
+    emit('tool:executed', {
+      scope,
+      sessionId: lock.sessionId,
+      toolName: 'api:force_override',
+      auditInput: {
+        toolName: 'api:force_override',
+        action: 'force_override',
+        resourceType: 'document',
+        resourceId: documentId,
+        detail: `User forced override via API`,
+        result: 'success'
+      }
+    }).catch(() => {})
+    return false
+  }
+
+  res.status(423).json({
+    error: 'Resource is locked',
+    code: 'RESOURCE_LOCKED',
+    lock: {
+      sessionId: lock.sessionId,
+      acquiredAt: lock.acquiredAt,
+      reason: lock.reason,
+      expiresAt: lock.lastHeartbeat + lock.ttlMs
+    }
+  })
+  return true
+}
 
 export function createDocumentsRoutes(
   router: Router,
@@ -136,6 +182,10 @@ export function createDocumentsRoutes(
         }
         scope = found.scope
       }
+
+      // 锁检查：被 agent checkout 的文档，API 不可直接修改
+      if (checkDocumentLock(req, res, scope, id)) return
+
       const doc = await adapter.updateDocument(scope, id, payload)
       if (searchIndex) await searchIndex.updateDocument(scope, id, doc)
 
@@ -180,6 +230,10 @@ export function createDocumentsRoutes(
         }
         scope = found.scope
       }
+
+      // 锁检查：被 agent checkout 的文档，API 不可直接删除
+      if (checkDocumentLock(req, res, scope, id)) return
+
       await adapter.deleteDocument(scope, id)
       if (searchIndex) await searchIndex.removeDocument(scope, id)
 
@@ -341,6 +395,9 @@ export function createDocumentsRoutes(
         scope = found.scope
       }
 
+      // 锁检查
+      if (checkDocumentLock(req, res, scope, id)) return
+
       const scopeRoot = scopeStore.getScopeRootPath(scope)
       const history = getVersionHistory(scopeRoot, id)
       const targetVersion = history.versions.find((v) => v.version === versionNum)
@@ -354,7 +411,10 @@ export function createDocumentsRoutes(
         content: targetVersion.content
       })
 
-      saveVersion(scopeRoot, id, targetVersion.title, targetVersion.content)
+      saveVersion(scopeRoot, id, targetVersion.title, targetVersion.content, {
+        changedBy: { type: 'user', apiSource: 'api:restore' },
+        changeReason: `Restored to version ${versionNum}`
+      })
 
       if (searchIndex) await searchIndex.updateDocument(scope, id, doc)
 

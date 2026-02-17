@@ -290,6 +290,121 @@ export function getBuiltinTools(): LLMTool[] {
         required: ['fileId']
       }
     ),
+    // ---- 知识库工具：文档-记忆双向查询 ----
+    tool(
+      'prizm_search_docs_by_memory',
+      '通过语义搜索记忆，反向定位关联文档。可指定记忆类型和检索方法。' +
+        '返回匹配文档列表（按记忆子类型分类：总览/事实/变更历史）。',
+      {
+        properties: {
+          query: { type: 'string', description: '搜索关键词或问题' },
+          memoryTypes: {
+            type: 'array',
+            description:
+              '限定搜索的记忆类型。默认 ["document"]。可选: profile, narrative, foresight, document, event_log',
+            items: { type: 'string' }
+          },
+          method: {
+            type: 'string',
+            description: '检索方法：keyword / vector / hybrid（默认） / rrf / agentic',
+            enum: ['keyword', 'vector', 'hybrid', 'rrf', 'agentic']
+          }
+        },
+        required: ['query']
+      }
+    ),
+    tool(
+      'prizm_get_document_memories',
+      '获取文档的全部记忆（按子类型分组：总览/原子事实/变更历史）。' +
+        '用于深入了解文档内容摘要和历史变更。',
+      {
+        properties: {
+          documentId: { type: 'string', description: '文档 ID' }
+        },
+        required: ['documentId']
+      }
+    ),
+    tool(
+      'prizm_document_versions',
+      '查看文档版本历史，含变更者身份和变更原因。' + '显示谁在什么时候做了什么修改。',
+      {
+        properties: {
+          documentId: { type: 'string', description: '文档 ID' },
+          limit: { type: 'number', description: '返回最近的版本数，默认 20' }
+        },
+        required: ['documentId']
+      }
+    ),
+    tool(
+      'prizm_find_related_documents',
+      '基于文档记忆关联，查找与指定文档语义相关的其他文档。' + '用于发现知识关联和相关内容。',
+      {
+        properties: {
+          documentId: { type: 'string', description: '文档 ID' }
+        },
+        required: ['documentId']
+      }
+    ),
+    // ---- 锁定与领取工具 ----
+    tool(
+      'prizm_checkout_document',
+      '签出文档获取编辑锁。在修改文档前必须先签出。返回文档内容和 fenceToken。' +
+        '同一时间只有一个 agent 会话可以签出同一文档。',
+      {
+        properties: {
+          documentId: { type: 'string', description: '文档 ID' },
+          reason: { type: 'string', description: '签出理由（可选）' }
+        },
+        required: ['documentId']
+      }
+    ),
+    tool(
+      'prizm_checkin_document',
+      '签入文档释放编辑锁。完成编辑后调用，让其他 agent 可以编辑此文档。',
+      {
+        properties: {
+          documentId: { type: 'string', description: '文档 ID' }
+        },
+        required: ['documentId']
+      }
+    ),
+    tool(
+      'prizm_claim_todo_list',
+      '领取待办列表为当前会话的在线待办。领取后其他 agent 不能修改此列表中的待办项。',
+      {
+        properties: {
+          todoListId: { type: 'string', description: '待办列表 ID' }
+        },
+        required: ['todoListId']
+      }
+    ),
+    tool(
+      'prizm_set_active_todo',
+      '设置待办项为"正在实现"状态。需要先领取待办项所在列表。表示当前 agent 正在处理此待办项。',
+      {
+        properties: {
+          todoId: { type: 'string', description: '待办项 ID' }
+        },
+        required: ['todoId']
+      }
+    ),
+    tool('prizm_release_todo_list', '释放已领取的待办列表，让其他 agent 可以领取和修改。', {
+      properties: {
+        todoListId: { type: 'string', description: '待办列表 ID' }
+      },
+      required: ['todoListId']
+    }),
+    tool('prizm_resource_status', '查询资源的状态信息，包括锁定状态、读取历史、活跃 agent 等。', {
+      properties: {
+        resourceType: {
+          type: 'string',
+          description: '资源类型：document / todo_list',
+          enum: ['document', 'todo_list']
+        },
+        resourceId: { type: 'string', description: '资源 ID' }
+      },
+      required: ['resourceType', 'resourceId']
+    }),
     // ---- 终端工具 ----
     tool(
       'prizm_terminal_execute',
@@ -392,5 +507,17 @@ export const BUILTIN_TOOL_NAMES = new Set([
   'prizm_search_memories',
   'prizm_terminal_execute',
   'prizm_terminal_spawn',
-  'prizm_terminal_send_keys'
+  'prizm_terminal_send_keys',
+  // 知识库工具
+  'prizm_search_docs_by_memory',
+  'prizm_get_document_memories',
+  'prizm_document_versions',
+  'prizm_find_related_documents',
+  // 锁定与领取工具
+  'prizm_checkout_document',
+  'prizm_checkin_document',
+  'prizm_claim_todo_list',
+  'prizm_set_active_todo',
+  'prizm_release_todo_list',
+  'prizm_resource_status'
 ])

@@ -12,6 +12,7 @@
 import { scopeStore } from '../core/ScopeStore'
 import { createLogger } from '../logger'
 import { getDocumentMemorySettings } from '../settings/agentToolsStore'
+import { DocumentSubType } from '@prizm/evermemos'
 import {
   isMemoryEnabled,
   addDocumentToMemory,
@@ -26,7 +27,7 @@ import {
   computeContentHash
 } from '../core/documentVersionStore'
 import { UnifiedExtractor } from '@prizm/evermemos'
-import { getLLMProvider } from './index'
+import { getLLMProvider, getLLMProviderName } from './index'
 import { ICompletionProvider, CompletionRequest } from '@prizm/evermemos'
 import { recordTokenUsage } from './tokenUsage'
 
@@ -64,10 +65,22 @@ class MigrationLLMAdapter implements ICompletionProvider {
   }
 }
 
+import type { VersionChangedBy } from '@prizm/shared'
+
+/** 文档记忆调度选项 */
+interface ScheduleDocumentMemoryOptions {
+  changedBy?: VersionChangedBy
+  changeReason?: string
+}
+
 /**
  * 异步触发文档记忆抽取（三层编排）
  */
-export function scheduleDocumentMemory(scope: string, documentId: string): void {
+export function scheduleDocumentMemory(
+  scope: string,
+  documentId: string,
+  options?: ScheduleDocumentMemoryOptions
+): void {
   const settings = getDocumentMemorySettings()
   const enabled = !ENV_DISABLED && settings?.enabled !== false
   if (!enabled) return
@@ -97,8 +110,11 @@ export function scheduleDocumentMemory(scope: string, documentId: string): void 
       const prevVersion = getPreviousVersion(scopeRoot, documentId)
       const oldContentHash = prevVersion?.contentHash ?? null
 
-      // 2. 保存版本快照
-      const newVersion = saveVersion(scopeRoot, documentId, title, content)
+      // 2. 保存版本快照（含变更者信息）
+      const newVersion = saveVersion(scopeRoot, documentId, title, content, {
+        changedBy: options?.changedBy,
+        changeReason: options?.changeReason
+      })
       const newContentHash = newVersion.contentHash
 
       // 3. 获取旧总览（在删除旧记忆之前）
@@ -110,7 +126,10 @@ export function scheduleDocumentMemory(scope: string, documentId: string): void 
       }
 
       // 4. 清除旧的 overview + fact 记忆（不删 migration）
-      const deleted = await deleteDocumentMemories(scope, documentId, ['overview', 'fact'])
+      const deleted = await deleteDocumentMemories(scope, documentId, [
+        DocumentSubType.OVERVIEW,
+        DocumentSubType.FACT
+      ])
       if (deleted > 0) {
         log.info('Cleared %d old document memories for %s', deleted, documentId)
       }
@@ -133,11 +152,17 @@ export function scheduleDocumentMemory(scope: string, documentId: string): void 
                 documentId,
                 title,
                 changes,
-                newVersion.version
+                newVersion.version,
+                options?.changedBy
               )
             }
             if (migrationAdapter.lastUsage) {
-              recordTokenUsage('memory:document_migration', scope, migrationAdapter.lastUsage)
+              recordTokenUsage(
+                'memory:document_migration',
+                scope,
+                migrationAdapter.lastUsage,
+                getLLMProviderName()
+              )
             }
           }
         } catch (e) {

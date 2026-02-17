@@ -12,6 +12,8 @@ import { toErrorResponse } from '../errors'
 import { createLogger } from '../logger'
 import { ensureStringParam, getScopeForCreate, requireScopeForList } from '../scopeUtils'
 import { parseTodoItemsFromInput } from '../utils/todoItems'
+import { lockManager } from '../core/resourceLockManager'
+import { emit } from '../core/eventBus'
 
 const log = createLogger('TodoList')
 
@@ -144,6 +146,45 @@ function broadcastTodoItemDeleted(req: Request, scope: string, itemId: string): 
   }
 }
 
+/**
+ * 检查待办列表是否被 agent claimed。
+ * 返回 true 表示请求应被阻断（已发送 423 响应），false 表示可继续。
+ */
+function checkTodoListLock(req: Request, res: Response, scope: string, listId: string): boolean {
+  const lock = lockManager.getLock(scope, 'todo_list', listId)
+  if (!lock) return false
+
+  const force = req.query.force === 'true'
+  if (force) {
+    emit('tool:executed', {
+      scope,
+      sessionId: lock.sessionId,
+      toolName: 'api:force_override',
+      auditInput: {
+        toolName: 'api:force_override',
+        action: 'force_override',
+        resourceType: 'todo_list',
+        resourceId: listId,
+        detail: `User forced override via API`,
+        result: 'success'
+      }
+    }).catch(() => {})
+    return false
+  }
+
+  res.status(423).json({
+    error: 'Resource is locked',
+    code: 'RESOURCE_LOCKED',
+    lock: {
+      sessionId: lock.sessionId,
+      acquiredAt: lock.acquiredAt,
+      reason: lock.reason,
+      expiresAt: lock.lastHeartbeat + lock.ttlMs
+    }
+  })
+  return true
+}
+
 export function createTodoListRoutes(router: Router, adapter?: ITodoListAdapter): void {
   if (!adapter) {
     log.warn('TodoList adapter not provided, routes will return 503')
@@ -241,6 +282,7 @@ export function createTodoListRoutes(router: Router, adapter?: ITodoListAdapter)
       if (!scope) return
       const listId = ensureStringParam(req.params.listId)
       if (!listId) return res.status(400).json({ error: 'listId required' })
+      if (checkTodoListLock(req, res, scope, listId)) return
       await adapter.deleteTodoList(scope, listId)
       broadcastTodoListDeleted(req, scope, listId)
       res.status(204).send()
@@ -260,6 +302,7 @@ export function createTodoListRoutes(router: Router, adapter?: ITodoListAdapter)
       const scope = getScopeForCreate(req)
       const listId = ensureStringParam(req.params.listId)
       if (!listId) return res.status(400).json({ error: 'listId required' })
+      if (checkTodoListLock(req, res, scope, listId)) return
       const { title, description, status } = req.body ?? {}
       if (typeof title !== 'string' || !title.trim()) {
         return res.status(400).json({ error: 'title required' })
@@ -290,6 +333,7 @@ export function createTodoListRoutes(router: Router, adapter?: ITodoListAdapter)
       const scope = getScopeForCreate(req)
       const listId = ensureStringParam(req.params.listId)
       if (!listId) return res.status(400).json({ error: 'listId required' })
+      if (checkTodoListLock(req, res, scope, listId)) return
       const { items } = req.body ?? {}
       if (!Array.isArray(items)) {
         return res.status(400).json({ error: 'items array required' })
@@ -315,6 +359,14 @@ export function createTodoListRoutes(router: Router, adapter?: ITodoListAdapter)
       const scope = getScopeForCreate(req)
       const itemId = ensureStringParam(req.params.itemId)
       if (!itemId) return res.status(400).json({ error: 'item id required' })
+
+      // 查找 item 所属的 list 并检查 claim
+      if (adapter.getTodoLists) {
+        const allLists = await adapter.getTodoLists(scope)
+        const parentList = allLists.find((l) => l.items?.some((it) => it.id === itemId))
+        if (parentList && checkTodoListLock(req, res, scope, parentList.id)) return
+      }
+
       const { status, title, description } = req.body ?? {}
       const payload: { status?: TodoItemStatus; title?: string; description?: string } = {}
       if (status && ['todo', 'doing', 'done'].includes(status))
@@ -342,6 +394,14 @@ export function createTodoListRoutes(router: Router, adapter?: ITodoListAdapter)
       const scope = getScopeForCreate(req)
       const itemId = ensureStringParam(req.params.itemId)
       if (!itemId) return res.status(400).json({ error: 'item id required' })
+
+      // 查找 item 所属的 list 并检查 claim
+      if (adapter.getTodoLists) {
+        const allLists = await adapter.getTodoLists(scope)
+        const parentList = allLists.find((l) => l.items?.some((it) => it.id === itemId))
+        if (parentList && checkTodoListLock(req, res, scope, parentList.id)) return
+      }
+
       const todoList = await adapter.deleteTodoItem(scope, itemId)
       broadcastTodoItemDeleted(req, scope, itemId)
       if (!todoList) return res.status(404).json({ error: 'TodoItem not found' })
@@ -434,6 +494,7 @@ export function createTodoListRoutes(router: Router, adapter?: ITodoListAdapter)
           .status(400)
           .json({ error: 'listId required (use ?listId= or DELETE /todo/lists/:listId)' })
       }
+      if (checkTodoListLock(req, res, scope, listId)) return
       await adapter.deleteTodoList(scope, listId)
       broadcastTodoListDeleted(req, scope, listId)
       res.status(204).send()
@@ -460,6 +521,7 @@ export function createTodoListRoutes(router: Router, adapter?: ITodoListAdapter)
           .status(400)
           .json({ error: 'listId required in body (use PUT /todo/lists/:listId/items)' })
       }
+      if (checkTodoListLock(req, res, scope, listId)) return
       const todoList = await adapter.replaceTodoItems(scope, listId, parseTodoItemsFromInput(items))
       broadcastTodoListUpdated(req, scope, todoList)
       res.json({ todoList })

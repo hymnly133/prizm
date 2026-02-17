@@ -34,7 +34,7 @@ import {
 import { scopeStore } from '../core/ScopeStore'
 import { appendSessionMemories } from '../core/mdStore'
 import { createCompositeStorageAdapter } from './CompositeStorageAdapter'
-import { getLLMProvider } from '../llm/index'
+import { getLLMProvider, getLLMProviderName } from '../llm/index'
 import { CompletionRequest, ICompletionProvider } from '@prizm/evermemos'
 import { recordTokenUsage } from './tokenUsage'
 import type { MemoryItem, MemoryIdsByLayer } from '@prizm/shared'
@@ -73,7 +73,7 @@ class PrizmLLMAdapter implements ICompletionProvider {
     const provider = getLLMProvider()
     const messages = [{ role: 'user', content: request.prompt }]
 
-    const model = 'zhipu'
+    const model = getLLMProviderName()
     const category = (request.operationTag ??
       'memory:conversation_extract') as import('../types').TokenUsageCategory
 
@@ -809,7 +809,8 @@ export async function addDocumentMigrationMemory(
   documentId: string,
   title: string,
   changes: string[],
-  version?: number
+  version?: number,
+  changedBy?: { type: string; sessionId?: string; apiSource?: string }
 ): Promise<void> {
   if (!changes.length) return
 
@@ -835,7 +836,8 @@ export async function addDocumentMigrationMemory(
       const migrationMeta: Record<string, unknown> = {
         documentId,
         title,
-        ...(version !== undefined && { version })
+        ...(version !== undefined && { version }),
+        ...(changedBy && { changedBy })
       }
 
       const contentStr = change.trim()

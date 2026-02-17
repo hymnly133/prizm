@@ -7,6 +7,7 @@ import * as mdStore from '../../core/mdStore'
 import { genUniqueId } from '../../id'
 import type { TodoItemStatus, TodoList } from '../../types'
 import { getScopeRefItem } from '../scopeItemRegistry'
+import { lockManager } from '../../core/resourceLockManager'
 import {
   resolveWorkspaceType,
   resolveFolder,
@@ -15,6 +16,18 @@ import {
   OUT_OF_BOUNDS_ERROR_CODE
 } from '../workspaceResolver'
 import type { BuiltinToolContext, BuiltinToolResult } from './types'
+
+/**
+ * 检查待办列表是否被其他会话 claimed，返回错误信息或 null
+ */
+function checkTodoListClaim(ctx: BuiltinToolContext, listId: string): string | null {
+  const lock = lockManager.getLock(ctx.scope, 'todo_list', listId)
+  if (lock && lock.sessionId !== ctx.sessionId) {
+    const since = new Date(lock.acquiredAt).toISOString()
+    return `待办列表 ${listId} 已被会话 ${lock.sessionId} 领取（${since}起），无法修改。可等待释放或联系用户强制释放。`
+  }
+  return null
+}
 
 export async function executeListTodos(ctx: BuiltinToolContext): Promise<BuiltinToolResult> {
   const { root: wsRoot, wsType: ws } = resolveWorkspaceType(ctx.wsCtx, ctx.wsArg)
@@ -132,6 +145,19 @@ export async function executeCreateTodo(ctx: BuiltinToolContext): Promise<Builti
   } else {
     const found = ctx.data.todoLists.find((l) => l.id === listId)
     if (!found) return { text: `待办列表不存在: ${listId}`, isError: true }
+    // 检查列表是否被其他会话 claimed
+    const claimError = checkTodoListClaim(ctx, found.id)
+    if (claimError) {
+      ctx.emitAudit({
+        toolName: ctx.toolName,
+        action: 'create',
+        resourceType: 'todo',
+        resourceId: listId,
+        result: 'denied',
+        errorMessage: claimError
+      })
+      return { text: claimError, isError: true }
+    }
     list = found
   }
   list.items.push(newItem)
@@ -169,6 +195,21 @@ export async function executeUpdateTodo(ctx: BuiltinToolContext): Promise<Builti
   const lists = ctx.data.todoLists ?? []
   const todoList = lists.find((l) => l.items.some((it) => it.id === todoId))
   if (!todoList) return { text: `待办项不存在: ${todoId}`, isError: true }
+
+  // 检查列表是否被其他会话 claimed
+  const claimError = checkTodoListClaim(ctx, todoList.id)
+  if (claimError) {
+    ctx.emitAudit({
+      toolName: ctx.toolName,
+      action: 'update',
+      resourceType: 'todo',
+      resourceId: todoId,
+      result: 'denied',
+      errorMessage: claimError
+    })
+    return { text: claimError, isError: true }
+  }
+
   const idx = todoList.items.findIndex((it) => it.id === todoId)
   if (idx < 0) return { text: `待办项不存在: ${todoId}`, isError: true }
   const cur = todoList.items[idx]
@@ -182,6 +223,15 @@ export async function executeUpdateTodo(ctx: BuiltinToolContext): Promise<Builti
   todoList.updatedAt = Date.now()
   scopeStore.saveScope(ctx.scope)
   ctx.record(todoId, 'todo', 'update')
+  ctx.emitAudit({
+    toolName: ctx.toolName,
+    action: 'update',
+    resourceType: 'todo',
+    resourceId: todoId,
+    resourceTitle: cur.title,
+    detail: ctx.args.status ? `status=${ctx.args.status}` : undefined,
+    result: 'success'
+  })
   return { text: `已更新待办项 ${todoId}` }
 }
 
@@ -205,11 +255,35 @@ export async function executeDeleteTodo(ctx: BuiltinToolContext): Promise<Builti
   const lists = ctx.data.todoLists ?? []
   const todoList = lists.find((l) => l.items.some((it) => it.id === todoId))
   if (!todoList) return { text: `待办项不存在: ${todoId}`, isError: true }
+
+  // 检查列表是否被其他会话 claimed
+  const claimError = checkTodoListClaim(ctx, todoList.id)
+  if (claimError) {
+    ctx.emitAudit({
+      toolName: ctx.toolName,
+      action: 'delete',
+      resourceType: 'todo',
+      resourceId: todoId,
+      result: 'denied',
+      errorMessage: claimError
+    })
+    return { text: claimError, isError: true }
+  }
+
   const idx = todoList.items.findIndex((it) => it.id === todoId)
   if (idx < 0) return { text: `待办项不存在: ${todoId}`, isError: true }
+  const deletedTitle = todoList.items[idx].title
   todoList.items.splice(idx, 1)
   todoList.updatedAt = Date.now()
   scopeStore.saveScope(ctx.scope)
   ctx.record(todoId, 'todo', 'delete')
+  ctx.emitAudit({
+    toolName: ctx.toolName,
+    action: 'delete',
+    resourceType: 'todo',
+    resourceId: todoId,
+    resourceTitle: deletedTitle,
+    result: 'success'
+  })
   return { text: `已删除待办项 ${todoId}` }
 }

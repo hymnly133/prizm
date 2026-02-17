@@ -5,6 +5,8 @@
 import { scopeStore } from '../../core/ScopeStore'
 import { createWorkspaceContext } from '../workspaceResolver'
 import { recordActivity } from '../contextTracker'
+import { emit } from '../../core/eventBus'
+import type { AuditEntryInput } from '../../core/agentAuditLog'
 import type { ScopeActivityItemKind, ScopeActivityAction } from '@prizm/shared'
 import type { BuiltinToolContext, BuiltinToolResult } from './types'
 import * as fileTools from './fileTools'
@@ -12,6 +14,8 @@ import * as todoTools from './todoTools'
 import * as documentTools from './documentTools'
 import * as searchTools from './searchTools'
 import * as terminalTools from './terminalTools'
+import * as knowledgeTools from './knowledgeTools'
+import * as lockTools from './lockTools'
 
 /**
  * 执行内置工具；sessionId 可选，用于记录修改到 ContextTracker
@@ -41,6 +45,13 @@ export async function executeBuiltinTool(
       })
   }
 
+  /** 通过 EventBus 发布审计事件 */
+  const emitAudit = (input: AuditEntryInput) => {
+    if (sessionId) {
+      emit('tool:executed', { scope, sessionId, toolName, auditInput: input }).catch(() => {})
+    }
+  }
+
   const wsArg = typeof args.workspace === 'string' ? args.workspace : undefined
 
   const ctx: BuiltinToolContext = {
@@ -51,6 +62,8 @@ export async function executeBuiltinTool(
     data,
     wsCtx,
     record,
+    audit: emitAudit,
+    emitAudit,
     wsArg,
     sessionId,
     grantedPaths
@@ -110,6 +123,30 @@ export async function executeBuiltinTool(
         return terminalTools.executeTerminalSpawn(ctx)
       case 'prizm_terminal_send_keys':
         return terminalTools.executeTerminalSendKeys(ctx)
+
+      // 知识库工具：文档-记忆双向查询
+      case 'prizm_search_docs_by_memory':
+        return knowledgeTools.executeSearchDocsByMemory(ctx)
+      case 'prizm_get_document_memories':
+        return knowledgeTools.executeGetDocumentMemories(ctx)
+      case 'prizm_document_versions':
+        return knowledgeTools.executeDocumentVersions(ctx)
+      case 'prizm_find_related_documents':
+        return knowledgeTools.executeFindRelatedDocuments(ctx)
+
+      // 锁定与领取工具
+      case 'prizm_checkout_document':
+        return lockTools.executeCheckoutDocument(ctx)
+      case 'prizm_checkin_document':
+        return lockTools.executeCheckinDocument(ctx)
+      case 'prizm_claim_todo_list':
+        return lockTools.executeClaimTodoList(ctx)
+      case 'prizm_set_active_todo':
+        return lockTools.executeSetActiveTodo(ctx)
+      case 'prizm_release_todo_list':
+        return lockTools.executeReleaseTodoList(ctx)
+      case 'prizm_resource_status':
+        return lockTools.executeResourceStatus(ctx)
 
       default:
         return { text: `未知内置工具: ${toolName}`, isError: true }

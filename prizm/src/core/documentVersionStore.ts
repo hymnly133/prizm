@@ -14,6 +14,8 @@ const log = createLogger('DocVersionStore')
 
 const DOC_VERSIONS_DIR = 'doc-versions'
 
+import type { VersionChangedBy } from '@prizm/shared'
+
 /** 文档版本快照 */
 export interface DocumentVersion {
   /** 自增版本号 */
@@ -26,6 +28,10 @@ export interface DocumentVersion {
   title: string
   /** 内容 hash（用于快速判断是否有变更） */
   contentHash: string
+  /** 变更者信息 */
+  changedBy?: VersionChangedBy
+  /** 变更原因/说明 */
+  changeReason?: string
 }
 
 /** 单个文档的版本历史 */
@@ -76,6 +82,14 @@ function writeHistory(scopeRoot: string, history: DocumentVersionHistory): void 
   fs.writeFileSync(filePath, JSON.stringify(history, null, 2), 'utf8')
 }
 
+/** saveVersion 的可选上下文参数 */
+export interface SaveVersionOptions {
+  /** 变更者信息 */
+  changedBy?: VersionChangedBy
+  /** 变更原因/说明 */
+  changeReason?: string
+}
+
 /**
  * 保存新版本快照。若内容与最新版本相同（hash 一致），跳过保存并返回最新版本。
  * @returns 保存的（或已存在的）版本快照
@@ -84,7 +98,8 @@ export function saveVersion(
   scopeRoot: string,
   documentId: string,
   title: string,
-  content: string
+  content: string,
+  options?: SaveVersionOptions
 ): DocumentVersion {
   const history = readHistory(scopeRoot, documentId)
   const contentHash = computeContentHash(content)
@@ -99,11 +114,19 @@ export function saveVersion(
     timestamp: new Date().toISOString(),
     content,
     title,
-    contentHash
+    contentHash,
+    changedBy: options?.changedBy,
+    changeReason: options?.changeReason
   }
   history.versions.push(version)
   writeHistory(scopeRoot, history)
-  log.info('Doc version saved: %s v%d scope=%s', documentId, version.version, scopeRoot)
+  log.info(
+    'Doc version saved: %s v%d scope=%s by=%s',
+    documentId,
+    version.version,
+    scopeRoot,
+    options?.changedBy?.type ?? 'unknown'
+  )
   return version
 }
 
