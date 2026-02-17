@@ -6,7 +6,7 @@ import { RawDataType } from '../types.js'
 
 /** 模拟默认模型返回的统一抽取格式（PROFILE 使用 ITEM 原子画像） */
 const mockUnifiedModelOutput = `
-## EPISODE
+## NARRATIVE
 CONTENT: 用户讨论了项目进度与下周计划，约定周三前完成设计稿。
 SUMMARY: 讨论项目进度与下周计划。
 KEYWORDS: 项目, 进度, 设计稿
@@ -72,6 +72,7 @@ function buildMemCell(overrides: Partial<MemCell> = {}): MemCell {
     type: RawDataType.CONVERSATION,
     original_data: simulatedConversation,
     timestamp: new Date().toISOString(),
+    deleted: false,
     ...overrides
   }
 }
@@ -85,10 +86,10 @@ describe('UnifiedExtractor 集成：模拟对话 + 默认模型输出', () => {
     const result = await extractor.extractAll(memcell)
 
     expect(result).not.toBeNull()
-    expect(result!.episode).toBeDefined()
-    expect(result!.episode!.content).toBe('用户讨论了项目进度与下周计划，约定周三前完成设计稿。')
-    expect(result!.episode!.summary).toBe('讨论项目进度与下周计划。')
-    expect(result!.episode!.keywords).toEqual(['项目', '进度', '设计稿'])
+    expect(result!.narrative).toBeDefined()
+    expect(result!.narrative!.content).toBe('用户讨论了项目进度与下周计划，约定周三前完成设计稿。')
+    expect(result!.narrative!.summary).toBe('讨论项目进度与下周计划。')
+    expect(result!.narrative!.keywords).toEqual(['项目', '进度', '设计稿'])
 
     expect(result!.event_log).toBeDefined()
     expect(result!.event_log!.time).toBe('2025-02-15')
@@ -123,7 +124,7 @@ describe('UnifiedExtractor 集成：模拟对话 + 默认模型输出', () => {
     const result = await extractor.extractAll(memcell)
 
     expect(result).not.toBeNull()
-    expect(result!.episode).toBeDefined()
+    expect(result!.narrative).toBeDefined()
     expect(result!.event_log).toBeDefined()
     expect(result!.foresight).toBeDefined()
     expect(result!.profile).toBeDefined()

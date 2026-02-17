@@ -60,9 +60,9 @@ export const EPISODE_MEMORY_PROMPT =
   '}\n' +
   '若对话无实质内容，返回 {} 空对象。\n'
 
-/** 单次调用完成 episode / event_log / foresight / profile 抽取，使用分段文本格式（非 JSON）。与分类型抽取语义等价；小节标题与键名必须保持英文以便解析。 */
+/** 单次调用完成 narrative / event_log / foresight / profile 抽取，使用分段文本格式（非 JSON）。与分类型抽取语义等价；小节标题与键名必须保持英文以便解析。 */
 export const UNIFIED_MEMORY_EXTRACTION_PROMPT =
-  '你是记忆抽取专家，从对话中一次性完成四类抽取：情景记忆、事件日志、前瞻、用户画像。当前时间：{{TIME}}\n\n' +
+  '你是记忆抽取专家，从对话中一次性完成四类抽取：叙事记忆、事件日志、前瞻、用户画像。当前时间：{{TIME}}\n\n' +
   '<input>\n对话内容：\n{{INPUT_TEXT}}\n</input>\n\n' +
   '<quality_gate>\n' +
   '**在抽取前，先判断对话是否包含有记忆价值的实质内容。以下场景不应产生任何记忆（直接输出空文本）：**\n' +
@@ -72,13 +72,13 @@ export const UNIFIED_MEMORY_EXTRACTION_PROMPT =
   '**有效记忆的最低标准：对话中必须存在用户的具体需求、观点、决策、经历描述或有信息量的交互。**\n' +
   '</quality_gate>\n\n' +
   '<format_convention>\n' +
-  '1. 小节标题：仅使用以下四者之一单独占一行，不可翻译或改写：## EPISODE、## EVENT_LOG、## FORESIGHT、## PROFILE。无内容的小节整节省略。\n' +
+  '1. 小节标题：仅使用以下四者之一单独占一行，不可翻译或改写：## NARRATIVE、## EVENT_LOG、## FORESIGHT、## PROFILE。无内容的小节整节省略。\n' +
   '2. 键值行：每行一条，格式为「英文键名: 值」。键名与值之间用英文冒号+空格分隔；值可含中文或冒号，但整条不换行。\n' +
   '3. FORESIGHT 多条之间用单独一行「---」分隔；不要在 CONTENT 或 EVIDENCE 的正文中写入「---」。\n' +
   '4. 对话中 role=user 的一方即为「用户」，role=assistant 为 AI 助手。\n' +
   '</format_convention>\n\n' +
   '<output_format>\n' +
-  '## EPISODE\n（完整详细摘要、一句话摘要、关键词。注意：摘要应聚焦于用户的行为和意图，而非 AI 的回应模板）\n' +
+  '## NARRATIVE\n（完整详细摘要、一句话摘要、关键词。注意：摘要应聚焦于用户的行为和意图，而非 AI 的回应模板）\n' +
   'CONTENT: <完整详细摘要，一行>\nSUMMARY: <一句话简要摘要>\nKEYWORDS: k1, k2\n\n' +
   '## EVENT_LOG\n（具体时间 + 原子事实列表；原子事实为可验证、不可再分的、有信息量的单一事实）\n' +
   'TIME: YYYY-MM-DD\nFACT: <原子事实一>\nFACT: <原子事实二>\n\n' +
@@ -120,7 +120,7 @@ export const UNIFIED_MEMORY_EXTRACTION_PROMPT =
   '   - ❌ 已有画像中已记录的信息 → 即使本次对话再次提及也不输出，避免重复\n' +
   '   - ✅ 仅保留：上方维度列表中有对话证据支撑的持久特征（称呼、技能、性格、兴趣、习惯、价值观等）\n' +
   '   每条 ITEM 必须是原子描述（一条一事实），严禁用逗号或"并且"合并多个事实。无**新增**高质量画像信息时整段省略。\n' +
-  '5. EPISODE：摘要必须反映有意义的交互内容。如果对话的实质只是打招呼或闲聊而无具体话题展开，则省略整个 ## EPISODE 段。\n' +
+  '5. NARRATIVE：摘要必须反映有意义的交互内容。如果对话的实质只是打招呼或闲聊而无具体话题展开，则省略整个 ## NARRATIVE 段。\n' +
   '6. 宁可不产出记忆，也不要产出低质量/无信息量的记忆。对话信息量不足时，输出空文本即可。\n' +
   '</rules>'
 

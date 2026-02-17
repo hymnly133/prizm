@@ -4,7 +4,8 @@ export interface CompletionRequest {
   prompt: string
   temperature?: number
   json?: boolean
-  scope?: string
+  /** 操作标签，用于 token 统计分类（如 'memory:dedup'） */
+  operationTag?: string
 }
 
 export interface ICompletionProvider extends ILLMProvider {

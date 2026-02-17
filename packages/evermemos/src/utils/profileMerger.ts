@@ -7,7 +7,7 @@ export interface IProfileMergeLLM {
     prompt: string
     temperature?: number
     json?: boolean
-    scope?: string
+    operationTag?: string
   }): Promise<string>
 }
 
@@ -91,7 +91,7 @@ export async function mergeProfilesWithLLM(
       prompt,
       temperature: 0,
       json: true,
-      scope: 'memory'
+      operationTag: 'memory:profile_merge'
     })
 
     const parsed = parseJSON(response)

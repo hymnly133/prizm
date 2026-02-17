@@ -221,7 +221,7 @@ export class RetrievalManager {
   private async vectorSearch(request: RetrieveRequest): Promise<SearchResult[]> {
     const embedding = await this.llmProvider.getEmbedding(request.query)
     const results: SearchResult[] = []
-    const types = request.memory_types || [MemoryType.EPISODIC_MEMORY]
+    const types = request.memory_types || [MemoryType.NARRATIVE]
     const limit = request.limit || 20
 
     for (const type of types) {

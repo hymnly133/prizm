@@ -24,7 +24,7 @@ export class ForesightExtractor extends BaseExtractor {
         prompt: prompt,
         temperature: 0.3,
         json: true,
-        scope: 'memory'
+        operationTag: 'memory:conversation_extract'
       })
 
       const foresightsData = parseJSON(response)

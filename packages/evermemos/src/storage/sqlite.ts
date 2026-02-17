@@ -22,11 +22,17 @@ export class SQLiteAdapter implements RelationalStoreAdapter {
         group_id TEXT,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        metadata JSON
+        metadata JSON,
+        source_type TEXT,
+        source_session_id TEXT,
+        source_round_id TEXT,
+        sub_type TEXT
       );
       
       CREATE INDEX IF NOT EXISTS idx_memories_user_id ON memories(user_id);
       CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type);
+      CREATE INDEX IF NOT EXISTS idx_memories_source_round ON memories(source_round_id);
+      CREATE INDEX IF NOT EXISTS idx_memories_sub_type ON memories(sub_type);
 
       CREATE TABLE IF NOT EXISTS search_index (
         scope TEXT PRIMARY KEY,

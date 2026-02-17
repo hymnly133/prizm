@@ -4,7 +4,7 @@ import { parseUnifiedMemoryText } from './unifiedMemoryParser.js'
 describe('parseUnifiedMemoryText', () => {
   /** 与提示词中 output_format 一致的期望输出样本（PROFILE 使用 ITEM 原子画像） */
   const fullExpectedOutput = `
-## EPISODE
+## NARRATIVE
 CONTENT: 用户讨论了项目进度与下周计划，约定周三前完成设计稿。
 SUMMARY: 讨论项目进度与下周计划。
 KEYWORDS: 项目, 进度, 设计稿
@@ -31,13 +31,13 @@ ITEM: 用户负责前端开发与需求对接
 ITEM: 用户热爱技术分享
 `
 
-  it('完整解析四类小节：EPISODE / EVENT_LOG / FORESIGHT / PROFILE', () => {
+  it('完整解析四类小节：NARRATIVE / EVENT_LOG / FORESIGHT / PROFILE', () => {
     const result = parseUnifiedMemoryText(fullExpectedOutput)
     expect(result).not.toBeNull()
 
-    expect(result!.episode?.content).toBe('用户讨论了项目进度与下周计划，约定周三前完成设计稿。')
-    expect(result!.episode?.summary).toBe('讨论项目进度与下周计划。')
-    expect(result!.episode?.keywords).toEqual(['项目', '进度', '设计稿'])
+    expect(result!.narrative?.content).toBe('用户讨论了项目进度与下周计划，约定周三前完成设计稿。')
+    expect(result!.narrative?.summary).toBe('讨论项目进度与下周计划。')
+    expect(result!.narrative?.keywords).toEqual(['项目', '进度', '设计稿'])
 
     expect(result!.event_log?.time).toBe('2025-02-15')
     expect(result!.event_log?.atomic_fact).toEqual([
@@ -67,15 +67,15 @@ ITEM: 用户热爱技术分享
 
   it('值内包含英文冒号时仍按第一冒号切分键值', () => {
     const text = `
-## EPISODE
+## NARRATIVE
 CONTENT: 会议时间：明天下午 3:00，地点：A 会议室
 SUMMARY: 时间：明天下午
 KEYWORDS: 会议, 时间
 `
     const result = parseUnifiedMemoryText(text)
-    expect(result?.episode?.content).toBe('会议时间：明天下午 3:00，地点：A 会议室')
-    expect(result?.episode?.summary).toBe('时间：明天下午')
-    expect(result?.episode?.keywords).toEqual(['会议', '时间'])
+    expect(result?.narrative?.content).toBe('会议时间：明天下午 3:00，地点：A 会议室')
+    expect(result?.narrative?.summary).toBe('时间：明天下午')
+    expect(result?.narrative?.keywords).toEqual(['会议', '时间'])
   })
 
   it('EVENT_LOG 最多解析 10 条 FACT', () => {
@@ -151,29 +151,29 @@ ITEM: 用户喜欢跑步
     expect(p.items).toEqual(['用户名叫张三', '用户喜欢跑步'])
   })
 
-  it('仅有 EPISODE 时仍返回有效结果', () => {
+  it('仅有 NARRATIVE 时仍返回有效结果', () => {
     const text = `
-## EPISODE
+## NARRATIVE
 CONTENT: 仅有一段情景摘要
 SUMMARY: 一句话
 KEYWORDS: a, b
 `
     const result = parseUnifiedMemoryText(text)
     expect(result).not.toBeNull()
-    expect(result!.episode?.content).toBe('仅有一段情景摘要')
+    expect(result!.narrative?.content).toBe('仅有一段情景摘要')
     expect(result!.event_log).toBeUndefined()
     expect(result!.foresight).toBeUndefined()
     expect(result!.profile).toBeUndefined()
   })
 
-  it('无 CONTENT 的 EPISODE 不写入 episode', () => {
+  it('无 CONTENT 的 NARRATIVE 不写入 narrative', () => {
     const text = `
-## EPISODE
+## NARRATIVE
 SUMMARY: 只有摘要没有 CONTENT
 KEYWORDS: x
 `
     const result = parseUnifiedMemoryText(text)
-    expect(result?.episode).toBeUndefined()
+    expect(result?.narrative).toBeUndefined()
   })
 
   it('PROFILE 无 ITEM 时不写入', () => {
@@ -184,7 +184,7 @@ KEYWORDS: x
   it('无任何有效内容时返回 null', () => {
     expect(parseUnifiedMemoryText('')).toBeNull()
     expect(parseUnifiedMemoryText('   \n  \n')).toBeNull()
-    expect(parseUnifiedMemoryText('## EPISODE\nSUMMARY: 无 CONTENT')).toBeNull()
+    expect(parseUnifiedMemoryText('## NARRATIVE\nSUMMARY: 无 CONTENT')).toBeNull()
   })
 
   it('小节标题大小写不敏感（解析器转大写）', () => {
@@ -195,20 +195,20 @@ SUMMARY: 测试
 KEYWORDS: k
 `
     const result = parseUnifiedMemoryText(text)
-    expect(result?.episode?.content).toBe('小写标题')
+    expect(result?.narrative?.content).toBe('小写标题')
   })
 
   it('Windows 换行 \\r\\n 正常解析', () => {
     const text =
       '## EPISODE\r\nCONTENT: 内容\r\nSUMMARY: 摘要\r\nKEYWORDS: a, b\r\n\r\n## EVENT_LOG\r\nTIME: 2025-02-15\r\nFACT: 事实1\r\n'
     const result = parseUnifiedMemoryText(text)
-    expect(result?.episode?.content).toBe('内容')
+    expect(result?.narrative?.content).toBe('内容')
     expect(result?.event_log?.atomic_fact).toEqual(['事实1'])
   })
 
   it('前后空白 trim 后仍能解析', () => {
     const result = parseUnifiedMemoryText('\n  \n' + fullExpectedOutput + '\n  ')
-    expect(result?.episode?.content).toBe('用户讨论了项目进度与下周计划，约定周三前完成设计稿。')
+    expect(result?.narrative?.content).toBe('用户讨论了项目进度与下周计划，约定周三前完成设计稿。')
     expect(result?.profile?.user_profiles?.[0]).toBeDefined()
     const p = result!.profile!.user_profiles![0] as Record<string, unknown>
     expect(p.items).toBeDefined()

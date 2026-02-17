@@ -1,10 +1,14 @@
 import { BaseExtractor } from './BaseExtractor.js'
-import { MemCell, BaseMemory, MemoryType, EpisodeMemory } from '../types.js'
+import { MemCell, BaseMemory, MemoryType, NarrativeMemory } from '../types.js'
 import { ICompletionProvider, parseJSON } from '../utils/llm.js'
 import { EPISODE_MEMORY_PROMPT } from '../prompts.js'
 import { v4 as uuidv4 } from 'uuid'
 
-export class EpisodeExtractor extends BaseExtractor {
+/**
+ * 叙事记忆抽取器（原 EpisodeExtractor）。
+ * 从对话中提取叙事性记忆（narrative memory）。
+ */
+export class NarrativeExtractor extends BaseExtractor {
   private llmProvider: ICompletionProvider
 
   constructor(llmProvider: ICompletionProvider) {
@@ -21,14 +25,14 @@ export class EpisodeExtractor extends BaseExtractor {
     const prompt = EPISODE_MEMORY_PROMPT.replace('{{INPUT_TEXT}}', inputText).replace(
       '{{TIME}}',
       formattedTime
-    ) // Assuming prompt has {{TIME}} or we add it
+    )
 
     try {
       const response = await this.llmProvider.generate({
         prompt: prompt,
         temperature: 0.1,
         json: true,
-        scope: 'memory'
+        operationTag: 'memory:conversation_extract'
       })
 
       const data = parseJSON(response)
@@ -38,9 +42,9 @@ export class EpisodeExtractor extends BaseExtractor {
 
       const embedding = await this.llmProvider.getEmbedding(data.summary || data.content)
 
-      const episode: EpisodeMemory = {
+      const narrative: NarrativeMemory = {
         id: uuidv4(),
-        memory_type: MemoryType.EPISODIC_MEMORY,
+        memory_type: MemoryType.NARRATIVE,
         user_id: memcell.user_id,
         group_id: memcell.group_id,
         created_at: new Date().toISOString(),
@@ -56,9 +60,9 @@ export class EpisodeExtractor extends BaseExtractor {
         }
       }
 
-      return [episode] as unknown as T[]
+      return [narrative] as unknown as T[]
     } catch (e) {
-      console.error('Error extracting episode:', e)
+      console.error('Error extracting narrative:', e)
       return null
     }
   }
@@ -92,3 +96,6 @@ export class EpisodeExtractor extends BaseExtractor {
     return new Intl.DateTimeFormat('en-US', options).format(date)
   }
 }
+
+/** @deprecated 使用 NarrativeExtractor 代替 */
+export const EpisodeExtractor = NarrativeExtractor

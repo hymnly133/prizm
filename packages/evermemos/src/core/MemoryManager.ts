@@ -2,9 +2,18 @@ import {
   MemCell,
   BaseMemory,
   MemoryType,
+  MemoryLayer,
   MemoryRoutingContext,
+  MemorySourceType,
+  DocumentSubType,
   RawDataType,
-  UnifiedExtractionResult
+  UnifiedExtractionResult,
+  ScopeMemoryType,
+  UserMemoryType,
+  SessionMemoryType,
+  getLayerForType,
+  USER_GROUP_ID,
+  DEFAULT_USER_ID
 } from '../types.js'
 import { StorageAdapter } from '../storage/interfaces.js'
 import { v4 as uuidv4 } from 'uuid'
@@ -109,7 +118,8 @@ export class MemoryManager {
   ): Promise<Array<{ id: string; content: string; type: string; group_id?: string }>> {
     this.createdCollector = []
     if (!memcell.event_id) memcell.event_id = uuidv4()
-    if (routing) memcell.user_id = routing.userId
+    if (routing) memcell.user_id = routing.userId ?? DEFAULT_USER_ID
+    if (!memcell.user_id) memcell.user_id = DEFAULT_USER_ID
 
     const isDocument = memcell.scene === 'document'
     const isAssistant = memcell.scene !== 'group' && memcell.scene !== 'document'
@@ -121,9 +131,9 @@ export class MemoryManager {
       try {
         // 在抽取前获取已有 profile 摘要，传入 LLM 让其只抽取增量
         let existingProfileSummary: string | undefined
-        if (isAssistant && routing?.userId) {
+        if (isAssistant) {
           try {
-            existingProfileSummary = await this.getExistingProfileSummary(routing.userId)
+            existingProfileSummary = await this.getExistingProfileSummary(memcell.user_id)
           } catch {
             // 查询失败不阻塞抽取
           }
@@ -155,7 +165,7 @@ export class MemoryManager {
   // ==================== 语义去重系统 ====================
 
   /** 需要语义去重的记忆类型（Profile 使用增量合并而非去重） */
-  private static readonly DEDUP_TYPES = new Set([MemoryType.EPISODIC_MEMORY, MemoryType.FORESIGHT])
+  private static readonly DEDUP_TYPES = new Set([MemoryType.NARRATIVE, MemoryType.FORESIGHT])
 
   /** L2 距离阈值：低于此值进入去重流程（cosine sim ≈ 0.90） */
   private static readonly DEDUP_L2_THRESHOLD = 0.45
@@ -339,7 +349,8 @@ export class MemoryManager {
         conditions.push('group_id = ?')
         params.push(groupId)
       } else if (type === MemoryType.PROFILE) {
-        conditions.push('group_id IS NULL')
+        conditions.push('group_id = ?')
+        params.push(USER_GROUP_ID)
       }
 
       const sql = `SELECT id, content FROM memories WHERE ${conditions.join(
@@ -416,7 +427,7 @@ export class MemoryManager {
     const response = await this.llmProvider!.generate({
       prompt,
       temperature: 0,
-      scope: 'memory'
+      operationTag: 'memory:dedup'
     })
 
     const line = response.trim().split('\n')[0].trim()
@@ -472,7 +483,7 @@ export class MemoryManager {
   // ---- 去重日志公开 API ----
 
   /** 查询去重日志 */
-  async listDedupLog(userId: string, limit = 50): Promise<DedupLogEntry[]> {
+  async listDedupLog(userId = DEFAULT_USER_ID, limit = 50): Promise<DedupLogEntry[]> {
     try {
       return await this.storage.relational.query(
         'SELECT * FROM dedup_log WHERE user_id = ? AND rolled_back = 0 ORDER BY created_at DESC LIMIT ?',
@@ -544,12 +555,8 @@ export class MemoryManager {
     const skipSession = routing?.skipSessionExtraction === true
 
     const tasks: Promise<void>[] = []
-    if (
-      !sessionOnly &&
-      (isAssistant || isDocument) &&
-      this.extractors.has(MemoryType.EPISODIC_MEMORY)
-    ) {
-      tasks.push(this.extractAndSave(MemoryType.EPISODIC_MEMORY, memcell, routing))
+    if (!sessionOnly && (isAssistant || isDocument) && this.extractors.has(MemoryType.NARRATIVE)) {
+      tasks.push(this.extractAndSave(MemoryType.NARRATIVE, memcell, routing))
     }
     if (!sessionOnly && isAssistant && this.extractors.has(MemoryType.FORESIGHT)) {
       tasks.push(this.extractAndSave(MemoryType.FORESIGHT, memcell, routing))
@@ -568,7 +575,7 @@ export class MemoryManager {
     result: UnifiedExtractionResult,
     routing?: MemoryRoutingContext
   ): Promise<void> {
-    const userId = routing?.userId ?? memcell.user_id
+    const userId = routing?.userId ?? memcell.user_id ?? DEFAULT_USER_ID
     const timestamp = memcell.timestamp || new Date().toISOString()
     const now = new Date().toISOString()
     const isAssistantScene = memcell.scene !== 'group' && memcell.scene !== 'document'
@@ -576,64 +583,64 @@ export class MemoryManager {
     const skipSession = routing?.skipSessionExtraction === true
 
     const roundMsgId = routing?.roundMessageId
+    const sourceType = routing?.sourceType ?? MemorySourceType.CONVERSATION
+    const sourceSessionId = routing?.sessionId
+    const sourceRoundId = roundMsgId
 
-    if (!sessionOnly && result.episode?.content) {
-      const content = result.episode.content
-      const summary = result.episode.summary || content.slice(0, 200)
+    if (!sessionOnly && result.narrative?.content) {
+      const content = result.narrative.content
+      const summary = result.narrative.summary || content.slice(0, 200)
       let embedding: number[] | undefined
       try {
         embedding = await this.embeddingProvider!.getEmbedding(summary || content)
       } catch (e) {
-        console.warn('Episode embedding failed:', e)
+        console.warn('Narrative embedding failed:', e)
       }
-      const groupId = memcell.scene === 'document' ? `${routing!.scope}:docs` : routing?.scope
+      const groupId = routing?.scope
 
       const id = uuidv4()
 
-      // SQLite metadata：只存类型特有字段，不重复 SQL 列
-      const episodeMeta: Record<string, unknown> = {
-        summary: result.episode.summary,
-        keywords: result.episode.keywords,
-        original_data: memcell.original_data,
-        ...(roundMsgId && { round_message_id: roundMsgId })
+      const narrativeMeta: Record<string, unknown> = {
+        summary: result.narrative.summary,
+        keywords: result.narrative.keywords,
+        original_data: memcell.original_data
       }
 
-      // 语义去重：向量匹配 + LLM 二次确认
       const dedupId = await this.tryDedup(
-        MemoryType.EPISODIC_MEMORY,
+        MemoryType.NARRATIVE,
         embedding,
         content,
         groupId,
         userId,
-        episodeMeta
+        narrativeMeta
       )
       if (!dedupId) {
         await this.storage.relational.insert('memories', {
           id,
-          type: MemoryType.EPISODIC_MEMORY,
+          type: MemoryType.NARRATIVE,
           content: content,
           user_id: userId,
           group_id: groupId ?? null,
           created_at: now,
           updated_at: now,
-          metadata: JSON.stringify(episodeMeta)
+          metadata: JSON.stringify(narrativeMeta),
+          source_type: sourceType,
+          source_session_id: sourceSessionId ?? null,
+          source_round_id: sourceRoundId ?? null
         })
         if (embedding?.length) {
-          await this.storage.vector.add(MemoryType.EPISODIC_MEMORY, [
+          await this.storage.vector.add(MemoryType.NARRATIVE, [
             toVectorRow(id, content, userId, groupId, embedding)
           ])
         }
-        this.pushCreated(id, content, MemoryType.EPISODIC_MEMORY, groupId)
+        this.pushCreated(id, content, MemoryType.NARRATIVE, groupId)
       }
     }
 
     if (!skipSession && result.event_log?.atomic_fact?.length) {
-      const groupId =
-        memcell.scene === 'document'
-          ? `${routing!.scope}:docs`
-          : routing?.sessionId
-          ? `${routing.scope}:session:${routing.sessionId}`
-          : routing?.scope
+      const groupId = routing?.sessionId
+        ? `${routing.scope}:session:${routing.sessionId}`
+        : routing?.scope
       for (const fact of result.event_log.atomic_fact) {
         if (typeof fact !== 'string' || !fact.trim()) continue
         const id = uuidv4()
@@ -643,13 +650,11 @@ export class MemoryManager {
         } catch (e) {
           console.warn('EventLog embedding failed:', e)
         }
-        // SQLite metadata：只存类型特有字段
         const eventLogMeta: Record<string, unknown> = {
           time: result.event_log.time,
           event_type: 'atomic',
           parent_type: 'memcell',
-          parent_id: memcell.event_id,
-          ...(roundMsgId && { round_message_id: roundMsgId })
+          parent_id: memcell.event_id
         }
 
         await this.storage.relational.insert('memories', {
@@ -660,7 +665,10 @@ export class MemoryManager {
           group_id: groupId ?? null,
           created_at: now,
           updated_at: now,
-          metadata: JSON.stringify(eventLogMeta)
+          metadata: JSON.stringify(eventLogMeta),
+          source_type: sourceType,
+          source_session_id: sourceSessionId ?? null,
+          source_round_id: sourceRoundId ?? null
         })
         if (embedding?.length) {
           await this.storage.vector.add(MemoryType.EVENT_LOG, [
@@ -685,16 +693,13 @@ export class MemoryManager {
 
         const id = uuidv4()
 
-        // SQLite metadata：只存类型特有字段
         const foresightMeta: Record<string, unknown> = {
           valid_start: item.start_time,
           valid_end: item.end_time,
           evidence: item.evidence,
-          duration_days: item.duration_days,
-          ...(roundMsgId && { round_message_id: roundMsgId })
+          duration_days: item.duration_days
         }
 
-        // 语义去重：向量匹配 + LLM 二次确认
         const dedupId = await this.tryDedup(
           MemoryType.FORESIGHT,
           embedding,
@@ -713,7 +718,10 @@ export class MemoryManager {
           group_id: groupId ?? null,
           created_at: now,
           updated_at: now,
-          metadata: JSON.stringify(foresightMeta)
+          metadata: JSON.stringify(foresightMeta),
+          source_type: sourceType,
+          source_session_id: sourceSessionId ?? null,
+          source_round_id: sourceRoundId ?? null
         })
         if (embedding?.length) {
           await this.storage.vector.add(MemoryType.FORESIGHT, [
@@ -734,8 +742,8 @@ export class MemoryManager {
 
         // 查找该用户的已有 PROFILE 记忆（最新一条）
         const existingRows = await this.storage.relational.query(
-          'SELECT * FROM memories WHERE type = ? AND user_id = ? AND group_id IS NULL ORDER BY updated_at DESC LIMIT 1',
-          [MemoryType.PROFILE, userId]
+          'SELECT * FROM memories WHERE type = ? AND user_id = ? AND group_id = ? ORDER BY updated_at DESC LIMIT 1',
+          [MemoryType.PROFILE, userId, USER_GROUP_ID]
         )
 
         if (existingRows.length > 0) {
@@ -784,20 +792,21 @@ export class MemoryManager {
             console.warn('Profile embedding failed:', e)
           }
 
-          // metadata 只存 profile 特有字段 + 追踪字段
           const updatedMeta: Record<string, unknown> = {
             items: mergeResult.merged.items,
             merge_history: [
               ...((existingMeta.merge_history as string[]) ?? []),
               `${now}: ${mergeResult.changesSummary}`
-            ].slice(-20),
-            ...(roundMsgId && { round_message_id: roundMsgId })
+            ].slice(-20)
           }
 
           await this.storage.relational.update('memories', existing.id, {
             content: finalContent,
             updated_at: now,
-            metadata: JSON.stringify(updatedMeta)
+            metadata: JSON.stringify(updatedMeta),
+            source_type: sourceType,
+            source_session_id: sourceSessionId ?? null,
+            source_round_id: sourceRoundId ?? null
           })
 
           // 更新向量索引：删旧加新
@@ -827,10 +836,8 @@ export class MemoryManager {
             console.warn('Profile embedding failed:', e)
           }
 
-          // metadata 只存 profile 特有字段
           const meta: Record<string, unknown> = {
-            items: profileData.items,
-            ...(roundMsgId && { round_message_id: roundMsgId })
+            items: profileData.items
           }
 
           await this.storage.relational.insert('memories', {
@@ -838,17 +845,20 @@ export class MemoryManager {
             type: MemoryType.PROFILE,
             content: incomingContent,
             user_id: userId,
-            group_id: null,
+            group_id: USER_GROUP_ID,
             created_at: now,
             updated_at: now,
-            metadata: JSON.stringify(meta)
+            metadata: JSON.stringify(meta),
+            source_type: sourceType,
+            source_session_id: sourceSessionId ?? null,
+            source_round_id: sourceRoundId ?? null
           })
           if (embedding?.length) {
             await this.storage.vector.add(MemoryType.PROFILE, [
-              toVectorRow(id, incomingContent, userId, null, embedding)
+              toVectorRow(id, incomingContent, userId, USER_GROUP_ID, embedding)
             ])
           }
-          this.pushCreated(id, incomingContent, MemoryType.PROFILE, null)
+          this.pushCreated(id, incomingContent, MemoryType.PROFILE, USER_GROUP_ID)
         }
       }
     }
@@ -856,11 +866,11 @@ export class MemoryManager {
 
   /**
    * 根据 memory_type 和路由上下文计算 group_id：
-   * - Profile       → null（User 层，仅按 user_id 检索）
-   * - Episodic      → scope（Scope 层）；document 场景 → scope:docs
-   * - Foresight     → scope（Scope 层）
-   * - EventLog      → scope:session:sessionId（Session 层）；document 场景 → scope:docs
-   * - 其他          → memcell 原始 group_id
+   * - Profile    → "user"（User 层）
+   * - Narrative  → scope（Scope 层）
+   * - Foresight  → scope（Scope 层）
+   * - Document   → scope（Scope 层）
+   * - EventLog   → scope:session:sessionId（Session 层）
    */
   private resolveGroupId(
     type: MemoryType,
@@ -869,21 +879,16 @@ export class MemoryManager {
   ): string | undefined {
     if (!routing) return memcell.group_id ?? undefined
 
-    const isDocument = memcell.scene === 'document'
-
     switch (type) {
       case MemoryType.PROFILE:
-        // User 层：不设 group_id
-        return undefined
+        return USER_GROUP_ID
 
-      case MemoryType.EPISODIC_MEMORY:
-        return isDocument ? `${routing.scope}:docs` : routing.scope
-
+      case MemoryType.NARRATIVE:
       case MemoryType.FORESIGHT:
+      case MemoryType.DOCUMENT:
         return routing.scope
 
       case MemoryType.EVENT_LOG:
-        if (isDocument) return `${routing.scope}:docs`
         return routing.sessionId ? `${routing.scope}:session:${routing.sessionId}` : routing.scope
 
       default:
@@ -904,15 +909,12 @@ export class MemoryManager {
           if (!memory) continue
           memory.id = memory.id || uuidv4()
           memory.memory_type = type
-          if (routing) {
-            memory.user_id = routing.userId
-          }
+          memory.user_id = routing?.userId ?? memory.user_id ?? DEFAULT_USER_ID
           memory.group_id = groupId ?? undefined
-          if (routing?.roundMessageId) {
-            memory.metadata = {
-              ...(memory.metadata ?? {}),
-              round_message_id: routing.roundMessageId
-            }
+          if (routing) {
+            memory.source_type = routing.sourceType ?? MemorySourceType.CONVERSATION
+            memory.source_session_id = routing.sessionId
+            memory.source_round_id = routing.roundMessageId
           }
 
           const contentStr = this.getMemoryContent(memory)
@@ -930,7 +932,6 @@ export class MemoryManager {
             if (dedupId) continue
           }
 
-          // 构建精简 metadata：排除 SQL 列字段，仅保留类型特有字段
           const fullObj = memory as Record<string, unknown>
           const excludeKeys = new Set([
             'id',
@@ -941,7 +942,11 @@ export class MemoryManager {
             'updated_at',
             'deleted',
             'content',
-            'embedding'
+            'embedding',
+            'source_type',
+            'source_session_id',
+            'source_round_id',
+            'sub_type'
           ])
           const cleanMeta: Record<string, unknown> = {}
           for (const [k, v] of Object.entries(fullObj)) {
@@ -958,7 +963,11 @@ export class MemoryManager {
             group_id: memory.group_id ?? null,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
-            metadata: JSON.stringify(cleanMeta)
+            metadata: JSON.stringify(cleanMeta),
+            source_type: memory.source_type ?? null,
+            source_session_id: memory.source_session_id ?? null,
+            source_round_id: memory.source_round_id ?? null,
+            sub_type: memory.sub_type ?? null
           })
 
           if (memory.embedding) {
@@ -997,8 +1006,8 @@ export class MemoryManager {
    */
   private async getExistingProfileSummary(userId: string): Promise<string | undefined> {
     const rows = await this.storage.relational.query(
-      'SELECT metadata FROM memories WHERE type = ? AND user_id = ? AND group_id IS NULL ORDER BY updated_at DESC LIMIT 1',
-      [MemoryType.PROFILE, userId]
+      'SELECT metadata FROM memories WHERE type = ? AND user_id = ? AND group_id = ? ORDER BY updated_at DESC LIMIT 1',
+      [MemoryType.PROFILE, userId, USER_GROUP_ID]
     )
     if (rows.length === 0) return undefined
 
@@ -1026,8 +1035,8 @@ export class MemoryManager {
     return ''
   }
 
-  /** 按用户列出记忆（用于管理/可视化） */
-  async listMemories(user_id: string, limit = 200): Promise<any[]> {
+  /** 列出记忆（用于管理/可视化） */
+  async listMemories(user_id = DEFAULT_USER_ID, limit = 200): Promise<any[]> {
     const rows = await this.storage.relational.query(
       'SELECT * FROM memories WHERE user_id = ? ORDER BY created_at DESC LIMIT ?',
       [user_id, limit]
@@ -1035,8 +1044,8 @@ export class MemoryManager {
     return rows
   }
 
-  /** 统计用户记忆总数 */
-  async countMemories(user_id: string): Promise<number> {
+  /** 统计记忆总数 */
+  async countMemories(user_id = DEFAULT_USER_ID): Promise<number> {
     const rows = await this.storage.relational.query(
       'SELECT COUNT(*) as cnt FROM memories WHERE user_id = ?',
       [user_id]
@@ -1044,21 +1053,25 @@ export class MemoryManager {
     return (rows[0] as any)?.cnt ?? 0
   }
 
-  /** 按 round_message_id 列出该轮对话新创建的记忆 */
+  /** 按来源轮次消息 ID 列出该轮创建的记忆 */
   async listMemoriesByRoundMessageId(
-    user_id: string,
     round_message_id: string,
+    user_id = DEFAULT_USER_ID,
     limit = 50
   ): Promise<any[]> {
     const rows = await this.storage.relational.query(
-      `SELECT * FROM memories WHERE user_id = ? AND json_extract(metadata, '$.round_message_id') = ? ORDER BY created_at DESC LIMIT ?`,
+      'SELECT * FROM memories WHERE user_id = ? AND source_round_id = ? ORDER BY created_at DESC LIMIT ?',
       [user_id, round_message_id, limit]
     )
     return rows
   }
 
   /** 按 group_id 列出记忆 */
-  async listMemoriesByGroup(user_id: string, group_id: string, limit = 200): Promise<any[]> {
+  async listMemoriesByGroup(
+    group_id: string,
+    user_id = DEFAULT_USER_ID,
+    limit = 200
+  ): Promise<any[]> {
     const rows = await this.storage.relational.query(
       'SELECT * FROM memories WHERE user_id = ? AND group_id = ? ORDER BY created_at DESC LIMIT ?',
       [user_id, group_id, limit]
@@ -1068,8 +1081,8 @@ export class MemoryManager {
 
   /** 按 group_id 前缀列出记忆（如 "online:" 列出 scope 下所有层级） */
   async listMemoriesByGroupPrefix(
-    user_id: string,
     group_prefix: string,
+    user_id = DEFAULT_USER_ID,
     limit = 200
   ): Promise<any[]> {
     const rows = await this.storage.relational.query(
@@ -1208,7 +1221,7 @@ export class MemoryManager {
    * embedding 不存在 SQLite 中，无法在 DB 层判断是否缺失向量。
    * 调用方应直接对返回结果执行 backfillVector（LanceDB add 是幂等的）。
    */
-  async listAllMemories(user_id: string): Promise<
+  async listAllMemories(user_id = DEFAULT_USER_ID): Promise<
     Array<{
       id: string
       type: string
@@ -1256,6 +1269,143 @@ export class MemoryManager {
     }
   }
 
+  // ==================== 类型安全的层级 API ====================
+
+  /** 列出 User 层记忆（Profile） */
+  async listUserMemories(
+    types?: UserMemoryType[],
+    userId = DEFAULT_USER_ID,
+    limit = 200
+  ): Promise<any[]> {
+    const typeFilter = types ?? [MemoryType.PROFILE]
+    const placeholders = typeFilter.map(() => '?').join(', ')
+    return this.storage.relational.query(
+      `SELECT * FROM memories WHERE user_id = ? AND group_id = ? AND type IN (${placeholders}) ORDER BY created_at DESC LIMIT ?`,
+      [userId, USER_GROUP_ID, ...typeFilter, limit]
+    )
+  }
+
+  /** 列出 Scope 层记忆（Narrative / Foresight / Document） */
+  async listScopeMemories(
+    scope: string,
+    types?: ScopeMemoryType[],
+    userId = DEFAULT_USER_ID,
+    limit = 200
+  ): Promise<any[]> {
+    const typeFilter: string[] = types ?? [
+      MemoryType.NARRATIVE,
+      MemoryType.FORESIGHT,
+      MemoryType.DOCUMENT
+    ]
+    const placeholders = typeFilter.map(() => '?').join(', ')
+    return this.storage.relational.query(
+      `SELECT * FROM memories WHERE user_id = ? AND group_id = ? AND type IN (${placeholders}) ORDER BY created_at DESC LIMIT ?`,
+      [userId, scope, ...typeFilter, limit]
+    )
+  }
+
+  /** 列出 Session 层记忆（EventLog） */
+  async listSessionMemories(
+    scope: string,
+    sessionId: string,
+    userId = DEFAULT_USER_ID,
+    limit = 200
+  ): Promise<any[]> {
+    const groupId = `${scope}:session:${sessionId}`
+    return this.storage.relational.query(
+      'SELECT * FROM memories WHERE user_id = ? AND group_id = ? AND type = ? ORDER BY created_at DESC LIMIT ?',
+      [userId, groupId, MemoryType.EVENT_LOG, limit]
+    )
+  }
+
+  /** 删除 User 层记忆 */
+  async deleteUserMemories(userId = DEFAULT_USER_ID): Promise<number> {
+    try {
+      const rows = await this.storage.relational.query(
+        'SELECT id FROM memories WHERE user_id = ? AND group_id = ?',
+        [userId, USER_GROUP_ID]
+      )
+      for (const row of rows) {
+        await this.storage.relational.delete('memories', row.id)
+      }
+      return rows.length
+    } catch {
+      return 0
+    }
+  }
+
+  /** 删除 Scope 层记忆，可选按类型过滤 */
+  async deleteScopeMemories(scope: string, types?: ScopeMemoryType[]): Promise<number> {
+    try {
+      const typeFilter: string[] = types ?? [
+        MemoryType.NARRATIVE,
+        MemoryType.FORESIGHT,
+        MemoryType.DOCUMENT
+      ]
+      const placeholders = typeFilter.map(() => '?').join(', ')
+      const rows = await this.storage.relational.query(
+        `SELECT id FROM memories WHERE group_id = ? AND type IN (${placeholders})`,
+        [scope, ...typeFilter]
+      )
+      for (const row of rows) {
+        await this.storage.relational.delete('memories', row.id)
+      }
+      return rows.length
+    } catch {
+      return 0
+    }
+  }
+
+  /** 删除 Session 层记忆 */
+  async deleteSessionMemories(scope: string, sessionId: string): Promise<number> {
+    const groupId = `${scope}:session:${sessionId}`
+    return this.deleteMemoriesByGroupId(groupId)
+  }
+
+  /** 按 sub_type 列出文档记忆 */
+  async listDocumentMemories(
+    scope: string,
+    subType?: DocumentSubType,
+    userId = DEFAULT_USER_ID,
+    limit = 200
+  ): Promise<any[]> {
+    if (subType) {
+      return this.storage.relational.query(
+        'SELECT * FROM memories WHERE user_id = ? AND group_id = ? AND type = ? AND sub_type = ? ORDER BY created_at DESC LIMIT ?',
+        [userId, scope, MemoryType.DOCUMENT, subType, limit]
+      )
+    }
+    return this.storage.relational.query(
+      'SELECT * FROM memories WHERE user_id = ? AND group_id = ? AND type = ? ORDER BY created_at DESC LIMIT ?',
+      [userId, scope, MemoryType.DOCUMENT, limit]
+    )
+  }
+
+  /** 按 sub_type 删除文档记忆 */
+  async deleteDocumentMemories(scope: string, subTypes?: DocumentSubType[]): Promise<number> {
+    try {
+      let rows: any[]
+      if (subTypes?.length) {
+        const placeholders = subTypes.map(() => '?').join(', ')
+        rows = await this.storage.relational.query(
+          `SELECT id FROM memories WHERE group_id = ? AND type = ? AND sub_type IN (${placeholders})`,
+          [scope, MemoryType.DOCUMENT, ...subTypes]
+        )
+      } else {
+        rows = await this.storage.relational.query(
+          'SELECT id FROM memories WHERE group_id = ? AND type = ?',
+          [scope, MemoryType.DOCUMENT]
+        )
+      }
+      for (const row of rows) {
+        await this.storage.relational.delete('memories', row.id)
+      }
+      return rows.length
+    } catch {
+      return 0
+    }
+  }
+
   /**
    * 清空所有记忆（SQLite + 向量索引）。
    * 返回删除的 SQLite 行数。
@@ -1280,10 +1430,11 @@ export class MemoryManager {
 
     // 删除所有向量集合
     const vectorTypes = [
-      MemoryType.EPISODIC_MEMORY,
+      MemoryType.NARRATIVE,
       MemoryType.FORESIGHT,
       MemoryType.EVENT_LOG,
-      MemoryType.PROFILE
+      MemoryType.PROFILE,
+      MemoryType.DOCUMENT
     ]
     for (const type of vectorTypes) {
       try {

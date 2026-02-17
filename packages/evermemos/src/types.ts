@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
-// Enum Definitions
+// ── 原始数据类型 ──
+
 export enum RawDataType {
   CONVERSATION = 'conversation',
   IMAGE = 'image',
@@ -11,12 +12,74 @@ export enum RawDataType {
   UNKNOWN = 'unknown'
 }
 
+// ── 记忆层级 ──
+
+export enum MemoryLayer {
+  USER = 'user',
+  SCOPE = 'scope',
+  SESSION = 'session'
+}
+
+// ── 记忆类型 ──
+
 export enum MemoryType {
-  EPISODIC_MEMORY = 'episodic_memory',
-  FORESIGHT = 'foresight',
-  EVENT_LOG = 'event_log',
   PROFILE = 'profile',
-  GROUP_PROFILE = 'group_profile'
+  NARRATIVE = 'narrative',
+  FORESIGHT = 'foresight',
+  DOCUMENT = 'document',
+  EVENT_LOG = 'event_log'
+}
+
+// ── 文档子类型 ──
+
+export enum DocumentSubType {
+  OVERVIEW = 'overview',
+  FACT = 'fact',
+  MIGRATION = 'migration'
+}
+
+// ── 记忆来源类型 ──
+
+export enum MemorySourceType {
+  CONVERSATION = 'conversation',
+  DOCUMENT = 'document',
+  COMPRESSION = 'compression',
+  MANUAL = 'manual'
+}
+
+/** User 层记忆固定使用的 group_id */
+export const USER_GROUP_ID = 'user'
+
+/**
+ * 默认用户 ID。当前系统为单用户模型，所有记忆归属于同一用户。
+ * 所有 userId 参数均默认使用此值，外部无需显式传递。
+ */
+export const DEFAULT_USER_ID = 'default'
+
+// ── 类型安全的层级→类型映射 ──
+
+export type UserMemoryType = MemoryType.PROFILE
+export type ScopeMemoryType = MemoryType.NARRATIVE | MemoryType.FORESIGHT | MemoryType.DOCUMENT
+export type SessionMemoryType = MemoryType.EVENT_LOG
+
+export const LAYER_TYPES = {
+  [MemoryLayer.USER]: [MemoryType.PROFILE],
+  [MemoryLayer.SCOPE]: [MemoryType.NARRATIVE, MemoryType.FORESIGHT, MemoryType.DOCUMENT],
+  [MemoryLayer.SESSION]: [MemoryType.EVENT_LOG]
+} as const
+
+/** 根据 MemoryType 推导所属层级 */
+export function getLayerForType(type: MemoryType): MemoryLayer {
+  switch (type) {
+    case MemoryType.PROFILE:
+      return MemoryLayer.USER
+    case MemoryType.NARRATIVE:
+    case MemoryType.FORESIGHT:
+    case MemoryType.DOCUMENT:
+      return MemoryLayer.SCOPE
+    case MemoryType.EVENT_LOG:
+      return MemoryLayer.SESSION
+  }
 }
 
 export enum ParentType {
@@ -31,11 +94,11 @@ export enum RetrieveMethod {
   AGENTIC = 'agentic'
 }
 
-// Zod Schemas & Types
+// ── Zod Schemas & Types ──
 
 export const BaseMemorySchema = z.object({
   id: z.string().optional(),
-  created_at: z.string().optional(), // ISO string
+  created_at: z.string().optional(),
   updated_at: z.string().optional(),
   timestamp: z.string().optional(),
   user_id: z.string().optional(),
@@ -44,24 +107,33 @@ export const BaseMemorySchema = z.object({
   memory_type: z.nativeEnum(MemoryType).optional(),
   embedding: z.array(z.number()).optional(),
   content: z.string().optional(),
-  metadata: z.any().optional()
+  metadata: z.any().optional(),
+  /** 记忆来源类型 */
+  source_type: z.nativeEnum(MemorySourceType).optional(),
+  /** 来源会话 ID */
+  source_session_id: z.string().optional(),
+  /** 来源轮次消息 ID */
+  source_round_id: z.string().optional(),
+  /** 文档子类型（仅 DOCUMENT 类型使用） */
+  sub_type: z.nativeEnum(DocumentSubType).optional()
 })
 
 export type BaseMemory = z.infer<typeof BaseMemorySchema>
 
-/** 场景：assistant=1:1 对话；group=群聊；document=文档（仅 Episode+EventLog） */
+/** 场景：assistant=1:1 对话；group=群聊；document=文档 */
 export type MemCellScene = 'assistant' | 'group' | 'document'
 
 /**
  * 三层记忆路由上下文，告知 MemoryManager 如何按 memory_type 设定 group_id：
- * - Profile → user_id only, group_id=null（User 层）
- * - Episodic/Foresight → group_id=scope（Scope 层）
- * - EventLog → group_id=scope:session:sessionId（Session 层）
- * - Document → group_id=scope:docs（Scope:Document 层）
+ * - Profile    → group_id="user"（User 层）
+ * - Narrative  → group_id=scope（Scope 层）
+ * - Foresight  → group_id=scope（Scope 层）
+ * - Document   → group_id=scope（Scope 层）
+ * - EventLog   → group_id=scope:session:sessionId（Session 层）
  */
 export interface MemoryRoutingContext {
-  /** 真实用户 ID（如 clientId） */
-  userId: string
+  /** 用户 ID，默认 DEFAULT_USER_ID（当前单用户模型） */
+  userId?: string
   /** 数据 scope（如 "online"） */
   scope: string
   /** 当前会话 ID；document 场景可不传 */
@@ -72,6 +144,8 @@ export interface MemoryRoutingContext {
   skipSessionExtraction?: boolean
   /** 仅抽取 Session 层（批量压缩时用，只抽 EventLog 到 session） */
   sessionOnly?: boolean
+  /** 记忆来源类型 */
+  sourceType?: MemorySourceType
 }
 
 export const MemCellSchema = BaseMemorySchema.extend({
@@ -81,20 +155,25 @@ export const MemCellSchema = BaseMemorySchema.extend({
   summary: z.string().optional(),
   keywords: z.array(z.string()).optional(),
   text: z.string().optional(),
-  /** group=跳过 Foresight/EventLog；document=仅 Episode+EventLog */
+  /** group=跳过 Foresight/EventLog；document=仅 Narrative+EventLog */
   scene: z.enum(['assistant', 'group', 'document']).optional()
 })
 
 export type MemCell = z.infer<typeof MemCellSchema>
 
-export const EpisodeMemorySchema = BaseMemorySchema.extend({
+export const NarrativeMemorySchema = BaseMemorySchema.extend({
   content: z.string(),
   summary: z.string().optional(),
   keywords: z.array(z.string()).optional(),
   embedding: z.array(z.number()).optional()
 })
 
-export type EpisodeMemory = z.infer<typeof EpisodeMemorySchema>
+export type NarrativeMemory = z.infer<typeof NarrativeMemorySchema>
+
+/** @deprecated 使用 NarrativeMemory 代替 */
+export type EpisodeMemory = NarrativeMemory
+/** @deprecated 使用 NarrativeMemorySchema 代替 */
+export const EpisodeMemorySchema = NarrativeMemorySchema
 
 export const ForesightSchema = BaseMemorySchema.extend({
   content: z.string(),
@@ -115,10 +194,6 @@ export type Foresight = z.infer<typeof ForesightSchema>
  * - `content` = 所有 items 用换行拼接（用于全文搜索和 embedding）
  * - `metadata.items` = 完整原子事实列表
  * - `metadata.merge_history` = 合并追踪记录
- *
- * 注：Python 原版 EverMemOS 的 ProfileMemory 包含 hard_skills/personality 等 15 个结构化字段，
- * 依赖专用的 3 段 LLM prompt（Part1/2/3）填充。TS Unified 路径仅使用原子化 items，已移除。
- * 如需恢复结构化抽取，可添加专用 ProfileStructuredExtractor 并在 metadata 中扩展字段。
  */
 export const ProfileMemorySchema = BaseMemorySchema.extend({
   /** 原子化描述列表（每条为一个独立的持久性画像事实，包括称呼偏好） */
@@ -135,9 +210,18 @@ export const EventLogSchema = BaseMemorySchema.extend({
 
 export type EventLog = z.infer<typeof EventLogSchema>
 
+export const DocumentMemorySchema = BaseMemorySchema.extend({
+  content: z.string(),
+  /** 文档子类型：overview / fact / migration */
+  sub_type: z.nativeEnum(DocumentSubType),
+  embedding: z.array(z.number()).optional()
+})
+
+export type DocumentMemory = z.infer<typeof DocumentMemorySchema>
+
 /** 单次 LLM 调用返回的四类记忆原始结构，供 UnifiedExtractor 使用 */
 export interface UnifiedExtractionResult {
-  episode?: { content?: string; summary?: string; keywords?: string[] } | null
+  narrative?: { content?: string; summary?: string; keywords?: string[] } | null
   event_log?: { time?: string; atomic_fact?: string[] } | null
   foresight?: Array<{
     content?: string
@@ -154,7 +238,7 @@ export interface MigrationExtractionResult {
   changes: string[]
 }
 
-// Retrieval Types
+// ── Retrieval Types ──
 
 /** 用于 agentic 检索：将用户 query 扩展为多条子查询（仅在有需要时使用） */
 export interface IQueryExpansionProvider {
@@ -173,10 +257,15 @@ export interface SearchResult {
   created_at?: string
   /** 来自 SQL 列，可选 */
   updated_at?: string
+  /** 记忆来源类型 */
+  source_type?: MemorySourceType | null
+  /** 文档子类型 */
+  sub_type?: DocumentSubType | null
 }
 
 export interface RetrieveRequest {
   query: string
+  /** 用户 ID，默认 DEFAULT_USER_ID */
   user_id?: string
   group_id?: string
   limit?: number

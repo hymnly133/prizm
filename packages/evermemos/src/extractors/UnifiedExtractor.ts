@@ -9,8 +9,8 @@ import { parseUnifiedMemoryText, parseMigrationText } from './unifiedMemoryParse
 
 /**
  * 单次 LLM 调用完成记忆抽取。
- * - 对话场景：episode / event_log / foresight / profile（6→1 合并调用）
- * - 文档场景：overview（→episode）+ facts（→event_log）使用专用 prompt
+ * - 对话场景：narrative / event_log / foresight / profile（合并调用）
+ * - 文档场景：overview（→narrative）+ facts（→event_log）使用专用 prompt
  * 不负责 embedding 与落库，由 MemoryManager 根据本结果统一写库。
  */
 export class UnifiedExtractor {
@@ -55,7 +55,7 @@ export class UnifiedExtractor {
       const response = await this.llmProvider.generate({
         prompt,
         temperature: 0.2,
-        scope: 'memory'
+        operationTag: isDocument ? 'memory:document_extract' : 'memory:conversation_extract'
       })
       return parseUnifiedMemoryText(response)
     } catch (e) {
@@ -86,7 +86,7 @@ export class UnifiedExtractor {
       const response = await this.llmProvider.generate({
         prompt,
         temperature: 0.2,
-        scope: 'document_memory'
+        operationTag: 'memory:document_migration'
       })
       return parseMigrationText(response)
     } catch (e) {

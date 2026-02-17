@@ -11,7 +11,7 @@ export interface IAgenticCompletionProvider {
     prompt: string
     temperature?: number
     json?: boolean
-    scope?: string
+    operationTag?: string
   }): Promise<string>
 }
 
@@ -61,7 +61,7 @@ export async function checkSufficiency(
     prompt,
     temperature: 0,
     json: true,
-    scope: 'memory'
+    operationTag: 'memory:query_expansion'
   })
 
   const parsed = parseJSON(raw)
@@ -103,7 +103,7 @@ export async function generateRefinedQueries(
     prompt,
     temperature: 0.4,
     json: true,
-    scope: 'memory'
+    operationTag: 'memory:query_expansion'
   })
 
   const parsed = parseJSON(raw)

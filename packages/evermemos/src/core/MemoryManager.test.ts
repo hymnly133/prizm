@@ -16,16 +16,28 @@ import type { IExtractor } from '../extractors/BaseExtractor.js'
 function createMockStorage(opts?: {
   vectorSearchResults?: any[]
   /** 模拟已有记忆行（用于文本去重查询） */
-  existingMemories?: Array<{ id: string; content: string; type?: string; user_id?: string }>
+  existingMemories?: Array<{
+    id: string
+    content: string
+    type?: string
+    user_id?: string
+    metadata?: string
+  }>
 }): {
   storage: StorageAdapter
   inserts: Array<{ table: string; item: Record<string, unknown> }>
   updates: Array<{ table: string; id: string; item: Record<string, unknown> }>
   deletes: Array<{ table: string; id: string }>
-  queryResults: Record<string, any[]>
+  queryResults: any[]
   setVectorSearchResults: (results: any[]) => void
   setExistingMemories: (
-    memories: Array<{ id: string; content: string; type?: string; user_id?: string }>
+    memories: Array<{
+      id: string
+      content: string
+      type?: string
+      user_id?: string
+      metadata?: string
+    }>
   ) => void
 } {
   const inserts: Array<{ table: string; item: Record<string, unknown> }> = []
@@ -48,16 +60,16 @@ function createMockStorage(opts?: {
       deletes.push({ table, id })
     },
     query: async (sql: string, params?: any[]) => {
-      // Profile 增量合并查询：SELECT * FROM memories WHERE type = ? AND user_id = ? AND group_id IS NULL ...
-      if (sql.includes('group_id IS NULL') && sql.includes('ORDER BY updated_at DESC')) {
+      // 文本去重查询：SELECT id, content FROM memories WHERE type = ? AND user_id = ? ...
+      if (sql.includes('SELECT id, content FROM memories')) {
         const typeParam = params?.[0]
         const userParam = params?.[1]
         return existingMemories.filter(
           (m) => (!typeParam || m.type === typeParam) && (!userParam || m.user_id === userParam)
         )
       }
-      // 文本去重查询：SELECT id, content FROM memories WHERE type = ? AND user_id = ? ...
-      if (sql.includes('SELECT id, content FROM memories')) {
+      // Profile 增量合并查询：SELECT * FROM memories WHERE type = ? AND user_id = ? AND group_id = ? ...
+      if (sql.includes('SELECT * FROM memories') && sql.includes('group_id = ?')) {
         const typeParam = params?.[0]
         const userParam = params?.[1]
         return existingMemories.filter(
@@ -115,7 +127,7 @@ function createMockExtractor(memoryType: MemoryType, content: string): IExtracto
 
 describe('MemoryManager', () => {
   describe('processMemCell with routing (assistant scene)', () => {
-    it('routes Profile to User layer (group_id null), Episodic/Foresight to Scope, EventLog to Session', async () => {
+    it('routes Profile to User layer (group_id="user"), Narrative/Foresight to Scope, EventLog to Session', async () => {
       const { storage, inserts } = createMockStorage()
 
       const manager = new MemoryManager(storage)
@@ -124,8 +136,8 @@ describe('MemoryManager', () => {
         createMockExtractor(MemoryType.PROFILE, 'user profile')
       )
       manager.registerExtractor(
-        MemoryType.EPISODIC_MEMORY,
-        createMockExtractor(MemoryType.EPISODIC_MEMORY, 'episode')
+        MemoryType.NARRATIVE,
+        createMockExtractor(MemoryType.NARRATIVE, 'narrative')
       )
       manager.registerExtractor(
         MemoryType.FORESIGHT,
@@ -157,8 +169,8 @@ describe('MemoryManager', () => {
       expect(inserts).toHaveLength(4)
 
       const byType = Object.fromEntries(inserts.map((i) => [i.item.type, i.item]))
-      expect(byType[MemoryType.PROFILE].group_id).toBeNull()
-      expect(byType[MemoryType.EPISODIC_MEMORY].group_id).toBe('online')
+      expect(byType[MemoryType.PROFILE].group_id).toBe('user')
+      expect(byType[MemoryType.NARRATIVE].group_id).toBe('online')
       expect(byType[MemoryType.FORESIGHT].group_id).toBe('online')
       expect(byType[MemoryType.EVENT_LOG].group_id).toBe('online:session:session-abc')
 
@@ -169,13 +181,13 @@ describe('MemoryManager', () => {
   })
 
   describe('processMemCell with routing (document scene)', () => {
-    it('routes Episodic and EventLog to scope:docs', async () => {
+    it('routes Narrative and EventLog to scope (no more scope:docs)', async () => {
       const { storage, inserts } = createMockStorage()
 
       const manager = new MemoryManager(storage)
       manager.registerExtractor(
-        MemoryType.EPISODIC_MEMORY,
-        createMockExtractor(MemoryType.EPISODIC_MEMORY, 'doc episode')
+        MemoryType.NARRATIVE,
+        createMockExtractor(MemoryType.NARRATIVE, 'doc narrative')
       )
       manager.registerExtractor(
         MemoryType.EVENT_LOG,
@@ -196,13 +208,15 @@ describe('MemoryManager', () => {
 
       expect(inserts).toHaveLength(2)
       const types = inserts.map((i) => i.item.type)
-      expect(types).toContain(MemoryType.EPISODIC_MEMORY)
+      expect(types).toContain(MemoryType.NARRATIVE)
       expect(types).toContain(MemoryType.EVENT_LOG)
 
       inserts.forEach((i) => {
-        expect(i.item.group_id).toBe('online:docs')
         expect(i.item.user_id).toBe('user1')
       })
+      // Narrative → group_id = scope, EventLog without session → group_id = scope
+      const narrativeInsert = inserts.find((i) => i.item.type === MemoryType.NARRATIVE)
+      expect(narrativeInsert?.item.group_id).toBe('online')
     })
   })
 
@@ -212,8 +226,8 @@ describe('MemoryManager', () => {
 
       const manager = new MemoryManager(storage)
       manager.registerExtractor(
-        MemoryType.EPISODIC_MEMORY,
-        createMockExtractor(MemoryType.EPISODIC_MEMORY, 'ep')
+        MemoryType.NARRATIVE,
+        createMockExtractor(MemoryType.NARRATIVE, 'ep')
       )
 
       const memcell: MemCell = {
@@ -314,7 +328,7 @@ describe('MemoryManager', () => {
       }
 
       const manager = new MemoryManager(storage)
-      const rows = await manager.listMemoriesByGroup('u1', 'online', 10)
+      const rows = await manager.listMemoriesByGroup('online', 'u1', 10)
       expect(rows).toHaveLength(1)
       expect(rows[0].id).toBe('m2')
     })
@@ -360,8 +374,8 @@ describe('MemoryManager', () => {
       const llm = createMockLLMProvider('SAME 两条都描述用户希望被称为老大')
       const manager = new MemoryManager(storage, { llmProvider: llm })
       manager.registerExtractor(
-        MemoryType.EPISODIC_MEMORY,
-        createMockExtractorWithEmbedding(MemoryType.EPISODIC_MEMORY, 'user wants nickname boss')
+        MemoryType.NARRATIVE,
+        createMockExtractorWithEmbedding(MemoryType.NARRATIVE, 'user wants nickname boss')
       )
 
       const memcell: MemCell = {
@@ -375,7 +389,7 @@ describe('MemoryManager', () => {
       const created = await manager.processMemCell(memcell, { userId: 'user1', scope: 'online' })
 
       // No new memory inserted
-      expect(inserts.filter((i) => i.item.type === MemoryType.EPISODIC_MEMORY)).toHaveLength(0)
+      expect(inserts.filter((i) => i.item.type === MemoryType.NARRATIVE)).toHaveLength(0)
       // Existing memory touched
       expect(
         updates.filter((u) => u.table === 'memories' && u.id === 'existing-ep-1')
@@ -386,7 +400,7 @@ describe('MemoryManager', () => {
       expect(logEntry.kept_memory_id).toBe('existing-ep-1')
       expect(logEntry.llm_reasoning).toContain('SAME')
       // Not reported as created
-      expect(created.filter((c) => c.type === MemoryType.EPISODIC_MEMORY)).toHaveLength(0)
+      expect(created.filter((c) => c.type === MemoryType.NARRATIVE)).toHaveLength(0)
     })
 
     it('should NOT dedup when LLM says DIFF (even if vector close)', async () => {
@@ -398,8 +412,8 @@ describe('MemoryManager', () => {
       const llm = createMockLLMProvider('DIFF 新记忆涉及用户的新项目需求')
       const manager = new MemoryManager(storage, { llmProvider: llm })
       manager.registerExtractor(
-        MemoryType.EPISODIC_MEMORY,
-        createMockExtractorWithEmbedding(MemoryType.EPISODIC_MEMORY, 'user started new project')
+        MemoryType.NARRATIVE,
+        createMockExtractorWithEmbedding(MemoryType.NARRATIVE, 'user started new project')
       )
 
       const memcell: MemCell = {
@@ -413,13 +427,13 @@ describe('MemoryManager', () => {
       const created = await manager.processMemCell(memcell, { userId: 'user1', scope: 'online' })
 
       // New memory inserted (LLM rejected dedup)
-      expect(inserts.filter((i) => i.item.type === MemoryType.EPISODIC_MEMORY)).toHaveLength(1)
+      expect(inserts.filter((i) => i.item.type === MemoryType.NARRATIVE)).toHaveLength(1)
       // No dedup log
       expect(inserts.filter((i) => i.table === 'dedup_log')).toHaveLength(0)
       // No touch
       expect(updates.filter((u) => u.table === 'memories')).toHaveLength(0)
       // Reported as created
-      expect(created.filter((c) => c.type === MemoryType.EPISODIC_MEMORY)).toHaveLength(1)
+      expect(created.filter((c) => c.type === MemoryType.NARRATIVE)).toHaveLength(1)
     })
 
     it('should dedup Foresight with LLM confirmation', async () => {
@@ -460,8 +474,8 @@ describe('MemoryManager', () => {
       // No llmProvider
       const manager = new MemoryManager(storage)
       manager.registerExtractor(
-        MemoryType.EPISODIC_MEMORY,
-        createMockExtractorWithEmbedding(MemoryType.EPISODIC_MEMORY, 'similar content')
+        MemoryType.NARRATIVE,
+        createMockExtractorWithEmbedding(MemoryType.NARRATIVE, 'similar content')
       )
 
       const memcell: MemCell = {
@@ -475,7 +489,7 @@ describe('MemoryManager', () => {
       await manager.processMemCell(memcell, { userId: 'user1', scope: 'online' })
 
       // Dedup still works (vector-only)
-      expect(inserts.filter((i) => i.item.type === MemoryType.EPISODIC_MEMORY)).toHaveLength(0)
+      expect(inserts.filter((i) => i.item.type === MemoryType.NARRATIVE)).toHaveLength(0)
       // Dedup log records both scores
       const logEntry = inserts.find((i) => i.table === 'dedup_log')?.item
       expect(logEntry?.llm_reasoning).toContain('vector-dist')
@@ -490,8 +504,8 @@ describe('MemoryManager', () => {
 
       const manager = new MemoryManager(storage)
       manager.registerExtractor(
-        MemoryType.EPISODIC_MEMORY,
-        createMockExtractorWithEmbedding(MemoryType.EPISODIC_MEMORY, 'new topic')
+        MemoryType.NARRATIVE,
+        createMockExtractorWithEmbedding(MemoryType.NARRATIVE, 'new topic')
       )
 
       const memcell: MemCell = {
@@ -504,7 +518,7 @@ describe('MemoryManager', () => {
 
       const created = await manager.processMemCell(memcell, { userId: 'user1', scope: 'online' })
 
-      expect(inserts.filter((i) => i.item.type === MemoryType.EPISODIC_MEMORY)).toHaveLength(1)
+      expect(inserts.filter((i) => i.item.type === MemoryType.NARRATIVE)).toHaveLength(1)
       expect(inserts.filter((i) => i.table === 'dedup_log')).toHaveLength(0)
     })
 
@@ -565,8 +579,8 @@ describe('MemoryManager', () => {
 
       const manager = new MemoryManager(storage)
       manager.registerExtractor(
-        MemoryType.EPISODIC_MEMORY,
-        createMockExtractorWithEmbedding(MemoryType.EPISODIC_MEMORY, 'episode')
+        MemoryType.NARRATIVE,
+        createMockExtractorWithEmbedding(MemoryType.NARRATIVE, 'episode')
       )
 
       const memcell: MemCell = {
@@ -578,7 +592,7 @@ describe('MemoryManager', () => {
       }
 
       const created = await manager.processMemCell(memcell, { userId: 'user1', scope: 'online' })
-      expect(inserts.filter((i) => i.item.type === MemoryType.EPISODIC_MEMORY)).toHaveLength(1)
+      expect(inserts.filter((i) => i.item.type === MemoryType.NARRATIVE)).toHaveLength(1)
     })
 
     it('should merge PROFILE into existing when profile already exists', async () => {
@@ -733,8 +747,8 @@ describe('MemoryManager', () => {
 
       const manager = new MemoryManager(storage, { llmProvider: errorLLM })
       manager.registerExtractor(
-        MemoryType.EPISODIC_MEMORY,
-        createMockExtractorWithEmbedding(MemoryType.EPISODIC_MEMORY, 'content')
+        MemoryType.NARRATIVE,
+        createMockExtractorWithEmbedding(MemoryType.NARRATIVE, 'content')
       )
 
       const memcell: MemCell = {
@@ -748,7 +762,7 @@ describe('MemoryManager', () => {
       await manager.processMemCell(memcell, { userId: 'user1', scope: 'online' })
 
       // LLM failed, should fallback to similarity-only dedup (still deduped)
-      expect(inserts.filter((i) => i.item.type === MemoryType.EPISODIC_MEMORY)).toHaveLength(0)
+      expect(inserts.filter((i) => i.item.type === MemoryType.NARRATIVE)).toHaveLength(0)
       const logEntry = inserts.find((i) => i.table === 'dedup_log')?.item
       expect(logEntry?.llm_reasoning).toContain('vector-dist')
       expect(logEntry?.llm_reasoning).toContain('llm-fallback')

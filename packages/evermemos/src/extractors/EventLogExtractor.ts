@@ -29,7 +29,7 @@ export class EventLogExtractor extends BaseExtractor {
         prompt: prompt,
         temperature: 0.1,
         json: true,
-        scope: 'memory'
+        operationTag: 'memory:conversation_extract'
       })
 
       const data = parseJSON(response)

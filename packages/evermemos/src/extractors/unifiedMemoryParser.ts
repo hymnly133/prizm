@@ -51,12 +51,13 @@ export function parseUnifiedMemoryText(text: string): UnifiedExtractionResult | 
 
   const result: UnifiedExtractionResult = {}
 
-  const episodeBody = sections.get('EPISODE')
-  if (episodeBody) {
-    const kv = parseSectionKeyValues(episodeBody)
+  // 支持 ## NARRATIVE 或旧格式 ## EPISODE
+  const narrativeBody = sections.get('NARRATIVE') ?? sections.get('EPISODE')
+  if (narrativeBody) {
+    const kv = parseSectionKeyValues(narrativeBody)
     const content = getFirst(kv, 'CONTENT')
     if (content) {
-      result.episode = {
+      result.narrative = {
         content,
         summary: getFirst(kv, 'SUMMARY') || content.slice(0, 200),
         keywords: getFirst(kv, 'KEYWORDS')
@@ -115,13 +116,13 @@ export function parseUnifiedMemoryText(text: string): UnifiedExtractionResult | 
     }
   }
 
-  // 文档场景：## OVERVIEW 映射到 episode.content，## FACTS 映射到 event_log.atomic_fact
+  // 文档场景：## OVERVIEW 映射到 narrative.content，## FACTS 映射到 event_log.atomic_fact
   const overviewBody = sections.get('OVERVIEW')
-  if (overviewBody && !result.episode) {
+  if (overviewBody && !result.narrative) {
     const kv = parseSectionKeyValues(overviewBody)
     const content = getFirst(kv, 'CONTENT')
     if (content) {
-      result.episode = { content, summary: content.slice(0, 200) }
+      result.narrative = { content, summary: content.slice(0, 200) }
     }
   }
 
@@ -138,7 +139,7 @@ export function parseUnifiedMemoryText(text: string): UnifiedExtractionResult | 
   }
 
   if (
-    !result.episode &&
+    !result.narrative &&
     !result.event_log?.atomic_fact?.length &&
     !result.foresight?.length &&
     !result.profile?.user_profiles?.length

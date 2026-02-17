@@ -16,7 +16,7 @@ export class DefaultQueryExpansionProvider implements IQueryExpansionProvider {
       prompt,
       temperature: 0.3,
       json: true,
-      scope: 'memory'
+      operationTag: 'memory:query_expansion'
     })
     const parsed = parseJSON(out)
     if (Array.isArray(parsed)) {
