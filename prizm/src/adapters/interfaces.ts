@@ -123,6 +123,10 @@ export type { ToolCallStatus } from '@prizm/shared'
 /** 单次工具调用记录 —— 统一使用 @prizm/shared 的 MessagePartTool */
 export type { MessagePartTool as ToolCallRecord } from '@prizm/shared'
 
+import type { MessagePartTool } from '@prizm/shared'
+/** 本文件内部使用的 ToolCallRecord 别名 */
+type ToolCallRecord = MessagePartTool
+
 /** 流式 LLM 响应块（usage 在 done 时由 LLM 提供商回传，与 lobehub FinishData.usage 一致） */
 export interface LLMStreamChunk {
   text?: string
