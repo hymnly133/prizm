@@ -26,7 +26,6 @@ describe('ScopeStore', () => {
     expect(data.clipboard).toEqual([])
     expect(data.documents).toEqual([])
     expect(data.agentSessions).toEqual([])
-    expect(data.tokenUsage).toEqual([])
   })
 
   it('getScopeData 新建 scope 并持久化', () => {

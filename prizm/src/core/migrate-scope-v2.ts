@@ -199,7 +199,7 @@ function migrateGlobalMemoryToLevels(dataDir: string): void {
         r.type,
         r.content ?? null,
         r.user_id ?? null,
-        null,
+        'user',
         r.created_at ?? null,
         r.updated_at ?? null,
         r.metadata ?? null

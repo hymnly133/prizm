@@ -1,7 +1,7 @@
 /**
  * Prizm ScopeStore V3 - 双层架构
  * scope 根目录可为任意路径，.prizm/ 存放配置与系统数据
- * 移除 notes/pomodoroSessions，保留 documents/todoLists/clipboard/agentSessions/tokenUsage
+ * 移除 notes/pomodoroSessions，保留 documents/todoLists/clipboard/agentSessions
  */
 
 import fs from 'fs'
@@ -19,8 +19,7 @@ import type {
   TodoItemStatus,
   ClipboardItem,
   Document,
-  AgentSession,
-  TokenUsageRecord
+  AgentSession
 } from '../types'
 
 const log = createLogger('ScopeStore')
@@ -32,7 +31,6 @@ export interface ScopeData {
   clipboard: ClipboardItem[]
   documents: Document[]
   agentSessions: AgentSession[]
-  tokenUsage: TokenUsageRecord[]
 }
 
 function migrateTodoListItems(list: TodoList): TodoList {
@@ -60,8 +58,7 @@ function createEmptyScopeData(): ScopeData {
     todoLists: [],
     clipboard: [],
     documents: [],
-    agentSessions: [],
-    tokenUsage: []
+    agentSessions: []
   }
 }
 
@@ -113,8 +110,7 @@ export class ScopeStore {
         todoLists: (mdStore.readTodoLists(rootPath) ?? []).map(migrateTodoListItems),
         clipboard: mdStore.readClipboard(rootPath),
         documents: mdStore.readDocuments(rootPath),
-        agentSessions: mdStore.readAgentSessions(rootPath),
-        tokenUsage: mdStore.readTokenUsage(rootPath)
+        agentSessions: mdStore.readAgentSessions(rootPath)
       }
       this.store.set(scopeId, data)
     } catch (e) {
@@ -151,7 +147,6 @@ export class ScopeStore {
       mdStore.writeClipboard(rootPath, data.clipboard)
       mdStore.writeDocuments(rootPath, data.documents)
       mdStore.writeAgentSessions(rootPath, data.agentSessions, scope)
-      mdStore.writeTokenUsage(rootPath, data.tokenUsage)
     } catch (e) {
       log.error('Failed to save scope', scope, e)
     }
@@ -178,7 +173,6 @@ export class ScopeStore {
     if (!Array.isArray(data.clipboard)) data.clipboard = []
     if (!Array.isArray(data.documents)) data.documents = []
     if (!Array.isArray(data.agentSessions)) data.agentSessions = []
-    if (!Array.isArray(data.tokenUsage)) data.tokenUsage = []
     return data
   }
 

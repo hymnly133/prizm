@@ -10,7 +10,6 @@ import {
   getSessionDir,
   getSessionFilePath,
   getSessionSummaryPath,
-  getSessionTokenUsagePath,
   getSessionActivitiesPath,
   getSessionMemoriesPath,
   getScopeMemoryDir,
@@ -25,9 +24,6 @@ import {
   writeAgentSessions,
   readSessionSummary,
   writeSessionSummary,
-  readSessionTokenUsage,
-  writeSessionTokenUsage,
-  appendSessionTokenUsage,
   readSessionActivities,
   appendSessionActivities,
   readSessionMemories,
@@ -68,10 +64,9 @@ describe('PathProviderCore - 分层路径函数', () => {
     expect(sessionPart).toBe('id_with_slash')
   })
 
-  it('getSessionFilePath/summary/token/activities/memories 路径正确', () => {
+  it('getSessionFilePath/summary/activities/memories 路径正确', () => {
     expect(getSessionFilePath(scopeRoot, sessionId)).toContain('session.md')
     expect(getSessionSummaryPath(scopeRoot, sessionId)).toContain('summary.md')
-    expect(getSessionTokenUsagePath(scopeRoot, sessionId)).toContain('token_usage.md')
     expect(getSessionActivitiesPath(scopeRoot, sessionId)).toContain('activities.json')
     expect(getSessionMemoriesPath(scopeRoot, sessionId)).toContain('memories.md')
   })
@@ -187,32 +182,6 @@ describe('mdStore - Session 文件夹读写', () => {
     writeSessionSummary(scopeRoot, 'sid', '这是摘要')
     expect(readSessionSummary(scopeRoot, 'sid')).toBe('这是摘要')
     expect(readSessionSummary(scopeRoot, 'nonexistent')).toBeNull()
-  })
-
-  it('appendSessionTokenUsage 追加 token 记录', () => {
-    appendSessionTokenUsage(scopeRoot, 'sid', {
-      id: 'r1',
-      usageScope: 'chat',
-      timestamp: 1000,
-      model: 'gpt-4',
-      inputTokens: 10,
-      outputTokens: 20,
-      totalTokens: 30
-    })
-    appendSessionTokenUsage(scopeRoot, 'sid', {
-      id: 'r2',
-      usageScope: 'chat',
-      timestamp: 2000,
-      model: 'gpt-4',
-      inputTokens: 15,
-      outputTokens: 25,
-      totalTokens: 40
-    })
-
-    const records = readSessionTokenUsage(scopeRoot, 'sid')
-    expect(records).toHaveLength(2)
-    expect(records[0].inputTokens).toBe(10)
-    expect(records[1].totalTokens).toBe(40)
   })
 
   it('appendSessionActivities 追加活动记录', () => {

@@ -119,7 +119,7 @@ describe('migrate-scope-v2', () => {
     const userDbPath = path.join(tempDir, 'memory', 'user.db')
     expect(fs.existsSync(userDbPath)).toBe(true)
     const userDb = new Database(userDbPath, { readonly: true })
-    const profileRows = userDb.prepare('SELECT * FROM memories WHERE group_id IS NULL').all()
+    const profileRows = userDb.prepare("SELECT * FROM memories WHERE group_id = 'user'").all()
     userDb.close()
     expect(profileRows).toHaveLength(1)
     expect((profileRows[0] as { content: string }).content).toBe('用户偏好')
