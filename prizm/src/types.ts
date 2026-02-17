@@ -32,7 +32,7 @@ import type {
   ScopeActivityAction,
   ScopeActivityItemKind,
   TokenUsageRecord,
-  TokenUsageScope,
+  TokenUsageCategory,
   FileEntry,
   FileReadResult
 } from '@prizm/shared'
@@ -70,7 +70,7 @@ export type {
   ScopeActivityAction,
   ScopeActivityItemKind,
   TokenUsageRecord,
-  TokenUsageScope,
+  TokenUsageCategory,
   FileEntry,
   FileReadResult
 }

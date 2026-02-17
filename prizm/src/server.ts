@@ -37,6 +37,7 @@ import { createMemoryRoutes } from './routes/memory'
 import { mountMcpRoutes } from './mcp'
 import { WebSocketServer } from './websocket/WebSocketServer'
 import { initEverMemService } from './llm/EverMemService'
+import { initTokenUsageDb, closeTokenUsageDb } from './core/tokenUsageDb'
 import { migrateAppLevelStorage } from './core/migrate-scope-v2'
 import { getTerminalManager } from './terminal/TerminalSessionManager'
 import { TerminalWebSocketServer } from './terminal/TerminalWebSocketServer'
@@ -224,6 +225,11 @@ export function createPrizmServer(
             } catch (e) {
               log.warn('EverMemService init failed:', e)
             }
+            try {
+              initTokenUsageDb()
+            } catch (e) {
+              log.warn('Token usage DB init failed:', e)
+            }
 
             if (enableWebSocket && server) {
               const terminalWsPath = '/ws/terminal'
@@ -304,6 +310,9 @@ export function createPrizmServer(
         wsServer.destroy()
         wsServer = undefined
       }
+
+      // 关闭 Token Usage DB
+      closeTokenUsageDb()
 
       return new Promise((resolve, reject) => {
         server!.close((error) => {

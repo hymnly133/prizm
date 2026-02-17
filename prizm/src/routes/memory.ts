@@ -7,7 +7,6 @@ import { toErrorResponse } from '../errors'
 import { createLogger } from '../logger'
 import { hasScopeAccess } from '../scopeUtils'
 import { DEFAULT_SCOPE } from '../core/ScopeStore'
-import { MEMORY_USER_ID } from '@prizm/shared'
 import {
   isMemoryEnabled,
   getAllMemories,
@@ -20,7 +19,7 @@ import {
   getMemoryCounts
 } from '../llm/EverMemService'
 import { RetrieveMethod, MemoryType } from '@prizm/evermemos'
-import { readUserTokenUsage } from '../core/UserStore'
+import { queryTokenUsage, aggregateTokenUsage } from '../core/tokenUsageDb'
 
 const log = createLogger('MemoryRoutes')
 
@@ -40,10 +39,28 @@ function getScopeFromRequest(req: Request, fromBody?: boolean): string {
 
 export function createMemoryRoutes(router: Router): void {
   // GET /agent/token-usage - token 使用记录（全局共享，不按客户端隔离）
+  // 支持 ?scope=&category=&limit=&offset= 过滤
   router.get('/agent/token-usage', async (req: Request, res: Response) => {
     try {
-      const records = readUserTokenUsage(MEMORY_USER_ID)
-      res.json({ records })
+      const dataScope =
+        typeof req.query.scope === 'string' ? req.query.scope.trim() || undefined : undefined
+      const category =
+        typeof req.query.category === 'string' ? req.query.category.trim() || undefined : undefined
+      const sessionId =
+        typeof req.query.sessionId === 'string'
+          ? req.query.sessionId.trim() || undefined
+          : undefined
+      const limit =
+        typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) || undefined : undefined
+      const offset =
+        typeof req.query.offset === 'string'
+          ? parseInt(req.query.offset, 10) || undefined
+          : undefined
+
+      const filter = { dataScope, category, sessionId, limit, offset }
+      const records = queryTokenUsage(filter)
+      const summary = aggregateTokenUsage({ dataScope, category, sessionId })
+      res.json({ records, summary })
     } catch (error) {
       log.error('token-usage error:', error)
       const { status, body } = toErrorResponse(error)
@@ -63,7 +80,7 @@ export function createMemoryRoutes(router: Router): void {
         return res.json({ enabled: false, memories: [] })
       }
 
-      const memories = await getAllMemories(MEMORY_USER_ID, scope)
+      const memories = await getAllMemories(scope)
       res.json({ enabled: true, memories })
     } catch (error) {
       log.error('list memories error:', error)
@@ -121,7 +138,6 @@ export function createMemoryRoutes(router: Router): void {
 
       const memories = await searchMemoriesWithOptions(
         query.trim(),
-        MEMORY_USER_ID,
         scope,
         hasOptions ? options : undefined
       )
@@ -145,7 +161,7 @@ export function createMemoryRoutes(router: Router): void {
         return res.json({ enabled: false, userCount: 0, scopeCount: 0 })
       }
 
-      const counts = await getMemoryCounts(MEMORY_USER_ID, scope)
+      const counts = await getMemoryCounts(scope)
       res.json({ enabled: true, ...counts })
     } catch (error) {
       log.error('memory counts error:', error)
@@ -234,7 +250,7 @@ export function createMemoryRoutes(router: Router): void {
       }
 
       const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : undefined
-      const entries = await listDedupLog(MEMORY_USER_ID, scope, limit)
+      const entries = await listDedupLog(scope, limit)
       res.json({ entries })
     } catch (error) {
       log.error('list dedup log error:', error)
