@@ -1,0 +1,293 @@
+/* Settings page / Test page - 内容在区域内滚动，现代卡片式排版 */
+.page {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 20px;
+}
+.settings-page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.settings-section {
+  background: var(--ant-color-bg-elevated);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: var(--ant-border-radius-lg, 12px);
+  padding: 16px 20px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.settings-section:hover {
+  border-color: var(--ant-color-border);
+}
+.settings-section-header {
+  margin-bottom: 12px;
+}
+/* 紧凑表单：Lobe Form 默认 gap 16px + FormItem padding-block 16px 过大，使用 compact-form 覆盖 */
+.compact-form.ant-form {
+  gap: 8px !important;
+}
+.compact-form .ant-form-item {
+  margin: 0 !important;
+  padding-block: 6px !important;
+}
+/* 接收通知事件：复选框横向排列、紧凑换行 */
+.settings-page .ant-checkbox-group,
+.compact-form .ant-checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.settings-page .ant-checkbox-wrapper,
+.compact-form .ant-checkbox-wrapper {
+  margin-inline-end: 0;
+}
+/* Form.Item 的 extra 说明文字紧凑 */
+.settings-page .ant-form-item-explain,
+.compact-form .ant-form-item-explain {
+  margin-top: 2px;
+}
+.settings-section h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 6px 0;
+  color: var(--ant-color-text);
+  letter-spacing: -0.01em;
+}
+.settings-section .form-hint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ant-color-text-secondary);
+}
+.form-hint {
+  font-size: 13px;
+  color: var(--ant-color-text-secondary);
+  margin-top: 6px;
+  line-height: 1.45;
+}
+.mcp-servers-list {
+  margin-top: 12px;
+}
+.mcp-servers-ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.mcp-server-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+}
+.mcp-server-item:last-child {
+  border-bottom: none;
+}
+.mcp-id {
+  font-weight: 500;
+  min-width: 80px;
+}
+.mcp-name {
+  min-width: 80px;
+}
+.mcp-transport {
+  min-width: 100px;
+  color: var(--ant-color-text-secondary);
+}
+.mcp-url {
+  flex: 1;
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mcp-loading,
+.mcp-empty {
+  color: var(--ant-color-text-secondary);
+  padding: 12px 0;
+}
+
+.scope-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.scope-list-placeholder {
+  color: var(--ant-color-text-secondary);
+  padding: 12px 0;
+  font-size: 13px;
+}
+.scope-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: var(--ant-border-radius);
+}
+.scope-list-item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.scope-id {
+  font-weight: 500;
+  flex-shrink: 0;
+}
+.scope-badge {
+  font-size: 11px;
+  padding: 2px 6px;
+  background: var(--ant-color-primary-bg);
+  color: var(--ant-color-primary);
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.scope-path {
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.config-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.config-actions .ant-btn {
+  border-radius: var(--ant-border-radius);
+}
+.logs-section {
+  margin-top: 0;
+}
+.logs-section .settings-section-header {
+  margin-bottom: 12px;
+}
+.logs-section .logs-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.logs-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.logs-section h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 6px 0;
+  color: var(--ant-color-text);
+}
+.logs {
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-border);
+  border-radius: var(--ant-border-radius);
+  padding: 14px 16px;
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: ui-monospace, 'Cascadia Code', 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ant-color-text);
+}
+.log-placeholder {
+  color: var(--ant-color-text-tertiary);
+  font-style: italic;
+}
+.log-item {
+  padding: 2px 0;
+}
+.log-item.info {
+  color: var(--ant-color-info);
+}
+.log-item.success {
+  color: var(--ant-color-success);
+}
+.log-item.error {
+  color: var(--ant-color-error);
+}
+.log-item.warning {
+  color: var(--ant-color-warning);
+}
+.log-time {
+  color: var(--ant-color-text-tertiary);
+  margin-right: 8px;
+  font-size: 11px;
+}
+.log-source {
+  color: var(--ant-color-text-tertiary);
+  margin-right: 8px;
+  font-size: 10px;
+}
+
+/* Test page - 内容项卡片与行内排版 */
+.text-success {
+  color: var(--ant-color-success);
+}
+.text-error {
+  color: var(--ant-color-error);
+}
+.test-row {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.test-row .test-input,
+.test-row .ant-input {
+  flex: 1;
+  min-width: 140px;
+  max-width: 280px;
+}
+.test-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 16px;
+}
+.test-action {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+}
+.test-action:last-of-type {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.test-action .test-input,
+.test-action .ant-input {
+  flex: 1;
+  min-width: 160px;
+  max-width: 320px;
+}
+.test-result-hint {
+  margin-top: 12px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.test-result-hint.text-success {
+  color: var(--ant-color-success);
+}
+.test-result-hint.text-error {
+  color: var(--ant-color-error);
+}

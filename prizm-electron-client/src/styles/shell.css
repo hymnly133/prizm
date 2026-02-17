@@ -1,0 +1,168 @@
+/* ═══ 自定义标题栏：窗口拖拽与平台适配 ═══ */
+.app-titlebar-drag {
+  -webkit-app-region: drag;
+}
+.app-titlebar-nodrag {
+  -webkit-app-region: no-drag;
+}
+/* 平台 overlay 留白已移至 AppHeader 组件内联样式（避免内联 style 覆盖 CSS 的优先级问题） */
+
+/* 固定骨架：仅用受控 class，不通配、不碰 portal
+ * .app-root：根容器占高
+ * .app-root__content：固定铺满视口，与 ant-app 下 portal 同级互不影响
+ * .app-root__content-inner：受控 flex 容器，仅子级一层 * 延续高度 */
+.app-root {
+  height: 100%;
+  overflow: hidden;
+}
+.app-root__content {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.app-root__content-inner {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.app-root__content-inner > * {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* App layout：整体占满剩余空间，内部由各区域各自滚动 */
+.app-layout-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* 头部：固定高度，不缩放 */
+.app-layout-wrap > header {
+  flex-shrink: 0;
+}
+/* 主内容区：占满剩余空间 */
+.app-layout-wrap > .app-main {
+  flex: 1;
+  min-height: 0;
+}
+/* Layout 主内容区：Lobe Layout 的 main（无高度约束会撑开整页，此处覆盖） */
+.app-layout-wrap main,
+.app-layout-wrap .ant-layout-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+/* Lobe Layout 内 main > section.content：必须约束高度才能实现分区域滚动 */
+.app-layout-wrap main > section {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+/* 主内容区：不整体滚动，由各页内部区域各自滚动；height:100% 保证在 Layout 内铺满 */
+.app-main {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.app-main > * {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ═══ 标题栏品牌名 ═══ */
+.app-brand-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ant-color-text);
+  letter-spacing: -0.02em;
+  line-height: 1;
+  user-select: none;
+}
+
+/* ═══ 连接状态指示点 ═══ */
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-dot--connected {
+  background: var(--ant-color-success);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ant-color-success) 20%, transparent);
+}
+.status-dot--connecting {
+  background: var(--ant-color-primary);
+  animation: status-pulse 1.5s ease-in-out infinite;
+}
+.status-dot--disconnected {
+  background: var(--ant-color-warning);
+}
+.status-dot--error {
+  background: var(--ant-color-error);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ant-color-error) 20%, transparent);
+}
+@keyframes status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.75);
+  }
+}
+
+/* ═══ 页面 keep-alive 容器 ═══ */
+.page-keep-alive {
+  display: flex;
+  flex-direction: column;
+}
+.page-keep-alive--hidden {
+  display: none !important;
+}
+
+/* app-main 的 overflow 已在 .app-layout-wrap 块中定义 */
+
+/* 可拉伸侧栏拖拽手柄 */
+.resizable-sidebar-handle {
+  user-select: none;
+  touch-action: none;
+}
+.resizable-sidebar-handle:hover {
+  background: var(--ant-color-primary-border);
+}
+.resizable-sidebar-handle:active {
+  background: var(--ant-color-primary);
+}
+
+/* ═══════════════════════════════════════════════════════
+   Reduced Motion — 关闭所有动画以提升可访问性
+   ═══════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

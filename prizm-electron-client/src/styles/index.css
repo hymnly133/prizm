@@ -1,0 +1,12 @@
+/* Prizm Electron Client — 全局样式入口
+ * 使用 Lobe UI / Ant Design 设计 token（通过 theme.cssVar 注入的 CSS 变量）
+ */
+
+@import './shell.css';
+@import './notification.css';
+@import './work.css';
+@import './settings.css';
+@import './agent.css';
+@import './agent-overview.css';
+@import './home.css';
+@import './document.css';

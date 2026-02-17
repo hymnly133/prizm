@@ -1,0 +1,618 @@
+/* ======================================================================
+   Agent Overview Panel — 卡片式总览面板
+   ====================================================================== */
+
+.overview-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 24px 28px 32px;
+  background: var(--ant-color-bg-layout);
+}
+
+.overview-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  flex-shrink: 0;
+}
+.overview-panel-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--ant-color-text);
+}
+
+.overview-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--ant-color-border);
+  border-radius: 8px;
+  background: var(--ant-color-bg-container);
+  color: var(--ant-color-text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.overview-refresh-btn:hover {
+  border-color: var(--ant-color-primary);
+  color: var(--ant-color-primary);
+  background: var(--ant-color-primary-bg);
+}
+
+/* Grid layout — align-items: stretch 让同行卡片等高 */
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+
+/* Card base — flex column 配合 stretch 让同行卡片等高 */
+.overview-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+.overview-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+  border-color: var(--ant-color-border);
+}
+
+.overview-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+  background: var(--ant-color-fill-quaternary);
+  flex-shrink: 0;
+}
+
+.overview-card-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ant-color-text-tertiary);
+  cursor: pointer;
+  margin-left: auto;
+  transition: all 0.15s;
+}
+.overview-card-action:hover {
+  background: var(--ant-color-fill-secondary);
+  color: var(--ant-color-primary);
+}
+.overview-card-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.overview-card-body {
+  padding: 16px;
+  flex: 1;
+  min-height: 0;
+}
+.overview-card-body-scroll {
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+/* Large cards span full width */
+.overview-card-inspector,
+.overview-card-token {
+  grid-column: 1 / -1;
+}
+
+/* Stat grid inside stats card */
+.overview-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.overview-stat-block {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--ant-color-fill-quaternary);
+  transition: background 0.15s;
+}
+.overview-stat-block:hover {
+  background: var(--ant-color-fill-tertiary);
+}
+
+.overview-stat-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: currentColor;
+  opacity: 0.12;
+  position: relative;
+}
+.overview-stat-icon > svg {
+  position: absolute;
+  opacity: 1;
+}
+/* Override opacity so the icon is visible on top of the tinted bg */
+.overview-stat-icon {
+  background: transparent;
+  opacity: 1;
+}
+
+.overview-stat-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.overview-stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--ant-color-text);
+}
+.overview-stat-label {
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
+}
+
+/* Memory tier bars */
+.overview-memory-tiers {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.overview-memory-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.overview-memory-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ant-color-text-secondary);
+  width: 52px;
+  flex-shrink: 0;
+}
+.overview-memory-bar-bg {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--ant-color-fill-secondary);
+  overflow: hidden;
+}
+.overview-memory-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+  min-width: 4px;
+}
+.overview-memory-count {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+  width: 28px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* Context preview */
+.overview-context-preview {
+  cursor: pointer;
+  border-radius: 8px;
+  border: 1px solid var(--ant-color-border-secondary);
+  padding: 10px 12px;
+  transition: border-color 0.15s, background 0.15s;
+  position: relative;
+}
+.overview-context-preview:hover {
+  border-color: var(--ant-color-primary-border);
+  background: var(--ant-color-primary-bg);
+}
+.overview-context-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 120px;
+  overflow: hidden;
+  color: var(--ant-color-text-secondary);
+}
+.overview-context-hint {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--ant-color-text-quaternary);
+  text-align: right;
+}
+
+/* Documents list */
+.overview-doc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.overview-doc-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--ant-color-text);
+  transition: background 0.15s;
+}
+.overview-doc-item:hover {
+  background: var(--ant-color-fill-quaternary);
+}
+.overview-doc-item > svg {
+  color: var(--ant-color-text-tertiary);
+  flex-shrink: 0;
+}
+.overview-doc-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Bottom documents card — 独立在 grid 外全宽 */
+.overview-card-docs-bottom {
+  margin-top: 16px;
+  flex-shrink: 0;
+}
+.overview-doc-list-horizontal {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+/* Empty text inside cards */
+.overview-empty-text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ant-color-text-quaternary);
+  text-align: center;
+  padding: 12px 0;
+}
+
+/* ── 终端切换按钮 ── */
+.terminal-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 2px 16px;
+  flex-shrink: 0;
+}
+.terminal-toggle-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--ant-color-border, #303030);
+  border-radius: 6px;
+  background: var(--ant-color-bg-elevated, #1f1f1f);
+  color: var(--ant-color-text-secondary, #999);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+.terminal-toggle-btn:hover {
+  color: var(--ant-color-text, #fff);
+  border-color: var(--ant-color-primary, #1677ff);
+  background: var(--ant-color-bg-container, #141414);
+}
+.terminal-toggle-btn--active {
+  color: var(--ant-color-primary, #1677ff);
+  border-color: var(--ant-color-primary, #1677ff);
+  background: rgba(22, 119, 255, 0.1);
+}
+
+/* ── 右侧边栏终端标签页 ── */
+.term-sidebar {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.term-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--ant-color-border-secondary, #303030);
+  flex-shrink: 0;
+}
+.term-sidebar-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ant-color-text-secondary, #999);
+}
+.term-sidebar-actions {
+  display: flex;
+  gap: 2px;
+}
+.term-sidebar-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+}
+
+/* 终端列表 */
+.term-sidebar-list {
+  flex-shrink: 0;
+  max-height: 180px;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--ant-color-border-secondary, #303030);
+}
+.term-sidebar-list-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px;
+  color: var(--ant-color-text-tertiary, #666);
+  font-size: 12px;
+}
+.term-sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-left: 2px solid transparent;
+}
+.term-sidebar-item:hover {
+  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.04));
+}
+.term-sidebar-item.active {
+  background: var(--ant-color-fill-tertiary, rgba(255, 255, 255, 0.06));
+  border-left-color: var(--ant-color-primary, #1677ff);
+}
+.term-sidebar-item.exited {
+  opacity: 0.55;
+}
+.term-sidebar-item-badge {
+  flex-shrink: 0;
+}
+.term-sidebar-item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.term-sidebar-item-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ant-color-text, #e0e0e0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.term-sidebar-item-meta {
+  font-size: 10px;
+  color: var(--ant-color-text-quaternary, #555);
+}
+.term-sidebar-item-kill {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ant-color-text-quaternary, #555);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: all 0.15s;
+}
+.term-sidebar-item:hover .term-sidebar-item-kill {
+  opacity: 1;
+}
+.term-sidebar-item-kill:hover {
+  background: var(--ant-color-error-bg, rgba(255, 77, 79, 0.12));
+  color: var(--ant-color-error, #ff4d4f);
+}
+
+/* ── Exec Worker 区域 ── */
+.exec-worker-section {
+  border-bottom: 1px solid var(--ant-color-border-secondary, rgba(255, 255, 255, 0.06));
+}
+.exec-worker-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+.exec-worker-section-header:hover {
+  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.04));
+}
+.exec-worker-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ant-color-text, #e0e0e0);
+}
+.exec-worker-title {
+  font-weight: 600;
+}
+.exec-worker-count {
+  font-size: 10px;
+  color: var(--ant-color-text-quaternary, #666);
+}
+.exec-worker-section-body {
+  padding-bottom: 2px;
+}
+
+/* 单个 Worker 卡片 */
+.exec-worker-card {
+  padding: 4px 12px;
+}
+.exec-worker-card-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+.exec-worker-ws-label {
+  font-weight: 600;
+  font-size: 11px;
+}
+.exec-worker-status {
+  font-size: 10px;
+  font-weight: 400;
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+}
+.exec-worker-cmd-count {
+  font-size: 10px;
+  color: var(--ant-color-text-quaternary, #666);
+  flex-shrink: 0;
+}
+.exec-worker-meta {
+  display: flex;
+  gap: 10px;
+  padding: 2px 0 2px 17px;
+  font-size: 10px;
+  color: var(--ant-color-text-quaternary, #666);
+}
+.exec-worker-cwd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+}
+
+/* Exec History 列表 */
+.exec-history-list {
+  max-height: 240px;
+  overflow-y: auto;
+  border-top: 1px solid var(--ant-color-border-secondary, rgba(255, 255, 255, 0.04));
+  margin-top: 2px;
+}
+.exec-history-empty {
+  padding: 12px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--ant-color-text-quaternary, #666);
+}
+
+.exec-record {
+  border-bottom: 1px solid var(--ant-color-border-secondary, rgba(255, 255, 255, 0.03));
+}
+.exec-record:last-child {
+  border-bottom: none;
+}
+.exec-record-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: background 0.15s;
+}
+.exec-record-header:hover {
+  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.04));
+}
+.exec-record-ws-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.exec-record-cmd {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'Cascadia Code', 'Fira Code', Menlo, Monaco, monospace;
+  color: var(--ant-color-text-secondary, #bbb);
+}
+.exec-record-duration {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--ant-color-text-quaternary, #666);
+}
+.exec-record-output {
+  margin: 0;
+  padding: 6px 12px;
+  font-family: 'Cascadia Code', 'Fira Code', Menlo, Monaco, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  background: #1a1a2e;
+  color: #e2e8f0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 160px;
+  overflow: auto;
+}
+
+/* xterm 渲染区 —— padding 放在 wrap 上，xterm 容器零 padding 以确保 FitAddon 列数计算准确 */
+.term-sidebar-xterm-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 4px;
+  background: #1e1e1e;
+}
+.term-sidebar-xterm {
+  flex: 1;
+  min-height: 0;
+}
+.term-sidebar-xterm .xterm {
+  height: 100%;
+}
+.term-sidebar-xterm .xterm-viewport {
+  overflow-y: auto !important;
+}
+.term-sidebar-xterm-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ant-color-text-quaternary, #555);
+  font-size: 12px;
+  background: #1e1e1e;
+}
