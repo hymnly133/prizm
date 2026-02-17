@@ -12,6 +12,7 @@ import type {
   TavilySettings,
   AgentLLMSettings,
   DocumentSummarySettings,
+  DocumentMemorySettings,
   ConversationSummarySettings,
   ContextWindowSettings,
   CommandsSettings,
@@ -180,6 +181,11 @@ export function getAgentLLMSettings(): AgentLLMSettings {
 export function getDocumentSummarySettings(): DocumentSummarySettings | null {
   const s = loadRaw().agent?.documentSummary
   return s ?? null
+}
+
+/** 获取文档记忆设置（与 getDocumentSummarySettings 读取同一配置项） */
+export function getDocumentMemorySettings(): DocumentMemorySettings | null {
+  return getDocumentSummarySettings()
 }
 
 export function getConversationSummarySettings(): ConversationSummarySettings | null {

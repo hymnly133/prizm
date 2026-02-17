@@ -16,14 +16,18 @@ export interface TavilySettings {
   searchDepth?: 'basic' | 'advanced' | 'fast' | 'ultra-fast'
 }
 
-/** 文档摘要：超长文档异步生成 LLM 摘要 */
-export interface DocumentSummarySettings {
+/**
+ * 文档记忆设置：文档内容通过记忆系统抽取三层记忆（总览 + 原子事实 + 迁移）
+ * 替代原 DocumentSummarySettings
+ */
+export interface DocumentMemorySettings {
   enabled?: boolean
-  /** 最小字符数才触发摘要，默认 500 */
+  /** 最小字符数才触发记忆抽取，默认 500 */
   minLen?: number
-  /** 使用的模型 ID，空则用默认 provider 默认模型 */
-  model?: string
 }
+
+/** @deprecated 已替换为 DocumentMemorySettings，保留兼容 */
+export type DocumentSummarySettings = DocumentMemorySettings
 
 /** 对话摘要：根据用户输入生成动宾短语，用于会话列表标题 */
 export interface ConversationSummarySettings {
@@ -40,10 +44,10 @@ export interface ContextWindowSettings {
   cachedContextTurns?: number
 }
 
-/** Agent LLM 相关设置（文档摘要、对话摘要、默认模型、记忆、上下文窗口） */
+/** Agent LLM 相关设置（文档记忆、对话摘要、默认模型、记忆、上下文窗口） */
 export interface AgentLLMSettings {
-  /** 文档摘要配置 */
-  documentSummary?: DocumentSummarySettings
+  /** 文档记忆配置（原 documentSummary） */
+  documentSummary?: DocumentMemorySettings
   /** 对话摘要配置（会话列表标题） */
   conversationSummary?: ConversationSummarySettings
   /** 默认对话模型，客户端可覆盖 */

@@ -33,7 +33,7 @@ import { scopeStore } from '../core/ScopeStore'
 import { genUniqueId } from '../id'
 import { deleteMemoriesByGroupId } from '../llm/EverMemService'
 import { getLLMProvider } from '../llm'
-import { scheduleDocumentSummary } from '../llm/documentSummaryService'
+import { scheduleDocumentMemory } from '../llm/documentMemoryService'
 import { getMcpClientManager } from '../mcp-client/McpClientManager'
 import { getTavilySettings } from '../settings/agentToolsStore'
 import { searchTavily } from '../llm/tavilySearch'
@@ -327,7 +327,7 @@ export class DefaultDocumentsAdapter implements IDocumentsAdapter {
     data.documents.push(doc)
     scopeStore.saveScope(scope)
     log.info('Document created:', doc.id, 'scope:', scope)
-    scheduleDocumentSummary(scope, doc.id)
+    scheduleDocumentMemory(scope, doc.id)
     return doc
   }
 
@@ -345,13 +345,12 @@ export class DefaultDocumentsAdapter implements IDocumentsAdapter {
       ...existing,
       ...(payload.title !== undefined && { title: payload.title }),
       ...(payload.content !== undefined && { content: payload.content }),
-      ...(payload.llmSummary !== undefined && { llmSummary: payload.llmSummary }),
       updatedAt: Date.now()
     }
     data.documents[idx] = updated
     scopeStore.saveScope(scope)
     log.info('Document updated:', id, 'scope:', scope)
-    scheduleDocumentSummary(scope, id)
+    scheduleDocumentMemory(scope, id)
     return updated
   }
 
@@ -481,7 +480,7 @@ export class DefaultAgentAdapter implements IAgentAdapter {
     const includeScopeContext = options?.includeScopeContext !== false
 
     registerBuiltinAtReferences()
-    const systemContent = buildSystemPrompt({
+    const systemContent = await buildSystemPrompt({
       scope,
       sessionId,
       includeScopeContext,
