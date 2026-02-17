@@ -2,6 +2,7 @@
  * Prizm WebSocket 客户端连接（可复用核心 SDK）
  */
 
+import { createClientLogger } from "../logger";
 import { ALL_EVENTS } from "../types";
 import type {
 	ServerMessage,
@@ -15,6 +16,8 @@ import type {
 	RegisterEventMessage,
 	UnregisterEventMessage,
 } from "../types";
+
+const log = createClientLogger("WebSocket");
 
 export class PrizmWebSocketClient {
 	private ws: WebSocket | null = null;
@@ -37,7 +40,7 @@ export class PrizmWebSocketClient {
 		const wsUrl = `ws://${this.config.host}:${
 			this.config.port
 		}/ws?apiKey=${encodeURIComponent(this.config.apiKey)}`;
-		console.log(`[PrizmClient] Connecting to ${wsUrl}`);
+		log.info("Connecting to", wsUrl);
 
 		return new Promise((resolve, reject) => {
 			this.manualDisconnect = false;
@@ -45,15 +48,13 @@ export class PrizmWebSocketClient {
 			try {
 				this.ws = new WebSocket(wsUrl);
 			} catch (error) {
-				console.error("[PrizmClient] Failed to create WebSocket:", error);
+				log.error("Failed to create WebSocket:", error);
 				reject(error);
 				return;
 			}
 
 			this.ws.onopen = () => {
-				console.log(
-					"[PrizmClient] WebSocket handshake complete, waiting for server auth..."
-				);
+				log.debug("WebSocket handshake complete, waiting for server auth");
 				const events =
 					this.config.subscribeEvents === "all"
 						? [...ALL_EVENTS]
@@ -69,9 +70,7 @@ export class PrizmWebSocketClient {
 			};
 
 			this.ws.onclose = (event: CloseEvent) => {
-				console.log(
-					`[PrizmClient] WebSocket closed: ${event.code} - ${event.reason}`
-				);
+				log.warn("WebSocket closed:", event.code, "-", event.reason);
 
 				if (!this.manualDisconnect) {
 					this.emit("disconnected", undefined as unknown as void);
@@ -82,7 +81,7 @@ export class PrizmWebSocketClient {
 			};
 
 			this.ws.onerror = (error: Event) => {
-				console.error("[PrizmClient] WebSocket error:", error);
+				log.error("WebSocket error:", error);
 				this.emit("error", error as unknown as Error);
 				reject(error as unknown as Error);
 			};
@@ -103,28 +102,17 @@ export class PrizmWebSocketClient {
 						clientId: string;
 						serverTime: number;
 					};
-					console.log(
-						"[PrizmClient] Server acknowledged connection:",
-						connectedMsg.clientId
-					);
+					log.info("Server acknowledged, clientId:", connectedMsg.clientId);
 					this.emit("connected", connectedMsg);
 					break;
 				}
 
 				case "registered":
-					console.log(
-						`[PrizmClient] Registered for event: ${
-							(message as any).eventType as string
-						}`
-					);
+					log.debug("Registered for event:", (message as any).eventType);
 					break;
 
 				case "unregistered":
-					console.log(
-						`[PrizmClient] Unregistered from event: ${
-							(message as any).eventType as string
-						}`
-					);
+					log.debug("Unregistered from event:", (message as any).eventType);
 					break;
 
 				case "event":
@@ -134,11 +122,7 @@ export class PrizmWebSocketClient {
 					break;
 
 				case "error":
-					console.error(
-						`[PrizmClient] Server error [${(message as any).code}]: ${
-							(message as any).message
-						}`
-					);
+					log.error("Server error:", (message as any).code, (message as any).message);
 					break;
 
 				case "pong":
@@ -146,7 +130,7 @@ export class PrizmWebSocketClient {
 					break;
 			}
 		} catch (error) {
-			console.error("[PrizmClient] Failed to parse message:", error);
+			log.error("Failed to parse message:", error);
 		}
 	}
 
@@ -218,16 +202,14 @@ export class PrizmWebSocketClient {
 	 */
 	private send(data: ClientMessage): void {
 		if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-			console.warn(
-				"[PrizmClient] WebSocket not connected, cannot send message"
-			);
+			log.warn("Cannot send: WebSocket not connected");
 			return;
 		}
 
 		try {
 			this.ws.send(JSON.stringify(data));
 		} catch (error) {
-			console.error("[PrizmClient] Failed to send message:", error);
+			log.error("Failed to send message:", error);
 		}
 	}
 
@@ -270,7 +252,7 @@ export class PrizmWebSocketClient {
 				try {
 					(handler as WebSocketEventHandler<T>)(data);
 				} catch (error) {
-					console.error(`[PrizmClient] Error in ${eventType} handler:`, error);
+					log.error("Error in", eventType, "handler:", error);
 				}
 			}
 		}
@@ -284,10 +266,10 @@ export class PrizmWebSocketClient {
 			return;
 		}
 
-		console.log("[PrizmClient] Scheduling reconnect in 5 seconds...");
+		log.info("Scheduling reconnect in 5s");
 		this.reconnectTimer = setTimeout(() => {
-			console.log("[PrizmClient] Reconnecting...");
-			this.connect().catch(console.error);
+			log.info("Reconnecting...");
+			this.connect().catch((err) => log.error("Reconnect failed:", err));
 			this.reconnectTimer = null;
 		}, 5000) as unknown as number;
 	}
@@ -308,7 +290,7 @@ export class PrizmWebSocketClient {
 			this.ws = null;
 		}
 
-		console.log("[PrizmClient] Disconnected");
+		log.info("Disconnected (manual)");
 	}
 
 	/**

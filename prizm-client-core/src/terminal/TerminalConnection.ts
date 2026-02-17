@@ -8,7 +8,10 @@
  * - 自动重连
  */
 
+import { createClientLogger } from '../logger'
 import type { TerminalClientMessage, TerminalServerMessage } from '@prizm/shared'
+
+const log = createClientLogger('Terminal')
 
 export type TerminalEventType =
   | 'output'
@@ -77,16 +80,18 @@ export class TerminalConnection {
       return
     }
 
+    log.info('Connecting to terminal WebSocket:', this.wsUrl)
     try {
       this.ws = new WebSocket(this.wsUrl)
     } catch (err) {
-      console.error('[TerminalConnection] Failed to create WebSocket:', err)
+      log.error('Failed to create WebSocket:', err)
       this.scheduleReconnect()
       return
     }
 
     this.ws.onopen = () => {
       this.reconnectAttempts = 0
+      log.info('Terminal WebSocket connected')
       this.startPing()
       this.emit('connected', undefined as unknown as void)
 
@@ -101,12 +106,13 @@ export class TerminalConnection {
         const msg = JSON.parse(event.data as string) as TerminalServerMessage
         this.handleServerMessage(msg)
       } catch {
-        // ignore malformed messages
+        log.warn('Failed to parse terminal message')
       }
     }
 
     this.ws.onclose = (event) => {
       this.stopPing()
+      log.warn('Terminal WebSocket closed:', event.code, event.reason)
       this.emit('disconnected', { reason: event.reason || 'Connection closed' })
       if (!this.disposed) {
         this.scheduleReconnect()
@@ -114,18 +120,20 @@ export class TerminalConnection {
     }
 
     this.ws.onerror = () => {
-      // onclose will fire after this
+      log.error('Terminal WebSocket error')
     }
   }
 
   /** 附着到指定终端 */
   attach(terminalId: string): void {
+    log.debug('Attaching terminal:', terminalId)
     this.attachedTerminalId = terminalId
     this.sendMessage({ type: 'terminal:attach', terminalId })
   }
 
   /** 分离当前终端 */
   detach(): void {
+    log.debug('Detaching terminal')
     if (this.attachedTerminalId) {
       this.sendMessage({ type: 'terminal:detach', terminalId: this.attachedTerminalId })
       this.attachedTerminalId = null
@@ -191,6 +199,7 @@ export class TerminalConnection {
   // ---- 销毁 ----
 
   dispose(): void {
+    log.debug('Terminal connection disposed')
     this.disposed = true
     this.stopPing()
     if (this.reconnectTimer) {
@@ -237,11 +246,18 @@ export class TerminalConnection {
   private sendMessage(msg: TerminalClientMessage): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg))
+    } else {
+      log.warn('Cannot send: terminal not connected')
     }
   }
 
   private scheduleReconnect(): void {
-    if (this.disposed || this.reconnectAttempts >= this.maxReconnectAttempts) return
+    if (this.disposed) return
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      log.error('Terminal max reconnect attempts reached')
+      return
+    }
+    log.info('Terminal reconnecting, attempt:', this.reconnectAttempts + 1, '/', this.maxReconnectAttempts)
     const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000)
     this.reconnectAttempts++
     this.reconnectTimer = setTimeout(() => {

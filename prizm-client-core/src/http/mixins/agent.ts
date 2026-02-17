@@ -1,5 +1,8 @@
+import { createClientLogger } from '../../logger'
 import { PrizmClient } from '../client'
 import type { AgentSession, StreamChatOptions, StreamChatChunk, SessionStats } from '../../types'
+
+const log = createClientLogger('AgentHTTP')
 
 declare module '../client' {
   interface PrizmClient {
@@ -396,6 +399,7 @@ PrizmClient.prototype.streamChat = async function (
   options?: StreamChatOptions & { scope?: string }
 ) {
   const scope = options?.scope ?? this.defaultScope
+  log.info('Starting stream chat, sessionId:', sessionId)
   const url = this.buildUrl(`/agent/sessions/${encodeURIComponent(sessionId)}/chat`, {
     scope
   })
@@ -430,9 +434,15 @@ PrizmClient.prototype.streamChat = async function (
 
   try {
     while (true) {
-      if (options?.signal?.aborted) break
+      if (options?.signal?.aborted) {
+        log.info('Stream aborted by signal')
+        break
+      }
       const { done, value } = await reader.read()
-      if (done) break
+      if (done) {
+        log.info('Stream reader done')
+        break
+      }
 
       buffer += decoder.decode(value, { stream: true })
       const lines = buffer.split('\n')
@@ -442,8 +452,8 @@ PrizmClient.prototype.streamChat = async function (
         if (line.startsWith(': heartbeat')) {
           try {
             options?.onChunk?.({ type: 'heartbeat' })
-          } catch {
-            // ignore heartbeat errors
+          } catch (hbErr) {
+            log.warn('Heartbeat handler error:', hbErr)
           }
           continue
         }
@@ -457,7 +467,7 @@ PrizmClient.prototype.streamChat = async function (
             try {
               options?.onChunk?.(parsed)
             } catch (chunkErr) {
-              console.error('[streamChat] onChunk handler error:', chunkErr, 'chunk:', parsed)
+              log.error('onChunk handler error:', chunkErr)
             }
             if (parsed.type === 'text' && typeof parsed.value === 'string') {
               fullContent += parsed.value
@@ -465,8 +475,8 @@ PrizmClient.prototype.streamChat = async function (
             if (parsed.type === 'tool_call') {
               await new Promise<void>((r) => setTimeout(r, 0))
             }
-          } catch {
-            // ignore JSON parse errors
+          } catch (parseErr) {
+            log.warn('Failed to parse SSE data:', data.slice(0, 100))
           }
         }
       }
