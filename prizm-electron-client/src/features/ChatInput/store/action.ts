@@ -1,6 +1,9 @@
 import type { StateCreator } from 'zustand/vanilla'
+import { createClientLogger } from '@prizm/client-core'
 
 import type { PublicState, State, InputRef } from './initialState'
+
+const log = createClientLogger('ChatInput')
 import type { OverlayTextReplacer } from './initialState'
 import { initialState } from './initialState'
 
@@ -95,10 +98,7 @@ export const store: CreateStore = (publicState) => (set, get) => ({
   },
 
   setInputRefs: (refs: InputRef[]) => {
-    console.log('[ImportAI-Chip] ChatInputStore.setInputRefs 调用', {
-      count: refs.length,
-      refs: refs.map((r) => ({ type: r.type, key: r.key.slice(0, 60), label: r.label }))
-    })
+    log.debug('Store.setInputRefs:', refs.length)
     set({ inputRefs: refs })
   },
 

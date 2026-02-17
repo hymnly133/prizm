@@ -1,7 +1,10 @@
 /**
  * 引用标签栏：在输入框上方显示当前附加的引用，支持移除
  */
+import { createClientLogger } from '@prizm/client-core'
 import { memo, useCallback, useEffect } from 'react'
+
+const log = createClientLogger('ChatInput')
 import { X, FileText, StickyNote, ListTodo, File } from 'lucide-react'
 import { useChatInputStore } from './store'
 import type { InputRef } from './store/initialState'
@@ -101,10 +104,7 @@ const RefChipsBar = memo(() => {
 
   useEffect(() => {
     if (inputRefs.length > 0) {
-      console.log('[ImportAI-Chip] RefChipsBar 收到 inputRefs', {
-        count: inputRefs.length,
-        refs: inputRefs.map((r) => ({ type: r.type, key: r.key.slice(0, 50), label: r.label }))
-      })
+      log.debug('RefChipsBar refs updated:', inputRefs.length)
     }
   }, [inputRefs])
 

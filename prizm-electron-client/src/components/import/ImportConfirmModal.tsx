@@ -6,6 +6,7 @@
 import { memo, useMemo, useCallback } from 'react'
 import { Button, Markdown, Tag } from '@lobehub/ui'
 import { Modal, Progress } from 'antd'
+import { createStyles } from 'antd-style'
 import {
   FileText,
   FileWarning,
@@ -19,6 +20,109 @@ import { useImportContext } from '../../context/ImportContext'
 import { useImportActions } from '../../hooks/useImportActions'
 import type { ImportItem } from '../../types/import'
 import { formatFileSize } from '../../types/import'
+
+const useStyles = createStyles(({ css, token }) => ({
+  itemRow: css`
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid ${token.colorBorderSecondary};
+  `,
+  itemInfo: css`
+    flex: 1;
+    min-width: 0;
+  `,
+  itemName: css`
+    font-size: 13px;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  `,
+  itemMeta: css`
+    font-size: 11px;
+    color: ${token.colorTextQuaternary};
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  `,
+  itemError: css`
+    color: ${token.colorError};
+    font-size: 11px;
+  `,
+  itemActions: css`
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+  `,
+  smallTag: css`
+    font-size: 10px;
+    line-height: 16px;
+    padding: 0 4px;
+  `,
+  smallBtn: css`
+    font-size: 12px;
+  `,
+  singleHeader: css`
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  `,
+  singleName: css`
+    font-weight: 500;
+    font-size: 14px;
+  `,
+  singleSize: css`
+    color: ${token.colorTextQuaternary};
+    font-size: 12px;
+  `,
+  previewBox: css`
+    max-height: 280px;
+    overflow: auto;
+    border-radius: 8px;
+    border: 1px solid ${token.colorBorderSecondary};
+    padding: 8px 12px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    background: ${token.colorFillQuaternary};
+  `,
+  unsupportedBox: css`
+    padding: 16px;
+    text-align: center;
+    color: ${token.colorTextQuaternary};
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  `,
+  footerActions: css`
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  `,
+  multiActions: css`
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    justify-content: flex-end;
+  `,
+  multiList: css`
+    max-height: 360px;
+    overflow: auto;
+    border-radius: 8px;
+    border: 1px solid ${token.colorBorderSecondary};
+    padding: 0 12px;
+  `,
+  progressWrap: css`
+    margin-top: 12px;
+  `,
+  doneFooter: css`
+    text-align: center;
+    margin-top: 12px;
+  `
+}))
 
 /** 截断预览文本 */
 function truncatePreview(content: string | null, maxLen = 500): string {
@@ -60,72 +164,38 @@ const ImportItemRow = memo(
     onDirect: (item: ImportItem) => void
     onAI: (item: ImportItem) => void
   }) => {
+    const { styles } = useStyles()
     const isActioned = item.status === 'done' || item.status === 'ai-sent'
     const isProcessing = item.status === 'importing'
 
     return (
-      <div
-        className="import-item-row"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '8px 0',
-          borderBottom: '1px solid var(--ant-color-border-secondary, #f0f0f0)',
-          opacity: item.unsupported ? 0.5 : 1
-        }}
-      >
+      <div className={styles.itemRow} style={{ opacity: item.unsupported ? 0.5 : 1 }}>
         <ItemStatusIcon status={item.status} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: 13,
-              fontWeight: 500,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap'
-            }}
-          >
-            {item.name}
-          </div>
-          <div
-            style={{
-              fontSize: 11,
-              color: 'var(--ant-color-text-quaternary)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6
-            }}
-          >
+        <div className={styles.itemInfo}>
+          <div className={styles.itemName}>{item.name}</div>
+          <div className={styles.itemMeta}>
             {item.size != null && <span>{formatFileSize(item.size)}</span>}
             {item.unsupported && (
-              <Tag color="warning" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>
+              <Tag color="warning" className={styles.smallTag}>
                 不支持
               </Tag>
             )}
             {item.truncated && (
-              <Tag
-                color="processing"
-                style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}
-              >
+              <Tag color="processing" className={styles.smallTag}>
                 已截断
               </Tag>
             )}
-            {item.errorMessage && (
-              <span style={{ color: 'var(--ant-color-error)', fontSize: 11 }}>
-                {item.errorMessage}
-              </span>
-            )}
+            {item.errorMessage && <span className={styles.itemError}>{item.errorMessage}</span>}
           </div>
         </div>
         {!item.unsupported && (
-          <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+          <div className={styles.itemActions}>
             <Button
               size="small"
               onClick={() => onDirect(item)}
               disabled={isActioned || isProcessing}
               icon={<Download size={12} />}
-              style={{ fontSize: 12 }}
+              className={styles.smallBtn}
             >
               导入
             </Button>
@@ -136,7 +206,7 @@ const ImportItemRow = memo(
               onClick={() => onAI(item)}
               disabled={isActioned || isProcessing}
               icon={<Sparkles size={12} />}
-              style={{ fontSize: 12 }}
+              className={styles.smallBtn}
             >
               AI 整理
             </Button>
@@ -158,65 +228,36 @@ function SingleItemView({
   onDirect: () => void
   onAI: () => void
 }) {
+  const { styles } = useStyles()
   const isProcessing = item.status === 'importing'
 
   return (
     <div>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          marginBottom: 12
-        }}
-      >
-        {item.type === 'file' ? <FileText size={18} /> : <FileText size={18} />}
-        <span style={{ fontWeight: 500, fontSize: 14 }}>{item.name}</span>
+      <div className={styles.singleHeader}>
+        <FileText size={18} />
+        <span className={styles.singleName}>{item.name}</span>
         {item.size != null && (
-          <span style={{ color: 'var(--ant-color-text-quaternary)', fontSize: 12 }}>
-            ({formatFileSize(item.size)})
-          </span>
+          <span className={styles.singleSize}>({formatFileSize(item.size)})</span>
         )}
         {item.truncated && (
-          <Tag color="processing" style={{ fontSize: 10 }}>
+          <Tag color="processing" className={styles.smallTag}>
             已截断到 1MB
           </Tag>
         )}
       </div>
 
       {item.unsupported ? (
-        <div
-          style={{
-            padding: 16,
-            textAlign: 'center',
-            color: 'var(--ant-color-text-quaternary)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8
-          }}
-        >
+        <div className={styles.unsupportedBox}>
           <FileWarning size={20} />
           <span>不支持的文件类型，无法导入</span>
         </div>
       ) : (
         <>
-          <div
-            style={{
-              maxHeight: 280,
-              overflow: 'auto',
-              borderRadius: 8,
-              border: '1px solid var(--ant-color-border-secondary, #f0f0f0)',
-              padding: '8px 12px',
-              marginBottom: 16,
-              fontSize: 13,
-              background: 'var(--ant-color-fill-quaternary, #fafafa)'
-            }}
-          >
+          <div className={styles.previewBox}>
             <Markdown variant="chat">{truncatePreview(item.content)}</Markdown>
           </div>
 
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <div className={styles.footerActions}>
             <Button
               onClick={onDirect}
               loading={isProcessing}
@@ -254,6 +295,7 @@ function MultiItemView({
   onDirectAll: () => void
   onAIAll: () => void
 }) {
+  const { styles } = useStyles()
   const doneCount = items.filter((i) => i.status === 'done' || i.status === 'ai-sent').length
   const validCount = items.filter((i) => !i.unsupported).length
   const allDone = doneCount >= validCount
@@ -261,14 +303,7 @@ function MultiItemView({
 
   return (
     <div>
-      <div
-        style={{
-          display: 'flex',
-          gap: 8,
-          marginBottom: 12,
-          justifyContent: 'flex-end'
-        }}
-      >
+      <div className={styles.multiActions}>
         <Button
           onClick={onDirectAll}
           disabled={allDone || isAnyProcessing}
@@ -288,22 +323,14 @@ function MultiItemView({
         </Button>
       </div>
 
-      <div
-        style={{
-          maxHeight: 360,
-          overflow: 'auto',
-          borderRadius: 8,
-          border: '1px solid var(--ant-color-border-secondary, #f0f0f0)',
-          padding: '0 12px'
-        }}
-      >
+      <div className={styles.multiList}>
         {items.map((item) => (
           <ImportItemRow key={item.id} item={item} onDirect={onDirectItem} onAI={onAIItem} />
         ))}
       </div>
 
       {doneCount > 0 && (
-        <div style={{ marginTop: 12 }}>
+        <div className={styles.progressWrap}>
           <Progress
             percent={Math.round((doneCount / validCount) * 100)}
             size="small"
@@ -317,6 +344,7 @@ function MultiItemView({
 
 /** 导入确认对话框 */
 const ImportConfirmModal = memo(() => {
+  const { styles } = useStyles()
   const { importState, updateItemStatus, closeImport } = useImportContext()
   const { importDirect, importWithAI, importAllDirect, importAllWithAI } = useImportActions()
 
@@ -414,7 +442,7 @@ const ImportConfirmModal = memo(() => {
       ) : null}
 
       {allDone && items.length > 0 && (
-        <div style={{ textAlign: 'center', marginTop: 12 }}>
+        <div className={styles.doneFooter}>
           <Button type="primary" onClick={closeImport}>
             完成
           </Button>

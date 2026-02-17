@@ -2,7 +2,10 @@
  * 统一的 chatWith API：从任意位置发起对话，支持文件引用、文本、命令等
  * 跳转到 Agent 页并将 payload 注入输入框
  */
+import { createClientLogger } from '@prizm/client-core'
 import { createContext, useContext, useCallback, useState } from 'react'
+
+const log = createClientLogger('ChatWithFile')
 import type { FileKind } from '../hooks/useFileList'
 import type { FilePathRef } from '@prizm/shared'
 
@@ -86,13 +89,7 @@ export function ChatWithFileProvider({
 
   const chatWith = useCallback(
     (payload: ChatWithPayload) => {
-      console.log('[ImportAI-Chip] ChatWithFileContext.chatWith 收到', {
-        hasFileRefs: !!payload.fileRefs?.length,
-        fileRefsCount: payload.fileRefs?.length ?? 0,
-        hasFiles: !!payload.files?.length,
-        hasText: !!payload.text,
-        forceNew: payload.forceNew
-      })
+      log.debug('chatWith received')
       setPendingPayload(payload)
       onNavigateToAgent()
     },

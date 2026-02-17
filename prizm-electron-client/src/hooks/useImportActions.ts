@@ -5,7 +5,10 @@
  * AI 整理现在使用 @(file:path) 引用而非直接嵌入内容，
  * 避免大文件内容直接进入 LLM 上下文。
  */
+import { createClientLogger } from '@prizm/client-core'
 import { useCallback } from 'react'
+
+const log = createClientLogger('Import')
 import { usePrizmContext } from '../context/PrizmContext'
 import { useChatWithFile } from '../context/ChatWithFileContext'
 import type { ChatWithPayload } from '../context/ChatWithFileContext'
@@ -67,8 +70,7 @@ export function useImportActions() {
     (item: ImportItem): void => {
       if (item.unsupported || item.content === null) return
       const fileRef = toFilePathRef(item)
-      // [ImportAI-Chip] 调试：单项 AI 整理
-      console.log('[ImportAI-Chip] importWithAI 调用', {
+      log.info('Import with AI:', {
         itemType: item.type,
         itemPath: item.path,
         itemName: item.name,
@@ -81,10 +83,10 @@ export function useImportActions() {
           text: '请帮我整理这个文件的内容，整理为结构清晰的文档并保存到工作区。',
           forceNew: true
         }
-        console.log('[ImportAI-Chip] 发送 payload (fileRefs)', payload)
+        log.debug('Sending payload with fileRefs', payload)
         chatWith(payload)
       } else {
-        console.log('[ImportAI-Chip] 发送 payload (纯文本，无 fileRefs)', {
+        log.debug('Sending text-only payload', {
           text: buildTextAIPrompt(item).slice(0, 80) + '...'
         })
         chatWith({ text: buildTextAIPrompt(item), forceNew: true })
@@ -133,8 +135,7 @@ export function useImportActions() {
         .map(toFilePathRef)
         .filter((r): r is FilePathRef => r !== null)
 
-      // [ImportAI-Chip] 调试：批量 AI 整理
-      console.log('[ImportAI-Chip] importAllWithAI 调用', {
+      log.info('Batch import with AI', {
         validItemsCount: validItems.length,
         fileItemsCount: fileItems.length,
         textItemsCount: textItems.length,
@@ -168,7 +169,7 @@ export function useImportActions() {
       }
 
       payload.text = promptParts.join('\n\n')
-      console.log('[ImportAI-Chip] 批量发送 payload', {
+      log.debug('Batch payload sent', {
         fileRefsCount: payload.fileRefs?.length ?? 0,
         textPreview: payload.text?.slice(0, 60) + '...'
       })

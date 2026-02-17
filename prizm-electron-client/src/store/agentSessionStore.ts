@@ -13,7 +13,7 @@ import type {
   InteractRequestPayload,
   PrizmClient
 } from '@prizm/client-core'
-import { getTextContent } from '@prizm/client-core'
+import { createClientLogger, getTextContent } from '@prizm/client-core'
 import type { FilePathRef } from '@prizm/shared'
 import {
   getInternals,
@@ -30,6 +30,8 @@ import {
   type SetStateLike,
   type GetStateLike
 } from './agentStreamingHandlers'
+
+const log = createClientLogger('AgentSession')
 
 function tmpId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -110,11 +112,14 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
   async refreshSessions(scope: string) {
     const http = _httpClient
     if (!http || !scope) return
+    log.debug('Refreshing sessions, scope:', scope)
     set({ loading: true })
     try {
       const list = await http.listAgentSessions(scope)
       set({ sessions: list })
-    } catch {
+      log.debug('Sessions loaded:', list.length)
+    } catch (err) {
+      log.error('Failed to refresh sessions:', err)
       set({ sessions: [] })
     } finally {
       set({ loading: false })
@@ -124,13 +129,16 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
   async createSession(scope: string) {
     const http = _httpClient
     if (!http || !scope) return null
+    log.info('Creating session, scope:', scope)
     set({ loading: true })
     try {
       const session = await http.createAgentSession(scope)
       await get().refreshSessions(scope)
       set({ currentSessionId: session.id })
+      log.info('Session created:', session.id)
       return session
-    } catch {
+    } catch (err) {
+      log.error('Failed to create session:', err)
       return null
     } finally {
       set({ loading: false })
@@ -140,6 +148,7 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
   async deleteSession(id: string, scope: string) {
     const http = _httpClient
     if (!http || !scope) return
+    log.info('Deleting session:', id)
     set({ loading: true })
     try {
       await http.deleteAgentSession(id, scope)
@@ -158,6 +167,7 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
   async loadSession(id: string, scope: string) {
     const http = _httpClient
     if (!http || !scope) return null
+    log.debug('Loading session:', id)
     set({ loading: true, error: null })
     try {
       const session = await http.getAgentSession(id, scope)
@@ -183,7 +193,8 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
         }
       })
       return session
-    } catch {
+    } catch (err) {
+      log.error('Failed to load session:', err)
       return null
     } finally {
       set({ loading: false })
@@ -200,22 +211,25 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
       }))
       await get().refreshSessions(scope)
       return session
-    } catch {
+    } catch (err) {
+      log.error('Failed to update session:', err)
       return null
     }
   },
 
   switchSession(id: string | null) {
+    log.debug('Switching session:', id)
     set({ currentSessionId: id })
   },
 
   async stopGeneration(sessionId: string, scope: string) {
+    log.info('Stopping generation:', sessionId)
     const http = _httpClient
     if (http) {
       try {
         await http.stopAgentChat(sessionId, scope)
-      } catch {
-        // ignore
+      } catch (err) {
+        log.warn('Stop generation request failed:', err)
       }
     }
     const internals = getInternals(sessionId)
@@ -243,13 +257,9 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
     if (!http) return
     try {
       await http.respondToInteract(sessionId, requestId, approved, { paths, scope })
-      console.debug(
-        '[agentStore] interact response sent: requestId=%s approved=%s',
-        requestId,
-        approved
-      )
+      log.debug('Interact response sent:', requestId, approved)
     } catch (err) {
-      console.error('[agentStore] Failed to send interact response:', err)
+      log.error('Failed to send interact response:', err)
       const internals = getInternals(sessionId)
       internals.pendingInteractRef = null
       updateStreamingState(setStreaming, sessionId, { pendingInteract: null })
@@ -258,6 +268,7 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
 
   handleSyncEvent(event: string, scope: string) {
     if (!event.startsWith('agent:')) return
+    log.debug('Sync event received:', event, 'scope:', scope)
     if (scope) void get().refreshSessions(scope)
     const state = get()
     const currentId = state.currentSessionId
@@ -284,6 +295,7 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
 
     const internals = getInternals(sessionId)
     const selectedModel = model ?? get().selectedModel
+    log.info('Sending message, session:', sessionId, 'model:', selectedModel, 'contentLen:', content.trim().length)
 
     updateStreamingState(setStreaming, sessionId, {
       sending: true,
@@ -329,12 +341,14 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
       })
 
       mergeOptimisticIntoSession(setStreaming, getStreaming, sessionId, acc, userMsg, assistantMsg)
+      log.info('Stream completed, session:', sessionId)
       updateStreamingState(setStreaming, sessionId, { optimisticMessages: [] })
       await get().refreshSessions(scope)
       return acc.commandResultContent ?? getTextContent({ parts: acc.parts })
     } catch (err) {
       const isAbort = err instanceof Error && err.name === 'AbortError'
       if (isAbort) {
+        log.info('Stream aborted, session:', sessionId)
         mergeAbortedIntoSession(
           setStreaming,
           getStreaming,
@@ -345,6 +359,7 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
         )
         updateStreamingState(setStreaming, sessionId, { optimisticMessages: [] })
       } else {
+        log.error('Stream error:', err instanceof Error ? err.message : String(err))
         set({ error: err instanceof Error ? err.message : '发送失败' })
         updateStreamingState(setStreaming, sessionId, { optimisticMessages: [] })
       }

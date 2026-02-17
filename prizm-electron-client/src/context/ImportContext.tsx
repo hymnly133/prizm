@@ -3,7 +3,10 @@
  * 管理导入流程状态：收集导入项 -> 显示确认对话框 -> 执行导入
  * 与触发方式（拖拽 / 手动按钮）解耦
  */
+import { createClientLogger } from '@prizm/client-core'
 import { createContext, useContext, useCallback, useState } from 'react'
+
+const log = createClientLogger('Import')
 import type { ImportItem, ReadFileResult } from '../types/import'
 import { fileResultToImportItem, textToImportItem } from '../types/import'
 
@@ -94,7 +97,7 @@ export function ImportProvider({ children }: { children: React.ReactNode }) {
       if (!results || results.length === 0) return
       startImportFromFileResults(results)
     } catch (e) {
-      console.error('[ImportService] selectAndReadFiles failed:', e)
+      log.error('selectAndReadFiles failed:', e)
     }
   }, [startImportFromFileResults])
 

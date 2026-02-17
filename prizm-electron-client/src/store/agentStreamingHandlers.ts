@@ -12,13 +12,15 @@ import type {
   StreamChatChunk,
   ToolCallRecord
 } from '@prizm/client-core'
-import { getTextContent } from '@prizm/client-core'
+import { createClientLogger, getTextContent } from '@prizm/client-core'
 import type { MemoryItem } from '@prizm/shared'
 import {
   DEFAULT_STREAMING_STATE,
   type SessionStreamingState,
   type StreamingInternals
 } from './agentStreamingInternals'
+
+const log = createClientLogger('AgentStream')
 
 /** 流式处理所需的状态最小形状，便于与 store 的 set/get 兼容 */
 export interface StreamingStateSlice {
@@ -136,6 +138,7 @@ export function processStreamChunk(chunk: StreamChatChunk, ctx: ProcessChunkCont
         session: MemoryItem[]
       }
     })
+    log.debug('Memory injected')
   }
 
   // 交互请求
@@ -146,12 +149,7 @@ export function processStreamChunk(chunk: StreamChatChunk, ctx: ProcessChunkCont
     'requestId' in chunk.value
   ) {
     const interact = chunk.value as InteractRequestPayload
-    console.debug(
-      '[agentStore] interact_request received: requestId=%s tool=%s paths=%s',
-      interact.requestId,
-      interact.toolName,
-      interact.paths.join(', ')
-    )
+    log.debug('Interact request:', interact.requestId, interact.toolName, interact.paths.join(', '))
     internals.pendingInteractRef = interact
     updateStreamingState(set, sessionId, { pendingInteract: interact })
   }
@@ -242,12 +240,7 @@ export function processStreamChunk(chunk: StreamChatChunk, ctx: ProcessChunkCont
     'id' in chunk.value
   ) {
     const tc = chunk.value as ToolCallRecord
-    console.debug(
-      '[agentStore] tool_call received: status=%s id=%s name=%s',
-      tc.status ?? 'done',
-      tc.id,
-      tc.name
-    )
+    log.debug('Tool call:', tc.status ?? 'done', tc.id, tc.name)
     if (
       internals.pendingInteractRef &&
       tc.id === internals.pendingInteractRef.toolCallId &&
@@ -317,6 +310,7 @@ export function processStreamChunk(chunk: StreamChatChunk, ctx: ProcessChunkCont
         ]
       })
     }
+    log.info('Stream done, messageId:', acc.lastMessageId, 'model:', acc.lastModel)
   }
 }
 
@@ -329,6 +323,7 @@ export function mergeOptimisticIntoSession(
   userMsg: AgentMessage,
   assistantMsg: AgentMessage
 ): void {
+  log.debug('Merging optimistic messages into session:', sessionId)
   set((state) => {
     const s = state as StreamingStateSlice
     const baseSession = s.sessions.find((sess) => sess.id === sessionId)
@@ -383,6 +378,7 @@ export function mergeAbortedIntoSession(
   lastModel: string | undefined,
   lastUsage: AgentMessage['usage'] | undefined
 ): void {
+  log.debug('Merging aborted messages into session:', sessionId)
   const s = get() as StreamingStateSlice
   const currentOptimistic = s.streamingStates[sessionId]?.optimisticMessages ?? []
   if (currentOptimistic.length < 2) return

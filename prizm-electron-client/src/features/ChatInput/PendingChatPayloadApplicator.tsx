@@ -5,7 +5,10 @@
  *   - files / fileRefs → inputRefs（引用栏标签）
  * 必须放在 ChatInputProvider 内部使用
  */
+import { createClientLogger } from '@prizm/client-core'
 import { useEffect, useRef } from 'react'
+
+const log = createClientLogger('ChatInput')
 import { useChatWithFile } from '../../context/ChatWithFileContext'
 import type { ChatWithPayload } from '../../context/ChatWithFileContext'
 import { useChatInputStore } from './store'
@@ -93,12 +96,12 @@ export function PendingChatPayloadApplicator() {
   const focusBlockInput = useChatInputStore((s) => s.focusBlockInput)
   const appliedKeyRef = useRef<string | null>(null)
   useEffect(() => {
-    console.log('[ImportAI-Chip] PendingChatPayloadApplicator 已挂载')
-    return () => console.log('[ImportAI-Chip] PendingChatPayloadApplicator 已卸载')
+    log.debug('PayloadApplicator mounted')
+    return () => log.debug('PayloadApplicator unmounted')
   }, [])
 
   useEffect(() => {
-    console.log('[ImportAI-Chip] PendingChatPayloadApplicator useEffect', {
+    log.debug('PayloadApplicator effect', {
       hasPendingPayload: !!pendingPayload,
       payloadFileRefs: pendingPayload?.fileRefs,
       payloadFileRefsCount: pendingPayload?.fileRefs?.length ?? 0
@@ -106,13 +109,13 @@ export function PendingChatPayloadApplicator() {
     if (!pendingPayload) return
     const key = payloadKey(pendingPayload)
     if (appliedKeyRef.current === key) {
-      console.log('[ImportAI-Chip] PendingChatPayloadApplicator 跳过（已应用过相同 key）', key)
+      log.debug('Skipping duplicate payload, key:', key)
       return
     }
 
     const text = payloadToText(pendingPayload)
     const refs = payloadToInputRefs(pendingPayload)
-    console.log('[ImportAI-Chip] PendingChatPayloadApplicator 将要应用', {
+    log.debug('Applying payload', {
       textLength: text?.length ?? 0,
       textPreview: text?.slice(0, 80),
       refsCount: refs.length,
@@ -127,9 +130,9 @@ export function PendingChatPayloadApplicator() {
 
     if (refs.length > 0) {
       setInputRefs(refs)
-      console.log('[ImportAI-Chip] PendingChatPayloadApplicator 已调用 setInputRefs', refs.length)
+      log.debug('Set input refs:', refs.length)
     } else {
-      console.log('[ImportAI-Chip] PendingChatPayloadApplicator 未调用 setInputRefs（refs 为空）')
+      log.debug('No refs to set')
     }
 
     appliedKeyRef.current = key

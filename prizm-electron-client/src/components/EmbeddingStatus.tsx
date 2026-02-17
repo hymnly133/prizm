@@ -114,6 +114,55 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
     border-radius: ${cssVar.borderRadiusLG};
     background: ${cssVar.colorErrorBg};
     margin-bottom: ${cssVar.marginSM};
+  `,
+  cardHeader: css`
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  `,
+  statusRow: css`
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 10px;
+  `,
+  modelInfo: css`
+    font-size: 13px;
+    color: ${cssVar.colorTextSecondary};
+  `,
+  errorTimestamp: css`
+    opacity: 0.7;
+  `,
+  formHintSpaced: css`
+    margin-top: 6px;
+    margin-bottom: 10px;
+  `,
+  dangerButton: css`
+    color: ${cssVar.colorError};
+    border-color: ${cssVar.colorErrorBorder};
+  `,
+  modalWarning: css`
+    margin-bottom: 12px;
+    color: ${cssVar.colorError};
+  `,
+  modalHint: css`
+    margin-bottom: 8px;
+  `,
+  modalInput: css`
+    margin-bottom: 12px;
+  `,
+  modalFooter: css`
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  `,
+  buttonGroup: css`
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  `,
+  statValueSmall: css`
+    font-size: 14px;
   `
 }))
 
@@ -313,12 +362,12 @@ export function EmbeddingStatus({ http, onLog }: Props) {
 
       {/* 状态概览 */}
       <div className={styles.card} style={{ marginTop: 12 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className={styles.cardHeader}>
           <div className={styles.sectionTitle} style={{ flex: 1 }}>
             <Cpu size={16} />
             模型状态
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div className={styles.buttonGroup}>
             <Button size="small" onClick={() => void loadStatus()} disabled={loading}>
               <RefreshCw size={13} />
             </Button>
@@ -333,7 +382,7 @@ export function EmbeddingStatus({ http, onLog }: Props) {
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10 }}>
+        <div className={styles.statusRow}>
           <span
             className={styles.statusBadge}
             style={{ color: stateConf.color, background: stateConf.bg }}
@@ -342,7 +391,7 @@ export function EmbeddingStatus({ http, onLog }: Props) {
             {stateConf.label}
           </span>
           {st && (
-            <span style={{ fontSize: 13, color: 'var(--ant-color-text-secondary)' }}>
+            <span className={styles.modelInfo}>
               {st.modelName} &middot; {st.dtype?.toUpperCase()} &middot; {st.dimension} 维 &middot;
               {st.source === 'bundled' ? '内置' : '缓存'} &middot; 模型 {st.modelMemoryMb} MB / 进程{' '}
               {st.processMemoryMb} MB
@@ -369,7 +418,7 @@ export function EmbeddingStatus({ http, onLog }: Props) {
           <div className={styles.errorBox}>
             <strong>最近错误:</strong> {st.stats.lastError.message}
             <br />
-            <span style={{ opacity: 0.7 }}>
+            <span className={styles.errorTimestamp}>
               {new Date(st.stats.lastError.timestamp).toLocaleString()}
             </span>
           </div>
@@ -419,7 +468,7 @@ export function EmbeddingStatus({ http, onLog }: Props) {
             </div>
             <div className={styles.statItem}>
               <span className={styles.statLabel}>最小 / 最大</span>
-              <span className={styles.statValue} style={{ fontSize: 14 }}>
+              <span className={`${styles.statValue} ${styles.statValueSmall}`}>
                 {formatNum(st.stats.minLatencyMs)} / {formatNum(st.stats.maxLatencyMs)}
                 <span className={styles.statUnit}>ms</span>
               </span>
@@ -433,9 +482,7 @@ export function EmbeddingStatus({ http, onLog }: Props) {
             </div>
             <div className={styles.statItem}>
               <span className={styles.statLabel}>运行时间</span>
-              <span className={styles.statValue} style={{ fontSize: 14 }}>
-                {uptimeStr}
-              </span>
+              <span className={`${styles.statValue} ${styles.statValueSmall}`}>{uptimeStr}</span>
             </div>
           </div>
         </div>
@@ -447,7 +494,7 @@ export function EmbeddingStatus({ http, onLog }: Props) {
           <Search size={16} />
           相似度测试
         </div>
-        <p className="form-hint" style={{ marginTop: 6, marginBottom: 10 }}>
+        <p className={`form-hint ${styles.formHintSpaced}`}>
           测试文本嵌入效果，可选填比较文本查看余弦相似度
         </p>
         <Form className="compact-form" gap={8} layout="vertical">
@@ -492,16 +539,13 @@ export function EmbeddingStatus({ http, onLog }: Props) {
           <Trash2 size={16} />
           危险操作
         </div>
-        <p className="form-hint" style={{ marginTop: 6, marginBottom: 10 }}>
+        <p className={`form-hint ${styles.formHintSpaced}`}>
           清空所有记忆数据，包括 SQLite 元数据和 LanceDB 向量索引。此操作不可逆。
         </p>
         <Button
           size="small"
           onClick={() => setClearModalOpen(true)}
-          style={{
-            color: 'var(--ant-color-error)',
-            borderColor: 'var(--ant-color-error-border)'
-          }}
+          className={styles.dangerButton}
         >
           清空记忆库
         </Button>
@@ -517,19 +561,19 @@ export function EmbeddingStatus({ http, onLog }: Props) {
         }}
         footer={null}
       >
-        <p style={{ marginBottom: 12, color: 'var(--ant-color-error)' }}>
+        <p className={styles.modalWarning}>
           此操作将永久删除所有记忆数据（包括所有 scope 下的记忆和向量索引），且不可恢复。
         </p>
-        <p style={{ marginBottom: 8 }}>
+        <p className={styles.modalHint}>
           请输入 <strong>DELETE ALL</strong> 确认：
         </p>
         <Input
           value={clearConfirmText}
           onChange={(e) => setClearConfirmText(e.target.value)}
           placeholder="DELETE ALL"
-          style={{ marginBottom: 12 }}
+          className={styles.modalInput}
         />
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <div className={styles.modalFooter}>
           <Button
             onClick={() => {
               setClearModalOpen(false)

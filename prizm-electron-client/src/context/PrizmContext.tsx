@@ -10,10 +10,17 @@ import {
   useEffect,
   type ReactNode
 } from 'react'
-import { PrizmClientManager, buildServerUrl, ONLINE_SCOPE } from '@prizm/client-core'
+import {
+  PrizmClientManager,
+  buildServerUrl,
+  ONLINE_SCOPE,
+  createClientLogger
+} from '@prizm/client-core'
 import type { PrizmConfig, NotificationPayload } from '@prizm/client-core'
 import { toast } from '@lobehub/ui'
 import { setLastSyncEvent, subscribeSyncEventStore } from '../events/syncEventStore'
+
+const log = createClientLogger('PrizmContext')
 
 export type ConnectionStatus = 'connected' | 'disconnected' | 'error' | 'connecting'
 
@@ -75,7 +82,8 @@ export function PrizmProvider({ children }: { children: ReactNode }) {
       const c = await window.prizm.loadConfig()
       setConfigState(c)
       return c
-    } catch {
+    } catch (err) {
+      log.error('Failed to load config:', err)
       return null
     }
   }, [])
@@ -83,7 +91,8 @@ export function PrizmProvider({ children }: { children: ReactNode }) {
   const saveConfig = useCallback(async (cfg: PrizmConfig): Promise<boolean> => {
     try {
       return await window.prizm.saveConfig(cfg)
-    } catch {
+    } catch (err) {
+      log.error('Failed to save config:', err)
       return false
     }
   }, [])
@@ -91,7 +100,8 @@ export function PrizmProvider({ children }: { children: ReactNode }) {
   const testConnection = useCallback(async (serverUrl: string): Promise<boolean> => {
     try {
       return await window.prizm.testConnection(serverUrl)
-    } catch {
+    } catch (err) {
+      log.warn('Connection test failed:', err)
       return false
     }
   }, [])
@@ -103,7 +113,8 @@ export function PrizmProvider({ children }: { children: ReactNode }) {
         const apiKey = await window.prizm.registerClient(serverUrl, clientName, scopes)
         if (apiKey) return apiKey
         throw new Error('注册失败')
-      } catch {
+      } catch (err) {
+        log.error('Client registration failed:', err)
         setStatus('error')
         return null
       }
@@ -120,7 +131,9 @@ export function PrizmProvider({ children }: { children: ReactNode }) {
       }
     ): Promise<void> => {
       try {
+        log.info('Initializing Prizm, host:', cfg.server.host, 'port:', cfg.server.port)
         if (managerRef.current) {
+          log.info('Disconnecting existing manager before re-init')
           managerRef.current.disconnect()
         }
 
@@ -187,6 +200,7 @@ export function PrizmProvider({ children }: { children: ReactNode }) {
         managerRef.current = m
         setTriggerUpdate({})
         await m.connect()
+        log.info('Prizm initialized and connected')
       } catch (error) {
         setStatus('error')
         opt.onLog(`初始化失败: ${String(error)}`, 'error')
@@ -197,6 +211,7 @@ export function PrizmProvider({ children }: { children: ReactNode }) {
   )
 
   const disconnect = useCallback(() => {
+    log.info('Disconnecting Prizm')
     managerRef.current?.disconnect()
     managerRef.current = null
     setTriggerUpdate({})

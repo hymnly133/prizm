@@ -4,7 +4,10 @@
  * drop 后通过 ImportService 开始导入流程
  * 过滤应用内部拖拽（如 FileTreeNode 的 @file: 引用）
  */
+import { createClientLogger } from '@prizm/client-core'
 import { memo, useState, useCallback, useEffect, useRef } from 'react'
+
+const log = createClientLogger('DropZone')
 import { AnimatePresence, motion } from 'motion/react'
 import { Download } from 'lucide-react'
 import { useImportContext } from '../../context/ImportContext'
@@ -75,7 +78,7 @@ const DropZoneOverlay = memo(() => {
               startImportFromFileResults(results)
             }
           } catch (err) {
-            console.error('[DropZone] readFiles failed:', err)
+            log.error('readFiles failed:', err)
           }
           return
         }
