@@ -122,6 +122,16 @@ export interface UpdateDocumentPayload {
 
 // ============ 文档版本 ============
 
+/** 版本变更者信息 */
+export interface VersionChangedBy {
+  /** 变更者类型：user=用户手动操作，agent=AI agent 工具调用 */
+  type: 'user' | 'agent'
+  /** Agent session ID（仅 type='agent' 时有值） */
+  sessionId?: string
+  /** 操作来源标识，如 'tool:prizm_update_document' / 'api:PATCH' / 'api:restore' */
+  apiSource?: string
+}
+
 /** 文档版本快照 */
 export interface DocumentVersion {
   /** 自增版本号 */
@@ -134,6 +144,10 @@ export interface DocumentVersion {
   contentHash: string
   /** 文档完整内容（仅单版本查询时返回，列表查询省略） */
   content?: string
+  /** 变更者信息 */
+  changedBy?: VersionChangedBy
+  /** 变更原因/说明 */
+  changeReason?: string
 }
 
 /** 单个文档的版本历史 */
@@ -141,6 +155,46 @@ export interface DocumentVersionHistory {
   documentId: string
   /** 版本列表，按 version 升序 */
   versions: DocumentVersion[]
+}
+
+// ============ 资源锁定 ============
+
+/** 可锁定的资源类型 */
+export type LockableResourceType = 'document' | 'todo_list'
+
+/** 资源锁状态（API 返回） */
+export interface ResourceLockInfo {
+  id: string
+  resourceType: LockableResourceType
+  resourceId: string
+  scope: string
+  sessionId: string
+  fenceToken: number
+  reason?: string
+  acquiredAt: number
+  lastHeartbeat: number
+  ttlMs: number
+  metadata?: string
+}
+
+// ============ Agent 审计 ============
+
+/** 审计日志条目（API 返回） */
+export interface AgentAuditEntryInfo {
+  id: string
+  scope: string
+  sessionId: string
+  toolName: string
+  action: string
+  resourceType: string
+  resourceId?: string
+  resourceTitle?: string
+  detail?: string
+  memoryType?: string
+  documentSubType?: string
+  result: string
+  errorMessage?: string
+  timestamp: number
 }
 
 // ============ Agent ============

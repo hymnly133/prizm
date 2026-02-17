@@ -31,7 +31,9 @@ export const EVENT_TYPES = [
   'file:moved',
   'terminal:created',
   'terminal:exited',
-  'terminal:killed'
+  'terminal:killed',
+  'resource:locked',
+  'resource:unlocked'
 ] as const
 
 export type EventType = (typeof EVENT_TYPES)[number]
@@ -57,7 +59,9 @@ export const EVENT_TYPES_OBJ = {
   FILE_MOVED: 'file:moved',
   TERMINAL_CREATED: 'terminal:created',
   TERMINAL_EXITED: 'terminal:exited',
-  TERMINAL_KILLED: 'terminal:killed'
+  TERMINAL_KILLED: 'terminal:killed',
+  RESOURCE_LOCKED: 'resource:locked',
+  RESOURCE_UNLOCKED: 'resource:unlocked'
 } as const satisfies Record<string, EventType>
 
 /** 服务端全部事件类型（用于 subscribeEvents: "all"） */
@@ -138,6 +142,14 @@ export interface FileEventPayload extends EventPayloadBase {
   isDir?: boolean
 }
 
+/** 资源锁事件载荷 */
+export interface ResourceLockEventPayload extends EventPayloadBase {
+  resourceType: 'document' | 'todo_list'
+  resourceId: string
+  sessionId?: string
+  reason?: string
+}
+
 /** 各事件类型对应的 payload 类型 */
 export interface EventPayloadMap {
   notification: NotificationPayload
@@ -160,6 +172,8 @@ export interface EventPayloadMap {
   'terminal:created': TerminalSession & EventPayloadBase
   'terminal:exited': { id: string; exitCode: number; signal?: number } & EventPayloadBase
   'terminal:killed': { id: string } & EventPayloadBase
+  'resource:locked': ResourceLockEventPayload
+  'resource:unlocked': ResourceLockEventPayload
 }
 
 /** 类型安全的 EventPushMessage，payload 与 eventType 对应 */
