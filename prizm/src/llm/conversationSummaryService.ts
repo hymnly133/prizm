@@ -8,7 +8,6 @@ import { scopeStore } from '../core/ScopeStore'
 import { getLLMProvider } from './index'
 import { createLogger } from '../logger'
 import { getConversationSummarySettings } from '../settings/agentToolsStore'
-import { MEMORY_USER_ID } from '@prizm/shared'
 import { recordTokenUsage } from './tokenUsage'
 
 const log = createLogger('ConversationSummary')
@@ -17,12 +16,7 @@ const log = createLogger('ConversationSummary')
  * 仅根据用户输入生成动宾短语摘要并覆盖写入会话的 llmSummary
  * 在用户发送消息时调用，与助手回复并行
  */
-export function scheduleTurnSummary(
-  scope: string,
-  sessionId: string,
-  userContent: string,
-  userId?: string
-): void {
+export function scheduleTurnSummary(scope: string, sessionId: string, userContent: string): void {
   const settings = getConversationSummarySettings()
   if (settings?.enabled === false) return
   if (!userContent.trim()) return
@@ -72,7 +66,7 @@ export function scheduleTurnSummary(
       log.error('Turn summary failed:', sessionId, 'scope:', scope, err)
     } finally {
       if (lastUsage) {
-        recordTokenUsage(MEMORY_USER_ID, 'conversation_summary', lastUsage, model)
+        recordTokenUsage('conversation_summary', scope, lastUsage, model, sessionId)
       }
     }
   })()

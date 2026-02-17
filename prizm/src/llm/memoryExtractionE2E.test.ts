@@ -1,6 +1,6 @@
 /**
  * E2E：使用真实默认模型（小米 MiMo，需 XIAOMIMIMO_API_KEY）+ 多种场景对话，
- * 检查提示词在各场景下是否都能抽到期望的维度（EPISODE / EVENT_LOG / FORESIGHT / PROFILE）。
+ * 检查提示词在各场景下是否都能抽到期望的维度（NARRATIVE / EVENT_LOG / FORESIGHT / PROFILE）。
  * 无 API Key 时整组跳过。
  */
 
@@ -16,8 +16,8 @@ type Round = { role: string; content: string; timestamp: string }
 type Scenario = {
   name: string
   rounds: Round[]
-  /** 该场景下期望至少抽到情景记忆 */
-  expectEpisode: boolean
+  /** 该场景下期望至少抽到叙事记忆 */
+  expectNarrative: boolean
   /** 该场景下期望至少抽到事件日志（原子事实） */
   expectEventLog: boolean
   /** 该场景下期望至少抽到前瞻 */
@@ -56,7 +56,7 @@ const scenarios: Scenario[] = [
         timestamp: '2025-02-15T09:04:00.000Z'
       }
     ],
-    expectEpisode: true,
+    expectNarrative: true,
     expectEventLog: true,
     expectForesight: true,
     expectProfile: true
@@ -80,7 +80,7 @@ const scenarios: Scenario[] = [
         timestamp: '2025-02-15T10:02:00.000Z'
       }
     ],
-    expectEpisode: true,
+    expectNarrative: true,
     expectEventLog: true,
     expectForesight: false,
     expectProfile: false
@@ -104,7 +104,7 @@ const scenarios: Scenario[] = [
         timestamp: '2025-02-15T11:02:00.000Z'
       }
     ],
-    expectEpisode: true,
+    expectNarrative: true,
     expectEventLog: false,
     expectForesight: false,
     expectProfile: true
@@ -128,7 +128,7 @@ const scenarios: Scenario[] = [
         timestamp: '2025-02-15T14:02:00.000Z'
       }
     ],
-    expectEpisode: true,
+    expectNarrative: true,
     expectEventLog: true,
     expectForesight: true,
     expectProfile: false
@@ -153,7 +153,7 @@ const scenarios: Scenario[] = [
         timestamp: '2025-02-15T15:02:00.000Z'
       }
     ],
-    expectEpisode: true,
+    expectNarrative: true,
     expectEventLog: true,
     expectForesight: true,
     expectProfile: true
@@ -172,7 +172,7 @@ const scenarios: Scenario[] = [
         timestamp: '2025-02-15T16:01:00.000Z'
       }
     ],
-    expectEpisode: true,
+    expectNarrative: true,
     expectEventLog: false,
     expectForesight: false,
     expectProfile: false
@@ -191,13 +191,13 @@ function buildMemCell(rounds: Round[], eventId: string): MemCell {
 }
 
 function assertResultShape(r: NonNullable<Awaited<ReturnType<UnifiedExtractor['extractAll']>>>) {
-  if (r.episode) {
-    expect(r.episode.content, 'EPISODE.CONTENT 应为非空字符串').toBeTruthy()
-    expect(typeof r.episode.content).toBe('string')
-    if (r.episode.summary) expect(typeof r.episode.summary).toBe('string')
-    if (r.episode.keywords) {
-      expect(Array.isArray(r.episode.keywords)).toBe(true)
-      r.episode.keywords.forEach((k) => expect(typeof k).toBe('string'))
+  if (r.narrative) {
+    expect(r.narrative.content, 'NARRATIVE.CONTENT 应为非空字符串').toBeTruthy()
+    expect(typeof r.narrative.content).toBe('string')
+    if (r.narrative.summary) expect(typeof r.narrative.summary).toBe('string')
+    if (r.narrative.keywords) {
+      expect(Array.isArray(r.narrative.keywords)).toBe(true)
+      r.narrative.keywords.forEach((k) => expect(typeof k).toBe('string'))
     }
   }
   if (r.event_log?.atomic_fact?.length) {
@@ -235,8 +235,11 @@ describe.skipIf(!hasMimoKey)('记忆抽取 E2E（小米 MiMo + 多场景对话�
 
       assertResultShape(r)
 
-      if (scenario.expectEpisode) {
-        expect(r.episode?.content, `[${scenario.name}] 期望抽到 EPISODE（情景记忆）`).toBeTruthy()
+      if (scenario.expectNarrative) {
+        expect(
+          r.narrative?.content,
+          `[${scenario.name}] 期望抽到 NARRATIVE（叙事记忆）`
+        ).toBeTruthy()
       }
       if (scenario.expectEventLog) {
         expect(
@@ -258,7 +261,7 @@ describe.skipIf(!hasMimoKey)('记忆抽取 E2E（小米 MiMo + 多场景对话�
       }
 
       expect(
-        r.episode?.content ||
+        r.narrative?.content ||
           r.event_log?.atomic_fact?.length ||
           r.foresight?.length ||
           r.profile?.user_profiles?.length,

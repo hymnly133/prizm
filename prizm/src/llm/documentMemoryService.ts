@@ -12,7 +12,6 @@
 import { scopeStore } from '../core/ScopeStore'
 import { createLogger } from '../logger'
 import { getDocumentMemorySettings } from '../settings/agentToolsStore'
-import { MEMORY_USER_ID } from '@prizm/shared'
 import {
   isMemoryEnabled,
   addDocumentToMemory,
@@ -117,7 +116,7 @@ export function scheduleDocumentMemory(scope: string, documentId: string): void 
       }
 
       // 5. 抽取新的 overview + fact（通过 addDocumentToMemory → UnifiedExtractor）
-      await addDocumentToMemory(MEMORY_USER_ID, scope, documentId)
+      await addDocumentToMemory(scope, documentId)
 
       // 6. 迁移记忆：若有旧版本且内容变化，抽取语义 diff
       const contentChanged = oldContentHash !== null && oldContentHash !== newContentHash
@@ -130,7 +129,6 @@ export function scheduleDocumentMemory(scope: string, documentId: string): void 
             const changes = await extractor.extractMigration(title, diff, oldOverview ?? undefined)
             if (changes.length > 0) {
               await addDocumentMigrationMemory(
-                MEMORY_USER_ID,
                 scope,
                 documentId,
                 title,
@@ -139,7 +137,7 @@ export function scheduleDocumentMemory(scope: string, documentId: string): void 
               )
             }
             if (migrationAdapter.lastUsage) {
-              recordTokenUsage(MEMORY_USER_ID, 'document_memory', migrationAdapter.lastUsage)
+              recordTokenUsage('memory:document_migration', scope, migrationAdapter.lastUsage)
             }
           }
         } catch (e) {

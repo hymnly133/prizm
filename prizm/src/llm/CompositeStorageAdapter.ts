@@ -2,8 +2,8 @@
  * 复合存储适配器 - 按 group_id 路由到用户级或 scope 级 DB
  *
  * 写入路由：
- *   PROFILE (group_id=null/undefined) -> userStorage
- *   其余 (scope/scope:docs/scope:session:x) -> scopeStorage
+ *   PROFILE (group_id="user") -> userStorage
+ *   其余 (scope/scope:session:x) -> scopeStorage
  *
  * 读取路由：
  *   能推断 group_id 时按 group_id 路由到对应 DB
@@ -15,19 +15,19 @@
  */
 
 import type { StorageAdapter, RelationalStoreAdapter, VectorStoreAdapter } from '@prizm/evermemos'
+import { USER_GROUP_ID } from '@prizm/evermemos'
 
 type DbTarget = 'user' | 'scope' | 'both'
 
 function targetFromGroupId(groupId: string | null | undefined): DbTarget {
-  if (groupId === null) return 'user'
+  if (groupId === USER_GROUP_ID) return 'user'
   if (groupId === undefined) return 'both'
-  if (groupId === '') return 'user'
   return 'scope'
 }
 
-/** 写入路由：undefined 视为 user（PROFILE 场景） */
+/** 写入路由：group_id="user" → userStorage，其余 → scopeStorage */
 function writeTargetFromGroupId(groupId: string | null | undefined): 'user' | 'scope' {
-  if (groupId === null || groupId === undefined || groupId === '') return 'user'
+  if (groupId === USER_GROUP_ID) return 'user'
   return 'scope'
 }
 
@@ -49,17 +49,13 @@ function pickVector(
 
 /**
  * 从 SQL + params 推断 group_id，用于 query 路由：
- * - SQL 含 group_id 且 params 非空 → 取第一个参数作为 group_id
- * - SQL 含 group_id IS NULL → 返回 null（User 层）
+ * - SQL 含 group_id 且 params 非空 → 取对应参数作为 group_id
  * - 其余 → 返回 undefined（无法推断，需查询两个 DB）
  */
 function inferGroupIdFromQuery(sql: string, params?: any[]): string | null | undefined {
   const lower = sql.toLowerCase()
   if (!lower.includes('group_id')) return undefined
-  if (lower.includes('group_id is null')) return null
   if (!params || params.length === 0) return undefined
-  // group_id 条件通常是 SQL 中第一个绑定参数的位置
-  // 根据 SQL 中 group_id 出现的位置推断对应 param index
   const groupIdIdx = countPlaceholdersBefore(lower, 'group_id')
   if (groupIdIdx < params.length) {
     const val = params[groupIdIdx]

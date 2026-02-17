@@ -26,22 +26,19 @@ describe('EverMemService (logic chain)', () => {
   describe('searchThreeLevelMemories', () => {
     it('calls retrieve with correct user_id and group_id for each layer and returns three segments', async () => {
       mockRetrieve.mockImplementation(async (req: { user_id?: string; group_id?: string }) => {
-        if (req.group_id === undefined) {
+        if (req.group_id === 'user') {
           return [{ id: 'p1', content: 'user profile', metadata: {}, type: 'profile', score: 0.9 }]
         }
         if (req.group_id === 'online') {
           return [
             {
               id: 'sc1',
-              content: 'scope episodic',
+              content: 'scope narrative',
               metadata: {},
-              type: 'episodic_memory',
+              type: 'narrative',
               score: 0.8
             }
           ]
-        }
-        if (req.group_id === 'online:docs') {
-          return []
         }
         if (req.group_id === 'online:session:sid1') {
           return [
@@ -57,7 +54,7 @@ describe('EverMemService (logic chain)', () => {
         return []
       })
 
-      const result = await searchThreeLevelMemories('query', 'user1', 'online', 'sid1')
+      const result = await searchThreeLevelMemories('query', 'online', 'sid1')
 
       expect(result).toHaveProperty('user')
       expect(result).toHaveProperty('scope')
@@ -72,7 +69,7 @@ describe('EverMemService (logic chain)', () => {
 
       expect(result.scope.length).toBeGreaterThanOrEqual(0)
       const scopeContent = result.scope.map((m) => m.memory)
-      expect(scopeContent.some((c) => c.includes('scope episodic'))).toBe(true)
+      expect(scopeContent.some((c) => c.includes('scope narrative'))).toBe(true)
 
       expect(result.session).toHaveLength(1)
       expect(result.session[0].memory).toBe('session event')
@@ -81,21 +78,21 @@ describe('EverMemService (logic chain)', () => {
       expect(mockRetrieve).toHaveBeenCalledWith(
         expect.objectContaining({
           query: 'query',
-          user_id: 'user1'
+          user_id: 'default'
         })
       )
     })
   })
 
   describe('searchUserMemories', () => {
-    it('calls retrieve with group_id undefined and memory_types Profile', async () => {
+    it('calls retrieve with group_id "user" and memory_types Profile', async () => {
       mockRetrieve.mockResolvedValue([])
-      await searchUserMemories('q', 'u1')
+      await searchUserMemories('q')
       expect(mockRetrieve).toHaveBeenCalledWith(
         expect.objectContaining({
           query: 'q',
-          user_id: 'u1',
-          group_id: undefined
+          user_id: 'default',
+          group_id: 'user'
         })
       )
       const call = mockRetrieve.mock.calls[0][0]
@@ -106,11 +103,11 @@ describe('EverMemService (logic chain)', () => {
   describe('searchSessionMemories', () => {
     it('calls retrieve with group_id scope:session:sessionId', async () => {
       mockRetrieve.mockResolvedValue([])
-      await searchSessionMemories('q', 'u1', 'online', 'sess-xyz')
+      await searchSessionMemories('q', 'online', 'sess-xyz')
       expect(mockRetrieve).toHaveBeenCalledWith(
         expect.objectContaining({
           query: 'q',
-          user_id: 'u1',
+          user_id: 'default',
           group_id: 'online:session:sess-xyz'
         })
       )
