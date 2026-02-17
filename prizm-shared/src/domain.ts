@@ -98,7 +98,7 @@ export interface Document {
   content?: string
   /** 可选标签 */
   tags?: string[]
-  /** LLM 生成的持久化摘要，用于 Agent 上下文 */
+  /** @deprecated 已替换为文档记忆系统（总览记忆），保留兼容存量数据 */
   llmSummary?: string
   /** 相对 scopeRoot 的路径（含文件名） */
   relativePath: string
@@ -118,7 +118,6 @@ export interface UpdateDocumentPayload {
   title?: string
   content?: string
   tags?: string[]
-  llmSummary?: string
 }
 
 // ============ Agent ============
@@ -151,18 +150,31 @@ export type MessagePart = { type: 'text'; content: string } | MessagePartTool
 export interface AgentMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
-  content: string
+  /** 有序段落数组（text + tool 交错排列）—— 唯一数据源 */
+  parts: MessagePart[]
   createdAt: number
   model?: string
-  toolCalls?: unknown[]
-  /** 按流式顺序的段落（文本 + 工具），存在时优先于 content+toolCalls 展示 */
-  parts?: MessagePart[]
   /** token 使用量，后端 LLM 返回时填充 */
   usage?: MessageUsage
   /** 思考链 / reasoning，支持 thinking 的模型流式输出 */
   reasoning?: string
-  /** 本轮对话的记忆增长（done 事件带回或懒加载） */
-  memoryGrowth?: RoundMemoryGrowth | null
+  /** 本轮记忆引用（解耦：仅存 ID，不嵌入内容） */
+  memoryRefs?: MemoryRefs | null
+}
+
+// ============ AgentMessage 工具函数 ============
+
+/** 从 parts 中拼接纯文本内容（替代旧 content 字段） */
+export function getTextContent(msg: Pick<AgentMessage, 'parts'>): string {
+  return msg.parts
+    .filter((p): p is { type: 'text'; content: string } => p.type === 'text')
+    .map((p) => p.content)
+    .join('')
+}
+
+/** 从 parts 中提取所有 tool 段落（替代旧 toolCalls 字段） */
+export function getToolCalls(msg: Pick<AgentMessage, 'parts'>): MessagePartTool[] {
+  return msg.parts.filter((p): p is MessagePartTool => p.type === 'tool')
 }
 
 export interface AgentSession {
@@ -314,16 +326,22 @@ export interface MemorySettings {
   model?: string
 }
 
-/** 单轮对话记忆增长（对话结束时返回，用于在消息旁展示标签） */
-export interface RoundMemoryGrowth {
-  /** 关联的 assistant 消息 ID */
-  messageId: string
-  /** 新增记忆总数 */
-  count: number
-  /** 按类型统计，如 { episodic_memory: 1, event_log: 3 } */
-  byType: Record<string, number>
-  /** 具体记忆列表（用于详情展示） */
-  memories: MemoryItem[]
+/** 按存储层分类的记忆 ID 集合（用于精确 DB 路由） */
+export interface MemoryIdsByLayer {
+  /** User DB 中的记忆 ID（Profile 等） */
+  user: string[]
+  /** Scope DB 中的记忆 ID（Episodic / Foresight / EventLog / Document） */
+  scope: string[]
+  /** Scope DB 中 Session 级别的记忆 ID */
+  session: string[]
+}
+
+/** 解耦的双向记忆引用（消息侧，仅存 ID + 层级路由） */
+export interface MemoryRefs {
+  /** 本轮注入到上下文的记忆 ID（消费端） */
+  injected: MemoryIdsByLayer
+  /** 本轮产生的新记忆 ID（产出端） */
+  created: MemoryIdsByLayer
 }
 
 /** 单条记忆项（API 返回结构） */
@@ -345,6 +363,10 @@ export interface MemoryItem {
   group_id?: string | null
   /** 记忆类型（列表接口返回） */
   memory_type?: string
+  /** 累计被注入到对话上下文的次数（引用索引） */
+  ref_count?: number
+  /** 最近一次被引用的时间 ISO（引用索引） */
+  last_ref_at?: string
 }
 
 // ============ Dedup Log ============
@@ -383,7 +405,8 @@ export interface DedupLogEntry {
 /** 功能 scope：区分不同功能消耗的 token（与数据 scope 无关） */
 export type TokenUsageScope =
   | 'chat' // 对话
-  | 'document_summary' // 文档摘要
+  | 'document_summary' // 文档摘要（兼容旧数据）
+  | 'document_memory' // 文档记忆（总览+事实+迁移）
   | 'conversation_summary' // 对话摘要
   | 'memory' // 记忆
 
