@@ -4,7 +4,7 @@
  * 支持停止生成、错误提示、会话重命名
  * 输入框使用 @lobehub/editor ChatInput，悬浮面板样式
  */
-import { ActionIcon, Empty, Flexbox, List, Markdown, Segmented, Tag } from '@lobehub/ui'
+import { ActionIcon, Empty, Flexbox, List, Markdown, Segmented } from '@lobehub/ui'
 import { ChatActionsBar as BaseChatActionsBar, ChatList, type ChatMessage } from '@lobehub/ui/chat'
 
 /** 过滤 createAt/updateAt 等非 DOM 属性，避免 React 警告 */
@@ -21,10 +21,8 @@ import {
   MessageSquare,
   Plus,
   Trash2,
-  X,
   Terminal as TerminalLucide
 } from 'lucide-react'
-import { FileTreePanel } from '../components/agent/FileTreePanel'
 import { useRef, useState, useMemo, useCallback, useEffect, memo } from 'react'
 import { usePrizmContext } from '../context/PrizmContext'
 import { useChatWithFile } from '../context/ChatWithFileContext'
@@ -34,289 +32,35 @@ import { useAgentScopeData } from '../hooks/useAgentScopeData'
 import { useScope } from '../hooks/useScope'
 import { usePendingInteractSessionIds } from '../events/agentBackgroundStore'
 import type { FileKind } from '../hooks/useFileList'
-import { MessageUsage } from '../components/MessageUsage'
 import { AgentRightSidebar } from '../components/AgentRightSidebar'
 import { ResizableSidebar } from '../components/layout'
 import {
   ChatInputProvider,
   DesktopChatInput,
   PendingChatPayloadApplicator,
-  useChatInputStore,
-  useChatInputStoreApi,
   type ActionKeys
 } from '../features/ChatInput'
 import type { AgentMessage, MessagePart, MessagePartTool } from '@prizm/client-core'
-import type { Document as PrizmDocument, TodoList } from '@prizm/client-core'
 import {
   ToolCallCard,
-  MemoryRefsTag,
   GrantPathProvider,
   InteractProvider
 } from '../components/agent'
 import type { GrantPathContextValue, InteractContextValue } from '../components/agent'
 import { AgentOverviewPanel } from '../components/agent/AgentOverviewPanel'
+import { AssistantMessageExtra } from '../components/agent/AssistantMessageExtra'
+import { FilePreviewPanel } from '../components/agent/FilePreviewPanel'
+import { FileTreePanel } from '../components/agent/FileTreePanel'
 import { TerminalSidebarTab } from '../components/agent/TerminalSidebarTab'
+import {
+  toChatMessage,
+  DRAFT_KEY_NEW,
+  draftCache,
+  setSkipNextDraftRestore,
+  DraftCacheManager
+} from '../components/agent/chatMessageAdapter'
 // 注册终端工具卡片渲染器（副作用导入）
 import '../components/agent/TerminalToolCards'
-
-/* ── 文件内嵌预览面板 ── */
-const KIND_LABELS: Record<FileKind, string> = {
-  note: '便签',
-  document: '文档',
-  todoList: '待办列表'
-}
-
-function FilePreviewPanel({
-  fileRef,
-  scope,
-  onClose
-}: {
-  fileRef: { kind: FileKind; id: string }
-  scope: string
-  onClose: () => void
-}) {
-  const { manager } = usePrizmContext()
-  const http = manager?.getHttpClient()
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [title, setTitle] = useState('')
-  const [content, setContent] = useState('')
-
-  useEffect(() => {
-    if (!http) return
-    setLoading(true)
-    setError(null)
-
-    const fetchFile = async () => {
-      try {
-        if (fileRef.kind === 'document' || fileRef.kind === 'note') {
-          const doc = await http.getDocument(fileRef.id, scope)
-          const titleStr = (doc as PrizmDocument).title
-          const contentStr = (doc as PrizmDocument).content ?? ''
-          setTitle(
-            fileRef.kind === 'note'
-              ? contentStr.split('\n')[0]?.trim() || '便签'
-              : titleStr || '无标题文档'
-          )
-          setContent(contentStr)
-        } else if (fileRef.kind === 'todoList') {
-          const list = await http.getTodoList(scope, fileRef.id)
-          if (list) {
-            setTitle((list as TodoList).title || '待办列表')
-            const items = (list as TodoList).items ?? []
-            const md = items
-              .map((it) => `- [${it.status === 'done' ? 'x' : ' '}] ${it.title}`)
-              .join('\n')
-            setContent(md || '(空列表)')
-          } else {
-            setError('未找到该待办列表')
-          }
-        }
-      } catch (e) {
-        setError(e instanceof Error ? e.message : '加载失败')
-      } finally {
-        setLoading(false)
-      }
-    }
-    void fetchFile()
-  }, [http, fileRef.kind, fileRef.id, scope])
-
-  return (
-    <div className="file-preview-panel">
-      <div className="file-preview-panel__header">
-        <Flexbox horizontal align="center" gap={8} flex={1} style={{ minWidth: 0 }}>
-          <Tag size="small">{KIND_LABELS[fileRef.kind]}</Tag>
-          <span className="file-preview-panel__title">{title || '加载中…'}</span>
-        </Flexbox>
-        <ActionIcon icon={X} size="small" title="关闭" onClick={onClose} />
-      </div>
-      <div className="file-preview-panel__body">
-        {loading ? (
-          <div style={{ padding: 24, textAlign: 'center', opacity: 0.5 }}>加载中…</div>
-        ) : error ? (
-          <div style={{ padding: 24, textAlign: 'center', color: 'var(--ant-color-error)' }}>
-            {error}
-          </div>
-        ) : (
-          <div className="md-preview-wrap">
-            <Markdown>{content || '(空)'}</Markdown>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-/** Draft cache key for new (unsaved) conversations */
-const DRAFT_KEY_NEW = '__new__'
-/** Module-level draft cache: sessionId → markdown content, survives session switches & page toggles */
-const _draftCache = new Map<string, string>()
-
-/**
- * When PendingChatPayloadApplicator sets content during a forceNew flow,
- * DraftCacheManager must NOT overwrite it when the session switches.
- * This flag is set in the pendingPayload handler and consumed by DraftCacheManager.
- */
-let _skipNextDraftRestore = false
-
-/**
- * Saves / restores draft per session (keyed by sessionId).
- * - On mount (or sessionId change): restores cached content
- * - On cleanup (unmount or before sessionId change): saves current content
- * Must be a child of ChatInputProvider.
- */
-function DraftCacheManager({ sessionId }: { sessionId: string }) {
-  const storeApi = useChatInputStoreApi()
-  const setMarkdownContent = useChatInputStore((s) => s.setMarkdownContent)
-
-  useEffect(() => {
-    if (_skipNextDraftRestore) {
-      _skipNextDraftRestore = false
-      return () => {
-        const content = storeApi.getState().markdownContent
-        if (content.trim()) {
-          _draftCache.set(sessionId, content)
-        } else {
-          _draftCache.delete(sessionId)
-        }
-      }
-    }
-
-    const cached = _draftCache.get(sessionId) ?? ''
-    setMarkdownContent(cached)
-
-    return () => {
-      const content = storeApi.getState().markdownContent
-      if (content.trim()) {
-        _draftCache.set(sessionId, content)
-      } else {
-        _draftCache.delete(sessionId)
-      }
-    }
-  }, [sessionId, storeApi, setMarkdownContent])
-
-  return null
-}
-
-/** 从消息得到按顺序的段落：有 parts 用 parts，否则用 content + toolCalls 推导（一段文本 + 工具在末尾） */
-function getMessageParts(m: AgentMessage): MessagePart[] {
-  if (Array.isArray(m.parts) && m.parts.length > 0) return m.parts
-  const toolCalls = Array.isArray(m.toolCalls) ? m.toolCalls : []
-  const list: MessagePart[] = []
-  if (m.content?.trim()) list.push({ type: 'text', content: m.content })
-  for (const tc of toolCalls) {
-    if (tc && typeof tc === 'object' && 'id' in tc && 'name' in tc) {
-      const t = tc as {
-        id: string
-        name: string
-        arguments?: string
-        result?: string
-        isError?: boolean
-        status?: 'preparing' | 'running' | 'done'
-      }
-      list.push({
-        type: 'tool',
-        id: t.id,
-        name: t.name,
-        arguments: t.arguments ?? '',
-        result: t.result ?? '',
-        ...(t.isError && { isError: true }),
-        ...(t.status && { status: t.status })
-      })
-    }
-  }
-  return list
-}
-
-/** 将 AgentMessage 转为 lobe-ui ChatMessage 格式 */
-function toChatMessage(m: AgentMessage & { streaming?: boolean }): ChatMessage {
-  const ts = m.createdAt
-  const title = m.role === 'user' ? '你' : m.role === 'system' ? '命令结果' : 'AI'
-  const avatar = m.role === 'user' ? '👤' : m.role === 'system' ? '⚡' : '🤖'
-  return {
-    id: m.id,
-    content: m.content,
-    role: m.role,
-    createAt: ts,
-    updateAt: ts,
-    meta: {
-      title,
-      avatar
-    },
-    extra: {
-      model: m.model,
-      usage: m.usage,
-      streaming: m.streaming,
-      reasoning: m.reasoning,
-      toolCalls: m.toolCalls,
-      parts: getMessageParts(m),
-      memoryRefs: m.memoryRefs,
-      messageId: m.id
-    }
-  }
-}
-
-/** 助手消息额外信息：思考过程 + MessageUsage + 记忆标签；工具已内联时不再底部汇总 */
-function AssistantMessageExtra(props: ChatMessage) {
-  const { manager } = usePrizmContext() ?? {}
-  const { currentScope } = useScope()
-  const extra = props.extra as
-    | {
-        model?: string
-        usage?: { totalTokens?: number; totalInputTokens?: number; totalOutputTokens?: number }
-        reasoning?: string
-        toolCalls?: Array<MessagePartTool & { id: string }>
-        parts?: MessagePart[]
-        memoryRefs?: import('@prizm/shared').MemoryRefs | null
-        messageId?: string
-      }
-    | undefined
-  const hasReasoning = !!extra?.reasoning?.trim()
-  const parts = extra?.parts
-  const hasInlineTools = Array.isArray(parts) && parts.some((p) => p.type === 'tool')
-  const toolCalls = Array.isArray(extra?.toolCalls) ? extra.toolCalls : []
-  const hasToolCalls = !hasInlineTools && toolCalls.length > 0
-  const http = manager?.getHttpClient()
-
-  const handleResolve = useCallback(
-    async (byLayer: import('@prizm/shared').MemoryIdsByLayer) => {
-      if (!http) return {}
-      return http.resolveMemoryIds(byLayer, currentScope)
-    },
-    [http, currentScope]
-  )
-
-  return (
-    <div className="assistant-message-extra">
-      {hasReasoning && (
-        <details className="reasoning-details">
-          <summary className="reasoning-summary">思考过程</summary>
-          <pre className="reasoning-content">{extra!.reasoning}</pre>
-        </details>
-      )}
-      {hasToolCalls && (
-        <details className="tool-calls-details">
-          <summary className="tool-calls-summary">工具调用 ({toolCalls.length})</summary>
-          <ul className="tool-calls-list">
-            {toolCalls.map((tc) => (
-              <li key={tc.id} className={`tool-call-item ${tc.isError ? 'error' : ''}`}>
-                <ToolCallCard tc={tc} />
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
-      <Flexbox horizontal align="center" gap={4} wrap="wrap">
-        <MessageUsage model={extra?.model} usage={extra?.usage} />
-        <MemoryRefsTag
-          memoryRefs={extra?.memoryRefs}
-          onResolve={handleResolve}
-          scope={currentScope}
-        />
-      </Flexbox>
-    </div>
-  )
-}
 
 function AgentPage() {
   const { currentScope } = useScope()
@@ -355,9 +99,9 @@ function AgentPage() {
     (content: string) => {
       const key = currentSession?.id ?? DRAFT_KEY_NEW
       if (content.trim()) {
-        _draftCache.set(key, content)
+        draftCache.set(key, content)
       } else {
-        _draftCache.delete(key)
+        draftCache.delete(key)
       }
     },
     [currentSession]
@@ -383,7 +127,7 @@ function AgentPage() {
     pendingHandledRef.current = key
     setOverviewMode(false)
     if (pendingPayload.forceNew) {
-      _skipNextDraftRestore = true
+      setSkipNextDraftRestore()
       setCurrentSession(null)
     } else if (pendingPayload.sessionId) {
       loadSession(pendingPayload.sessionId)
@@ -430,8 +174,8 @@ function AgentPage() {
           name: r.label
         }))
 
-      _draftCache.delete(DRAFT_KEY_NEW)
-      if (session) _draftCache.delete(session.id)
+      draftCache.delete(DRAFT_KEY_NEW)
+      if (session) draftCache.delete(session.id)
       clearContent()
       await sendMessage(combined, session, fileRefs.length > 0 ? fileRefs : undefined)
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -620,17 +364,7 @@ function AgentPage() {
                                           <Markdown>{p.content}</Markdown>
                                         </div>
                                       ) : (
-                                        <ToolCallCard
-                                          key={p.id}
-                                          tc={{
-                                            id: p.id,
-                                            name: p.name,
-                                            arguments: p.arguments,
-                                            result: p.result,
-                                            isError: p.isError,
-                                            status: (p as MessagePartTool).status
-                                          }}
-                                        />
+                                        <ToolCallCard key={p.id} tc={p as MessagePartTool} />
                                       )
                                     )}
                                   </div>

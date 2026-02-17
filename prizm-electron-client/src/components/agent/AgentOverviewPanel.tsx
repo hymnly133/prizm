@@ -104,12 +104,14 @@ export function AgentOverviewPanel({ selectedModel, onModelChange }: AgentOvervi
                 label="User 记忆"
                 value={memoryCountsLoading ? '...' : String(userMemoryCount)}
                 color="var(--ant-color-warning)"
+                description="画像/偏好"
               />
               <StatBlock
                 icon={<Sparkles size={18} />}
                 label="Scope 记忆"
                 value={memoryCountsLoading ? '...' : String(scopeMemoryCount)}
                 color="var(--ant-geekblue-6, #2f54eb)"
+                description="叙事/文档"
               />
             </div>
           </div>
@@ -163,12 +165,32 @@ export function AgentOverviewPanel({ selectedModel, onModelChange }: AgentOvervi
                   label="User"
                   count={userMemoryCount}
                   color="var(--ant-color-warning)"
+                  description="画像 / 偏好"
                 />
                 <MemoryTierBar
                   label="Scope"
                   count={scopeMemoryCount}
                   color="var(--ant-color-primary)"
+                  description="叙事 / 前瞻 / 文档记忆"
                 />
+                <div
+                  className="overview-memory-row"
+                  style={{
+                    borderTop: '1px solid var(--ant-color-border-secondary)',
+                    paddingTop: 4,
+                    marginTop: 4
+                  }}
+                >
+                  <span className="overview-memory-label" style={{ fontWeight: 500 }}>
+                    合计
+                  </span>
+                  <div className="overview-memory-bar-bg" style={{ visibility: 'hidden' }}>
+                    <div className="overview-memory-bar-fill" />
+                  </div>
+                  <span className="overview-memory-count" style={{ fontWeight: 600 }}>
+                    {userMemoryCount + scopeMemoryCount}
+                  </span>
+                </div>
               </div>
             ) : (
               <p className="overview-empty-text">暂无记忆或未启用</p>
@@ -293,12 +315,14 @@ function StatBlock({
   icon,
   label,
   value,
-  color
+  color,
+  description
 }: {
   icon: React.ReactNode
   label: string
   value: string
   color: string
+  description?: string
 }) {
   return (
     <div className="overview-stat-block">
@@ -308,18 +332,56 @@ function StatBlock({
       <div className="overview-stat-info">
         <span className="overview-stat-value">{value}</span>
         <span className="overview-stat-label">{label}</span>
+        {description && (
+          <span
+            style={{
+              fontSize: 10,
+              color: 'var(--ant-color-text-quaternary)',
+              lineHeight: 1,
+              marginTop: 1
+            }}
+          >
+            {description}
+          </span>
+        )}
       </div>
     </div>
   )
 }
 
-function MemoryTierBar({ label, count, color }: { label: string; count: number; color: string }) {
+function MemoryTierBar({
+  label,
+  count,
+  color,
+  description
+}: {
+  label: string
+  count: number
+  color: string
+  description?: string
+}) {
   const maxWidth = 100
   const barWidth = Math.min(count * 8, maxWidth)
 
   return (
     <div className="overview-memory-row">
-      <span className="overview-memory-label">{label}</span>
+      <span className="overview-memory-label" title={description}>
+        {label}
+        {description && (
+          <span
+            style={{
+              display: 'block',
+              fontSize: 10,
+              fontWeight: 'normal',
+              color: 'var(--ant-color-text-quaternary)',
+              lineHeight: 1.2,
+              marginTop: 1
+            }}
+          >
+            {description}
+          </span>
+        )}
+      </span>
       <div className="overview-memory-bar-bg">
         <div
           className="overview-memory-bar-fill"

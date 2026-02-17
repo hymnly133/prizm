@@ -23,6 +23,15 @@ import { createStyles } from 'antd-style'
 
 type SearchMethod = 'keyword' | 'vector' | 'hybrid' | 'rrf' | 'agentic'
 
+/** 可筛选的记忆类型 */
+const MEMORY_TYPE_OPTIONS = [
+  { value: 'narrative', label: '叙事记忆' },
+  { value: 'foresight', label: '前瞻记忆' },
+  { value: 'document', label: '文档记忆' },
+  { value: 'event_log', label: '事件日志' },
+  { value: 'profile', label: '用户画像' }
+]
+
 /** 记忆分区：与 MEMORY_SYSTEM 三层一致 */
 type MemoryPartition = 'user' | 'scope' | 'session'
 
@@ -32,9 +41,14 @@ const PARTITION_LABELS: Record<MemoryPartition, string> = {
   session: 'Session 层（本次会话原子事实）'
 }
 
-function getPartition(groupId: string | null | undefined, scope: string): MemoryPartition {
-  if (!groupId) return 'user'
-  if (groupId === scope || groupId === `${scope}:docs`) return 'scope'
+function getPartition(item: MemoryItemWithGroup, scope: string): MemoryPartition {
+  // 优先使用 memory_layer 字段（新格式）
+  if (item.memory_layer === 'user') return 'user'
+  if (item.memory_layer === 'scope') return 'scope'
+  if (item.memory_layer === 'session') return 'session'
+  // 向后兼容：基于 group_id 推断
+  const groupId = item.group_id
+  if (!groupId || groupId === 'user') return 'user'
   if (groupId.startsWith(`${scope}:session:`)) return 'session'
   return 'scope'
 }
@@ -50,7 +64,7 @@ function partitionMemories(
   const scopeList: MemoryItemWithGroup[] = []
   const session: MemoryItemWithGroup[] = []
   for (const m of memories) {
-    const p = getPartition(m.group_id ?? null, scope)
+    const p = getPartition(m, scope)
     if (p === 'user') user.push(m)
     else if (p === 'scope') scopeList.push(m)
     else session.push(m)
@@ -60,26 +74,40 @@ function partitionMemories(
 
 /** 统一记忆类型标签 */
 const MEMORY_TYPE_LABELS: Record<string, string> = {
-  episodic_memory: '情景记忆',
+  narrative: '叙事记忆',
   foresight: '前瞻记忆',
+  document: '文档记忆',
   event_log: '事件日志',
-  profile: '用户画像',
-  group_profile: '群组画像'
+  profile: '用户画像'
 }
 
 /** 记忆类型 → Tag 颜色 */
 const MEMORY_TYPE_COLORS: Record<string, string> = {
-  episodic_memory: 'blue',
+  narrative: 'blue',
   foresight: 'purple',
+  document: 'green',
   event_log: 'cyan',
-  profile: 'gold',
-  group_profile: 'orange'
+  profile: 'gold'
+}
+
+/** 文档子类型标签 */
+const DOC_SUB_TYPE_LABELS: Record<string, string> = {
+  overview: '总览',
+  fact: '事实',
+  migration: '变更'
+}
+
+/** 记忆来源标签 */
+const SOURCE_TYPE_LABELS: Record<string, string> = {
+  conversation: '对话',
+  document: '文档',
+  compression: '压缩',
+  manual: '手动'
 }
 
 /** User 层子类别：按 memory_type 细分 */
 const USER_SUBCAT_LABELS: Record<string, string> = {
-  profile: '用户画像',
-  group_profile: '群组画像'
+  profile: '用户画像'
 }
 
 function subdivideUser(
@@ -98,54 +126,59 @@ function subdivideUser(
   }))
 }
 
-/** Scope 层子类别：先按 group_id 分组（narrative / docs），再按 memory_type 细分 */
+/** Scope 层子类别：按 memory_type 分组，document 类型下按 sub_type 二级分组 */
 function subdivideScope(
   list: MemoryItemWithGroup[],
-  scope: string
+  _scope: string
 ): { key: string; label: string; list: MemoryItemWithGroup[] }[] {
-  const narrativeByType: Record<string, MemoryItemWithGroup[]> = {}
-  const docsByType: Record<string, MemoryItemWithGroup[]> = {}
+  const byType: Record<string, MemoryItemWithGroup[]> = {}
 
   for (const m of list) {
-    const isDoc = m.group_id === `${scope}:docs`
-    const type = m.memory_type || 'episodic_memory'
-    const target = isDoc ? docsByType : narrativeByType
-    if (!target[type]) target[type] = []
-    target[type].push(m)
+    const type = m.memory_type || 'narrative'
+    if (!byType[type]) byType[type] = []
+    byType[type].push(m)
   }
 
-  /** 文档记忆子类型标签 */
-  const DOC_TYPE_LABELS: Record<string, string> = {
-    episodic_memory: '文档总览',
-    event_log: '文档事实',
-    foresight: '文档前瞻'
-  }
+  /** 固定排序 */
+  const TYPE_ORDER = ['narrative', 'foresight', 'document', 'event_log']
 
-  /** 固定排序：情景 → 前瞻 → 事件日志 → 其它 */
-  const TYPE_ORDER = ['episodic_memory', 'foresight', 'event_log']
-
-  const sortedKeys = (obj: Record<string, MemoryItemWithGroup[]>) => {
-    const known = TYPE_ORDER.filter((t) => obj[t]?.length)
-    const rest = Object.keys(obj).filter((t) => !TYPE_ORDER.includes(t) && obj[t]?.length)
-    return [...known, ...rest]
-  }
+  const sortedKeys = Object.keys(byType).sort((a, b) => {
+    const ai = TYPE_ORDER.indexOf(a)
+    const bi = TYPE_ORDER.indexOf(b)
+    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi)
+  })
 
   const out: { key: string; label: string; list: MemoryItemWithGroup[] }[] = []
 
-  for (const type of sortedKeys(narrativeByType)) {
-    out.push({
-      key: `narrative:${type}`,
-      label: MEMORY_TYPE_LABELS[type] || type,
-      list: narrativeByType[type]
-    })
-  }
-
-  for (const type of sortedKeys(docsByType)) {
-    out.push({
-      key: `docs:${type}`,
-      label: DOC_TYPE_LABELS[type] || `文档${MEMORY_TYPE_LABELS[type] || type}`,
-      list: docsByType[type]
-    })
+  for (const type of sortedKeys) {
+    if (type === 'document') {
+      // 文档记忆按 sub_type 细分
+      const bySubType: Record<string, MemoryItemWithGroup[]> = {}
+      for (const m of byType[type]) {
+        const sub = (m as any).sub_type || 'overview'
+        if (!bySubType[sub]) bySubType[sub] = []
+        bySubType[sub].push(m)
+      }
+      const subOrder = ['overview', 'fact', 'migration']
+      const sortedSubs = Object.keys(bySubType).sort((a, b) => {
+        const ai = subOrder.indexOf(a)
+        const bi = subOrder.indexOf(b)
+        return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi)
+      })
+      for (const sub of sortedSubs) {
+        out.push({
+          key: `document:${sub}`,
+          label: `文档${DOC_SUB_TYPE_LABELS[sub] || sub}（${bySubType[sub].length}）`,
+          list: bySubType[sub]
+        })
+      }
+    } else {
+      out.push({
+        key: type,
+        label: MEMORY_TYPE_LABELS[type] || type,
+        list: byType[type]
+      })
+    }
   }
 
   return out
@@ -164,9 +197,17 @@ function subdivideSession(
     if (!bySession[sessionId]) bySession[sessionId] = []
     bySession[sessionId].push(m)
   }
-  return Object.entries(bySession).map(([sessionId, items]) => ({
+  const entries = Object.entries(bySession)
+  entries.sort((a, b) => {
+    const aTime = a[1][0]?.created_at ?? ''
+    const bTime = b[1][0]?.created_at ?? ''
+    return bTime.localeCompare(aTime)
+  })
+  return entries.map(([sessionId, items], idx) => ({
     key: sessionId,
-    label: `会话 ${sessionId}`,
+    label: `会话 #${entries.length - idx} (${
+      sessionId.length > 8 ? sessionId.slice(0, 8) + '…' : sessionId
+    }) · ${items.length} 条`,
     list: items
   }))
 }
@@ -377,6 +418,7 @@ export function MemoryInspector() {
   const [searchMethod, setSearchMethod] = useState<SearchMethod>('hybrid')
   const [searchLimit, setSearchLimit] = useState<number>(20)
   const [useRerank, setUseRerank] = useState(false)
+  const [filterTypes, setFilterTypes] = useState<string[]>([])
   const [dedupEntries, setDedupEntries] = useState<DedupLogEntry[]>([])
   const [dedupLoading, setDedupLoading] = useState(false)
   const [undoingId, setUndoingId] = useState<string | null>(null)
@@ -396,13 +438,19 @@ export function MemoryInspector() {
                 searchMemories(
                   query: string,
                   scope?: string,
-                  options?: { method?: SearchMethod; limit?: number; use_rerank?: boolean }
+                  options?: {
+                    method?: SearchMethod
+                    limit?: number
+                    use_rerank?: boolean
+                    memory_types?: string[]
+                  }
                 ): Promise<{ enabled: boolean; memories: MemoryItem[] }>
               }
             ).searchMemories(q, currentScope, {
               method: searchMethod,
               limit: searchLimit,
-              use_rerank: useRerank
+              use_rerank: useRerank,
+              memory_types: filterTypes.length > 0 ? filterTypes : undefined
             })
           : await http.getMemories(currentScope)
 
@@ -410,7 +458,14 @@ export function MemoryInspector() {
           setMemories([])
           if (open) message.warning('记忆模块未启用')
         } else {
-          setMemories(res.memories)
+          // 客户端侧按类型过滤（全量列表无服务端过滤时）
+          const filtered =
+            !q && filterTypes.length > 0
+              ? res.memories.filter(
+                  (m: MemoryItemWithGroup) => m.memory_type && filterTypes.includes(m.memory_type)
+                )
+              : res.memories
+          setMemories(filtered)
         }
       } catch (e) {
         if (open) message.error(String(e))
@@ -419,7 +474,7 @@ export function MemoryInspector() {
         setLoading(false)
       }
     },
-    [http, query, currentScope, open, searchMethod, searchLimit, useRerank]
+    [http, query, currentScope, open, searchMethod, searchLimit, useRerank, filterTypes]
   )
 
   const handleManualQuery = useCallback(() => {
@@ -583,6 +638,18 @@ export function MemoryInspector() {
                               >
                                 精排
                               </Checkbox>
+                              <span className={styles.advancedLabel}>类型</span>
+                              <Select
+                                size="small"
+                                mode="multiple"
+                                value={filterTypes}
+                                onChange={(v) => setFilterTypes(v)}
+                                style={{ minWidth: 160, flex: 1 }}
+                                placeholder="全部类型"
+                                allowClear
+                                maxTagCount={2}
+                                options={MEMORY_TYPE_OPTIONS}
+                              />
                             </div>
                           )
                         }
@@ -599,6 +666,7 @@ export function MemoryInspector() {
                       </div>
                     ) : (
                       (() => {
+                        const totalCount = memories.length
                         const {
                           user: userList,
                           scope: scopeList,
@@ -618,6 +686,19 @@ export function MemoryInspector() {
                                     {MEMORY_TYPE_LABELS[item.memory_type] ?? item.memory_type}
                                   </Tag>
                                 )}
+                                {(item as any).sub_type && (
+                                  <Tag bordered={false} color="lime">
+                                    {DOC_SUB_TYPE_LABELS[(item as any).sub_type] ??
+                                      (item as any).sub_type}
+                                  </Tag>
+                                )}
+                                {(item as any).source_type && (
+                                  <Tag bordered={false} style={{ fontSize: 11 }}>
+                                    来源:{' '}
+                                    {SOURCE_TYPE_LABELS[(item as any).source_type] ??
+                                      (item as any).source_type}
+                                  </Tag>
+                                )}
                                 <span title={item.created_at}>
                                   {item.created_at
                                     ? new Date(item.created_at).toLocaleString()
@@ -629,19 +710,31 @@ export function MemoryInspector() {
                                   </Tag>
                                 )}
                                 {item.ref_count != null && item.ref_count > 0 && (
-                                  <Tag bordered={false} color="geekblue">
-                                    引用: {item.ref_count}次
-                                  </Tag>
+                                  <Tooltip
+                                    title={
+                                      item.last_ref_at
+                                        ? `最近引用: ${new Date(item.last_ref_at).toLocaleString()}`
+                                        : undefined
+                                    }
+                                  >
+                                    <Tag
+                                      bordered={false}
+                                      color="geekblue"
+                                      style={{ cursor: item.last_ref_at ? 'help' : undefined }}
+                                    >
+                                      引用 {item.ref_count}次
+                                    </Tag>
+                                  </Tooltip>
                                 )}
-                                {item.last_ref_at && (
+                                {item.updated_at && item.updated_at !== item.created_at && (
                                   <span
-                                    title={`最近引用: ${item.last_ref_at}`}
+                                    title={`更新于: ${item.updated_at}`}
                                     style={{
                                       fontSize: 11,
                                       color: 'var(--ant-color-text-quaternary)'
                                     }}
                                   >
-                                    最近引用: {new Date(item.last_ref_at).toLocaleDateString()}
+                                    更新: {new Date(item.updated_at).toLocaleDateString()}
                                   </span>
                                 )}
                               </div>
@@ -728,13 +821,43 @@ export function MemoryInspector() {
                         ]
 
                         return (
-                          <Collapse
-                            defaultActiveKey={['user', 'scope', 'session']}
-                            ghost
-                            size="small"
-                            items={mainItems}
-                            className={styles.subCollapse}
-                          />
+                          <>
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 8,
+                                padding: '4px 8px',
+                                fontSize: 12,
+                                color: 'var(--ant-color-text-description)',
+                                flexShrink: 0
+                              }}
+                            >
+                              <span>共 {totalCount} 条记忆</span>
+                              {userList.length > 0 && (
+                                <Tag bordered={false} color="gold" style={{ fontSize: 11 }}>
+                                  User {userList.length}
+                                </Tag>
+                              )}
+                              {scopeList.length > 0 && (
+                                <Tag bordered={false} color="blue" style={{ fontSize: 11 }}>
+                                  Scope {scopeList.length}
+                                </Tag>
+                              )}
+                              {sessionList.length > 0 && (
+                                <Tag bordered={false} color="cyan" style={{ fontSize: 11 }}>
+                                  Session {sessionList.length}
+                                </Tag>
+                              )}
+                            </div>
+                            <Collapse
+                              defaultActiveKey={['user', 'scope', 'session']}
+                              ghost
+                              size="small"
+                              items={mainItems}
+                              className={styles.subCollapse}
+                            />
+                          </>
                         )
                       })()
                     )}

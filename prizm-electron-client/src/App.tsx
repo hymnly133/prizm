@@ -1,13 +1,23 @@
 import { ActionIcon, Icon, Segmented } from '@lobehub/ui'
-import { App as AntdApp } from 'antd'
+import { App as AntdApp, Modal } from 'antd'
 import type { NotificationPayload } from '@prizm/client-core'
 import type { LucideIcon } from 'lucide-react'
-import { Bot, FlaskConical, Gem, Home, LayoutDashboard, Settings, User } from 'lucide-react'
+import {
+  Bot,
+  BookOpen,
+  FlaskConical,
+  Gem,
+  Home,
+  LayoutDashboard,
+  Settings,
+  User
+} from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { ClientSettingsProvider } from './context/ClientSettingsContext'
 import { LogsProvider, useLogsContext } from './context/LogsContext'
 import { PrizmProvider, usePrizmContext, SyncEventProvider } from './context/PrizmContext'
 import { WorkNavigationProvider } from './context/WorkNavigationContext'
+import { DocumentNavigationProvider } from './context/DocumentNavigationContext'
 import { ChatWithFileProvider } from './context/ChatWithFileContext'
 import { ImportProvider } from './context/ImportContext'
 import DropZoneOverlay from './components/import/DropZoneOverlay'
@@ -26,8 +36,9 @@ import SettingsPage from './views/SettingsPage'
 import TestPage from './views/TestPage'
 import UserPage from './views/UserPage'
 import WorkPage from './views/WorkPage'
+import DocumentPage from './views/DocumentPage'
 
-type PageKey = 'home' | 'work' | 'agent' | 'user' | 'settings' | 'test'
+type PageKey = 'home' | 'work' | 'docs' | 'agent' | 'user' | 'settings' | 'test'
 
 const STATUS_LABELS: Record<'connected' | 'disconnected' | 'connecting' | 'error', string> = {
   connected: '已连接',
@@ -39,6 +50,7 @@ const STATUS_LABELS: Record<'connected' | 'disconnected' | 'connecting' | 'error
 const NAV_ITEMS: Array<{ key: PageKey; label: string; icon: LucideIcon }> = [
   { key: 'home', label: '主页', icon: Home },
   { key: 'work', label: '工作', icon: LayoutDashboard },
+  { key: 'docs', label: '知识库', icon: BookOpen },
   { key: 'agent', label: 'Agent', icon: Bot },
   { key: 'user', label: '用户', icon: User }
 ]
@@ -47,8 +59,30 @@ function AppContent() {
   const { status, loadConfig, initializePrizm, disconnect } = usePrizmContext()
   const { addLog } = useLogsContext()
   const [activePage, setActivePage] = useState<PageKey>('home')
-  const navigateToWork = useCallback(() => setActivePage('work'), [])
-  const navigateToAgent = useCallback(() => setActivePage('agent'), [])
+  /** 文档页 dirty 状态引用（由 DocumentPage 设置） */
+  const docDirtyRef = useRef(false)
+
+  /** 带离开保护的 setActivePage */
+  const setActivePageSafe = useCallback(
+    (next: PageKey) => {
+      if (activePage === 'docs' && docDirtyRef.current && next !== 'docs') {
+        Modal.confirm({
+          title: '未保存的更改',
+          content: '知识库中有未保存的更改，确定离开吗？',
+          okText: '离开',
+          cancelText: '继续编辑',
+          onOk: () => setActivePage(next)
+        })
+      } else {
+        setActivePage(next)
+      }
+    },
+    [activePage]
+  )
+
+  const navigateToWork = useCallback(() => setActivePageSafe('work'), [setActivePageSafe])
+  const navigateToDocs = useCallback(() => setActivePage('docs'), [])
+  const navigateToAgent = useCallback(() => setActivePageSafe('agent'), [setActivePageSafe])
   const agentSending = useAgentSending()
   const agentPendingInteract = useAgentPendingInteract()
   const firstPendingInteract = useFirstPendingInteract()
@@ -155,7 +189,7 @@ function AppContent() {
           <Segmented
             size="small"
             value={segmentedValue}
-            onChange={(v) => setActivePage(v as PageKey)}
+            onChange={(v) => setActivePageSafe(v as PageKey)}
             options={navOptions}
           />
         }
@@ -166,75 +200,84 @@ function AppContent() {
               size="small"
               title="设置"
               active={activePage === 'settings'}
-              onClick={() => setActivePage('settings')}
+              onClick={() => setActivePageSafe('settings')}
             />
             <ActionIcon
               icon={FlaskConical}
               size="small"
               title="测试"
               active={activePage === 'test'}
-              onClick={() => setActivePage('test')}
+              onClick={() => setActivePageSafe('test')}
             />
           </>
         }
       />
       <WorkNavigationProvider onNavigateToWork={navigateToWork}>
-        <ChatWithFileProvider onNavigateToAgent={navigateToAgent}>
-          <ImportProvider>
-            <DropZoneOverlay />
-            <ImportConfirmModal />
-            <QuickActionHandler setActivePage={setActivePage} />
-            {/* 所有页面始终挂载（keep-alive），通过 CSS display:none 隐藏非活跃页面 */}
-            <div className="app-main">
-              <div
-                className={`page-keep-alive${
-                  activePage !== 'home' ? ' page-keep-alive--hidden' : ''
-                }`}
-              >
-                <HomePage onNavigateToAgent={navigateToAgent} onNavigateToWork={navigateToWork} />
-              </div>
-              <div
-                className={`page-keep-alive${
-                  activePage !== 'work' ? ' page-keep-alive--hidden' : ''
-                }`}
-              >
-                <WorkPage />
-              </div>
-              <SyncEventProvider>
+        <DocumentNavigationProvider onNavigateToDocs={navigateToDocs}>
+          <ChatWithFileProvider onNavigateToAgent={navigateToAgent}>
+            <ImportProvider>
+              <DropZoneOverlay />
+              <ImportConfirmModal />
+              <QuickActionHandler setActivePage={setActivePage} />
+              {/* 所有页面始终挂载（keep-alive），通过 CSS display:none 隐藏非活跃页面 */}
+              <div className="app-main">
                 <div
                   className={`page-keep-alive${
-                    activePage !== 'agent' ? ' page-keep-alive--hidden' : ''
+                    activePage !== 'home' ? ' page-keep-alive--hidden' : ''
                   }`}
                 >
-                  <AgentPage />
+                  <HomePage onNavigateToAgent={navigateToAgent} onNavigateToWork={navigateToWork} />
                 </div>
-              </SyncEventProvider>
-              <div
-                className={`page-keep-alive${
-                  activePage !== 'user' ? ' page-keep-alive--hidden' : ''
-                }`}
-              >
-                <UserPage />
-              </div>
-              <div
-                className={`page-keep-alive${
-                  activePage !== 'settings' ? ' page-keep-alive--hidden' : ''
-                }`}
-              >
-                <SettingsPage />
-              </div>
-              <SyncEventProvider>
                 <div
                   className={`page-keep-alive${
-                    activePage !== 'test' ? ' page-keep-alive--hidden' : ''
+                    activePage !== 'work' ? ' page-keep-alive--hidden' : ''
                   }`}
                 >
-                  <TestPage />
+                  <WorkPage />
                 </div>
-              </SyncEventProvider>
-            </div>
-          </ImportProvider>
-        </ChatWithFileProvider>
+                <div
+                  className={`page-keep-alive${
+                    activePage !== 'docs' ? ' page-keep-alive--hidden' : ''
+                  }`}
+                >
+                  <DocumentPage dirtyRef={docDirtyRef} />
+                </div>
+                <SyncEventProvider>
+                  <div
+                    className={`page-keep-alive${
+                      activePage !== 'agent' ? ' page-keep-alive--hidden' : ''
+                    }`}
+                  >
+                    <AgentPage />
+                  </div>
+                </SyncEventProvider>
+                <div
+                  className={`page-keep-alive${
+                    activePage !== 'user' ? ' page-keep-alive--hidden' : ''
+                  }`}
+                >
+                  <UserPage />
+                </div>
+                <div
+                  className={`page-keep-alive${
+                    activePage !== 'settings' ? ' page-keep-alive--hidden' : ''
+                  }`}
+                >
+                  <SettingsPage />
+                </div>
+                <SyncEventProvider>
+                  <div
+                    className={`page-keep-alive${
+                      activePage !== 'test' ? ' page-keep-alive--hidden' : ''
+                    }`}
+                  >
+                    <TestPage />
+                  </div>
+                </SyncEventProvider>
+              </div>
+            </ImportProvider>
+          </ChatWithFileProvider>
+        </DocumentNavigationProvider>
       </WorkNavigationProvider>
     </div>
   )

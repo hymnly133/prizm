@@ -1,10 +1,10 @@
 /**
- * Token 使用可视化 - 按功能 scope 展示当前用户的 token 消耗
+ * Token 使用可视化 - 按功能类别展示 token 消耗
  */
 import { Coins, Loader2, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { usePrizmContext } from '../../context/PrizmContext'
-import type { TokenUsageRecord, TokenUsageScope } from '@prizm/client-core'
+import type { TokenUsageCategory } from '@prizm/client-core'
 import { createStyles } from 'antd-style'
 import { Button } from 'antd'
 
@@ -60,13 +60,29 @@ const useStyles = createStyles(({ css, token }) => ({
   `
 }))
 
-const SCOPE_LABELS: Record<TokenUsageScope, string> = {
+const CATEGORY_LABELS: Record<TokenUsageCategory, string> = {
   chat: '对话',
-  document_summary: '文档摘要',
-  document_memory: '文档记忆',
   conversation_summary: '对话摘要',
-  memory: '记忆'
+  'memory:conversation_extract': '记忆提取（对话）',
+  'memory:document_extract': '记忆提取（文档）',
+  'memory:document_migration': '文档迁移记忆',
+  'memory:dedup': '记忆去重',
+  'memory:profile_merge': '画像合并',
+  'memory:query_expansion': '查询扩展',
+  document_summary: '文档摘要'
 }
+
+const CATEGORY_ORDER: TokenUsageCategory[] = [
+  'chat',
+  'conversation_summary',
+  'memory:conversation_extract',
+  'memory:document_extract',
+  'memory:document_migration',
+  'memory:dedup',
+  'memory:profile_merge',
+  'memory:query_expansion',
+  'document_summary'
+]
 
 function formatToken(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -74,11 +90,19 @@ function formatToken(n: number): string {
   return String(n)
 }
 
+interface SummaryData {
+  totalInputTokens: number
+  totalOutputTokens: number
+  totalTokens: number
+  count: number
+  byCategory: Record<string, { input: number; output: number; total: number; count: number }>
+}
+
 export function TokenUsagePanel() {
   const { styles } = useStyles()
   const { manager } = usePrizmContext()
   const http = manager?.getHttpClient()
-  const [records, setRecords] = useState<TokenUsageRecord[]>([])
+  const [summary, setSummary] = useState<SummaryData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -87,10 +111,10 @@ export function TokenUsagePanel() {
     setLoading(true)
     setError(null)
     try {
-      const { records: list } = await http.getTokenUsage()
-      setRecords(list ?? [])
+      const result = await http.getTokenUsage()
+      setSummary(result.summary ?? null)
     } catch (e) {
-      setRecords([])
+      setSummary(null)
       setError(e instanceof Error ? e.message : '加载失败')
     } finally {
       setLoading(false)
@@ -101,25 +125,11 @@ export function TokenUsagePanel() {
     void load()
   }, [load])
 
-  const byScope = records.reduce((acc, r) => {
-    const scope = r.usageScope
-    if (!acc[scope]) acc[scope] = { input: 0, output: 0, total: 0, count: 0 }
-    acc[scope].input += r.inputTokens
-    acc[scope].output += r.outputTokens
-    acc[scope].total += r.totalTokens
-    acc[scope].count += 1
-    return acc
-  }, {} as Record<TokenUsageScope, { input: number; output: number; total: number; count: number }>)
-
-  const totalInput = records.reduce((s, r) => s + r.inputTokens, 0)
-  const totalOutput = records.reduce((s, r) => s + r.outputTokens, 0)
-  const totalAll = records.reduce((s, r) => s + r.totalTokens, 0)
-
   if (!http) {
     return <div className={styles.empty}>请先连接服务器</div>
   }
 
-  if (loading && records.length === 0) {
+  if (loading && !summary) {
     return (
       <div className={styles.loading}>
         <Loader2 size={14} className="spinning" />
@@ -128,15 +138,7 @@ export function TokenUsagePanel() {
     )
   }
 
-  const scopes: TokenUsageScope[] = [
-    'chat',
-    'document_summary',
-    'document_memory',
-    'conversation_summary',
-    'memory'
-  ]
-
-  if (records.length === 0 && !error) {
+  if (!summary && !error) {
     return <div className={styles.empty}>暂无 token 使用记录</div>
   }
 
@@ -150,7 +152,7 @@ export function TokenUsagePanel() {
           </Button>
         </div>
       )}
-      {records.length === 0 ? (
+      {!summary || summary.count === 0 ? (
         <div className={styles.empty}>暂无 token 使用记录</div>
       ) : (
         <>
@@ -165,14 +167,16 @@ export function TokenUsagePanel() {
               刷新
             </Button>
           </div>
-          {scopes.map(
-            (scope) =>
-              byScope[scope] && (
-                <div key={scope} className={styles.scopeRow}>
-                  <span className={styles.scopeLabel}>{SCOPE_LABELS[scope]}</span>
+          {CATEGORY_ORDER.map(
+            (cat) =>
+              summary.byCategory[cat] && (
+                <div key={cat} className={styles.scopeRow}>
+                  <span className={styles.scopeLabel}>{CATEGORY_LABELS[cat]}</span>
                   <span className={styles.scopeValue}>
-                    {formatToken(byScope[scope].total)} tokens
-                    {byScope[scope].count > 1 ? ` (${byScope[scope].count} 次)` : ''}
+                    {formatToken(summary.byCategory[cat].total)} tokens
+                    {summary.byCategory[cat].count > 1
+                      ? ` (${summary.byCategory[cat].count} 次)`
+                      : ''}
                   </span>
                 </div>
               )
@@ -183,8 +187,8 @@ export function TokenUsagePanel() {
               合计
             </span>
             <span className={styles.scopeValue}>
-              {formatToken(totalAll)} ({formatToken(totalInput)} in / {formatToken(totalOutput)}{' '}
-              out)
+              {formatToken(summary.totalTokens)} ({formatToken(summary.totalInputTokens)} in /{' '}
+              {formatToken(summary.totalOutputTokens)} out)
             </span>
           </div>
         </>

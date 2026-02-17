@@ -2,24 +2,13 @@
  * WorkPage - 工作页：中间大卡片展示便签/任务/文档，现代交互
  */
 import { useState, useMemo, useEffect, useRef, useCallback, memo } from 'react'
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import {
-  ActionIcon,
-  Button,
-  Checkbox,
-  Empty,
-  Flexbox,
-  Markdown,
-  Modal,
-  Skeleton,
-  toast
-} from '@lobehub/ui'
+import { useReducedMotion } from 'motion/react'
+import { Button, Flexbox, Markdown, Modal, toast } from '@lobehub/ui'
 import { App } from 'antd'
-import ScopeSidebar from '../components/ui/ScopeSidebar'
-import SearchSection from '../components/SearchSection'
 import FileDetailView from '../components/FileDetailView'
-import DataCard from '../components/DataCard'
-import { CardHoverOverlay, type HoveredCardState } from '../components/DataCardHoverMenu'
+import type { HoveredCardState } from '../components/DataCardHoverMenu'
+import WorkPageToolbar from '../components/WorkPageToolbar'
+import FileCardGrid from '../components/FileCardGrid'
 import { useScope } from '../hooks/useScope'
 import { useFileList, docToFileItem, todoToFileItem } from '../hooks/useFileList'
 import { usePrizmContext } from '../context/PrizmContext'
@@ -28,7 +17,6 @@ import { useWorkNavigation } from '../context/WorkNavigationContext'
 import type { FileKind, FileItem } from '../hooks/useFileList'
 import type { TodoItemStatus } from '@prizm/client-core'
 import type { SavePayload } from '../components/FileDetailView'
-import { FileText, FolderTree, Import, LayoutGrid, ListTodo } from 'lucide-react'
 import { getKindLabel, STATUS_LABELS } from '../constants/todo'
 import { WorkFolderView } from '../components/WorkFolderView'
 import { WorkspaceFoldersSection } from '../components/WorkspaceFoldersSection'
@@ -293,6 +281,18 @@ function WorkPage() {
     }
   }, [])
 
+  const handleCategoryFilterChange = useCallback((kind: FileKind, checked: boolean) => {
+    setCategoryFilter((f) => ({ ...f, [kind]: checked }))
+  }, [])
+
+  const handleCardMouseEnter = useCallback(
+    (file: FileItem, anchorRect: DOMRect, mouseY: number) => {
+      clearHoverHideTimeout()
+      setHoveredCard({ file, scope: currentScope, anchorRect, mouseY })
+    },
+    [currentScope, clearHoverHideTimeout]
+  )
+
   const handleFolderNodeClick = useCallback((node: TreeNode) => {
     if (node.prizmId && node.prizmType) {
       const kind: FileKind = node.prizmType === 'todo_list' ? 'todoList' : 'document'
@@ -356,186 +356,45 @@ function WorkPage() {
 
   return (
     <section className="work-page work-page--cards">
-      <div className="work-page__toolbar">
-        <div className="work-page__toolbar-left">
-          <div className="work-page__category-filter">
-            <Checkbox
-              checked={categoryFilter.todoList}
-              onChange={(checked) => setCategoryFilter((f) => ({ ...f, todoList: checked }))}
-            >
-              TODO
-            </Checkbox>
-            <Checkbox
-              checked={categoryFilter.document}
-              onChange={(checked) => setCategoryFilter((f) => ({ ...f, document: checked }))}
-            >
-              文件
-            </Checkbox>
-          </div>
-          <ScopeSidebar
-            scopes={scopes}
-            getScopeLabel={getScopeLabel}
-            scopesLoading={scopesLoading}
-            currentScope={currentScope}
-            onSelect={setScope}
-          />
-          <SearchSection
-            activeTab={activeTab}
-            scope={currentScope}
-            onActiveTabChange={setActiveTab}
-            onRefreshFiles={refreshScope}
-            onRefreshTasks={refreshScope}
-            onRefreshClipboard={() => {}}
-            onSelectFile={onSelectFile}
-          />
-        </div>
-        <div className="work-page__toolbar-actions">
-          <ActionIcon icon={ListTodo} title="新建待办" onClick={onAddTodo} size="large" />
-          <ActionIcon icon={FileText} title="新建文档" onClick={onAddDocument} size="large" />
-          <ActionIcon
-            icon={Import}
-            title="导入文件"
-            onClick={() => void startImportFromFileDialog()}
-            size="large"
-          />
-          <span className="work-page__toolbar-divider" />
-          <ActionIcon
-            icon={LayoutGrid}
-            title="平铺视图"
-            size="large"
-            className={viewMode === 'flat' ? 'work-page__view-toggle--active' : ''}
-            onClick={() => handleViewModeChange('flat')}
-          />
-          <ActionIcon
-            icon={FolderTree}
-            title="文件夹视图"
-            size="large"
-            className={viewMode === 'folder' ? 'work-page__view-toggle--active' : ''}
-            onClick={() => handleViewModeChange('folder')}
-          />
-        </div>
-      </div>
+      <WorkPageToolbar
+        categoryFilter={categoryFilter}
+        onCategoryFilterChange={handleCategoryFilterChange}
+        scopes={scopes}
+        getScopeLabel={getScopeLabel}
+        scopesLoading={scopesLoading}
+        currentScope={currentScope}
+        onScopeSelect={setScope}
+        activeTab={activeTab}
+        onActiveTabChange={setActiveTab}
+        onRefreshScope={refreshScope}
+        onSelectFile={onSelectFile}
+        onAddTodo={onAddTodo}
+        onAddDocument={onAddDocument}
+        onImport={() => void startImportFromFileDialog()}
+        viewMode={viewMode}
+        onViewModeChange={handleViewModeChange}
+      />
 
       <div className="work-page__content">
         {viewMode === 'flat' ? (
           <>
-            {fileListLoading ? (
-              <div className="work-page__cards-grid work-page__cards-grid--variable">
-                {[1, 2, 3, 4, 5, 6].map((i) => (
-                  <div key={i} className="work-page__card-item work-page__card-item--skeleton">
-                    <div className="data-card data-card--skeleton">
-                      <Skeleton active paragraph={{ rows: 4 }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : filteredFileList.length === 0 ? (
-              <div className="work-page__empty">
-                <Empty
-                  description={
-                    fileList.length === 0
-                      ? '暂无内容，创建文档或待办开始工作'
-                      : '没有符合条件的项，勾选上方类别筛选'
-                  }
-                  imageSize={80}
-                  action={
-                    fileList.length === 0 ? (
-                      <div className="work-page__empty-actions">
-                        <Button type="primary" onClick={onAddDocument}>
-                          新建文档
-                        </Button>
-                        <Button onClick={onAddTodo}>新建待办</Button>
-                      </div>
-                    ) : undefined
-                  }
-                />
-              </div>
-            ) : (
-              <CardHoverOverlay
-                hoveredCard={hoveredCard}
-                onClose={clearHoveredCard}
-                onMenuEnter={clearHoverHideTimeout}
-              >
-                <div className="work-page__cards-grid work-page__cards-grid--variable">
-                  <AnimatePresence initial={false}>
-                    {todoItems.map((file) => (
-                      <motion.div
-                        key={`${file.kind}-${file.id}`}
-                        className={`work-page__card-item work-page__card-item--${file.kind}`}
-                        variants={cardVariants}
-                        initial="enter"
-                        animate="animate"
-                        exit="exit"
-                        style={{ position: 'relative' }}
-                        onMouseEnter={(e) => {
-                          clearHoverHideTimeout()
-                          const rect = e.currentTarget.getBoundingClientRect()
-                          setHoveredCard({
-                            file,
-                            scope: currentScope,
-                            anchorRect: rect,
-                            mouseY: e.clientY
-                          })
-                        }}
-                        onMouseLeave={scheduleHoverHide}
-                      >
-                        <DataCard
-                          file={file}
-                          onClick={() => onSelectFile({ kind: file.kind, id: file.id })}
-                          onDelete={() => handleDeleteFile(file)}
-                        />
-                      </motion.div>
-                    ))}
-                  </AnimatePresence>
-                </div>
-
-                <AnimatePresence initial={false}>
-                  {todoItems.length > 0 && docItems.length > 0 && (
-                    <motion.div
-                      key="section-divider"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1, transition: { duration: 0.18 } }}
-                      exit={{ opacity: 0, transition: { duration: 0.2 } }}
-                    >
-                      <div className="work-page__section-divider" />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                <div className="work-page__cards-grid work-page__cards-grid--variable">
-                  <AnimatePresence initial={false}>
-                    {docItems.map((file) => (
-                      <motion.div
-                        key={`${file.kind}-${file.id}`}
-                        className={`work-page__card-item work-page__card-item--${file.kind}`}
-                        variants={cardVariants}
-                        initial="enter"
-                        animate="animate"
-                        exit="exit"
-                        style={{ position: 'relative' }}
-                        onMouseEnter={(e) => {
-                          clearHoverHideTimeout()
-                          const rect = e.currentTarget.getBoundingClientRect()
-                          setHoveredCard({
-                            file,
-                            scope: currentScope,
-                            anchorRect: rect,
-                            mouseY: e.clientY
-                          })
-                        }}
-                        onMouseLeave={scheduleHoverHide}
-                      >
-                        <DataCard
-                          file={file}
-                          onClick={() => onSelectFile({ kind: file.kind, id: file.id })}
-                          onDelete={() => handleDeleteFile(file)}
-                        />
-                      </motion.div>
-                    ))}
-                  </AnimatePresence>
-                </div>
-              </CardHoverOverlay>
-            )}
+            <FileCardGrid
+              loading={fileListLoading}
+              fileListLength={fileList.length}
+              todoItems={todoItems}
+              docItems={docItems}
+              currentScope={currentScope}
+              onSelectFile={onSelectFile}
+              onDeleteFile={handleDeleteFile}
+              hoveredCard={hoveredCard}
+              onCardMouseEnter={handleCardMouseEnter}
+              onCardMouseLeave={scheduleHoverHide}
+              onMenuEnter={clearHoverHideTimeout}
+              onCloseHover={clearHoveredCard}
+              cardVariants={cardVariants}
+              onAddDocument={onAddDocument}
+              onAddTodo={onAddTodo}
+            />
             <WorkspaceFoldersSection
               scope={currentScope}
               onNavigateToFolder={handleNavigateToFolder}

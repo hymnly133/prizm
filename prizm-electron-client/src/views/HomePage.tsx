@@ -9,7 +9,6 @@ import { SpotlightCard } from '@lobehub/ui/awesome'
 import {
   Brain,
   Clipboard,
-  Clock,
   FileText,
   Import,
   ListTodo,
@@ -23,8 +22,11 @@ import { useWorkNavigation } from '../context/WorkNavigationContext'
 import { useChatWithFile } from '../context/ChatWithFileContext'
 import { useImportContext } from '../context/ImportContext'
 import ScopeSidebar from '../components/ui/ScopeSidebar'
-import TodoItemRow from '../components/todo/TodoItemRow'
-import type { AgentSession, TodoList, Document as PrizmDocument } from '@prizm/client-core'
+import { formatRelativeTime } from '../utils/formatRelativeTime'
+import HomeStatsSection, { type StatItem } from './HomeStatsSection'
+import RecentSessionsSection from './RecentSessionsSection'
+import HomeTodoSection, { type TodoListGroup } from './HomeTodoSection'
+import type { TodoList, Document as PrizmDocument } from '@prizm/client-core'
 import type { FileItem } from '../hooks/useFileList'
 
 /* ── 动画常量 ── */
@@ -49,38 +51,11 @@ function getGreeting(): string {
   return '晚上好'
 }
 
-function formatRelativeTime(timestamp: number): string {
-  const diff = Date.now() - timestamp
-  const minutes = Math.floor(diff / 60000)
-  if (minutes < 1) return '刚刚'
-  if (minutes < 60) return `${minutes} 分钟前`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours} 小时前`
-  const days = Math.floor(hours / 24)
-  if (days < 30) return `${days} 天前`
-  return new Date(timestamp).toLocaleDateString()
-}
-
-function getSessionTitle(session: AgentSession): string {
-  if (session.llmSummary) return session.llmSummary.slice(0, 60)
-  const firstUserMsg = session.messages?.find((m) => m.role === 'user')
-  if (firstUserMsg) return firstUserMsg.content.slice(0, 60) || '新对话'
-  return '新对话'
-}
-
 function stripMarkdown(text: string): string {
   return text
     .replace(/[#*_~`>|[\]()!-]/g, '')
     .replace(/\n+/g, ' ')
     .trim()
-}
-
-/* ── 统计卡片数据类型 ── */
-interface StatItem {
-  icon: React.ReactNode
-  label: string
-  value: string
-  color: string
 }
 
 /* ── 主组件 ── */
@@ -102,10 +77,9 @@ function HomePage({
   }, [data.sessions])
 
   /* 待办列表：按列表分组，每个列表最多展示 4 项活跃待办，最多 3 个列表 */
-  const todoLists = useMemo(() => {
+  const todoLists = useMemo<TodoListGroup[]>(() => {
     const todoFiles = data.fileList.filter((f) => f.kind === 'todoList')
-    const lists: Array<{ list: TodoList; activeItems: import('@prizm/client-core').TodoItem[] }> =
-      []
+    const lists: TodoListGroup[] = []
     for (const file of todoFiles) {
       const list = file.raw as TodoList
       const activeItems = list.items
@@ -151,13 +125,15 @@ function HomePage({
         icon: <Brain size={20} />,
         label: 'User 记忆',
         value: data.statsLoading ? '...' : String(data.stats.userMemoryCount),
-        color: 'var(--ant-color-warning)'
+        color: 'var(--ant-color-warning)',
+        description: '画像 / 偏好'
       },
       {
         icon: <Sparkles size={20} />,
         label: 'Scope 记忆',
         value: data.statsLoading ? '...' : String(data.stats.scopeMemoryCount),
-        color: 'var(--ant-geekblue-6, #2f54eb)'
+        color: 'var(--ant-geekblue-6, #2f54eb)',
+        description: '叙事 / 文档'
       }
     ],
     [data.statsLoading, data.stats]
@@ -191,22 +167,6 @@ function HomePage({
       onNavigateToWork()
     },
     [openFileAtWork, onNavigateToWork]
-  )
-
-  /* SpotlightCard renderItem 回调 */
-  const renderStatItem = useCallback(
-    (item: StatItem) => (
-      <div className="home-stat-card">
-        <div className="home-stat-card__icon" style={{ color: item.color }}>
-          {item.icon}
-        </div>
-        <div className="home-stat-card__info">
-          <span className="home-stat-card__value">{item.value}</span>
-          <span className="home-stat-card__label">{item.label}</span>
-        </div>
-      </div>
-    ),
-    []
   )
 
   const renderDocItem = useCallback(
@@ -302,122 +262,24 @@ function HomePage({
         </motion.div>
 
         {/* ── 工作区统计 (SpotlightCard) ── */}
-        <motion.div {...fadeUp(sectionIdx++)}>
-          <div className="home-section-header">
-            <Icon icon={Sparkles} size="small" />
-            <span className="home-section-title">工作区概览</span>
-          </div>
-          <SpotlightCard
-            items={statItems}
-            renderItem={renderStatItem}
-            columns={4}
-            gap="12px"
-            size={400}
-            borderRadius={12}
-            className="home-spotlight-stats"
-          />
-        </motion.div>
+        <HomeStatsSection items={statItems} animationIndex={sectionIdx++} />
 
         {/* ── 主内容网格 ── */}
         <div className="home-grid">
-          {/* ── 最近对话 ── */}
-          <motion.div className="home-card home-card--sessions" {...fadeUp(sectionIdx++)}>
-            <div className="home-card__header">
-              <Icon icon={MessageSquare} size="small" />
-              <span className="home-card__title">最近对话</span>
-              <Tag size="small">{data.stats.sessionsCount}</Tag>
-            </div>
-            <div className="home-card__body">
-              {data.sessionsLoading ? (
-                <div className="home-loading-placeholder">加载中...</div>
-              ) : recentSessions.length === 0 ? (
-                <div className="home-empty-state">
-                  <Text type="secondary">暂无对话</Text>
-                  <Button size="small" type="primary" onClick={handleNewChat}>
-                    开始第一个对话
-                  </Button>
-                </div>
-              ) : (
-                <div className="home-session-list">
-                  {/* 新建对话入口 */}
-                  <div
-                    className="home-session-item home-session-item--new"
-                    role="button"
-                    tabIndex={0}
-                    onClick={handleNewChat}
-                    onKeyDown={(e) => e.key === 'Enter' && handleNewChat()}
-                  >
-                    <div className="home-session-item__icon home-session-item__icon--new">
-                      <Plus size={18} />
-                    </div>
-                    <div className="home-session-item__content">
-                      <span className="home-session-item__title">新建对话</span>
-                      <span className="home-session-item__meta">开始一段新的 AI 对话</span>
-                    </div>
-                  </div>
-                  {recentSessions.map((session) => (
-                    <SessionItem
-                      key={session.id}
-                      session={session}
-                      onClick={() => handleOpenSession(session.id)}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </motion.div>
-
-          {/* ── 待办列表（按列表分组） ── */}
-          <motion.div className="home-card home-card--todos" {...fadeUp(sectionIdx++)}>
-            <div className="home-card__header">
-              <Icon icon={ListTodo} size="small" />
-              <span className="home-card__title">待办列表</span>
-            </div>
-            <div className="home-card__body">
-              {data.fileListLoading ? (
-                <div className="home-loading-placeholder">加载中...</div>
-              ) : todoLists.length === 0 ? (
-                <div className="home-empty-state">
-                  <Text type="secondary">没有活跃的待办列表</Text>
-                </div>
-              ) : (
-                <div className="home-todolist-groups">
-                  {todoLists.map(({ list, activeItems }) => (
-                    <div
-                      key={list.id}
-                      className="home-todolist-group"
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => handleOpenTodoList(list.id)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleOpenTodoList(list.id)}
-                    >
-                      <div className="home-todolist-group__header">
-                        <ListTodo size={14} />
-                        <span className="home-todolist-group__title">{list.title || '待办'}</span>
-                        <Tag size="small">
-                          {activeItems.length}/{list.items.length}
-                        </Tag>
-                      </div>
-                      <div className="home-todolist-group__items">
-                        {activeItems.map((item) => (
-                          <TodoItemRow key={item.id} item={item} compact />
-                        ))}
-                        {list.items.filter((i) => i.status === 'todo' || i.status === 'doing')
-                          .length > 4 && (
-                          <span className="home-todolist-group__more">
-                            还有{' '}
-                            {list.items.filter((i) => i.status === 'todo' || i.status === 'doing')
-                              .length - 4}{' '}
-                            项...
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </motion.div>
+          <RecentSessionsSection
+            sessions={recentSessions}
+            sessionsLoading={data.sessionsLoading}
+            sessionsCount={data.stats.sessionsCount}
+            onNewChat={handleNewChat}
+            onOpenSession={handleOpenSession}
+            animationIndex={sectionIdx++}
+          />
+          <HomeTodoSection
+            todoLists={todoLists}
+            loading={data.fileListLoading}
+            onOpenTodoList={handleOpenTodoList}
+            animationIndex={sectionIdx++}
+          />
         </div>
 
         {/* ── 最近文档 (SpotlightCard) ── */}
@@ -469,40 +331,5 @@ function HomePage({
     </div>
   )
 }
-
-/* ── 子组件 ── */
-
-const SessionItem = memo(function SessionItem({
-  session,
-  onClick
-}: {
-  session: AgentSession
-  onClick: () => void
-}) {
-  const title = getSessionTitle(session)
-  const msgCount = session.messages?.length ?? 0
-
-  return (
-    <div
-      className="home-session-item"
-      role="button"
-      tabIndex={0}
-      onClick={onClick}
-      onKeyDown={(e) => e.key === 'Enter' && onClick()}
-    >
-      <div className="home-session-item__icon">
-        <MessageSquare size={16} />
-      </div>
-      <div className="home-session-item__content">
-        <span className="home-session-item__title">{title}</span>
-        <span className="home-session-item__meta">
-          <Clock size={11} />
-          {formatRelativeTime(session.updatedAt)}
-          {msgCount > 0 && <span> · {msgCount} 条消息</span>}
-        </span>
-      </div>
-    </div>
-  )
-})
 
 export default memo(HomePage)

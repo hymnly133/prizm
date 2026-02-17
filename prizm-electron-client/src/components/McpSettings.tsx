@@ -6,7 +6,6 @@ import {
   ActionIcon,
   Alert,
   Button,
-  Checkbox,
   Flexbox,
   Form,
   Icon,
@@ -17,12 +16,13 @@ import {
   toast
 } from '@lobehub/ui'
 import { Select } from './ui/Select'
-import type { McpServerConfig, TavilySettings } from '@prizm/client-core'
+import type { McpServerConfig } from '@prizm/client-core'
 import { createStaticStyles } from 'antd-style'
-import { ClipboardPaste, Edit, FileText, Globe, Link, Plus, Terminal, Trash2 } from 'lucide-react'
+import { ClipboardPaste, Edit, Link, Plus, Terminal, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import type { PrizmClient } from '@prizm/client-core'
 import { parseMcpJson, ParseMcpErrorCode, type ParseMcpSuccessResult } from '../utils/parseMcpJson'
+import { BuiltinToolsSettings } from './BuiltinToolsSettings'
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   connectionForm: css`
@@ -108,121 +108,6 @@ const TRANSPORT_OPTIONS: { label: string; value: McpServerConfig['transport'] }[
   { label: 'SSE', value: 'sse' },
   { label: 'Stdio', value: 'stdio' }
 ]
-
-const TAVILY_SEARCH_DEPTH_OPTIONS = [
-  { label: 'basic', value: 'basic' },
-  { label: 'advanced', value: 'advanced' },
-  { label: 'fast', value: 'fast' },
-  { label: 'ultra-fast', value: 'ultra-fast' }
-]
-
-function BuiltinToolsSection({
-  http,
-  onLog
-}: {
-  http: PrizmClient | null
-  onLog?: (msg: string, type: 'info' | 'success' | 'error' | 'warning') => void
-}) {
-  const [tavily, setTavily] = useState<Partial<TavilySettings> | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [apiKeyInput, setApiKeyInput] = useState('')
-
-  const load = useCallback(async () => {
-    if (!http) return
-    setLoading(true)
-    try {
-      const data = await http.getAgentTools()
-      setTavily(data.builtin?.tavily ?? null)
-      setApiKeyInput('')
-    } catch (e) {
-      onLog?.(`加载内置工具配置失败: ${e}`, 'error')
-    } finally {
-      setLoading(false)
-    }
-  }, [http, onLog])
-
-  useEffect(() => {
-    void load()
-  }, [load])
-
-  async function handleSave() {
-    if (!http) return
-    setSaving(true)
-    try {
-      await http.updateTavilySettings({
-        ...tavily,
-        ...(apiKeyInput.trim() && { apiKey: apiKeyInput.trim() })
-      })
-      toast.success('Tavily 配置已保存')
-      setApiKeyInput('')
-      void load()
-    } catch (e) {
-      toast.error(String(e))
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  if (loading) return <Text type="secondary">加载中...</Text>
-
-  return (
-    <div className={styles.serverCard} style={{ marginTop: 12 }}>
-      <div className={styles.sectionTitle}>
-        <Globe size={16} />
-        Tavily 联网搜索
-      </div>
-      <p className="form-hint" style={{ marginTop: 6, marginBottom: 10 }}>
-        为 Agent 提供实时联网搜索能力，需在{' '}
-        <a href="https://tavily.com" target="_blank" rel="noreferrer">
-          tavily.com
-        </a>{' '}
-        获取 API Key
-      </p>
-      <Form className="compact-form" gap={8} layout="vertical">
-        <Form.Item label="API Key">
-          <Input
-            type="password"
-            placeholder={tavily?.configured ? '已配置，留空不修改' : 'tvly-xxx'}
-            value={apiKeyInput}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setApiKeyInput(e.target.value)}
-          />
-        </Form.Item>
-        <Form.Item label="启用">
-          <Checkbox
-            checked={tavily?.enabled !== false}
-            onChange={(checked: boolean) => setTavily((t) => ({ ...t, enabled: checked }))}
-          />
-        </Form.Item>
-        <Form.Item label="最大结果数" extra="1-20，默认 5">
-          <Input
-            type="number"
-            min={1}
-            max={20}
-            value={tavily?.maxResults ?? 5}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-              setTavily((t) => ({ ...t, maxResults: parseInt(e.target.value, 10) || 5 }))
-            }
-          />
-        </Form.Item>
-        <Form.Item label="搜索深度">
-          <Select
-            options={TAVILY_SEARCH_DEPTH_OPTIONS}
-            value={tavily?.searchDepth ?? 'basic'}
-            onChange={(v) =>
-              setTavily((t) => ({ ...t, searchDepth: v as TavilySettings['searchDepth'] }))
-            }
-          />
-        </Form.Item>
-        <Form.Item>
-          <Button onClick={() => void handleSave()} type="primary" loading={saving}>
-            保存 Tavily 配置
-          </Button>
-        </Form.Item>
-      </Form>
-    </div>
-  )
-}
 
 export function McpSettings({ http, onLog }: McpSettingsProps) {
   const [servers, setServers] = useState<McpServerConfig[]>([])
@@ -434,7 +319,7 @@ export function McpSettings({ http, onLog }: McpSettingsProps) {
         </p>
       </div>
 
-      <BuiltinToolsSection http={http} onLog={onLog} />
+      <BuiltinToolsSettings http={http} onLog={onLog} />
 
       <Flexbox gap={12} style={{ marginTop: 16 }}>
         <div className={styles.sectionTitle}>

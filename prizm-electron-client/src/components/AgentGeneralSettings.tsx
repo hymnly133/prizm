@@ -136,21 +136,6 @@ export function AgentGeneralSettings({ http, onLog }: AgentGeneralSettingsProps)
             />
             <span style={{ marginLeft: 8 }}>启用</span>
           </Form.Item>
-          <Form.Item label="文档摘要模型" extra="超长文档异步生成摘要">
-            <Select
-              options={modelOptions}
-              value={agent.documentSummary?.model ?? ''}
-              onChange={(v) =>
-                setAgent((a) => ({
-                  ...a,
-                  documentSummary: {
-                    ...a.documentSummary,
-                    model: v || undefined
-                  }
-                }))
-              }
-            />
-          </Form.Item>
           <Form.Item label="文档摘要最小长度" extra="字符数超过此值才触发，默认 500">
             <Input
               type="number"
