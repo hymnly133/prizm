@@ -25,6 +25,7 @@ export type {
   MessagePart,
   MessagePartTool,
   MessageUsage,
+  ToolCallStatus,
   NotificationPayload,
   ClientInfo,
   ScopeDescription,
@@ -40,6 +41,8 @@ export type {
   PingMessage
 } from '@prizm/shared'
 
+export { getTextContent, getToolCalls } from '@prizm/shared'
+
 export {
   DEFAULT_SCOPE,
   ONLINE_SCOPE,
@@ -50,7 +53,8 @@ export {
 export type { EventType } from '@prizm/shared'
 export type {
   MemoryItem,
-  RoundMemoryGrowth,
+  MemoryIdsByLayer,
+  MemoryRefs,
   TokenUsageRecord,
   TokenUsageScope,
   DedupLogEntry
@@ -142,19 +146,8 @@ export type WebSocketEventHandler<T extends WebSocketEventType> = (
 
 // ============ Agent 流式对话（仅 client-core） ============
 
-/** 工具调用状态：preparing=参数填写中 running=执行中 awaiting_interact=等待用户交互 done=已完成 */
-export type ToolCallStatus = 'preparing' | 'running' | 'awaiting_interact' | 'done'
-
-/** 工具调用记录（SSE tool_call 事件） */
-export interface ToolCallRecord {
-  id: string
-  name: string
-  arguments: string
-  result: string
-  isError?: boolean
-  /** 调用状态，默认 'done' 向后兼容 */
-  status?: ToolCallStatus
-}
+/** 工具调用记录（SSE tool_call 事件）—— 统一使用 @prizm/shared 的 MessagePartTool */
+export type ToolCallRecord = import('@prizm/shared').MessagePartTool
 
 /** Scope 交互记录（从工具调用解析） */
 export interface ScopeInteraction {
@@ -196,7 +189,7 @@ export interface StreamChatChunk {
   type: string
   value?:
     | string
-    | ToolCallRecord
+    | import('@prizm/shared').MessagePartTool
     | ToolResultChunkValue
     | MemoryInjectedPayload
     | InteractRequestPayload
@@ -206,8 +199,8 @@ export interface StreamChatChunk {
   stopped?: boolean
   /** 服务端生成的 assistant 消息 ID，用于替换客户端 tmpId */
   messageId?: string
-  /** 本轮对话的记忆增长（done 时带回） */
-  memoryGrowth?: import('@prizm/shared').RoundMemoryGrowth | null
+  /** 本轮记忆引用（done 时带回，仅存 ID） */
+  memoryRefs?: import('@prizm/shared').MemoryRefs | null
 }
 
 export interface StreamChatOptions {
@@ -244,20 +237,12 @@ export interface SessionTokenSummary {
   >
 }
 
-/** 会话记忆创建聚合 */
+/** 会话记忆引用聚合 */
 export interface SessionMemorySummary {
   /** 本会话创建的记忆总数 */
   totalCount: number
-  /** 按记忆类型统计 */
-  byType: Record<string, number>
-  /** 具体记忆列表 */
-  memories: Array<{
-    id: string
-    memory: string
-    memory_type?: string
-    /** 关联的 assistant 消息 ID */
-    messageId: string
-  }>
+  /** 按层分类的记忆 ID */
+  ids: { user: string[]; scope: string[]; session: string[] }
 }
 
 /** GET /agent/sessions/:id/stats 返回结构 */
@@ -266,6 +251,8 @@ export interface SessionStats {
   scope: string
   tokenUsage: SessionTokenSummary
   memoryCreated: SessionMemorySummary
+  /** 本会话累计注入到上下文的记忆次数 */
+  memoryInjectedTotal: number
 }
 
 // ============ 统一搜索结果（仅 client-core） ============

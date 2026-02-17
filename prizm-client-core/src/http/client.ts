@@ -1099,15 +1099,19 @@ export class PrizmClient {
     )
   }
 
-  /** 获取某轮对话的记忆增长（按 assistant 消息 ID，用于历史消息懒加载） */
-  async getRoundMemories(
-    messageId: string,
+  /** 按层精确解析记忆 ID → MemoryItem（用于懒加载记忆详情） */
+  async resolveMemoryIds(
+    byLayer: import('@prizm/shared').MemoryIdsByLayer,
     scope?: string
-  ): Promise<import('@prizm/shared').RoundMemoryGrowth | null> {
-    return this.request<import('@prizm/shared').RoundMemoryGrowth | null>(
-      `/agent/memories/round/${encodeURIComponent(messageId)}`,
-      { method: 'GET', scope }
-    )
+  ): Promise<Record<string, import('@prizm/shared').MemoryItem | null>> {
+    const res = await this.request<{
+      memories: Record<string, import('@prizm/shared').MemoryItem | null>
+    }>('/agent/memories/resolve', {
+      method: 'POST',
+      scope,
+      body: JSON.stringify({ byLayer })
+    })
+    return res.memories
   }
 
   /** 获取去重日志列表 */
@@ -1490,6 +1494,41 @@ export class PrizmClient {
     const apiKeyParam = this.apiKey ? `?apiKey=${encodeURIComponent(this.apiKey)}` : ''
     return `${wsUrl}/ws/terminal${apiKeyParam}`
   }
+
+  // ==================== Embedding ====================
+
+  /** 获取本地 embedding 模型的完整状态和统计信息 */
+  async getEmbeddingStatus(): Promise<EmbeddingStatus> {
+    return this.request<EmbeddingStatus>('/embedding/status')
+  }
+
+  /** 测试文本嵌入，可选比较两段文本的相似度 */
+  async testEmbedding(text: string, compareWith?: string): Promise<EmbeddingTestResult> {
+    return this.request<EmbeddingTestResult>('/embedding/test', {
+      method: 'POST',
+      body: JSON.stringify({ text, compareWith })
+    })
+  }
+
+  /** 热重载 embedding 模型，可选切换量化级别 */
+  async reloadEmbedding(dtype?: string): Promise<EmbeddingReloadResult> {
+    return this.request<EmbeddingReloadResult>('/embedding/reload', {
+      method: 'POST',
+      body: dtype ? JSON.stringify({ dtype }) : undefined
+    })
+  }
+
+  /** 清空所有记忆（需要 confirm token 确认） */
+  async clearAllMemories(
+    confirmToken: string,
+    scope?: string
+  ): Promise<{ deleted: number; vectorsCleared: boolean }> {
+    return this.request('/agent/memories/clear-all', {
+      method: 'POST',
+      scope,
+      body: JSON.stringify({ confirm: confirmToken })
+    })
+  }
 }
 
 export interface McpServerConfig {
@@ -1519,11 +1558,10 @@ export interface TavilySettings {
   configured?: boolean
 }
 
-/** 文档摘要设置 */
+/** 文档记忆设置（原 DocumentSummarySettings） */
 export interface DocumentSummarySettings {
   enabled?: boolean
   minLen?: number
-  model?: string
 }
 
 /** 对话摘要设置 */
@@ -1629,4 +1667,58 @@ export interface AvailableModel {
   id: string
   label: string
   provider: string
+}
+
+// ==================== Embedding 类型 ====================
+
+/** Embedding 推理统计 */
+export interface EmbeddingStats {
+  totalCalls: number
+  totalErrors: number
+  totalCharsProcessed: number
+  avgLatencyMs: number
+  p95LatencyMs: number
+  minLatencyMs: number
+  maxLatencyMs: number
+  lastError: { message: string; timestamp: number } | null
+  modelLoadTimeMs: number
+}
+
+/** Embedding 模型完整状态 */
+export interface EmbeddingStatus {
+  state: 'idle' | 'loading' | 'ready' | 'error' | 'disposing'
+  modelName: string
+  dimension: number
+  enabled: boolean
+  dtype: string
+  /** 模型加载来源：'bundled' | 'cache' | 'download' */
+  source: string
+  stats: EmbeddingStats
+  cacheDir: string
+  /** 模型专属内存估算（加载前后堆差值），单位 MB */
+  modelMemoryMb: number
+  /** Node.js 进程 RSS，单位 MB */
+  processMemoryMb: number
+  upSinceMs: number | null
+}
+
+/** Embedding 测试结果 */
+export interface EmbeddingTestResult {
+  dimension: number
+  latencyMs: number
+  vectorPreview: number[]
+  vectorFull?: number[]
+  similarity?: number
+  compareLatencyMs?: number
+}
+
+/** Embedding 重载结果 */
+export interface EmbeddingReloadResult {
+  message: string
+  previousState: string
+  currentState: string
+  modelName: string
+  dimension: number
+  dtype: string
+  loadTimeMs: number
 }
