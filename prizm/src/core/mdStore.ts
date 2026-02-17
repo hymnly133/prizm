@@ -401,6 +401,7 @@ function parseDocument(
     title,
     content: content || undefined,
     tags: tagList.length ? tagList : undefined,
+    /** @deprecated 兼容读取存量数据，新文档不再写入此字段 */
     llmSummary: typeof d.llmSummary === 'string' ? d.llmSummary : undefined,
     relativePath,
     createdAt: (d.createdAt as number) ?? 0,
@@ -432,6 +433,7 @@ export function writeDocuments(scopeRoot: string, docs: Document[]): void {
       id: d.id,
       title: d.title,
       ...(d.tags?.length && { tags: d.tags }),
+      // @deprecated llmSummary: 兼容回写存量数据，新文档不再产生此字段
       ...(d.llmSummary != null && { llmSummary: d.llmSummary }),
       createdAt: d.createdAt,
       updatedAt: d.updatedAt
@@ -477,6 +479,7 @@ export function writeSingleDocument(scopeRoot: string, doc: Document): string {
     id: doc.id,
     title: doc.title,
     ...(doc.tags?.length && { tags: doc.tags }),
+    // @deprecated llmSummary: 兼容回写存量数据，新文档不再产生此字段
     ...(doc.llmSummary != null && { llmSummary: doc.llmSummary }),
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt
@@ -837,33 +840,53 @@ function parseAgentMessage(raw: unknown): AgentMessage | null {
   const role = (
     r.role === 'user' || r.role === 'assistant' || r.role === 'system' ? r.role : 'user'
   ) as AgentMessage['role']
-  const content = typeof r.content === 'string' ? r.content : ''
   const createdAt = (r.createdAt as number) ?? 0
   if (!id) return null
-  let parts: AgentMessage['parts']
+
+  // parts 为唯一数据源：优先读 parts，否则从旧格式 content+toolCalls 合成
+  let parts: MessagePart[] = []
   if (Array.isArray(r.parts) && r.parts.length > 0) {
     const parsed = r.parts
       .map(parseMessagePart)
       .filter((x): x is NonNullable<typeof x> => x !== null)
     if (parsed.length > 0) parts = parsed
   }
-  const res: AgentMessage = {
+  if (parts.length === 0) {
+    // 向后兼容：从旧 content + toolCalls 合成 parts
+    const content = typeof r.content === 'string' ? r.content : ''
+    if (content.trim()) {
+      parts.push({ type: 'text', content })
+    }
+    if (Array.isArray(r.toolCalls)) {
+      for (const tc of r.toolCalls) {
+        if (tc && typeof tc === 'object' && 'id' in tc && 'name' in tc) {
+          const t = tc as Record<string, unknown>
+          parts.push({
+            type: 'tool',
+            id: String(t.id ?? ''),
+            name: String(t.name ?? ''),
+            arguments: typeof t.arguments === 'string' ? t.arguments : JSON.stringify(t.arguments ?? {}),
+            result: typeof t.result === 'string' ? t.result : '',
+            ...(t.isError === true && { isError: true }),
+            ...(typeof t.status === 'string' && { status: t.status as 'preparing' | 'running' | 'awaiting_interact' | 'done' })
+          })
+        }
+      }
+    }
+  }
+
+  return {
     id,
     role,
-    content,
+    parts,
     createdAt,
     ...(typeof r.model === 'string' ? { model: r.model } : {}),
-    ...(Array.isArray(r.toolCalls) ? { toolCalls: r.toolCalls } : {}),
     ...(r.usage && typeof r.usage === 'object' ? { usage: r.usage as AgentMessage['usage'] } : {}),
     ...(typeof r.reasoning === 'string' ? { reasoning: r.reasoning } : {}),
-    ...(r.memoryGrowth && typeof r.memoryGrowth === 'object'
-      ? { memoryGrowth: r.memoryGrowth as AgentMessage['memoryGrowth'] }
+    ...(r.memoryRefs && typeof r.memoryRefs === 'object'
+      ? { memoryRefs: r.memoryRefs as AgentMessage['memoryRefs'] }
       : {})
   }
-  if (parts) {
-    res.parts = parts
-  }
-  return res
 }
 
 function parseAgentSession(
@@ -981,14 +1004,12 @@ export function writeAgentSessions(
       messages: s.messages.map((m) => ({
         id: m.id,
         role: m.role,
-        content: m.content,
+        parts: m.parts,
         createdAt: m.createdAt,
         ...(m.model && { model: m.model }),
-        ...(m.toolCalls?.length && { toolCalls: m.toolCalls }),
         ...(m.usage && { usage: m.usage }),
         ...(m.reasoning && { reasoning: m.reasoning }),
-        ...(m.parts && m.parts.length > 0 && { parts: m.parts }),
-        ...(m.memoryGrowth && { memoryGrowth: m.memoryGrowth })
+        ...(m.memoryRefs && { memoryRefs: m.memoryRefs })
       }))
     }
     writeMd(sessionFilePath, frontmatter, '')

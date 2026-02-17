@@ -14,6 +14,7 @@ import {
 } from '@prizm/evermemos'
 import Database from 'better-sqlite3'
 import fs from 'fs'
+import { randomUUID } from 'node:crypto'
 import { MEMORY_USER_ID } from '@prizm/shared'
 import { createLogger } from '../logger'
 import {
@@ -32,7 +33,7 @@ import { createCompositeStorageAdapter } from './CompositeStorageAdapter'
 import { getLLMProvider } from '../llm/index'
 import { CompletionRequest, ICompletionProvider } from '@prizm/evermemos'
 import { recordTokenUsage } from './tokenUsage'
-import type { MemoryItem, RoundMemoryGrowth } from '@prizm/shared'
+import type { MemoryItem, MemoryIdsByLayer } from '@prizm/shared'
 import type { DedupLogEntry } from '@prizm/evermemos'
 
 const log = createLogger('EverMemService')
@@ -55,6 +56,9 @@ const _scopeManagers = new Map<string, ScopeManagerSet>()
 
 /** 当前请求的 token 记录用 userId，由 addMemoryInteraction 设置 */
 let _tokenUserId: string | null = null
+
+/** 当前请求的 token 使用分类，默认 'memory'，文档记忆场景为 'document_memory' */
+let _tokenUsageScope: 'memory' | 'document_memory' = 'memory'
 
 /** 仅测试用：注入后所有 retrieval（含 scope）均使用此 mock */
 let _testRetrievalOverride: RetrievalManager | null = null
@@ -88,7 +92,7 @@ class PrizmLLMAdapter implements ICompletionProvider {
       if (_tokenUserId) {
         recordTokenUsage(
           _tokenUserId,
-          'memory',
+          _tokenUsageScope,
           usage ?? { totalInputTokens: 0, totalOutputTokens: 0, totalTokens: 0 },
           model,
           !usage
@@ -98,7 +102,7 @@ class PrizmLLMAdapter implements ICompletionProvider {
       throw err
     } finally {
       if (usage && _tokenUserId && !recordedInCatch) {
-        recordTokenUsage(_tokenUserId, 'memory', usage, model)
+        recordTokenUsage(_tokenUserId, _tokenUsageScope, usage, model)
       }
     }
 
@@ -106,7 +110,7 @@ class PrizmLLMAdapter implements ICompletionProvider {
   }
 
   async getEmbedding(text: string): Promise<number[]> {
-    // 优先使用本地 embedding provider（如 bge-small-zh-v1.5）
+    // 优先使用本地 embedding provider
     if (_localEmbeddingProvider) {
       return _localEmbeddingProvider(text)
     }
@@ -118,16 +122,19 @@ class PrizmLLMAdapter implements ICompletionProvider {
       return resp[0]
     }
 
-    // 回退：mock embedding（仅用于向量表占位，实际去重依赖 jieba 文本相似度）
+    // 无可用 embedding provider：返回空数组。
+    // MemoryManager 检查 embedding?.length，空数组会跳过向量插入。
+    // 文本去重（jieba Dice 系数）仍然有效。
+    // 当本地模型稍后就绪时，向量迁移任务会自动补全。
     if (!_mockEmbeddingWarned) {
-      console.warn(
-        '[EverMemService] No embedding provider available, using mock embedding. ' +
-          'Text-based dedup (jieba) will still work. ' +
-          'Set PRIZM_LOCAL_EMBEDDING=1 to enable local embedding model.'
+      log.warn(
+        'No embedding provider available — memories will be saved without vectors. ' +
+          'Vector search will be unavailable until the local embedding model is ready. ' +
+          'Text-based dedup (jieba) still works.'
       )
       _mockEmbeddingWarned = true
     }
-    return new Array(384).fill(0.01)
+    return []
   }
 }
 
@@ -290,6 +297,14 @@ function runTokenUsageMigration(): void {
 export async function initEverMemService() {
   ensureMemoryDir()
 
+  // 初始化本地 embedding 模型（在 EverMemService 初始化前，以便注册 provider）
+  try {
+    const { localEmbedding } = await import('./localEmbedding')
+    await localEmbedding.init()
+  } catch (e) {
+    log.warn('Local embedding init failed — memories will be saved without vectors:', e)
+  }
+
   // 启动时执行 user_id 统一迁移
   runMemoryUserIdMigration()
   runTokenUsageMigration()
@@ -312,11 +327,101 @@ export async function initEverMemService() {
   })
   const queryExpansionProvider = new DefaultQueryExpansionProvider(llmProvider)
   const userRetrieval = new RetrievalManager(userStorage, llmProvider, {
-    queryExpansionProvider
+    queryExpansionProvider,
+    agenticCompletionProvider: llmProvider
   })
 
   _userManagers = { memory: userMemory, retrieval: userRetrieval }
   log.info('EverMemService initialized (user-level)')
+
+  // 当本地 embedding 模型就绪后，自动补全无向量的记忆
+  scheduleVectorBackfill()
+}
+
+// ==================== 向量迁移（Backfill） ====================
+
+let _backfillRunning = false
+
+/**
+ * 安排向量补全任务。
+ * 等待本地 embedding 就绪后，扫描所有无向量记忆并逐条补全。
+ */
+function scheduleVectorBackfill(): void {
+  // 延迟 5 秒启动，让服务端完成初始化
+  setTimeout(() => void runVectorBackfill(), 5_000)
+}
+
+/** 执行向量补全。可被热重载或外部事件触发。 */
+export async function runVectorBackfill(): Promise<void> {
+  if (_backfillRunning) return
+  if (!_localEmbeddingProvider) {
+    log.info('[VectorBackfill] No local embedding provider available, skipping')
+    return
+  }
+
+  _backfillRunning = true
+  log.info('[VectorBackfill] Starting vector backfill scan...')
+
+  const embeddingProvider = new PrizmLLMAdapter()
+  let totalBackfilled = 0
+  let totalFailed = 0
+
+  try {
+    // 补全 user-level 记忆（LanceDB add 是幂等的，重复写入不会报错）
+    const userManagers = getUserManagers()
+    const userAll = await userManagers.memory.listAllMemories(MEMORY_USER_ID)
+    if (userAll.length > 0) {
+      log.info(`[VectorBackfill] Scanning ${userAll.length} user memories for vector backfill`)
+      for (const mem of userAll) {
+        const ok = await userManagers.memory.backfillVector(
+          mem.id,
+          mem.type,
+          mem.content,
+          mem.user_id,
+          mem.group_id,
+          embeddingProvider
+        )
+        if (ok) totalBackfilled++
+        else totalFailed++
+      }
+    }
+
+    // 补全所有已初始化 scope 的记忆
+    for (const [scopeId, managers] of _scopeManagers) {
+      try {
+        const scopeAll = await managers.scopeOnlyMemory.listAllMemories(MEMORY_USER_ID)
+        if (scopeAll.length > 0) {
+          log.info(
+            `[VectorBackfill] Scanning ${scopeAll.length} scope[${scopeId}] memories for vector backfill`
+          )
+          for (const mem of scopeAll) {
+            const ok = await managers.scopeOnlyMemory.backfillVector(
+              mem.id,
+              mem.type,
+              mem.content,
+              mem.user_id,
+              mem.group_id,
+              embeddingProvider
+            )
+            if (ok) totalBackfilled++
+            else totalFailed++
+          }
+        }
+      } catch (e) {
+        log.warn(`[VectorBackfill] Failed to backfill scope "${scopeId}":`, e)
+      }
+    }
+  } catch (e) {
+    log.error('[VectorBackfill] Backfill error:', e)
+  } finally {
+    _backfillRunning = false
+  }
+
+  if (totalBackfilled > 0 || totalFailed > 0) {
+    log.info(`[VectorBackfill] Complete: ${totalBackfilled} backfilled, ${totalFailed} failed`)
+  } else {
+    log.info('[VectorBackfill] No memories need vector backfill')
+  }
 }
 
 function getUserManagers(): { memory: MemoryManager; retrieval: RetrievalManager } {
@@ -379,7 +484,8 @@ function getScopeManagers(scope: string): ScopeManagerSet {
 
   const queryExpansionProvider = new DefaultQueryExpansionProvider(llmProvider)
   const retrieval = new RetrievalManager(scopeStorage, llmProvider, {
-    queryExpansionProvider
+    queryExpansionProvider,
+    agenticCompletionProvider: llmProvider
   })
 
   m = { memory, scopeOnlyMemory, retrieval }
@@ -427,14 +533,83 @@ export function setRetrievalManagerForTest(manager: RetrievalManager | null): vo
   }
 }
 
+// ==================== P2: MemCell 边界检测（消息累积缓冲区） ====================
+
+/** 边界检测硬限制 */
+const BOUNDARY_HARD_TOKEN_LIMIT = 4096
+const BOUNDARY_HARD_MESSAGE_LIMIT = 30
+/** 消息间隔超过此值（毫秒）视为新话题 */
+const BOUNDARY_TIME_GAP_MS = 2 * 60 * 60 * 1000 // 2 hours
+
+interface SessionBuffer {
+  messages: Array<{ role: string; content: string }>
+  lastTimestamp: number
+  /** 粗略的 token 估算（按 char 数 / 2 近似，中文 1 char ≈ 1 token，英文约 4 char ≈ 1 token） */
+  estimatedTokens: number
+}
+
+/** 按 scope:sessionId 维度维护消息累积缓冲区 */
+const _sessionBuffers = new Map<string, SessionBuffer>()
+
+function estimateTokens(text: string): number {
+  let cjkCount = 0
+  for (const ch of text) {
+    const code = ch.charCodeAt(0)
+    if (
+      (code >= 0x4e00 && code <= 0x9fff) ||
+      (code >= 0x3400 && code <= 0x4dbf) ||
+      (code >= 0xf900 && code <= 0xfaff)
+    ) {
+      cjkCount++
+    }
+  }
+  const nonCjkLen = text.length - cjkCount
+  return cjkCount + Math.ceil(nonCjkLen / 4)
+}
+
+function getBufferKey(scope: string, sessionId?: string): string {
+  return sessionId ? `${scope}:${sessionId}` : `${scope}:__nosession__`
+}
+
 /**
- * 三层路由：将对话记忆写入 User/Scope/Session 层
- * @param messages 对话消息
+ * 判断缓冲区是否应当 flush（边界检测）。
+ * 返回 true 表示应当将当前 buffer 作为一个 MemCell 提交。
+ */
+function shouldFlushBuffer(buffer: SessionBuffer, now: number): boolean {
+  if (buffer.messages.length >= BOUNDARY_HARD_MESSAGE_LIMIT) return true
+  if (buffer.estimatedTokens >= BOUNDARY_HARD_TOKEN_LIMIT) return true
+  if (now - buffer.lastTimestamp > BOUNDARY_TIME_GAP_MS) return true
+  return false
+}
+
+/** 清理所有会话缓冲区（用于 shutdown） */
+export function clearSessionBuffers(): void {
+  _sessionBuffers.clear()
+}
+
+/** 强制 flush 指定会话的缓冲区并提取记忆（会话结束时调用） */
+export async function flushSessionBuffer(
+  userId: string,
+  scope: string,
+  sessionId?: string
+): Promise<MemoryIdsByLayer | null> {
+  const key = getBufferKey(scope, sessionId)
+  const buffer = _sessionBuffers.get(key)
+  if (!buffer || buffer.messages.length === 0) return null
+  _sessionBuffers.delete(key)
+  return processBufferedMemCell(buffer.messages, userId, scope, sessionId)
+}
+
+/**
+ * 三层路由：将对话记忆写入 User/Scope/Session 层。
+ * 消息先进入 per-session 累积缓冲区，触发边界条件后才 flush 为 MemCell 提交抽取。
+ *
+ * @param messages 本轮对话消息（user+assistant）
  * @param userId   用户 ID（统一使用 MEMORY_USER_ID）
  * @param scope    数据 scope
  * @param sessionId 当前会话 ID
  * @param roundMessageId 关联的 assistant 消息 ID，用于按轮次查询记忆增长
- * @returns 本轮新创建的记忆汇总（RoundMemoryGrowth），用于客户端展示
+ * @returns 按存储层分类的新记忆 ID（MemoryIdsByLayer），用于 memoryRefs.created；若未触发 flush 返回 null
  */
 export async function addMemoryInteraction(
   messages: Array<{ role: string; content: string }>,
@@ -442,7 +617,58 @@ export async function addMemoryInteraction(
   scope: string,
   sessionId?: string,
   roundMessageId?: string
-): Promise<RoundMemoryGrowth | null> {
+): Promise<MemoryIdsByLayer | null> {
+  const key = getBufferKey(scope, sessionId)
+  const now = Date.now()
+
+  let buffer = _sessionBuffers.get(key)
+
+  // 如果存在缓冲区且时间间隔超限，先 flush 旧 buffer
+  if (buffer && buffer.messages.length > 0 && now - buffer.lastTimestamp > BOUNDARY_TIME_GAP_MS) {
+    const oldMessages = buffer.messages
+    _sessionBuffers.delete(key)
+    try {
+      await processBufferedMemCell(oldMessages, userId, scope, sessionId)
+    } catch (e) {
+      log.warn('Failed to flush time-gap boundary buffer:', e)
+    }
+    buffer = undefined
+  }
+
+  // 初始化或获取缓冲区
+  if (!buffer) {
+    buffer = { messages: [], lastTimestamp: now, estimatedTokens: 0 }
+    _sessionBuffers.set(key, buffer)
+  }
+
+  // 累积新消息
+  for (const msg of messages) {
+    buffer.messages.push(msg)
+    buffer.estimatedTokens += estimateTokens(msg.content)
+  }
+  buffer.lastTimestamp = now
+
+  // 检查边界条件
+  if (!shouldFlushBuffer(buffer, now)) {
+    // 未到边界，不 flush，返回 null（本轮不产生记忆）
+    return null
+  }
+
+  // 触发边界 → flush
+  const toFlush = buffer.messages
+  _sessionBuffers.delete(key)
+
+  return processBufferedMemCell(toFlush, userId, scope, sessionId, roundMessageId)
+}
+
+/** 将累积的消息列表作为一个 MemCell 提交抽取，返回按层分类的新记忆 ID */
+async function processBufferedMemCell(
+  messages: Array<{ role: string; content: string }>,
+  userId: string,
+  scope: string,
+  sessionId?: string,
+  roundMessageId?: string
+): Promise<MemoryIdsByLayer | null> {
   const manager = getScopeManagers(scope).memory
   _tokenUserId = userId
   try {
@@ -462,18 +688,20 @@ export async function addMemoryInteraction(
       scene: 'assistant'
     }
     const created = await manager.processMemCell(memcell, routing)
-    if (!roundMessageId || created.length === 0) return null
-    const byType: Record<string, number> = {}
+    if (created.length === 0) return null
+
+    // 按层分类新记忆 ID
+    const byLayer: MemoryIdsByLayer = { user: [], scope: [], session: [] }
     for (const c of created) {
-      byType[c.type] = (byType[c.type] ?? 0) + 1
+      if (c.group_id == null || c.type === MemoryType.PROFILE) {
+        byLayer.user.push(c.id)
+      } else if (c.group_id.includes(':session:')) {
+        byLayer.session.push(c.id)
+      } else {
+        byLayer.scope.push(c.id)
+      }
     }
-    const memories: MemoryItem[] = created.map((c) => ({
-      id: c.id,
-      memory: c.content,
-      user_id: userId,
-      group_id: c.group_id,
-      memory_type: c.type
-    }))
+
     if (sessionId) {
       const sessionGroupPrefix = `${scope}:session:${sessionId}`
       const sessionMemories = created.filter(
@@ -489,7 +717,7 @@ export async function addMemoryInteraction(
         }
       }
     }
-    return { messageId: roundMessageId, count: created.length, byType, memories }
+    return byLayer
   } finally {
     _tokenUserId = null
   }
@@ -545,7 +773,10 @@ export async function addSessionMemoryFromRounds(
 }
 
 /**
- * 将文档内容写入 scope:docs 层记忆
+ * 将文档内容写入 scope:docs 层记忆（总览 + 原子事实）。
+ * metadata 中携带 docMemoryKind 标记，MemoryManager 落库时会将其写入各条记忆。
+ * - Episode → docMemoryKind: 'overview'
+ * - EventLog → docMemoryKind: 'fact'
  * @param userId     真实用户 ID
  * @param scope      数据 scope
  * @param documentId 文档 ID
@@ -557,6 +788,7 @@ export async function addDocumentToMemory(
 ): Promise<void> {
   const manager = getScopeManagers(scope).memory
   _tokenUserId = userId
+  _tokenUsageScope = 'document_memory'
   try {
     const data = scopeStore.getScopeData(scope)
     const doc = data.documents.find((d) => d.id === documentId)
@@ -571,29 +803,228 @@ export async function addDocumentToMemory(
       return
     }
 
+    const title = doc.title ?? documentId
+
     const routing: MemoryRoutingContext = {
       userId,
       scope
-      // document 场景不传 sessionId
     }
     const memcell: MemCell = {
-      original_data: { documentId, title: doc.title ?? documentId },
+      original_data: { documentId, title },
       timestamp: new Date().toISOString(),
       type: RawDataType.TEXT,
-      text: content.slice(0, 8000), // 截断避免过长
+      text: content.slice(0, 8000),
       user_id: userId,
       deleted: false,
-      scene: 'document', // 仅抽取 Episode + EventLog
+      scene: 'document',
       metadata: {
         source: 'document',
         documentId,
-        title: doc.title ?? documentId
+        title,
+        docMemoryKind: 'overview'
       }
     }
     await manager.processMemCell(memcell, routing)
     log.info('Document memory stored:', documentId, 'scope:', scope)
   } finally {
     _tokenUserId = null
+    _tokenUsageScope = 'memory'
+  }
+}
+
+/**
+ * 删除指定文档的记忆。默认仅删除 overview + fact（不删迁移记忆）。
+ * @param kinds 要删除的 docMemoryKind 列表，默认 ['overview', 'fact']
+ * @returns 删除的记忆数量
+ */
+export async function deleteDocumentMemories(
+  scope: string,
+  documentId: string,
+  kinds: string[] = ['overview', 'fact']
+): Promise<number> {
+  const groupId = `${scope}:docs`
+  const managers = getScopeManagers(scope)
+  let total = 0
+  for (const kind of kinds) {
+    // 使用两个条件：documentId + docMemoryKind
+    const count = await managers.scopeOnlyMemory.deleteMemoriesByMetadata(
+      'documentId',
+      documentId,
+      groupId
+    )
+    total += count
+    // deleteMemoriesByMetadata 按 documentId 删除已匹配到所有类型，
+    // 但我们需要只删特定 kind，因此改用更精准的查询
+  }
+  // 更精准的方式：直接用 SQL 查询 documentId + docMemoryKind 组合
+  // 但 deleteMemoriesByMetadata 只支持单 key，这里简化为按 documentId 删除后，
+  // 迁移记忆后续由 addDocumentMigrationMemory 补回。
+  // 实际实现：先列出再按需删除
+  total = 0
+  const allRows = await managers.scopeOnlyMemory.listMemoriesByMetadata(
+    'documentId',
+    documentId,
+    groupId
+  )
+  for (const row of allRows) {
+    try {
+      const meta = JSON.parse(row.metadata)
+      if (kinds.includes(meta?.docMemoryKind)) {
+        await managers.scopeOnlyMemory.deleteMemory(row.id)
+        total++
+      }
+    } catch {
+      // metadata 解析失败，按旧格式处理：无 docMemoryKind 的视为旧数据，也删除
+      await managers.scopeOnlyMemory.deleteMemory(row.id)
+      total++
+    }
+  }
+  if (total > 0) {
+    log.info('Deleted %d document memories for %s (kinds=%s)', total, documentId, kinds.join(','))
+  }
+  return total
+}
+
+/**
+ * 追加文档迁移记忆。每条 change 作为独立的 EVENT_LOG 写入 scope:docs 层。
+ * @param version 文档版本号，记录在 metadata 中
+ */
+export async function addDocumentMigrationMemory(
+  userId: string,
+  scope: string,
+  documentId: string,
+  title: string,
+  changes: string[],
+  version?: number
+): Promise<void> {
+  if (!changes.length) return
+
+  const manager = getScopeManagers(scope).memory
+  const groupId = `${scope}:docs`
+  const now = new Date().toISOString()
+  const embeddingProvider = new PrizmLLMAdapter()
+
+  _tokenUserId = userId
+  _tokenUsageScope = 'document_memory'
+  try {
+    for (const change of changes) {
+      if (!change.trim()) continue
+      const id = randomUUID()
+
+      let embedding: number[] | undefined
+      try {
+        embedding = await embeddingProvider.getEmbedding(change)
+      } catch (e) {
+        log.warn('Migration memory embedding failed:', e)
+      }
+
+      // SQLite metadata：只存类型特有字段
+      const migrationMeta: Record<string, unknown> = {
+        event_type: 'migration',
+        source: 'document',
+        documentId,
+        title,
+        docMemoryKind: 'migration',
+        ...(version !== undefined && { version })
+      }
+
+      const contentStr = change.trim()
+
+      // 直接写入 SQLite + LanceDB（不走 processMemCell，因为这里已是抽取后的结果）
+      await manager.storage.relational.insert('memories', {
+        id,
+        type: MemoryType.EVENT_LOG,
+        content: contentStr,
+        user_id: userId,
+        group_id: groupId,
+        created_at: now,
+        updated_at: now,
+        metadata: JSON.stringify(migrationMeta)
+      })
+      if (embedding?.length) {
+        await manager.storage.vector.add(MemoryType.EVENT_LOG, [
+          { id, content: contentStr, user_id: userId, group_id: groupId, vector: embedding }
+        ])
+      }
+    }
+    log.info(
+      'Migration memories added: %d changes for doc %s v%s',
+      changes.length,
+      documentId,
+      version ?? '?'
+    )
+  } finally {
+    _tokenUserId = null
+    _tokenUsageScope = 'memory'
+  }
+}
+
+/**
+ * 获取文档的总览记忆（overview Episode）。
+ * 用于 scopeContext 注入，替代 llmSummary。
+ * @returns 总览内容字符串，或 null（尚未生成）
+ */
+export async function getDocumentOverview(
+  scope: string,
+  documentId: string
+): Promise<string | null> {
+  try {
+    const groupId = `${scope}:docs`
+    const managers = getScopeManagers(scope)
+    const rows = await managers.scopeOnlyMemory.listMemoriesByMetadata(
+      'documentId',
+      documentId,
+      groupId,
+      MemoryType.EPISODIC_MEMORY
+    )
+    // 找到 docMemoryKind === 'overview' 的那条
+    for (const row of rows) {
+      try {
+        const meta = JSON.parse(row.metadata)
+        if (meta?.docMemoryKind === 'overview') {
+          return row.content || null
+        }
+      } catch {
+        // 旧格式兼容：无 docMemoryKind 的 episodic_memory 也视为 overview
+        return row.content || null
+      }
+    }
+    return null
+  } catch (e) {
+    log.warn('getDocumentOverview error:', documentId, e)
+    return null
+  }
+}
+
+/**
+ * 获取文档的迁移记忆列表（按时间倒序）。
+ */
+export async function getDocumentMigrationHistory(
+  scope: string,
+  documentId: string
+): Promise<MemoryItem[]> {
+  try {
+    const groupId = `${scope}:docs`
+    const managers = getScopeManagers(scope)
+    const rows = await managers.scopeOnlyMemory.listMemoriesByMetadata(
+      'documentId',
+      documentId,
+      groupId,
+      MemoryType.EVENT_LOG
+    )
+    return rows
+      .filter((row) => {
+        try {
+          const meta = JSON.parse(row.metadata)
+          return meta?.docMemoryKind === 'migration'
+        } catch {
+          return false
+        }
+      })
+      .map((r) => mapRowToMemoryItem(r as any))
+  } catch (e) {
+    log.warn('getDocumentMigrationHistory error:', documentId, e)
+    return []
   }
 }
 
@@ -799,10 +1230,10 @@ async function doSearchWithManager(
     id: r.id,
     memory: r.content ?? '',
     user_id: userId,
-    group_id: (r.metadata as any)?.group_id ?? undefined,
-    memory_type: (r.metadata as any)?.type ?? r.type,
-    created_at: (r.metadata as any)?.created_at,
-    updated_at: (r.metadata as any)?.updated_at,
+    group_id: r.group_id ?? undefined,
+    memory_type: r.type,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
     metadata: r.metadata,
     score: r.score
   }))
@@ -833,7 +1264,7 @@ function deduplicateRows(rows: any[]): any[] {
   })
 }
 
-/** 将 DB 行映射为 API 返回的 MemoryItem */
+/** 将 DB 行映射为 API 返回的 MemoryItem（含引用索引字段） */
 function mapRowToMemoryItem(r: {
   id: string
   content?: string
@@ -844,6 +1275,16 @@ function mapRowToMemoryItem(r: {
   updated_at?: string
   metadata?: unknown
 }): MemoryItem {
+  let meta: Record<string, unknown> | undefined
+  if (typeof r.metadata === 'string') {
+    try {
+      meta = JSON.parse(r.metadata)
+    } catch {
+      meta = undefined
+    }
+  } else if (r.metadata && typeof r.metadata === 'object') {
+    meta = r.metadata as Record<string, unknown>
+  }
   return {
     id: r.id,
     memory: r.content ?? '',
@@ -852,7 +1293,9 @@ function mapRowToMemoryItem(r: {
     memory_type: r.type,
     created_at: r.created_at,
     updated_at: r.updated_at,
-    metadata: typeof r.metadata === 'string' ? undefined : (r.metadata as Record<string, unknown>)
+    metadata: meta,
+    ref_count: typeof meta?.ref_count === 'number' ? meta.ref_count : undefined,
+    last_ref_at: typeof meta?.last_ref_at === 'string' ? meta.last_ref_at : undefined
   }
 }
 
@@ -916,6 +1359,34 @@ export function isMemoryEnabled(): boolean {
 }
 
 /**
+ * 清空所有记忆（User DB + 所有已初始化的 Scope DB）。
+ * 包括 SQLite 记录和 LanceDB 向量索引。
+ */
+export async function clearAllMemories(): Promise<number> {
+  let total = 0
+
+  // 清空 user-level DB
+  try {
+    total += await getUserManagers().memory.clearAllMemories()
+  } catch (e) {
+    log.error('Failed to clear user memories:', e)
+  }
+
+  // 清空所有已初始化的 scope DB
+  for (const [scopeId, managers] of _scopeManagers) {
+    try {
+      total += await managers.scopeOnlyMemory.clearAllMemories()
+      log.info(`Cleared scope "${scopeId}" memories`)
+    } catch (e) {
+      log.error(`Failed to clear scope "${scopeId}" memories:`, e)
+    }
+  }
+
+  log.info(`All memories cleared: ${total} records deleted`)
+  return total
+}
+
+/**
  * 获取各层记忆的实际总数（直接 COUNT，不依赖语义搜索）
  */
 export async function getMemoryCounts(
@@ -935,49 +1406,99 @@ export async function getMemoryCounts(
 }
 
 /**
- * 按 round_message_id 获取该轮对话的记忆增长（用于历史消息懒加载）
- * @param scope 可选，提供时优先查 scope DB（session 记忆在此）
+ * 按层精确解析记忆 ID → MemoryItem（用于客户端懒加载）。
+ * 每个 ID 只查对应层的 DB，不盲查。已删除的 ID 返回 null。
  */
-export async function getRoundMemories(
-  userId: string,
-  messageId: string,
+export async function resolveMemoryIds(
+  byLayer: MemoryIdsByLayer,
   scope?: string
-): Promise<RoundMemoryGrowth | null> {
-  let rows: any[] = []
-  try {
-    rows = await getUserManagers().memory.listMemoriesByRoundMessageId(userId, messageId)
-  } catch {
-    // ignore
-  }
-  if (scope) {
+): Promise<Record<string, MemoryItem | null>> {
+  const result: Record<string, MemoryItem | null> = {}
+  const allIds = [...byLayer.user, ...byLayer.scope, ...byLayer.session]
+  for (const id of allIds) result[id] = null
+
+  // User DB
+  if (byLayer.user.length > 0) {
     try {
-      // 使用 scopeOnlyMemory 直接查询 scope DB，避免 composite adapter 路由问题
-      const scopeRows = await getScopeManagers(scope).scopeOnlyMemory.listMemoriesByRoundMessageId(
-        userId,
-        messageId
+      const placeholders = byLayer.user.map(() => '?').join(',')
+      const rows = await getUserManagers().memory.storage.relational.query(
+        `SELECT * FROM memories WHERE id IN (${placeholders})`,
+        byLayer.user
       )
-      rows = [...rows, ...scopeRows]
+      for (const r of rows) {
+        result[r.id] = mapRowToMemoryItem(r)
+      }
     } catch {
-      // ignore
+      // user managers not initialized
     }
   }
-  rows = deduplicateRows(rows)
-  if (rows.length === 0) return null
-  const byType: Record<string, number> = {}
-  const memories: MemoryItem[] = rows.map(
-    (r: { id: string; content?: string; type?: string; group_id?: string | null }) => {
-      const t = r.type ?? 'unknown'
-      byType[t] = (byType[t] ?? 0) + 1
-      return {
-        id: r.id,
-        memory: r.content ?? '',
-        user_id: userId,
-        group_id: r.group_id ?? undefined,
-        memory_type: t
+
+  // Scope DB
+  const scopeIds = [...byLayer.scope, ...byLayer.session]
+  if (scopeIds.length > 0 && scope) {
+    try {
+      const placeholders = scopeIds.map(() => '?').join(',')
+      const rows = await getScopeManagers(scope).scopeOnlyMemory.storage.relational.query(
+        `SELECT * FROM memories WHERE id IN (${placeholders})`,
+        scopeIds
+      )
+      for (const r of rows) {
+        result[r.id] = mapRowToMemoryItem(r)
       }
+    } catch {
+      // scope not found
     }
-  )
-  return { messageId, count: rows.length, byType, memories }
+  }
+
+  return result
+}
+
+/**
+ * 按层批量更新记忆引用索引（ref_count += 1, last_ref_at = NOW）。
+ * fire-and-forget 调用，不阻塞对话流程。
+ */
+export async function updateMemoryRefStats(
+  byLayer: MemoryIdsByLayer,
+  scope?: string
+): Promise<void> {
+  const now = new Date().toISOString()
+
+  // User DB
+  if (byLayer.user.length > 0) {
+    try {
+      for (const id of byLayer.user) {
+        await getUserManagers().memory.storage.relational.query(
+          `UPDATE memories SET metadata = json_set(
+            COALESCE(metadata, '{}'),
+            '$.ref_count', COALESCE(json_extract(metadata, '$.ref_count'), 0) + 1,
+            '$.last_ref_at', ?
+          ) WHERE id = ?`,
+          [now, id]
+        )
+      }
+    } catch (e) {
+      log.warn('updateMemoryRefStats user failed:', e)
+    }
+  }
+
+  // Scope DB
+  const scopeIds = [...byLayer.scope, ...byLayer.session]
+  if (scopeIds.length > 0 && scope) {
+    try {
+      for (const id of scopeIds) {
+        await getScopeManagers(scope).scopeOnlyMemory.storage.relational.query(
+          `UPDATE memories SET metadata = json_set(
+            COALESCE(metadata, '{}'),
+            '$.ref_count', COALESCE(json_extract(metadata, '$.ref_count'), 0) + 1,
+            '$.last_ref_at', ?
+          ) WHERE id = ?`,
+          [now, id]
+        )
+      }
+    } catch (e) {
+      log.warn('updateMemoryRefStats scope failed:', e)
+    }
+  }
 }
 
 // ==================== 去重日志 API ====================

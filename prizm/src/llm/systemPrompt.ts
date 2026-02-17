@@ -26,7 +26,7 @@ export interface SystemPromptOptions {
 /**
  * 构建注入到对话前的 system 内容
  */
-export function buildSystemPrompt(options: SystemPromptOptions): string {
+export async function buildSystemPrompt(options: SystemPromptOptions): Promise<string> {
   const {
     scope,
     sessionId,
@@ -89,7 +89,7 @@ export function buildSystemPrompt(options: SystemPromptOptions): string {
 
   // ── P3: 工作区现状摘要（动态注入） ──
   if (includeScopeContext) {
-    const contextSummary = buildScopeContextSummary(scope)
+    const contextSummary = await buildScopeContextSummary(scope)
     if (contextSummary) {
       parts.push('')
       parts.push(`[工作区 ${scope}]`)

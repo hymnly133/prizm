@@ -80,7 +80,6 @@ function docToRefItem(d: {
   title: string
   content?: string
   updatedAt: number
-  llmSummary?: string
 }): ScopeRefItem {
   const content = (d.content ?? '').trim()
   const charCount = content.length
@@ -203,7 +202,7 @@ export function getScopeRefItem(
     if (!d) return null
     const content = (d.content ?? '').trim()
     const base = docToRefItem(d)
-    return { ...base, content, summary: d.llmSummary }
+    return { ...base, content, summary: undefined }
   }
 
   return null

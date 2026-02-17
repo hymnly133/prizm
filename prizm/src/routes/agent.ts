@@ -14,7 +14,7 @@ import {
   hasScopeAccess
 } from '../scopeUtils'
 import { scopeStore, DEFAULT_SCOPE } from '../core/ScopeStore'
-import { MEMORY_USER_ID } from '@prizm/shared'
+import { MEMORY_USER_ID, getTextContent } from '@prizm/shared'
 import { buildScopeContextSummary } from '../llm/scopeContext'
 import { buildSystemPrompt } from '../llm/systemPrompt'
 import { scheduleTurnSummary } from '../llm/conversationSummaryService'
@@ -37,7 +37,9 @@ import {
   searchUserAndScopeMemories,
   searchThreeLevelMemories,
   addMemoryInteraction,
-  addSessionMemoryFromRounds
+  addSessionMemoryFromRounds,
+  flushSessionBuffer,
+  updateMemoryRefStats
 } from '../llm/EverMemService'
 import { recordTokenUsage } from '../llm/tokenUsage'
 import { getTerminalManager } from '../terminal/TerminalSessionManager'
@@ -58,14 +60,14 @@ function getScopeFromQuery(req: Request): string {
 }
 
 /**
- * 将 memoryGrowth 写回已持久化的 assistant 消息。
- * appendMessage 在 addMemoryInteraction 之前调用，因此 memoryGrowth 需要事后补写。
+ * 将 memoryRefs 写回已持久化的 assistant 消息。
+ * appendMessage 在记忆处理之前调用，因此 memoryRefs 需要事后补写。
  */
-function persistMemoryGrowth(
+function persistMemoryRefs(
   scope: string,
   sessionId: string,
   messageId: string,
-  memoryGrowth: unknown
+  memoryRefs: import('@prizm/shared').MemoryRefs
 ): void {
   try {
     const data = scopeStore.getScopeData(scope)
@@ -73,10 +75,10 @@ function persistMemoryGrowth(
     if (!session) return
     const msg = session.messages.find((m) => m.id === messageId)
     if (!msg) return
-    ;(msg as unknown as Record<string, unknown>).memoryGrowth = memoryGrowth
+    ;(msg as unknown as Record<string, unknown>).memoryRefs = memoryRefs
     scopeStore.saveScope(scope)
   } catch (e) {
-    log.warn('Failed to persist memoryGrowth:', messageId, e)
+    log.warn('Failed to persist memoryRefs:', messageId, e)
   }
 }
 
@@ -111,7 +113,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
       if (!hasScopeAccess(req, scope)) {
         return res.status(403).json({ error: 'scope access denied' })
       }
-      const summary = buildScopeContextSummary(scope)
+      const summary = await buildScopeContextSummary(scope)
       res.json({ summary, scope })
     } catch (error) {
       log.error('get scope context error:', error)
@@ -131,7 +133,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         typeof req.query.sessionId === 'string' && req.query.sessionId.trim()
           ? req.query.sessionId.trim()
           : undefined
-      const systemPrompt = buildSystemPrompt({
+      const systemPrompt = await buildSystemPrompt({
         scope,
         sessionId,
         includeScopeContext: true
@@ -331,36 +333,29 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         tokenSummary.byScope[s].count += 1
       }
 
-      // 2. 记忆创建：从 messages 的 memoryGrowth 字段聚合
-      let memorySummary = {
-        totalCount: 0,
-        byType: {} as Record<string, number>,
-        memories: [] as Array<{
-          id: string
-          memory: string
-          memory_type?: string
-          messageId: string
-        }>
+      // 2. 记忆引用：从 messages 的 memoryRefs 字段聚合 created ID
+      const memoryCreatedIds: { user: string[]; scope: string[]; session: string[] } = {
+        user: [],
+        scope: [],
+        session: []
       }
+      let memoryInjectedTotal = 0
       if (adapter?.getSession) {
         const session = await adapter.getSession(scope, id)
         if (session?.messages) {
           for (const msg of session.messages) {
-            const mg = msg.memoryGrowth
-            if (mg && typeof mg === 'object' && mg.count > 0) {
-              memorySummary.totalCount += mg.count
-              for (const [type, cnt] of Object.entries(mg.byType)) {
-                memorySummary.byType[type] = (memorySummary.byType[type] ?? 0) + cnt
+            const refs = msg.memoryRefs
+            if (refs && typeof refs === 'object') {
+              if (refs.created) {
+                memoryCreatedIds.user.push(...(refs.created.user ?? []))
+                memoryCreatedIds.scope.push(...(refs.created.scope ?? []))
+                memoryCreatedIds.session.push(...(refs.created.session ?? []))
               }
-              if (Array.isArray(mg.memories)) {
-                for (const mem of mg.memories) {
-                  memorySummary.memories.push({
-                    id: mem.id,
-                    memory: mem.memory,
-                    memory_type: mem.memory_type,
-                    messageId: mg.messageId
-                  })
-                }
+              if (refs.injected) {
+                memoryInjectedTotal +=
+                  (refs.injected.user?.length ?? 0) +
+                  (refs.injected.scope?.length ?? 0) +
+                  (refs.injected.session?.length ?? 0)
               }
             }
           }
@@ -371,7 +366,14 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         sessionId: id,
         scope,
         tokenUsage: tokenSummary,
-        memoryCreated: memorySummary
+        memoryCreated: {
+          totalCount:
+            memoryCreatedIds.user.length +
+            memoryCreatedIds.scope.length +
+            memoryCreatedIds.session.length,
+          ids: memoryCreatedIds
+        },
+        memoryInjectedTotal
       })
     } catch (error) {
       log.error('get session stats error:', error)
@@ -593,6 +595,15 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
       // 取消待处理的交互请求
       interactManager.cancelSession(id, scope)
 
+      // flush 记忆缓冲区（确保会话删除前，累积的消息被抽取为记忆）
+      if (isMemoryEnabled()) {
+        try {
+          await flushSessionBuffer(MEMORY_USER_ID, scope, id)
+        } catch (memErr) {
+          log.warn('memory buffer flush on session delete failed:', memErr)
+        }
+      }
+
       // 清理关联终端
       try {
         getTerminalManager().cleanupSession(id)
@@ -671,7 +682,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
       // 追加用户消息
       await adapter.appendMessage(scope, id, {
         role: 'user',
-        content: content.trim()
+        parts: [{ type: 'text', content: content.trim() }]
       })
       scheduleTurnSummary(scope, id, content.trim(), memoryUserId)
 
@@ -689,7 +700,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
             // action 模式：直接返回结果
             await adapter.appendMessage(scope, id, {
               role: 'system',
-              content: cmdResult.text
+              parts: [{ type: 'text', content: cmdResult.text }]
             })
             res.setHeader('Content-Type', 'text/event-stream')
             res.setHeader('Cache-Control', 'no-cache')
@@ -729,7 +740,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         if (slice.length >= 2) {
           try {
             await addSessionMemoryFromRounds(
-              slice.map((m) => ({ role: m.role, content: m.content })),
+              slice.map((m) => ({ role: m.role, content: getTextContent(m) })),
               memoryUserId,
               scope,
               id
@@ -748,16 +759,16 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
 
       if (completeRounds < fullContextTurns + cachedContextTurns) {
         history = [
-          ...session.messages.map((m) => ({ role: m.role, content: m.content })),
+          ...session.messages.map((m) => ({ role: m.role, content: getTextContent(m) })),
           currentUserMsg
         ]
       } else {
         const systemMsgs = session.messages.filter((m) => m.role === 'system')
         const systemPrefix =
-          systemMsgs.length > 0 ? systemMsgs.map((m) => ({ role: m.role, content: m.content })) : []
+          systemMsgs.length > 0 ? systemMsgs.map((m) => ({ role: m.role, content: getTextContent(m) })) : []
         const cacheRaw = chatMessages
           .slice(2 * compressedThrough)
-          .map((m) => ({ role: m.role, content: m.content }))
+          .map((m) => ({ role: m.role, content: getTextContent(m) }))
         history = [...systemPrefix, ...cacheRaw, currentUserMsg]
       }
 
@@ -779,10 +790,17 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         scope: import('@prizm/shared').MemoryItem[]
         session: import('@prizm/shared').MemoryItem[]
       } | null = null
+      /** 按层分类的注入记忆 ID（用于 memoryRefs.injected） */
+      let injectedIds: import('@prizm/shared').MemoryIdsByLayer = {
+        user: [],
+        scope: [],
+        session: []
+      }
 
-      const maxCharsPerMemory = 80
-      const truncateMem = (s: string) =>
-        s.length <= maxCharsPerMemory ? s : s.slice(0, maxCharsPerMemory) + '…'
+      // 优化1: 截断阈值 80→200；Profile 记忆是精炼原子事实，不截断
+      const MAX_CHARS_CONTEXT = 200
+      const truncateMem = (s: string, max = MAX_CHARS_CONTEXT) =>
+        s.length <= max ? s : s.slice(0, max) + '…'
 
       // --- Step 1: 每轮必注入用户画像（最高优先级，紧跟 system prompt） ---
       let profileMem: import('@prizm/shared').MemoryItem[] = []
@@ -791,10 +809,9 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
           profileMem = await listAllUserProfiles(memoryUserId)
           if (profileMem.length > 0) {
             const profilePrompt =
-              '[用户画像 - 必须严格遵守]\n' +
-              profileMem.map((m) => `- ${truncateMem(m.memory)}`).join('\n') +
-              '\n\n请根据以上用户画像调整你的称呼和回复风格。'
-            // 插入到 system prompt 之后（index 1），确保位于所有对话历史之前
+              '【用户画像- 必须严格遵守】\n' +
+              profileMem.map((m) => `- ${m.memory}`).join('\n') +
+              '\n\n请根据以上用户画像调整你的称呼、回复风格、行为风格。'
             const profileInsertIdx = history.findIndex((m) => m.role !== 'system')
             const insertAt = profileInsertIdx === -1 ? history.length : profileInsertIdx
             history.splice(insertAt, 0, { role: 'system', content: profilePrompt })
@@ -806,6 +823,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
       }
 
       // --- Step 2: 工作区/会话记忆（基于语义搜索，按相关性注入） ---
+      // 与 EverMemOS 推荐对齐：情景记忆和前瞻记忆分开注入，情景带编号和时间戳
       const shouldInjectContextMemory =
         memoryEnabled &&
         (trimmedContent.length >= 4 || (isFirstMessage && trimmedContent.length >= 1))
@@ -815,21 +833,51 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         try {
           const two = await searchUserAndScopeMemories(memoryQuery, memoryUserId, scope)
           const scopeMem = two.scope
-          let sessionMem: { memory: string }[] = []
+          let sessionMem: import('@prizm/shared').MemoryItem[] = []
           if (compressedThrough > 0) {
             const three = await searchThreeLevelMemories(memoryQuery, memoryUserId, scope, id)
             sessionMem = three.session
           }
 
+          // 优化2: 按 memory_type 分区 scope 记忆，避免混杂
+          const foresightMem = scopeMem.filter((m) => m.memory_type === 'foresight')
+          const docMem = scopeMem.filter(
+            (m) => m.group_id?.endsWith(':docs') && m.memory_type !== 'foresight'
+          )
+          const episodicMem = scopeMem.filter(
+            (m) => !m.group_id?.endsWith(':docs') && m.memory_type !== 'foresight'
+          )
+
           const sections: string[] = []
-          if (scopeMem.length > 0) {
+
+          // 优化3: 情景记忆 — 带编号和时间戳，便于 LLM 引用和推理时间关系
+          if (episodicMem.length > 0) {
+            const lines = episodicMem.map((m, i) => {
+              const date = m.created_at ? m.created_at.slice(0, 10) : ''
+              const dateTag = date ? ` (${date})` : ''
+              return `  [${i + 1}]${dateTag} ${truncateMem(m.memory)}`
+            })
+            sections.push('【相关记忆】\n' + lines.join('\n'))
+          }
+
+          // 前瞻/意图 — 独立 section，bullet list
+          if (foresightMem.length > 0) {
             sections.push(
-              '[工作区记忆]\n' + scopeMem.map((m) => `- ${truncateMem(m.memory)}`).join('\n')
+              '【前瞻/意图】\n' + foresightMem.map((m) => `  - ${truncateMem(m.memory)}`).join('\n')
             )
           }
+
+          // 文档记忆
+          if (docMem.length > 0) {
+            sections.push(
+              '【文档记忆】\n' + docMem.map((m) => `  - ${truncateMem(m.memory)}`).join('\n')
+            )
+          }
+
+          // 会话记忆
           if (sessionMem.length > 0) {
             sections.push(
-              '[会话记忆]\n' + sessionMem.map((m) => `- ${truncateMem(m.memory)}`).join('\n')
+              '【会话记忆】\n' + sessionMem.map((m) => `  - ${truncateMem(m.memory)}`).join('\n')
             )
           }
 
@@ -837,7 +885,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
             injectedMemoriesForClient = {
               user: profileMem,
               scope: scopeMem,
-              session: sessionMem as import('@prizm/shared').MemoryItem[]
+              session: sessionMem
             }
             if (sections.length > 0) {
               const memoryPrompt = sections.join('\n\n')
@@ -846,11 +894,12 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
               history.splice(insertAt, 0, { role: 'system', content: memoryPrompt })
             }
             log.info(
-              'Injected memories: profile=%d, scope=%d, session=%d (compressedThrough=%d)',
+              'Injected memories: profile=%d, episodic=%d, foresight=%d, doc=%d, session=%d',
               profileMem.length,
-              scopeMem.length,
-              sessionMem.length,
-              compressedThrough
+              episodicMem.length,
+              foresightMem.length,
+              docMem.length,
+              sessionMem.length
             )
           }
         } catch (memErr) {
@@ -865,6 +914,19 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
           scope: [],
           session: []
         }
+      }
+
+      // 收集注入记忆 ID（用于 memoryRefs.injected）
+      if (injectedMemoriesForClient) {
+        injectedIds = {
+          user: injectedMemoriesForClient.user.map((m) => m.id),
+          scope: injectedMemoriesForClient.scope.map((m) => m.id),
+          session: injectedMemoriesForClient.session.map((m) => m.id)
+        }
+        // fire-and-forget: 更新记忆侧引用索引
+        updateMemoryRefStats(injectedIds, scope).catch((e) =>
+          log.warn('ref stats update failed:', e)
+        )
       }
 
       // ---- Skill 自动激活 + Rules 加载 ----
@@ -913,29 +975,9 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         interactManager.cancelSession(id, scope)
       })
 
-      let fullContent = ''
       let fullReasoning = ''
       let segmentContent = ''
-      const parts: Array<
-        | { type: 'text'; content: string }
-        | {
-            type: 'tool'
-            id: string
-            name: string
-            arguments: string
-            result: string
-            isError?: boolean
-            status?: 'preparing' | 'running' | 'awaiting_interact' | 'done'
-          }
-      > = []
-      const fullToolCalls: Array<{
-        id: string
-        name: string
-        arguments: string
-        result: string
-        isError?: boolean
-        status?: 'preparing' | 'running' | 'awaiting_interact' | 'done'
-      }> = []
+      const parts: import('@prizm/shared').MessagePart[] = []
       function flushSegment(): void {
         if (segmentContent) {
           parts.push({ type: 'text', content: segmentContent })
@@ -976,7 +1018,6 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
           if (ac.signal.aborted) break
           if (chunk.usage) lastUsage = chunk.usage
           if (chunk.text) {
-            fullContent += chunk.text
             segmentContent += chunk.text
             res.write(
               `data: ${JSON.stringify({
@@ -1010,8 +1051,8 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
             flushSegment()
             const tc = chunk.toolCall
             log.info('[SSE] tool_call status=%s id=%s name=%s', tc.status ?? 'done', tc.id, tc.name)
-            const toolPart = {
-              type: 'tool' as const,
+            const toolPart: import('@prizm/shared').MessagePartTool = {
+              type: 'tool',
               id: tc.id,
               name: tc.name,
               arguments: tc.arguments,
@@ -1019,14 +1060,10 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
               ...(tc.isError && { isError: true }),
               ...(tc.status && { status: tc.status })
             }
-            const existingIdx = fullToolCalls.findIndex((t) => t.id === tc.id)
+            const existingIdx = parts.findIndex((p) => p.type === 'tool' && p.id === tc.id)
             if (existingIdx >= 0) {
-              fullToolCalls[existingIdx] = tc
-              const partIdx = parts.findIndex((p) => p.type === 'tool' && p.id === tc.id)
-              if (partIdx >= 0) parts[partIdx] = toolPart
-              else parts.push(toolPart)
+              parts[existingIdx] = toolPart
             } else {
-              fullToolCalls.push(tc)
               parts.push(toolPart)
             }
             res.write(
@@ -1059,18 +1096,17 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
             const usedModel = typeof model === 'string' && model.trim() ? model.trim() : undefined
             const appendedMsg = await adapter.appendMessage(scope, id, {
               role: 'assistant',
-              content: fullContent,
+              parts: [...parts],
               model: usedModel,
               usage: lastUsage,
-              ...(fullReasoning && { reasoning: fullReasoning }),
-              ...(fullToolCalls.length > 0 && { toolCalls: fullToolCalls }),
-              ...(parts.length > 0 && { parts })
+              ...(fullReasoning && { reasoning: fullReasoning })
             })
 
-            let memoryGrowth = null
+            const fullContent = getTextContent({ parts })
+            let createdByLayer: import('@prizm/shared').MemoryIdsByLayer | null = null
             if (isMemoryEnabled() && fullContent) {
               try {
-                memoryGrowth = await addMemoryInteraction(
+                createdByLayer = await addMemoryInteraction(
                   [
                     { role: 'user', content: content.trim() },
                     { role: 'assistant', content: fullContent }
@@ -1080,12 +1116,24 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
                   id,
                   appendedMsg.id
                 )
-                if (memoryGrowth) {
-                  persistMemoryGrowth(scope, id, appendedMsg.id, memoryGrowth)
-                }
               } catch (e) {
                 log.warn('Memory storage failed:', e)
               }
+            }
+            const memoryRefs: import('@prizm/shared').MemoryRefs = {
+              injected: injectedIds,
+              created: createdByLayer ?? { user: [], scope: [], session: [] }
+            }
+            const hasRefs =
+              memoryRefs.injected.user.length +
+                memoryRefs.injected.scope.length +
+                memoryRefs.injected.session.length +
+                memoryRefs.created.user.length +
+                memoryRefs.created.scope.length +
+                memoryRefs.created.session.length >
+              0
+            if (hasRefs) {
+              persistMemoryRefs(scope, id, appendedMsg.id, memoryRefs)
             }
             res.write(
               `data: ${JSON.stringify({
@@ -1093,7 +1141,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
                 model: usedModel,
                 usage: lastUsage ?? undefined,
                 messageId: appendedMsg.id,
-                ...(memoryGrowth && { memoryGrowth })
+                ...(hasRefs && { memoryRefs })
               })}\n\n`
             )
             usageSent = true
@@ -1102,38 +1150,49 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
         }
 
         // 被 abort 时：若已有部分内容，保存到 assistant 消息
-        if (ac.signal.aborted && fullContent) {
+        if (ac.signal.aborted && (segmentContent || parts.length > 0)) {
           flushSegment()
           chatCompletedAt = Date.now()
           const usedModel = typeof model === 'string' && model.trim() ? model.trim() : undefined
           const appendedMsg = await adapter.appendMessage(scope, id, {
             role: 'assistant',
-            content: fullContent,
+            parts: [...parts],
             model: usedModel,
             usage: lastUsage,
-            ...(fullReasoning && { reasoning: fullReasoning }),
-            ...(fullToolCalls.length > 0 && { toolCalls: fullToolCalls }),
-            ...(parts.length > 0 && { parts })
+            ...(fullReasoning && { reasoning: fullReasoning })
           })
-          let memoryGrowth = null
-          if (isMemoryEnabled() && fullContent) {
+          const abortFullContent = getTextContent({ parts })
+          let abortCreatedByLayer: import('@prizm/shared').MemoryIdsByLayer | null = null
+          if (isMemoryEnabled() && abortFullContent) {
             try {
-              memoryGrowth = await addMemoryInteraction(
+              abortCreatedByLayer = await addMemoryInteraction(
                 [
                   { role: 'user', content: content.trim() },
-                  { role: 'assistant', content: fullContent }
+                  { role: 'assistant', content: abortFullContent }
                 ],
                 memoryUserId,
                 scope,
                 id,
                 appendedMsg.id
               )
-              if (memoryGrowth) {
-                persistMemoryGrowth(scope, id, appendedMsg.id, memoryGrowth)
-              }
             } catch (e) {
               log.warn('Memory storage failed:', e)
             }
+          }
+          const abortRefs: import('@prizm/shared').MemoryRefs = {
+            injected: injectedIds,
+            created: abortCreatedByLayer ?? { user: [], scope: [], session: [] }
+          }
+          const hasAbortRefs =
+            abortRefs.injected.user.length +
+              abortRefs.injected.scope.length +
+              abortRefs.injected.session.length +
+              abortRefs.created.user.length +
+              abortRefs.created.scope.length +
+              abortRefs.created.session.length >
+            0
+          if (hasAbortRefs) {
+            persistMemoryRefs(scope, id, appendedMsg.id, abortRefs)
           }
           res.write(
             `data: ${JSON.stringify({
@@ -1142,7 +1201,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
               usage: lastUsage ?? undefined,
               stopped: true,
               messageId: appendedMsg.id,
-              ...(memoryGrowth && { memoryGrowth })
+              ...(hasAbortRefs && { memoryRefs: abortRefs })
             })}\n\n`
           )
           usageSent = true
@@ -1178,10 +1237,10 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
             ...(fullToolCalls.length > 0 && { toolCalls: fullToolCalls }),
             ...(parts.length > 0 && { parts })
           })
-          let memoryGrowth = null
+          let errCreatedByLayer: import('@prizm/shared').MemoryIdsByLayer | null = null
           if (isMemoryEnabled() && fullContent) {
             try {
-              memoryGrowth = await addMemoryInteraction(
+              errCreatedByLayer = await addMemoryInteraction(
                 [
                   { role: 'user', content: content.trim() },
                   { role: 'assistant', content: fullContent }
@@ -1191,12 +1250,24 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
                 id,
                 appendedMsg.id
               )
-              if (memoryGrowth) {
-                persistMemoryGrowth(scope, id, appendedMsg.id, memoryGrowth)
-              }
             } catch (e) {
               log.warn('Memory storage failed:', e)
             }
+          }
+          const errRefs: import('@prizm/shared').MemoryRefs = {
+            injected: injectedIds,
+            created: errCreatedByLayer ?? { user: [], scope: [], session: [] }
+          }
+          const hasErrRefs =
+            errRefs.injected.user.length +
+              errRefs.injected.scope.length +
+              errRefs.injected.session.length +
+              errRefs.created.user.length +
+              errRefs.created.scope.length +
+              errRefs.created.session.length >
+            0
+          if (hasErrRefs) {
+            persistMemoryRefs(scope, id, appendedMsg.id, errRefs)
           }
           res.write(
             `data: ${JSON.stringify({
@@ -1205,7 +1276,7 @@ export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void
               usage: lastUsage ?? undefined,
               stopped: true,
               messageId: appendedMsg.id,
-              ...(memoryGrowth && { memoryGrowth })
+              ...(hasErrRefs && { memoryRefs: errRefs })
             })}\n\n`
           )
           usageSent = true

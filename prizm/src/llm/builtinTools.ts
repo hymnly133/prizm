@@ -8,7 +8,7 @@ import { scopeStore } from '../core/ScopeStore'
 import * as mdStore from '../core/mdStore'
 import { genUniqueId } from '../id'
 import type { TodoItemStatus, TodoList } from '../types'
-import { scheduleDocumentSummary } from './documentSummaryService'
+import { scheduleDocumentMemory } from './documentMemoryService'
 import { listRefItems, getScopeRefItem, getScopeStats } from './scopeItemRegistry'
 import type { SearchIndexService } from '../search/searchIndexService'
 import { recordActivity } from './contextTracker'
@@ -786,7 +786,7 @@ export async function executeBuiltinTool(
         }
         data.documents.push(doc)
         scopeStore.saveScope(scope)
-        scheduleDocumentSummary(scope, doc.id)
+        scheduleDocumentMemory(scope, doc.id)
         record(doc.id, 'document', 'create')
         const folderHint = folderPath ? ` (${folderPath}/)` : ''
         return { text: `已创建文档 ${doc.id}${folderHint}` }
@@ -811,7 +811,7 @@ export async function executeBuiltinTool(
         if (typeof args.content === 'string') data.documents[idx].content = args.content
         data.documents[idx].updatedAt = Date.now()
         scopeStore.saveScope(scope)
-        scheduleDocumentSummary(scope, documentId)
+        scheduleDocumentMemory(scope, documentId)
         record(documentId, 'document', 'update')
         return { text: `已更新文档 ${documentId}` }
       }
@@ -852,7 +852,7 @@ export async function executeBuiltinTool(
           data.documents.push(doc)
           scopeStore.saveScope(scope)
           mdStore.deleteSingleDocument(wsCtx.sessionWorkspaceRoot, fileId)
-          scheduleDocumentSummary(scope, doc.id)
+          scheduleDocumentMemory(scope, doc.id)
           record(doc.id, 'document', 'create')
           return { text: `已将文档「${doc.title}」(${doc.id}) 从临时工作区提升到主工作区。` }
         }

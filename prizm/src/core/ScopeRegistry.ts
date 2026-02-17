@@ -40,7 +40,7 @@ const DEFAULT_TYPES_JSON = {
     taskId: 'text',
     sourceApp: 'text',
     title: 'text',
-    llmSummary: 'text',
+    llmSummary: 'text', // @deprecated 兼容存量数据索引
     createdAt: 'number',
     updatedAt: 'number'
   },

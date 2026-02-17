@@ -13,7 +13,8 @@ import {
   getAllMemories,
   searchMemoriesWithOptions,
   deleteMemory,
-  getRoundMemories,
+  clearAllMemories,
+  resolveMemoryIds,
   listDedupLog,
   undoDedupLog,
   getMemoryCounts
@@ -153,27 +154,38 @@ export function createMemoryRoutes(router: Router): void {
     }
   })
 
-  // GET /agent/memories/round/:messageId - 获取某轮对话的记忆增长（按 assistant 消息 ID）
-  router.get('/agent/memories/round/:messageId', async (req: Request, res: Response) => {
+  // POST /agent/memories/resolve - 按层精确解析记忆 ID → MemoryItem
+  router.post('/agent/memories/resolve', async (req: Request, res: Response) => {
     try {
-      const scope = getScopeFromQuery(req)
+      const scope = getScopeFromRequest(req, true)
       if (!hasScopeAccess(req, scope)) {
         return res.status(403).json({ error: 'scope access denied' })
       }
 
       if (!isMemoryEnabled()) {
-        return res.json(null)
+        return res.json({ memories: {} })
       }
 
-      const messageId = String(req.params.messageId ?? '').trim()
-      if (!messageId) {
-        return res.status(400).json({ error: 'messageId is required' })
+      const body = req.body as {
+        byLayer?: { user?: string[]; scope?: string[]; session?: string[] }
+      }
+      const byLayer = {
+        user: Array.isArray(body.byLayer?.user) ? body.byLayer!.user : [],
+        scope: Array.isArray(body.byLayer?.scope) ? body.byLayer!.scope : [],
+        session: Array.isArray(body.byLayer?.session) ? body.byLayer!.session : []
+      }
+      const totalIds = byLayer.user.length + byLayer.scope.length + byLayer.session.length
+      if (totalIds === 0) {
+        return res.json({ memories: {} })
+      }
+      if (totalIds > 200) {
+        return res.status(400).json({ error: 'Too many IDs (max 200)' })
       }
 
-      const growth = await getRoundMemories(MEMORY_USER_ID, messageId, scope)
-      res.json(growth)
+      const memories = await resolveMemoryIds(byLayer, scope)
+      res.json({ memories })
     } catch (error) {
-      log.error('get round memories error:', error)
+      log.error('resolve memory ids error:', error)
       const { status, body } = toErrorResponse(error)
       res.status(status).json(body)
     }
@@ -256,6 +268,36 @@ export function createMemoryRoutes(router: Router): void {
       }
     } catch (error) {
       log.error('undo dedup error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  /**
+   * POST /agent/memories/clear-all
+   * 清空所有记忆（SQLite + LanceDB 向量索引）。
+   * 需要严格确认：body.confirm === 'DELETE ALL'
+   */
+  router.post('/agent/memories/clear-all', async (req: Request, res: Response) => {
+    try {
+      if (!isMemoryEnabled()) {
+        return res.status(400).json({ error: 'Memory module is not enabled' })
+      }
+
+      const { confirm } = req.body as { confirm?: string }
+      if (confirm !== 'DELETE ALL') {
+        return res.status(400).json({
+          error: 'Confirmation required: body.confirm must be "DELETE ALL"'
+        })
+      }
+
+      log.warn('CLEAR ALL MEMORIES requested — this is destructive and irreversible')
+      const deleted = await clearAllMemories()
+      log.warn(`All memories cleared: ${deleted} records deleted`)
+
+      res.json({ deleted, vectorsCleared: true })
+    } catch (error) {
+      log.error('clear all memories error:', error)
       const { status, body } = toErrorResponse(error)
       res.status(status).json(body)
     }

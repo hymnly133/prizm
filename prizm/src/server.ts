@@ -43,6 +43,8 @@ import { TerminalWebSocketServer } from './terminal/TerminalWebSocketServer'
 import { createTerminalRoutes } from './routes/terminal'
 import { builtinToolEvents } from './llm/builtinToolEvents'
 import { EVENT_TYPES_OBJ } from '@prizm/shared'
+import { createEmbeddingRoutes } from './routes/embedding'
+import { localEmbedding } from './llm/localEmbedding'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -132,7 +134,12 @@ export function createPrizmServer(
     res.json({
       status: 'ok',
       service: 'prizm-server',
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      embedding: {
+        state: localEmbedding.getState(),
+        model: localEmbedding.getModelName(),
+        dimension: localEmbedding.getDimension()
+      }
     })
   })
 
@@ -156,6 +163,7 @@ export function createPrizmServer(
   createSkillsRoutes(router)
   createSettingsRoutes(router)
   createMemoryRoutes(router)
+  createEmbeddingRoutes(router)
   app.use('/', router)
 
   // MCP 端点：供 Cursor、LobeChat 等 Agent 连接（wsServer 在 start 后注入）

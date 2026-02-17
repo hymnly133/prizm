@@ -3,16 +3,16 @@
  * 用于注入到 LLM 对话的 system prompt 中
  *
  * 策略：
- * - 便签列表：各便签项全文（单条较短）；超限则按优先级截断
  * - 待办列表：全量注入
- * - 文档：短内容全文，长内容仅标题 + LLM 摘要（或前 150 字）
- * - 会话：总览仅展示数量或标题列表，不提供具体消息（TODO）
+ * - 文档：短内容全文，长内容使用文档总览记忆（回退到 llmSummary 或截断）
+ * - 会话：总览仅展示数量或标题列表
  * - 末尾附加统一字数统计（基于 ScopeItemRegistry）
  */
 
 import { scopeStore } from '../core/ScopeStore'
 import type { ScopeData } from '../core/ScopeStore'
 import { getScopeStats } from './scopeItemRegistry'
+import { getDocumentOverview } from './EverMemService'
 
 /** 单条内容最大字符数（摘要时） */
 const MAX_CONTENT_LEN = 100
@@ -74,9 +74,14 @@ function buildTodoSection(scope: string, data: ScopeData, maxItems: number): str
 }
 
 /**
- * 构建文档区块：短内容全文，长内容标题+摘要
+ * 构建文档区块：短内容全文，长内容使用文档总览记忆
+ * 回退策略：总览记忆 → llmSummary（存量兼容）→ truncate
  */
-function buildDocumentsSection(scope: string, data: ScopeData, maxItems: number): string {
+async function buildDocumentsSection(
+  scope: string,
+  data: ScopeData,
+  maxItems: number
+): Promise<string> {
   const { documents } = data
   if (!documents.length) return ''
 
@@ -85,7 +90,20 @@ function buildDocumentsSection(scope: string, data: ScopeData, maxItems: number)
   for (const d of sorted.slice(0, maxItems)) {
     const content = (d.content ?? '').trim()
     const isShort = content.length < SHORT_THRESHOLD
-    const desc = isShort ? content : d.llmSummary ?? truncate(content, MAX_CONTENT_LEN)
+
+    let desc: string
+    if (isShort) {
+      desc = content
+    } else {
+      // 优先使用文档总览记忆，回退到 llmSummary（@deprecated 兼容存量），再回退到截断
+      let overview: string | null = null
+      try {
+        overview = await getDocumentOverview(scope, d.id)
+      } catch {
+        // 记忆系统未初始化或查询失败
+      }
+      desc = overview ?? d.llmSummary /* @deprecated */ ?? truncate(content, MAX_CONTENT_LEN)
+    }
     lines.push(`- [id:${d.id}] ${d.title}: ${desc}`)
   }
   if (sorted.length > maxItems) {
@@ -138,14 +156,13 @@ function truncateByPriority(
 /**
  * 构建 scope 的上下文摘要，用于注入到 Agent 的 system prompt
  * @param scope - scope 标识
- * @param options.sessionId - 若提供则在本会话中记录各条提供状态（供 ContextTracker）
  */
-export function buildScopeContextSummary(scope: string): string {
+export async function buildScopeContextSummary(scope: string): Promise<string> {
   const data = scopeStore.getScopeData(scope)
   const maxLen = getMaxSummaryLen()
 
   const todoSection = buildTodoSection(scope, data, MAX_TODO_ITEMS)
-  const docsSection = buildDocumentsSection(scope, data, MAX_DOCUMENTS)
+  const docsSection = await buildDocumentsSection(scope, data, MAX_DOCUMENTS)
   const sessionsSection = buildSessionsSection(data)
 
   if (!todoSection && !docsSection && !sessionsSection) {
