@@ -199,6 +199,8 @@ export function MemorySidebarPanel({
 
   const filtered = memories.filter((m) => {
     if (layerFilter === 'all') return true
+    if (layerFilter === 'document') return m.memory_type === 'document' && m.memory_layer === 'scope'
+    if (layerFilter === 'scope') return m.memory_layer === 'scope' && m.memory_type !== 'document'
     return m.memory_layer === layerFilter
   })
 

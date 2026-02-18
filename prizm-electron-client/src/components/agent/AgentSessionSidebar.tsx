@@ -54,6 +54,7 @@ export interface AgentSessionSidebarProps {
   userMemoryCount: number
   scopeMemoryCount: number
   sessionMemoryCount: number
+  documentMemoryCount: number
   memoryByType?: Record<string, number>
   memoryCountsLoading: boolean
   sessionLocks?: ResourceLockInfo[]
