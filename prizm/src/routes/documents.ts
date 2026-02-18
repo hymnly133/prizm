@@ -1,11 +1,10 @@
 /**
  * 文档路由 - 正式信息文档 CRUD
+ * 写操作通过 DocumentService 统一处理，副作用由 EventBus Handler 提供
  */
 
 import type { Router, Request, Response } from 'express'
 import type { IDocumentsAdapter } from '../adapters/interfaces'
-import type { CreateDocumentPayload, UpdateDocumentPayload } from '../types'
-import { EVENT_TYPES } from '../websocket/types'
 import { toErrorResponse } from '../errors'
 import { createLogger } from '../logger'
 import {
@@ -15,11 +14,12 @@ import {
   getScopeForReadById,
   findAcrossScopes
 } from '../scopeUtils'
-import type { SearchIndexService } from '../search/searchIndexService'
 import { getVersionHistory, computeDiff, saveVersion } from '../core/documentVersionStore'
 import { scopeStore } from '../core/ScopeStore'
 import { lockManager } from '../core/resourceLockManager'
 import { emit } from '../core/eventBus'
+import * as documentService from '../services/documentService'
+import { ResourceLockedException, ResourceNotFoundException } from '../services/errors'
 
 const log = createLogger('Documents')
 
@@ -49,7 +49,8 @@ function checkDocumentLock(
         resourceId: documentId,
         detail: `User forced override via API`,
         result: 'success'
-      }
+      },
+      actor: { type: 'user', clientId: req.prizmClient?.clientId, source: 'api:force_override' }
     }).catch(() => {})
     return false
   }
@@ -67,26 +68,43 @@ function checkDocumentLock(
   return true
 }
 
+/** 构建 User OperationContext */
+function userContext(req: Request, scope: string, source: string) {
+  return {
+    scope,
+    actor: {
+      type: 'user' as const,
+      clientId: req.prizmClient?.clientId,
+      source
+    }
+  }
+}
+
 export function createDocumentsRoutes(
   router: Router,
   adapter?: IDocumentsAdapter,
-  searchIndex?: SearchIndexService | null
+  _searchIndex?: unknown
 ): void {
   if (!adapter) {
     log.warn('Documents adapter not provided, routes will return 503')
   }
 
   // GET /documents - 获取所有文档，scope 必填 ?scope=xxx
+  // 返回 EnrichedDocument[]，自带 lockInfo
   router.get('/documents', async (req: Request, res: Response) => {
     try {
-      if (!adapter?.getAllDocuments) {
-        return res.status(503).json({ error: 'Documents adapter not available' })
-      }
-
       const scope = requireScopeForList(req, res)
       if (!scope) return
-      const docs = await adapter.getAllDocuments(scope)
-      res.json({ documents: docs })
+      const docs = await documentService.listDocuments(scope)
+      const scopeLocks = lockManager.listScopeLocks(scope)
+      const lockByDocId = new Map(
+        scopeLocks.filter((l) => l.resourceType === 'document').map((l) => [l.resourceId, l])
+      )
+      const enriched = docs.map((doc) => ({
+        ...doc,
+        lockInfo: lockByDocId.get(doc.id) ?? null
+      }))
+      res.json({ documents: enriched })
     } catch (error) {
       log.error('get all documents error:', error)
       const { status, body } = toErrorResponse(error)
@@ -95,27 +113,35 @@ export function createDocumentsRoutes(
   })
 
   // GET /documents/:id - 获取单个文档，scope 可选 ?scope=xxx，未提供则跨 scope 查找
+  // 返回 EnrichedDocument，附带 lockInfo + versionCount
   router.get('/documents/:id', async (req: Request, res: Response) => {
     try {
-      if (!adapter?.getDocumentById) {
-        return res.status(503).json({ error: 'Documents adapter not available' })
-      }
-
       const id = ensureStringParam(req.params.id)
       const scopeHint = getScopeForReadById(req)
       let doc
+      let resolvedScope: string | undefined = scopeHint ?? undefined
       if (scopeHint) {
-        doc = await adapter.getDocumentById(scopeHint, id)
+        doc = await documentService.getDocument(scopeHint, id)
       } else {
-        const found = await findAcrossScopes(req, (s) => adapter!.getDocumentById!(s, id))
+        const found = await findAcrossScopes(req, (s) => documentService.getDocument(s, id))
         doc = found?.item ?? null
+        resolvedScope = found?.scope
       }
 
-      if (!doc) {
+      if (!doc || !resolvedScope) {
         return res.status(404).json({ error: 'Document not found' })
       }
 
-      res.json({ document: doc })
+      const lock = lockManager.getLock(resolvedScope, 'document', doc.id)
+      const scopeRoot = scopeStore.getScopeRootPath(resolvedScope)
+      const history = getVersionHistory(scopeRoot, doc.id)
+      res.json({
+        document: {
+          ...doc,
+          lockInfo: lock ?? null,
+          versionCount: history.versions.length
+        }
+      })
     } catch (error) {
       log.error('get document by id error:', error)
       const { status, body } = toErrorResponse(error)
@@ -123,36 +149,17 @@ export function createDocumentsRoutes(
     }
   })
 
-  // POST /documents - 创建文档，scope 可选 body.scope，默认 default
+  // POST /documents - 创建文档
   router.post('/documents', async (req: Request, res: Response) => {
     try {
-      if (!adapter?.createDocument) {
-        return res.status(503).json({ error: 'Documents adapter not available' })
-      }
-
       const { title, content } = req.body ?? {}
       if (!title || typeof title !== 'string') {
         return res.status(400).json({ error: 'title is required' })
       }
 
       const scope = getScopeForCreate(req)
-      const payload: CreateDocumentPayload = { title, content }
-      const doc = await adapter.createDocument(scope, payload)
-      if (searchIndex) await searchIndex.addDocument(scope, doc)
-
-      const wsServer = req.prizmServer
-      if (wsServer) {
-        wsServer.broadcast(
-          EVENT_TYPES.DOCUMENT_CREATED,
-          {
-            id: doc.id,
-            scope,
-            title: doc.title,
-            sourceClientId: req.prizmClient?.clientId
-          },
-          scope
-        )
-      }
+      const ctx = userContext(req, scope, 'api:documents')
+      const doc = await documentService.createDocument(ctx, { title, content })
 
       res.status(201).json({ document: doc })
     } catch (error) {
@@ -165,89 +172,64 @@ export function createDocumentsRoutes(
   // PATCH /documents/:id - 更新文档
   router.patch('/documents/:id', async (req: Request, res: Response) => {
     try {
-      if (!adapter?.updateDocument) {
-        return res.status(503).json({ error: 'Documents adapter not available' })
-      }
-
       const id = ensureStringParam(req.params.id)
-      const payload: UpdateDocumentPayload = req.body ?? {}
+      const payload = req.body ?? {}
       const scopeHint = getScopeForReadById(req)
       let scope: string
       if (scopeHint) {
         scope = scopeHint
       } else {
-        const found = await findAcrossScopes(req, (s) => adapter!.getDocumentById!(s, id))
+        const found = await findAcrossScopes(req, (s) => documentService.getDocument(s, id))
         if (!found) {
           return res.status(404).json({ error: 'Document not found' })
         }
         scope = found.scope
       }
 
-      // 锁检查：被 agent checkout 的文档，API 不可直接修改
+      // 锁检查：被 agent checkout 的文档，API 不可直接修改（除非 force）
       if (checkDocumentLock(req, res, scope, id)) return
 
-      const doc = await adapter.updateDocument(scope, id, payload)
-      if (searchIndex) await searchIndex.updateDocument(scope, id, doc)
-
-      const wsServer = req.prizmServer
-      if (wsServer) {
-        wsServer.broadcast(
-          EVENT_TYPES.DOCUMENT_UPDATED,
-          {
-            id: doc.id,
-            scope,
-            title: doc.title,
-            sourceClientId: req.prizmClient?.clientId
-          },
-          scope
-        )
-      }
+      const ctx = userContext(req, scope, 'api:documents')
+      const doc = await documentService.updateDocument(ctx, id, payload)
 
       res.json({ document: doc })
     } catch (error) {
+      if (error instanceof ResourceNotFoundException) {
+        return res.status(404).json({ error: error.message })
+      }
       log.error('update document error:', error)
       const { status, body } = toErrorResponse(error)
       res.status(status).json(body)
     }
   })
 
-  // DELETE /documents/:id - 删除文档，scope 可选 query，未提供则跨 scope 查找
+  // DELETE /documents/:id - 删除文档
   router.delete('/documents/:id', async (req: Request, res: Response) => {
     try {
-      if (!adapter?.deleteDocument) {
-        return res.status(503).json({ error: 'Documents adapter not available' })
-      }
-
       const id = ensureStringParam(req.params.id)
       const scopeHint = getScopeForReadById(req)
       let scope: string
       if (scopeHint) {
         scope = scopeHint
       } else {
-        const found = await findAcrossScopes(req, (s) => adapter!.getDocumentById!(s, id))
+        const found = await findAcrossScopes(req, (s) => documentService.getDocument(s, id))
         if (!found) {
           return res.status(404).json({ error: 'Document not found' })
         }
         scope = found.scope
       }
 
-      // 锁检查：被 agent checkout 的文档，API 不可直接删除
+      // 锁检查
       if (checkDocumentLock(req, res, scope, id)) return
 
-      await adapter.deleteDocument(scope, id)
-      if (searchIndex) await searchIndex.removeDocument(scope, id)
-
-      const wsServer = req.prizmServer
-      if (wsServer) {
-        wsServer.broadcast(
-          EVENT_TYPES.DOCUMENT_DELETED,
-          { id, scope, sourceClientId: req.prizmClient?.clientId },
-          scope
-        )
-      }
+      const ctx = userContext(req, scope, 'api:documents')
+      await documentService.deleteDocument(ctx, id)
 
       res.status(204).send()
     } catch (error) {
+      if (error instanceof ResourceNotFoundException) {
+        return res.status(404).json({ error: error.message })
+      }
       log.error('delete document error:', error)
       const { status, body } = toErrorResponse(error)
       res.status(status).json(body)
@@ -264,12 +246,10 @@ export function createDocumentsRoutes(
       let scope: string
       if (scopeHint) {
         scope = scopeHint
-      } else if (adapter?.getDocumentById) {
-        const found = await findAcrossScopes(req, (s) => adapter!.getDocumentById!(s, id))
+      } else {
+        const found = await findAcrossScopes(req, (s) => documentService.getDocument(s, id))
         if (!found) return res.status(404).json({ error: 'Document not found' })
         scope = found.scope
-      } else {
-        return res.status(503).json({ error: 'Documents adapter not available' })
       }
 
       const scopeRoot = scopeStore.getScopeRootPath(scope)
@@ -279,7 +259,9 @@ export function createDocumentsRoutes(
         version: v.version,
         timestamp: v.timestamp,
         title: v.title,
-        contentHash: v.contentHash
+        contentHash: v.contentHash,
+        changedBy: v.changedBy,
+        changeReason: v.changeReason
       }))
 
       res.json({ documentId: id, versions })
@@ -303,12 +285,10 @@ export function createDocumentsRoutes(
       let scope: string
       if (scopeHint) {
         scope = scopeHint
-      } else if (adapter?.getDocumentById) {
-        const found = await findAcrossScopes(req, (s) => adapter!.getDocumentById!(s, id))
+      } else {
+        const found = await findAcrossScopes(req, (s) => documentService.getDocument(s, id))
         if (!found) return res.status(404).json({ error: 'Document not found' })
         scope = found.scope
-      } else {
-        return res.status(503).json({ error: 'Documents adapter not available' })
       }
 
       const scopeRoot = scopeStore.getScopeRootPath(scope)
@@ -342,12 +322,10 @@ export function createDocumentsRoutes(
       let scope: string
       if (scopeHint) {
         scope = scopeHint
-      } else if (adapter?.getDocumentById) {
-        const found = await findAcrossScopes(req, (s) => adapter!.getDocumentById!(s, id))
+      } else {
+        const found = await findAcrossScopes(req, (s) => documentService.getDocument(s, id))
         if (!found) return res.status(404).json({ error: 'Document not found' })
         scope = found.scope
-      } else {
-        return res.status(503).json({ error: 'Documents adapter not available' })
       }
 
       const scopeRoot = scopeStore.getScopeRootPath(scope)
@@ -375,10 +353,6 @@ export function createDocumentsRoutes(
   // POST /documents/:id/restore/:version - 恢复到指定版本
   router.post('/documents/:id/restore/:version', async (req: Request, res: Response) => {
     try {
-      if (!adapter?.updateDocument || !adapter?.getDocumentById) {
-        return res.status(503).json({ error: 'Documents adapter not available' })
-      }
-
       const id = ensureStringParam(req.params.id)
       const versionNum = parseInt(ensureStringParam(req.params.version), 10)
       if (isNaN(versionNum) || versionNum < 1) {
@@ -390,7 +364,7 @@ export function createDocumentsRoutes(
       if (scopeHint) {
         scope = scopeHint
       } else {
-        const found = await findAcrossScopes(req, (s) => adapter!.getDocumentById!(s, id))
+        const found = await findAcrossScopes(req, (s) => documentService.getDocument(s, id))
         if (!found) return res.status(404).json({ error: 'Document not found' })
         scope = found.scope
       }
@@ -406,34 +380,28 @@ export function createDocumentsRoutes(
         return res.status(404).json({ error: `Version ${versionNum} not found` })
       }
 
-      const doc = await adapter.updateDocument(scope, id, {
-        title: targetVersion.title,
-        content: targetVersion.content
-      })
+      const ctx = userContext(req, scope, 'api:restore')
+      const doc = await documentService.updateDocument(
+        ctx,
+        id,
+        {
+          title: targetVersion.title,
+          content: targetVersion.content
+        },
+        { changeReason: `Restored to version ${versionNum}` }
+      )
 
+      // restore 操作需要手动保存一个版本快照，因为 DocumentService 不直接调 saveVersion
       saveVersion(scopeRoot, id, targetVersion.title, targetVersion.content, {
-        changedBy: { type: 'user', apiSource: 'api:restore' },
+        changedBy: { type: 'user', source: 'api:restore' },
         changeReason: `Restored to version ${versionNum}`
       })
 
-      if (searchIndex) await searchIndex.updateDocument(scope, id, doc)
-
-      const wsServer = req.prizmServer
-      if (wsServer) {
-        wsServer.broadcast(
-          EVENT_TYPES.DOCUMENT_UPDATED,
-          {
-            id: doc.id,
-            scope,
-            title: doc.title,
-            sourceClientId: req.prizmClient?.clientId
-          },
-          scope
-        )
-      }
-
       res.json({ document: doc, restoredVersion: versionNum })
     } catch (error) {
+      if (error instanceof ResourceNotFoundException) {
+        return res.status(404).json({ error: error.message })
+      }
       log.error('restore document version error:', error)
       const { status, body } = toErrorResponse(error)
       res.status(status).json(body)

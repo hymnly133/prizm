@@ -1,6 +1,6 @@
 /**
  * 通用文件系统路由 - Layer 0 基础文件操作
- * 管理 scope 目录下的所有文件
+ * 写操作通过 FileService 统一处理，WS 广播由 EventBus handler 提供
  */
 
 import type { Router, Request, Response } from 'express'
@@ -10,7 +10,8 @@ import { requireScopeForList, getScopeForCreate } from '../scopeUtils'
 import { scopeStore } from '../core/ScopeStore'
 import * as mdStore from '../core/mdStore'
 import { getSessionWorkspaceDir } from '../core/PathProviderCore'
-import { EVENT_TYPES_OBJ } from '@prizm/shared'
+import * as fileService from '../services/fileService'
+import { ValidationError } from '../services/errors'
 
 const log = createLogger('Files')
 
@@ -25,6 +26,18 @@ function resolveScopeRoot(req: Request, scope: string): string {
     return getSessionWorkspaceDir(rootPath, sessionWorkspace)
   }
   return rootPath
+}
+
+/** 构建 User OperationContext */
+function userCtx(req: Request, scope: string, source: string) {
+  return {
+    scope,
+    actor: {
+      type: 'user' as const,
+      clientId: req.prizmClient?.clientId,
+      source
+    }
+  }
 }
 
 export function createFilesRoutes(router: Router): void {
@@ -90,7 +103,7 @@ export function createFilesRoutes(router: Router): void {
   })
 
   // POST /files/write - 写入文件
-  router.post('/files/write', (req: Request, res: Response) => {
+  router.post('/files/write', async (req: Request, res: Response) => {
     try {
       const scope = getScopeForCreate(req)
       const scopeRoot = resolveScopeRoot(req, scope)
@@ -100,123 +113,78 @@ export function createFilesRoutes(router: Router): void {
       }
 
       if (!relativePath) {
-        res.status(400).json({ error: 'path is required' })
-        return
+        return res.status(400).json({ error: 'path is required' })
       }
 
-      if (!mdStore.validateRelativePath(relativePath)) {
-        res.status(400).json({ error: 'Invalid path' })
-        return
-      }
-
-      if (mdStore.isSystemPath(relativePath)) {
-        res.status(403).json({ error: 'Cannot write to system directory' })
-        return
-      }
-
-      const ok = mdStore.writeFileByPath(scopeRoot, relativePath, content ?? '')
+      const ctx = userCtx(req, scope, 'api:files')
+      const ok = await fileService.writeFile(ctx, scopeRoot, relativePath, content ?? '')
       if (!ok) {
-        res.status(500).json({ error: 'Failed to write file' })
-        return
-      }
-
-      // Broadcast file event
-      const wsServer = req.prizmServer
-      if (wsServer) {
-        wsServer.broadcast(
-          EVENT_TYPES_OBJ.FILE_CREATED,
-          {
-            relativePath,
-            scope
-          },
-          scope
-        )
+        return res.status(500).json({ error: 'Failed to write file' })
       }
 
       res.json({ ok: true, relativePath })
     } catch (e) {
+      if (e instanceof ValidationError) {
+        return res.status(e.statusCode).json({ error: e.message })
+      }
       res.status(500).json(toErrorResponse(e))
     }
   })
 
   // POST /files/mkdir - 创建目录
-  router.post('/files/mkdir', (req: Request, res: Response) => {
+  router.post('/files/mkdir', async (req: Request, res: Response) => {
     try {
       const scope = getScopeForCreate(req)
       const scopeRoot = resolveScopeRoot(req, scope)
       const { path: relativePath } = req.body as { path?: string }
 
       if (!relativePath) {
-        res.status(400).json({ error: 'path is required' })
-        return
+        return res.status(400).json({ error: 'path is required' })
       }
 
-      if (!mdStore.validateRelativePath(relativePath)) {
-        res.status(400).json({ error: 'Invalid path' })
-        return
-      }
-
-      const ok = mdStore.mkdirByPath(scopeRoot, relativePath)
+      const ctx = userCtx(req, scope, 'api:files')
+      const ok = await fileService.mkdir(ctx, scopeRoot, relativePath)
       if (!ok) {
-        res.status(500).json({ error: 'Failed to create directory' })
-        return
+        return res.status(500).json({ error: 'Failed to create directory' })
       }
 
       res.json({ ok: true, relativePath })
     } catch (e) {
+      if (e instanceof ValidationError) {
+        return res.status(e.statusCode).json({ error: e.message })
+      }
       res.status(500).json(toErrorResponse(e))
     }
   })
 
   // POST /files/move - 移动/重命名
-  router.post('/files/move', (req: Request, res: Response) => {
+  router.post('/files/move', async (req: Request, res: Response) => {
     try {
       const scope = getScopeForCreate(req)
       const scopeRoot = resolveScopeRoot(req, scope)
       const { from, to } = req.body as { from?: string; to?: string }
 
       if (!from || !to) {
-        res.status(400).json({ error: 'from and to are required' })
-        return
+        return res.status(400).json({ error: 'from and to are required' })
       }
 
-      if (!mdStore.validateRelativePath(from) || !mdStore.validateRelativePath(to)) {
-        res.status(400).json({ error: 'Invalid path' })
-        return
-      }
-
-      if (mdStore.isSystemPath(from) || mdStore.isSystemPath(to)) {
-        res.status(403).json({ error: 'Cannot move system files' })
-        return
-      }
-
-      const ok = mdStore.moveFile(scopeRoot, from, to)
+      const ctx = userCtx(req, scope, 'api:files')
+      const ok = await fileService.moveFile(ctx, scopeRoot, from, to)
       if (!ok) {
-        res.status(404).json({ error: 'Source file not found' })
-        return
-      }
-
-      const wsServer = req.prizmServer
-      if (wsServer) {
-        wsServer.broadcast(
-          EVENT_TYPES_OBJ.FILE_MOVED,
-          {
-            relativePath: to,
-            oldRelativePath: from,
-            scope
-          },
-          scope
-        )
+        return res.status(404).json({ error: 'Source file not found' })
       }
 
       res.json({ ok: true, from, to })
     } catch (e) {
+      if (e instanceof ValidationError) {
+        return res.status(e.statusCode).json({ error: e.message })
+      }
       res.status(500).json(toErrorResponse(e))
     }
   })
 
   // DELETE /files/delete - 删除文件/目录
-  router.delete('/files/delete', (req: Request, res: Response) => {
+  router.delete('/files/delete', async (req: Request, res: Response) => {
     try {
       const scope = requireScopeForList(req, res)
       if (!scope) return
@@ -224,40 +192,20 @@ export function createFilesRoutes(router: Router): void {
       const relativePath = req.query.path as string
 
       if (!relativePath) {
-        res.status(400).json({ error: 'path is required' })
-        return
+        return res.status(400).json({ error: 'path is required' })
       }
 
-      if (!mdStore.validateRelativePath(relativePath)) {
-        res.status(400).json({ error: 'Invalid path' })
-        return
-      }
-
-      if (mdStore.isSystemPath(relativePath)) {
-        res.status(403).json({ error: 'Cannot delete system files' })
-        return
-      }
-
-      const ok = mdStore.deleteByPath(scopeRoot, relativePath)
+      const ctx = userCtx(req, scope, 'api:files')
+      const ok = await fileService.deleteFile(ctx, scopeRoot, relativePath)
       if (!ok) {
-        res.status(404).json({ error: 'File not found' })
-        return
-      }
-
-      const wsServer = req.prizmServer
-      if (wsServer) {
-        wsServer.broadcast(
-          EVENT_TYPES_OBJ.FILE_DELETED,
-          {
-            relativePath,
-            scope
-          },
-          scope
-        )
+        return res.status(404).json({ error: 'File not found' })
       }
 
       res.json({ ok: true, relativePath })
     } catch (e) {
+      if (e instanceof ValidationError) {
+        return res.status(e.statusCode).json({ error: e.message })
+      }
       res.status(500).json(toErrorResponse(e))
     }
   })

@@ -5,7 +5,7 @@
 import type { Router, Request, Response } from 'express'
 import type { IClipboardAdapter } from '../adapters/interfaces'
 import type { ClipboardItem, ClipboardItemType } from '../types'
-import { EVENT_TYPES } from '../websocket/types'
+import { emit } from '../core/eventBus'
 import { toErrorResponse } from '../errors'
 import { createLogger } from '../logger'
 import {
@@ -79,19 +79,16 @@ export function createClipboardRoutes(router: Router, adapter?: IClipboardAdapte
       }
       const item = await adapter.addItem(scope, payload)
 
-      const wsServer = req.prizmServer
-      if (wsServer) {
-        wsServer.broadcast(
-          EVENT_TYPES.CLIPBOARD_ITEM_ADDED,
-          {
-            id: item.id,
-            scope,
-            content: item.content,
-            sourceClientId: req.prizmClient?.clientId
-          },
-          scope
-        )
-      }
+      emit('clipboard:mutated', {
+        action: 'added',
+        scope,
+        itemId: item.id,
+        actor: { type: 'user', clientId: req.prizmClient?.clientId, source: 'api:clipboard' },
+        itemType: item.type,
+        content: item.content,
+        sourceApp: item.sourceApp,
+        createdAt: item.createdAt
+      }).catch(() => {})
 
       res.status(201).json({ item })
     } catch (error) {
@@ -125,14 +122,13 @@ export function createClipboardRoutes(router: Router, adapter?: IClipboardAdapte
       }
       await adapter.deleteItem(scope, id)
 
-      const wsServer = req.prizmServer
-      if (wsServer) {
-        wsServer.broadcast(
-          EVENT_TYPES.CLIPBOARD_ITEM_DELETED,
-          { id, scope, sourceClientId: req.prizmClient?.clientId },
-          scope
-        )
-      }
+      emit('clipboard:mutated', {
+        action: 'deleted',
+        scope,
+        itemId: id,
+        actor: { type: 'user', clientId: req.prizmClient?.clientId, source: 'api:clipboard' }
+      }).catch(() => {})
+
       res.status(204).send()
     } catch (error) {
       log.error('delete item error:', error)

@@ -203,12 +203,28 @@ export interface IAgentAdapter {
 
   getMessages?(scope: string, sessionId: string): Promise<AgentMessage[]>
 
-  /** 更新会话（对话摘要、压缩轮次、授权路径等） */
+  /** 更新会话（对话摘要、压缩轮次、授权路径、BG 状态等） */
   updateSession?(
     scope: string,
     id: string,
-    update: { llmSummary?: string; compressedThroughRound?: number; grantedPaths?: string[] }
+    update: {
+      llmSummary?: string
+      compressedThroughRound?: number
+      grantedPaths?: string[]
+      kind?: import('@prizm/shared').SessionKind
+      bgMeta?: import('@prizm/shared').BgSessionMeta
+      bgStatus?: import('@prizm/shared').BgStatus
+      bgResult?: string
+      startedAt?: number
+      finishedAt?: number
+    }
   ): Promise<AgentSession>
+
+  /**
+   * 截断会话消息到指定位置，用于 checkpoint 回退。
+   * 同时清除 checkpoint.messageIndex 之后的所有 checkpoint。
+   */
+  truncateMessages?(scope: string, sessionId: string, messageIndex: number): Promise<AgentSession>
 
   /** 流式对话，返回 SSE 流 */
   chat?(
@@ -225,6 +241,8 @@ export interface IAgentAdapter {
       activeSkillInstructions?: Array<{ name: string; instructions: string }>
       /** 外部项目规则内容 */
       rulesContent?: string
+      /** 用户自定义规则内容（用户级 + scope 级） */
+      customRulesContent?: string
       /** 用户授权的外部文件路径列表 */
       grantedPaths?: string[]
     }

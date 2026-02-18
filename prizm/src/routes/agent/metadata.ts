@@ -10,11 +10,14 @@ import { buildSystemPrompt } from '../../llm/systemPrompt'
 import { listRefItems } from '../../llm/scopeItemRegistry'
 import { listAtReferences, registerBuiltinAtReferences } from '../../llm/atReferenceRegistry'
 import { registerBuiltinSlashCommands } from '../../llm/slashCommands'
-import { loadAllSkillMetadata } from '../../llm/skillManager'
-import { listDiscoveredRules } from '../../llm/rulesLoader'
+import { loadAllSkillMetadata, getActiveSkills } from '../../llm/skillManager'
+import { loadRules, listDiscoveredRules } from '../../llm/rulesLoader'
+import { loadActiveRules } from '../../llm/agentRulesManager'
 import { loadAllCustomCommands } from '../../llm/customCommandLoader'
 import { listSlashCommands } from '../../llm/slashCommandRegistry'
 import { getAllToolMetadata } from '../../llm/toolMetadata'
+import { getBuiltinTools } from '../../llm/builtinTools'
+import { listAllUserProfiles, isMemoryEnabled } from '../../llm/EverMemService'
 import { log, getScopeFromQuery } from './_shared'
 
 export function registerMetadataRoutes(router: Router): void {
@@ -46,7 +49,7 @@ export function registerMetadataRoutes(router: Router): void {
     }
   })
 
-  // GET /agent/system-prompt
+  // GET /agent/system-prompt — 尽可能还原真实发送给 LLM 的完整 system 内容
   router.get('/agent/system-prompt', async (req: Request, res: Response) => {
     try {
       const scope = getScopeFromQuery(req)
@@ -57,12 +60,75 @@ export function registerMetadataRoutes(router: Router): void {
         typeof req.query.sessionId === 'string' && req.query.sessionId.trim()
           ? req.query.sessionId.trim()
           : undefined
+
+      // 加载 Skills（与 chat.ts 同逻辑）
+      const activeSkills = sessionId ? getActiveSkills(scope, sessionId) : []
+      const activeSkillInstructions =
+        activeSkills.length > 0
+          ? activeSkills.map((a) => ({ name: a.skillName, instructions: a.instructions }))
+          : undefined
+
+      // 加载 Rules
+      let rulesContent: string | undefined
+      try {
+        rulesContent = loadRules() || undefined
+      } catch {
+        /* ignore */
+      }
+      let customRulesContent: string | undefined
+      try {
+        customRulesContent = loadActiveRules(scope) || undefined
+      } catch {
+        /* ignore */
+      }
+
       const systemPrompt = await buildSystemPrompt({
         scope,
         sessionId,
-        includeScopeContext: true
+        includeScopeContext: true,
+        activeSkillInstructions,
+        rulesContent,
+        customRulesContent
       })
-      res.json({ systemPrompt, scope, sessionId: sessionId ?? null })
+
+      // 加载用户画像（chat.ts 在 system prompt 之后单独注入）
+      let profileSection = ''
+      if (isMemoryEnabled()) {
+        try {
+          const profileMem = await listAllUserProfiles()
+          if (profileMem.length > 0) {
+            profileSection =
+              '【用户画像 — 只读，由系统自动维护】\n' +
+              profileMem.map((m) => `- ${m.memory}`).join('\n') +
+              '\n\n严格遵守以上画像中的称呼和偏好。画像由记忆系统自动更新，不要为此创建文档。'
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+
+      // 工具列表摘要（tools 参数通过 function calling 接口单独传递，不在 system message 中）
+      const tools = getBuiltinTools()
+      const toolsSummary =
+        `## 工具列表（共 ${tools.length} 个，通过 function calling 接口传递）\n` +
+        tools
+          .map((t) => {
+            const fn = t.function
+            const params = fn.parameters as { required?: string[] } | undefined
+            const required = params?.required ?? []
+            return `- \`${fn.name}\`${required.length ? `(${required.join(', ')})` : ''}: ${
+              fn.description?.slice(0, 60) ?? ''
+            }…`
+          })
+          .join('\n')
+
+      // 拼接完整预览
+      const sections = [systemPrompt]
+      if (profileSection) sections.push(profileSection)
+      sections.push(toolsSummary)
+      const fullPreview = sections.join('\n\n---\n\n')
+
+      res.json({ systemPrompt: fullPreview, scope, sessionId: sessionId ?? null })
     } catch (error) {
       log.error('get system prompt error:', error)
       const { status, body } = toErrorResponse(error)

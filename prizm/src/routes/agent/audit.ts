@@ -4,22 +4,22 @@
 
 import type { Router, Request, Response } from 'express'
 import { toErrorResponse } from '../../errors'
-import { hasScopeAccess } from '../../scopeUtils'
+import { hasScopeAccess, getScopeFromQuery as _getScopeFromQuery } from '../../scopeUtils'
 import { auditManager } from '../../core/agentAuditLog'
 import type { AuditQueryFilter } from '../../core/agentAuditLog'
 import { lockManager } from '../../core/resourceLockManager'
 import type { LockableResourceType } from '../../core/resourceLockManager'
 import { emit } from '../../core/eventBus'
-import { EVENT_TYPES } from '../../websocket/types'
 import { createLogger } from '../../logger'
 
 const log = createLogger('AuditRoutes')
 
 function getScopeFromQuery(req: Request): string {
-  const fromQuery = typeof req.query.scope === 'string' ? req.query.scope : undefined
-  const fromHeader =
-    typeof req.headers['x-prizm-scope'] === 'string' ? req.headers['x-prizm-scope'] : undefined
-  return fromQuery || fromHeader || 'default'
+  const fromScopeUtils = _getScopeFromQuery(req)
+  if (fromScopeUtils) return fromScopeUtils
+  const fromHeader = req.headers['x-prizm-scope']
+  if (typeof fromHeader === 'string' && fromHeader.trim()) return fromHeader.trim()
+  return 'default'
 }
 
 export function registerAuditRoutes(router: Router): void {
@@ -57,7 +57,7 @@ export function registerAuditRoutes(router: Router): void {
         filter.offset = Math.max(0, Math.min(Number(req.query.offset) || 0, 100000))
 
       const entries = auditManager.query(filter)
-      res.json({ data: entries })
+      res.json({ entries, total: entries.length })
     } catch (error) {
       log.error('query audit log error:', error)
       const { status, body } = toErrorResponse(error)
@@ -79,7 +79,7 @@ export function registerAuditRoutes(router: Router): void {
         const limit =
           typeof req.query.limit === 'string' ? Math.min(Number(req.query.limit) || 50, 200) : 50
         const entries = auditManager.getResourceHistory(scope, resourceType, resourceId, limit)
-        res.json({ data: entries })
+        res.json({ entries })
       } catch (error) {
         log.error('query resource history error:', error)
         const { status, body } = toErrorResponse(error)
@@ -160,18 +160,19 @@ export function registerAuditRoutes(router: Router): void {
             resourceId,
             detail: `Forced release by user. reason="${reason}"`,
             result: 'success'
-          }
+          },
+          actor: { type: 'user', clientId: req.prizmClient?.clientId, source: 'api:force_release' }
         }).catch(() => {})
 
-        // 广播锁释放事件
-        const wsServer = req.prizmServer
-        if (wsServer) {
-          wsServer.broadcast(
-            EVENT_TYPES.RESOURCE_UNLOCKED,
-            { resourceType, resourceId, sessionId: released.sessionId, reason, scope },
-            scope
-          )
-        }
+        // 通过 EventBus 广播锁释放事件（由 wsBridgeHandler 转发到 WebSocket）
+        emit('resource:lock.changed', {
+          action: 'unlocked',
+          scope,
+          resourceType: resourceType as 'document' | 'todo_list',
+          resourceId,
+          sessionId: released.sessionId,
+          reason
+        }).catch(() => {})
 
         res.json({
           released: true,

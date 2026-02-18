@@ -3,12 +3,7 @@
  */
 
 import { createLogger } from '../logger'
-import type {
-  IAgentAdapter,
-  LLMStreamChunk,
-  LLMTool,
-  LLMChatMessage
-} from './interfaces'
+import type { IAgentAdapter, LLMStreamChunk, LLMTool, LLMChatMessage } from './interfaces'
 import type { AgentSession, AgentMessage } from '../types'
 import { scopeStore } from '../core/ScopeStore'
 import { genUniqueId } from '../id'
@@ -20,7 +15,20 @@ import { searchTavily } from '../llm/tavilySearch'
 import { buildSystemPrompt } from '../llm/systemPrompt'
 import { processMessageAtRefs } from '../llm/atReferenceParser'
 import { registerBuiltinAtReferences } from '../llm/atReferenceRegistry'
-import { getBuiltinTools, executeBuiltinTool, BUILTIN_TOOL_NAMES } from '../llm/builtinTools'
+import {
+  getBuiltinTools,
+  getBackgroundOnlyTools,
+  executeBuiltinTool,
+  BUILTIN_TOOL_NAMES
+} from '../llm/builtinTools'
+import {
+  getGuardCategory,
+  lookupToolGuide,
+  getToolTips,
+  isGuideConsulted,
+  markGuideConsulted,
+  clearSessionGuides
+} from '../llm/toolInstructions'
 import { OUT_OF_BOUNDS_ERROR_CODE } from '../llm/workspaceResolver'
 import { interactManager } from '../llm/interactManager'
 
@@ -85,6 +93,7 @@ export class DefaultAgentAdapter implements IAgentAdapter {
       data.agentSessions.splice(idx, 1)
       scopeStore.saveScope(scope)
       scopeStore.deleteSessionDir(scope, id)
+      clearSessionGuides(id)
       try {
         await deleteMemoriesByGroupId(`${scope}:session:${id}`)
       } catch (e) {
@@ -97,21 +106,33 @@ export class DefaultAgentAdapter implements IAgentAdapter {
   async updateSession(
     scope: string,
     id: string,
-    update: { llmSummary?: string; compressedThroughRound?: number; grantedPaths?: string[] }
+    update: {
+      llmSummary?: string
+      compressedThroughRound?: number
+      grantedPaths?: string[]
+      kind?: AgentSession['kind']
+      bgMeta?: AgentSession['bgMeta']
+      bgStatus?: AgentSession['bgStatus']
+      bgResult?: string
+      startedAt?: number
+      finishedAt?: number
+    }
   ): Promise<AgentSession> {
     const data = scopeStore.getScopeData(scope)
     const session = data.agentSessions.find((s) => s.id === id)
     if (!session) throw new Error(`Session not found: ${id}`)
 
-    if (update.llmSummary !== undefined) {
-      session.llmSummary = update.llmSummary
-    }
-    if (update.compressedThroughRound !== undefined) {
+    if (update.llmSummary !== undefined) session.llmSummary = update.llmSummary
+    if (update.compressedThroughRound !== undefined)
       session.compressedThroughRound = update.compressedThroughRound
-    }
-    if (update.grantedPaths !== undefined) {
-      session.grantedPaths = update.grantedPaths
-    }
+    if (update.grantedPaths !== undefined) session.grantedPaths = update.grantedPaths
+    if (update.kind !== undefined) session.kind = update.kind
+    if (update.bgMeta !== undefined) session.bgMeta = update.bgMeta
+    if (update.bgStatus !== undefined) session.bgStatus = update.bgStatus
+    if (update.bgResult !== undefined) session.bgResult = update.bgResult
+    if (update.startedAt !== undefined) session.startedAt = update.startedAt
+    if (update.finishedAt !== undefined) session.finishedAt = update.finishedAt
+
     session.updatedAt = Date.now()
     scopeStore.saveScope(scope)
     log.info('Agent session updated:', id, 'scope:', scope)
@@ -145,6 +166,33 @@ export class DefaultAgentAdapter implements IAgentAdapter {
     return session ? [...session.messages] : []
   }
 
+  async truncateMessages(
+    scope: string,
+    sessionId: string,
+    messageIndex: number
+  ): Promise<AgentSession> {
+    const data = scopeStore.getScopeData(scope)
+    const session = data.agentSessions.find((s) => s.id === sessionId)
+    if (!session) throw new Error(`Session not found: ${sessionId}`)
+
+    const clampedIndex = Math.max(0, Math.min(messageIndex, session.messages.length))
+    session.messages = session.messages.slice(0, clampedIndex)
+
+    if (session.checkpoints) {
+      session.checkpoints = session.checkpoints.filter((cp) => cp.messageIndex < clampedIndex)
+    }
+
+    session.updatedAt = Date.now()
+    scopeStore.saveScope(scope)
+    log.info(
+      'Session truncated: %s to messageIndex=%d (remaining=%d)',
+      sessionId,
+      clampedIndex,
+      session.messages.length
+    )
+    return { ...session }
+  }
+
   async *chat(
     scope: string,
     sessionId: string,
@@ -156,6 +204,7 @@ export class DefaultAgentAdapter implements IAgentAdapter {
       includeScopeContext?: boolean
       activeSkillInstructions?: Array<{ name: string; instructions: string }>
       rulesContent?: string
+      customRulesContent?: string
       grantedPaths?: string[]
     }
   ): AsyncIterable<LLMStreamChunk> {
@@ -169,7 +218,8 @@ export class DefaultAgentAdapter implements IAgentAdapter {
       sessionId,
       includeScopeContext,
       activeSkillInstructions: options?.activeSkillInstructions,
-      rulesContent: options?.rulesContent
+      rulesContent: options?.rulesContent,
+      customRulesContent: options?.customRulesContent
     })
     const baseMessages: Array<{ role: string; content: string }> = [
       { role: 'system', content: systemContent }
@@ -195,7 +245,11 @@ export class DefaultAgentAdapter implements IAgentAdapter {
       }
     }
 
+    const session = await this.getSession(scope, sessionId)
     let llmTools: LLMTool[] = getBuiltinTools()
+    if (session?.kind === 'background') {
+      llmTools = [...llmTools, ...getBackgroundOnlyTools()]
+    }
     if (mcpEnabled) {
       const manager = getMcpClientManager()
       await manager.connectAll()
@@ -377,6 +431,9 @@ export class DefaultAgentAdapter implements IAgentAdapter {
             let text: string
             let isError = false
             if (BUILTIN_TOOL_NAMES.has(tc.name)) {
+              const guardCat = getGuardCategory(tc.name)
+
+              // 先执行工具（不阻断）
               const result = await executeBuiltinTool(
                 scope,
                 tc.name,
@@ -387,6 +444,26 @@ export class DefaultAgentAdapter implements IAgentAdapter {
               )
               text = result.text
               isError = result.isError ?? false
+
+              // ── 守卫机制（透传模式：首次附完整指南，后续附精简 tips） ──
+              if (guardCat && !isGuideConsulted(sessionId, guardCat)) {
+                markGuideConsulted(sessionId, guardCat)
+                const guide = lookupToolGuide(tc.name)
+                if (guide) text += `\n\n---\n[首次使用指南]\n${guide.content}`
+              } else if (guardCat && !isError) {
+                const tips = getToolTips(tc.name)
+                if (tips) text += `\n\n${tips}`
+              }
+
+              // prizm_tool_guide 主动查阅后记录类别
+              if (tc.name === 'prizm_tool_guide' && !isError) {
+                const toolArg = typeof args.tool === 'string' ? args.tool.trim() : ''
+                if (toolArg) {
+                  const guide = lookupToolGuide(toolArg)
+                  if (guide) markGuideConsulted(sessionId, guide.category)
+                }
+              }
+
               // 检测 OUT_OF_BOUNDS：需要用户授权
               if (isError && text.includes(OUT_OF_BOUNDS_ERROR_CODE)) {
                 const paths = extractPathsFromToolArgs(args)
@@ -540,12 +617,6 @@ export class DefaultAgentAdapter implements IAgentAdapter {
             if (!runtimeGrantedPaths.includes(p)) runtimeGrantedPaths.push(p)
           }
 
-          log.info(
-            '[Interact] Approved, retrying tool=%s with %d granted paths',
-            r.tc.name,
-            runtimeGrantedPaths.length
-          )
-
           // 通知客户端：工具恢复执行
           yield {
             toolCall: {
@@ -578,7 +649,6 @@ export class DefaultAgentAdapter implements IAgentAdapter {
             execResults[i] = { tc: r.tc, text: `Error: ${errText}`, isError: true }
           }
         } else {
-          log.info('[Interact] Denied for tool=%s requestId=%s', r.tc.name, request.requestId)
           // 拒绝：保持原始 OUT_OF_BOUNDS 错误，LLM 将看到并做出反应
         }
       }

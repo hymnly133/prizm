@@ -6,14 +6,13 @@ import type { Router, Request, Response } from 'express'
 import type { TerminalSessionManager } from '../terminal/TerminalSessionManager'
 import { toErrorResponse } from '../errors'
 import { createLogger } from '../logger'
-import { ensureStringParam, hasScopeAccess } from '../scopeUtils'
+import { ensureStringParam, hasScopeAccess, getScopeFromQuery as _getScopeFromQuery } from '../scopeUtils'
 import { DEFAULT_SCOPE, scopeStore } from '../core/ScopeStore'
 
 const log = createLogger('TerminalRoute')
 
 function getScopeFromQuery(req: Request): string {
-  const s = req.query.scope
-  return typeof s === 'string' && s.trim() ? s.trim() : DEFAULT_SCOPE
+  return _getScopeFromQuery(req) ?? DEFAULT_SCOPE
 }
 
 export function createTerminalRoutes(

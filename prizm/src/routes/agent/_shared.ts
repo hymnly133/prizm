@@ -4,13 +4,13 @@
 
 import type { Request } from 'express'
 import { createLogger } from '../../logger'
+import { getScopeFromQuery as _getScopeFromQuery } from '../../scopeUtils'
 import { scopeStore, DEFAULT_SCOPE } from '../../core/ScopeStore'
 
 export const log = createLogger('Agent')
 
 export function getScopeFromQuery(req: Request): string {
-  const s = req.query.scope
-  return typeof s === 'string' && s.trim() ? s.trim() : DEFAULT_SCOPE
+  return _getScopeFromQuery(req) ?? DEFAULT_SCOPE
 }
 
 /**

@@ -5,11 +5,12 @@
 import type { Router, Request, Response } from 'express'
 import { toErrorResponse } from '../errors'
 import { createLogger } from '../logger'
-import { hasScopeAccess } from '../scopeUtils'
+import { hasScopeAccess, getScopeFromQuery as _getScopeFromQuery } from '../scopeUtils'
 import { DEFAULT_SCOPE } from '../core/ScopeStore'
 import {
   isMemoryEnabled,
   getAllMemories,
+  getDocumentAllMemories,
   searchMemoriesWithOptions,
   deleteMemory,
   clearAllMemories,
@@ -20,26 +21,18 @@ import {
 } from '../llm/EverMemService'
 import { RetrieveMethod, MemoryType } from '@prizm/evermemos'
 import { queryTokenUsage, aggregateTokenUsage } from '../core/tokenUsageDb'
+import { readRecentLogs } from '../llm/memoryLogger'
+import { scheduleDocumentMemory, isDocumentExtracting } from '../llm/documentMemoryService'
 
 const log = createLogger('MemoryRoutes')
 
 function getScopeFromQuery(req: Request): string {
-  const s = req.query.scope
-  return typeof s === 'string' && s.trim() ? s.trim() : DEFAULT_SCOPE
-}
-
-/** POST 请求可能把 scope 放在 body，优先从 body 取 */
-function getScopeFromRequest(req: Request, fromBody?: boolean): string {
-  if (fromBody && req.body && typeof req.body === 'object') {
-    const s = (req.body as { scope?: string }).scope
-    if (typeof s === 'string' && s.trim()) return s.trim()
-  }
-  return getScopeFromQuery(req)
+  return _getScopeFromQuery(req) ?? DEFAULT_SCOPE
 }
 
 export function createMemoryRoutes(router: Router): void {
   // GET /agent/token-usage - token 使用记录（全局共享，不按客户端隔离）
-  // 支持 ?scope=&category=&limit=&offset= 过滤
+  // 支持 ?scope=&category=&sessionId=&from=&to=&limit=&offset= 过滤
   router.get('/agent/token-usage', async (req: Request, res: Response) => {
     try {
       const dataScope =
@@ -50,6 +43,10 @@ export function createMemoryRoutes(router: Router): void {
         typeof req.query.sessionId === 'string'
           ? req.query.sessionId.trim() || undefined
           : undefined
+      const from =
+        typeof req.query.from === 'string' ? parseInt(req.query.from, 10) || undefined : undefined
+      const to =
+        typeof req.query.to === 'string' ? parseInt(req.query.to, 10) || undefined : undefined
       const limit =
         typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) || undefined : undefined
       const offset =
@@ -57,9 +54,9 @@ export function createMemoryRoutes(router: Router): void {
           ? parseInt(req.query.offset, 10) || undefined
           : undefined
 
-      const filter = { dataScope, category, sessionId, limit, offset }
+      const filter = { dataScope, category, sessionId, from, to, limit, offset }
       const records = queryTokenUsage(filter)
-      const summary = aggregateTokenUsage({ dataScope, category, sessionId })
+      const summary = aggregateTokenUsage({ dataScope, category, sessionId, from, to })
       res.json({ records, summary })
     } catch (error) {
       log.error('token-usage error:', error)
@@ -89,10 +86,70 @@ export function createMemoryRoutes(router: Router): void {
     }
   })
 
+  // GET /agent/memories/document/:documentId - 获取指定文档的全部记忆
+  router.get('/agent/memories/document/:documentId', async (req: Request, res: Response) => {
+    try {
+      const scope = getScopeFromQuery(req)
+      if (!hasScopeAccess(req, scope)) {
+        return res.status(403).json({ error: 'scope access denied' })
+      }
+
+      if (!isMemoryEnabled()) {
+        return res.json({ enabled: false, memories: [] })
+      }
+
+      const documentId = String(req.params.documentId ?? '').trim()
+      if (!documentId) {
+        return res.status(400).json({ error: 'documentId is required' })
+      }
+
+      const memories = await getDocumentAllMemories(scope, documentId)
+      const extracting = isDocumentExtracting(scope, documentId)
+      res.json({ enabled: true, memories, extracting })
+    } catch (error) {
+      log.error('get document memories error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // POST /agent/memories/document/:documentId/extract - 手动触发文档记忆提取
+  router.post(
+    '/agent/memories/document/:documentId/extract',
+    async (req: Request, res: Response) => {
+      try {
+        const scope = getScopeFromQuery(req)
+        if (!hasScopeAccess(req, scope)) {
+          return res.status(403).json({ error: 'scope access denied' })
+        }
+
+        if (!isMemoryEnabled()) {
+          return res.status(400).json({ error: 'Memory module is not enabled' })
+        }
+
+        const documentId = String(req.params.documentId ?? '').trim()
+        if (!documentId) {
+          return res.status(400).json({ error: 'documentId is required' })
+        }
+
+        if (isDocumentExtracting(scope, documentId)) {
+          return res.json({ triggered: false, reason: 'already_extracting' })
+        }
+
+        scheduleDocumentMemory(scope, documentId)
+        res.json({ triggered: true })
+      } catch (error) {
+        log.error('manual extract document memory error:', error)
+        const { status, body } = toErrorResponse(error)
+        res.status(status).json(body)
+      }
+    }
+  )
+
   // POST /agent/memories/search - 搜索记忆（与内置工具、MCP 对齐；可选 method/use_rerank/limit/memory_types）
   router.post('/agent/memories/search', async (req: Request, res: Response) => {
     try {
-      const scope = getScopeFromRequest(req, true)
+      const scope = getScopeFromQuery(req)
       if (!hasScopeAccess(req, scope)) {
         return res.status(403).json({ error: 'scope access denied' })
       }
@@ -158,7 +215,13 @@ export function createMemoryRoutes(router: Router): void {
       }
 
       if (!isMemoryEnabled()) {
-        return res.json({ enabled: false, userCount: 0, scopeCount: 0 })
+        return res.json({
+          enabled: false,
+          userCount: 0,
+          scopeCount: 0,
+          sessionCount: 0,
+          byType: {}
+        })
       }
 
       const counts = await getMemoryCounts(scope)
@@ -173,7 +236,7 @@ export function createMemoryRoutes(router: Router): void {
   // POST /agent/memories/resolve - 按层精确解析记忆 ID → MemoryItem
   router.post('/agent/memories/resolve', async (req: Request, res: Response) => {
     try {
-      const scope = getScopeFromRequest(req, true)
+      const scope = getScopeFromQuery(req)
       if (!hasScopeAccess(req, scope)) {
         return res.status(403).json({ error: 'scope access denied' })
       }
@@ -262,7 +325,7 @@ export function createMemoryRoutes(router: Router): void {
   // POST /agent/memories/dedup-log/:id/undo - 回退去重
   router.post('/agent/memories/dedup-log/:id/undo', async (req: Request, res: Response) => {
     try {
-      const scope = getScopeFromRequest(req, true)
+      const scope = getScopeFromQuery(req)
       if (!hasScopeAccess(req, scope)) {
         return res.status(403).json({ error: 'scope access denied' })
       }
@@ -314,6 +377,18 @@ export function createMemoryRoutes(router: Router): void {
       res.json({ deleted, vectorsCleared: true })
     } catch (error) {
       log.error('clear all memories error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // GET /agent/memories/logs - 查看记忆系统持久化日志（最近 N 条）
+  router.get('/agent/memories/logs', async (req: Request, res: Response) => {
+    try {
+      const limit = Math.min(parseInt(String(req.query.limit ?? '100'), 10) || 100, 500)
+      const logs = readRecentLogs(limit)
+      res.json({ logs })
+    } catch (error) {
       const { status, body } = toErrorResponse(error)
       res.status(status).json(body)
     }

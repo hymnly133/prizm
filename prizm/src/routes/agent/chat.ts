@@ -13,6 +13,7 @@ import { getAgentLLMSettings, getContextWindowSettings } from '../../settings/ag
 import { registerBuiltinSlashCommands, tryRunSlashCommand } from '../../llm/slashCommands'
 import { autoActivateSkills, getActiveSkills } from '../../llm/skillManager'
 import { loadRules } from '../../llm/rulesLoader'
+import { loadActiveRules } from '../../llm/agentRulesManager'
 import {
   isMemoryEnabled,
   listAllUserProfiles,
@@ -23,9 +24,22 @@ import {
   updateMemoryRefStats
 } from '../../llm/EverMemService'
 import { recordTokenUsage } from '../../llm/tokenUsage'
+import { getLLMProviderName } from '../../llm/index'
+import { memLog } from '../../llm/memoryLogger'
 import { deriveScopeActivities } from '../../llm/scopeInteractionParser'
 import { appendSessionActivities } from '../../core/mdStore'
 import { interactManager } from '../../llm/interactManager'
+import { emit } from '../../core/eventBus'
+import {
+  createCheckpoint,
+  completeCheckpoint,
+  saveFileSnapshots,
+  extractFileChangesFromMessages,
+  initSnapshotCollector,
+  flushSnapshotCollector
+} from '../../core/checkpointStore'
+import * as mdStoreOps from '../../core/mdStore'
+import type { SessionCheckpoint, CheckpointFileChange } from '../../types'
 import { log, getScopeFromQuery, persistMemoryRefs, activeChats, chatKey } from './_shared'
 
 export function registerChatRoutes(router: Router, adapter?: IAgentAdapter): void {
@@ -87,12 +101,32 @@ export function registerChatRoutes(router: Router, adapter?: IAgentAdapter): voi
       } = req.body ?? {}
       const ctxWin = getContextWindowSettings()
 
+      // ---- Checkpoint: 在追加用户消息前创建回退点 ----
+      const checkpointMessageIndex = session.messages.length
+      const turnCheckpoint = createCheckpoint(id, checkpointMessageIndex, content.trim())
+      initSnapshotCollector(id)
+
       // 追加用户消息
       await adapter.appendMessage(scope, id, {
         role: 'user',
         parts: [{ type: 'text', content: content.trim() }]
       })
-      scheduleTurnSummary(scope, id, content.trim())
+
+      // 将 checkpoint 追加到 session
+      const scopeData = scopeStore.getScopeData(scope)
+      const liveSession = scopeData.agentSessions.find((s) => s.id === id)
+      if (liveSession) {
+        if (!liveSession.checkpoints) liveSession.checkpoints = []
+        liveSession.checkpoints.push(turnCheckpoint)
+        scopeStore.saveScope(scope)
+      }
+
+      const skipSummary =
+        session.kind === 'background' &&
+        session.bgMeta?.memoryPolicy?.skipConversationSummary !== false
+      if (!skipSummary) {
+        scheduleTurnSummary(scope, id, content.trim())
+      }
 
       // Slash 命令处理
       let promptInjection: string | null = null
@@ -135,6 +169,9 @@ export function registerChatRoutes(router: Router, adapter?: IAgentAdapter): voi
       const uncompressedRounds = completeRounds - compressedThrough
       const shouldCompress = uncompressedRounds >= fullContextTurns + cachedContextTurns
 
+      const skipP2 =
+        session.kind === 'background' &&
+        session.bgMeta?.memoryPolicy?.skipNarrativeBatchExtract !== false
       if (shouldCompress && adapter?.updateSession) {
         const toCompress = cachedContextTurns
         const startIdx = 2 * compressedThrough
@@ -142,13 +179,18 @@ export function registerChatRoutes(router: Router, adapter?: IAgentAdapter): voi
         const slice = chatMessages.slice(startIdx, endIdx)
         if (slice.length >= 2) {
           try {
-            await addSessionMemoryFromRounds(
-              slice.map((m) => ({ role: m.role, content: getTextContent(m) })),
-              scope,
-              id
-            )
+            if (!skipP2) {
+              await addSessionMemoryFromRounds(
+                slice.map((m) => ({ role: m.role, content: getTextContent(m) })),
+                scope,
+                id
+              )
+            }
             compressedThrough = compressedThrough + toCompress
             await adapter.updateSession(scope, id, { compressedThroughRound: compressedThrough })
+            emit('agent:session.compressing', { scope, sessionId: id, rounds: slice }).catch(
+              () => {}
+            )
           } catch (e) {
             log.warn('Session memory compression failed:', e)
           }
@@ -208,9 +250,9 @@ export function registerChatRoutes(router: Router, adapter?: IAgentAdapter): voi
           profileMem = await listAllUserProfiles()
           if (profileMem.length > 0) {
             const profilePrompt =
-              '【用户画像- 必须严格遵守】\n' +
+              '【用户画像 — 只读，由系统自动维护】\n' +
               profileMem.map((m) => `- ${m.memory}`).join('\n') +
-              '\n\n请根据以上用户画像调整你的称呼、回复风格、行为风格。'
+              '\n\n严格遵守以上画像中的称呼和偏好。画像由记忆系统自动更新，不要为此创建文档。'
             const profileInsertIdx = history.findIndex((m) => m.role !== 'system')
             const insertAt = profileInsertIdx === -1 ? history.length : profileInsertIdx
             history.splice(insertAt, 0, { role: 'system', content: profilePrompt })
@@ -334,6 +376,13 @@ export function registerChatRoutes(router: Router, adapter?: IAgentAdapter): voi
         log.warn('Rules loading failed:', rulesErr)
       }
 
+      let customRulesContent: string | undefined
+      try {
+        customRulesContent = loadActiveRules(scope) || undefined
+      } catch (customRulesErr) {
+        log.warn('Custom rules loading failed:', customRulesErr)
+      }
+
       // AbortController
       const key = chatKey(scope, id)
       activeChats.get(key)?.abort()
@@ -397,7 +446,22 @@ export function registerChatRoutes(router: Router, adapter?: IAgentAdapter): voi
         })
         const fullContent = getTextContent({ parts })
         let createdByLayer: import('@prizm/shared').MemoryIdsByLayer | null = null
-        if (isMemoryEnabled() && fullContent) {
+        const memEnabled = isMemoryEnabled()
+        memLog('conv_memory:chat_trigger', {
+          scope,
+          sessionId: id,
+          detail: {
+            memoryEnabled: memEnabled,
+            hasFullContent: !!fullContent,
+            userContentLen: content.trim().length,
+            assistantContentLen: fullContent?.length ?? 0,
+            messageId: appendedMsg.id
+          }
+        })
+        const skipP1 =
+          session?.kind === 'background' &&
+          session?.bgMeta?.memoryPolicy?.skipPerRoundExtract !== false
+        if (memEnabled && fullContent && !skipP1) {
           try {
             createdByLayer = await addMemoryInteraction(
               [
@@ -408,7 +472,27 @@ export function registerChatRoutes(router: Router, adapter?: IAgentAdapter): voi
               id,
               appendedMsg.id
             )
+            memLog('conv_memory:chat_trigger', {
+              scope,
+              sessionId: id,
+              detail: {
+                phase: 'result',
+                createdByLayer: createdByLayer
+                  ? {
+                      user: createdByLayer.user.length,
+                      scope: createdByLayer.scope.length,
+                      session: createdByLayer.session.length
+                    }
+                  : null
+              }
+            })
           } catch (e) {
+            memLog('conv_memory:flush_error', {
+              scope,
+              sessionId: id,
+              detail: { phase: 'chat_addMemoryInteraction' },
+              error: e
+            })
             log.warn('Memory storage failed:', e)
           }
         }
@@ -441,6 +525,58 @@ export function registerChatRoutes(router: Router, adapter?: IAgentAdapter): voi
           usageSent = true
           res.flush?.()
         }
+        // ---- Checkpoint: 完成当前 checkpoint，记录文件变更并保存快照 ----
+        try {
+          const toolParts = parts.filter(
+            (p): p is import('@prizm/shared').MessagePartTool => p.type === 'tool'
+          )
+          const fileChanges = extractFileChangesFromMessages([
+            {
+              parts: toolParts.map((p) => ({
+                type: p.type,
+                name: p.name,
+                arguments: p.arguments,
+                result: p.result,
+                isError: p.isError
+              }))
+            }
+          ])
+          const completedCp = completeCheckpoint(turnCheckpoint, fileChanges)
+
+          // 保存文件快照到磁盘
+          const snapshots = flushSnapshotCollector(id)
+          const scopeRootForCp = scopeStore.getScopeRootPath(scope)
+          saveFileSnapshots(scopeRootForCp, id, turnCheckpoint.id, snapshots)
+
+          const cpScopeData = scopeStore.getScopeData(scope)
+          const cpSession = cpScopeData.agentSessions.find((s) => s.id === id)
+          if (cpSession?.checkpoints) {
+            const cpIdx = cpSession.checkpoints.findIndex((cp) => cp.id === turnCheckpoint.id)
+            if (cpIdx >= 0) {
+              cpSession.checkpoints[cpIdx] = completedCp
+              scopeStore.saveScope(scope)
+            }
+          }
+        } catch (cpErr) {
+          log.warn('Failed to complete checkpoint:', cpErr)
+        }
+
+        // fire-and-forget: 通知下游 handler（如统计、活动记录等）
+        emit('agent:message.completed', {
+          scope,
+          sessionId: id,
+          messages: [
+            {
+              id: '',
+              role: 'user',
+              parts: [{ type: 'text', content: content.trim() }],
+              createdAt: Date.now()
+            },
+            appendedMsg
+          ],
+          roundMessageId: appendedMsg.id,
+          actor: { type: 'user', clientId: req.prizmClient?.clientId, source: 'api:chat' }
+        }).catch(() => {})
       }
 
       // SSE 心跳
@@ -460,6 +596,7 @@ export function registerChatRoutes(router: Router, adapter?: IAgentAdapter): voi
           includeScopeContext: includeScopeContext !== false,
           activeSkillInstructions,
           rulesContent,
+          customRulesContent,
           grantedPaths: session.grantedPaths
         })) {
           if (ac.signal.aborted) break
@@ -497,7 +634,6 @@ export function registerChatRoutes(router: Router, adapter?: IAgentAdapter): voi
           if (chunk.toolCall) {
             flushSegment()
             const tc = chunk.toolCall
-            log.info('[SSE] tool_call status=%s id=%s name=%s', tc.status ?? 'done', tc.id, tc.name)
             const toolPart: import('@prizm/shared').MessagePartTool = {
               type: 'tool',
               id: tc.id,
@@ -522,12 +658,6 @@ export function registerChatRoutes(router: Router, adapter?: IAgentAdapter): voi
             res.flush?.()
           }
           if (chunk.interactRequest) {
-            log.info(
-              '[SSE] interact_request requestId=%s tool=%s paths=%s',
-              chunk.interactRequest.requestId,
-              chunk.interactRequest.toolName,
-              chunk.interactRequest.paths.join(', ')
-            )
             res.write(
               `data: ${JSON.stringify({
                 type: 'interact_request',
@@ -575,7 +705,7 @@ export function registerChatRoutes(router: Router, adapter?: IAgentAdapter): voi
         clearInterval(heartbeatTimer)
         const usedModel = typeof model === 'string' && model.trim() ? model.trim() : undefined
         if (lastUsage) {
-          recordTokenUsage('chat', scope, lastUsage, usedModel, id)
+          recordTokenUsage('chat', scope, lastUsage, usedModel ?? getLLMProviderName(), id)
         }
         if (chatCompletedAt && lastUsage) {
           const toolCallParts = parts.filter(

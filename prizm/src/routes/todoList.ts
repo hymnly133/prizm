@@ -167,7 +167,8 @@ function checkTodoListLock(req: Request, res: Response, scope: string, listId: s
         resourceId: listId,
         detail: `User forced override via API`,
         result: 'success'
-      }
+      },
+      actor: { type: 'user', clientId: req.prizmClient?.clientId, source: 'api:force_override' }
     }).catch(() => {})
     return false
   }
