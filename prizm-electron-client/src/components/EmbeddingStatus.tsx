@@ -1,6 +1,6 @@
 /**
  * Embedding 模型状态、统计与调试面板
- * 展示本地向量模型的运行状态、推理统计、量化选择、相似度测试和记忆库管理
+ * 展示本地向量模型的运行状态、推理统计、量化选择、相似度测试、基准评测和记忆库管理
  */
 import { Button, Form, Input, Modal, TextArea, toast } from '@lobehub/ui'
 import { Select } from './ui/Select'
@@ -11,6 +11,7 @@ import {
   CheckCircle,
   Clock,
   Cpu,
+  FlaskConical,
   Loader,
   RefreshCw,
   Search,
@@ -18,7 +19,16 @@ import {
   Zap
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { PrizmClient, EmbeddingStatus as EmbeddingStatusType } from '@prizm/client-core'
+import type {
+  PrizmClient,
+  EmbeddingStatus as EmbeddingStatusType,
+  EmbeddingTestResult,
+  EmbeddingBenchmarkResult,
+  SimilarityLevel,
+  VectorStats
+} from '@prizm/client-core'
+
+// ==================== 样式 ====================
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   sectionTitle: css`
@@ -26,8 +36,8 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
     display: flex;
     gap: ${cssVar.marginXS};
     align-items: center;
-    height: 32px;
-    font-size: ${cssVar.fontSizeLG};
+    height: 28px;
+    font-size: 13px;
     font-weight: 600;
     color: ${cssVar.colorTextHeading};
     &::after {
@@ -37,13 +47,6 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
       margin-inline-start: ${cssVar.marginMD};
       background: linear-gradient(to right, ${cssVar.colorBorder}, transparent);
     }
-  `,
-  card: css`
-    padding: ${cssVar.paddingMD};
-    border: 1px solid ${cssVar.colorBorder};
-    border-radius: ${cssVar.borderRadiusLG};
-    background: ${cssVar.colorFillAlter};
-    margin-bottom: ${cssVar.marginSM};
   `,
   statGrid: css`
     display: grid;
@@ -87,17 +90,115 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
     font-size: 12px;
     font-weight: 500;
   `,
-  testResult: css`
-    margin-top: 10px;
-    padding: 12px;
+  testResultCard: css`
+    margin-top: 12px;
+    padding: 14px;
     border-radius: ${cssVar.borderRadiusSM};
     background: ${cssVar.colorBgContainer};
     border: 1px solid ${cssVar.colorBorderSecondary};
+    font-size: 13px;
+    line-height: 1.7;
+  `,
+  testResultRow: css`
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    padding: 2px 0;
+  `,
+  testResultLabel: css`
+    flex-shrink: 0;
+    min-width: 80px;
+    font-size: 12px;
+    color: ${cssVar.colorTextDescription};
+  `,
+  testResultValue: css`
     font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
     font-size: 12px;
-    line-height: 1.6;
-    white-space: pre-wrap;
+    color: ${cssVar.colorText};
     word-break: break-all;
+  `,
+  similarityBadge: css`
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  `,
+  divider: css`
+    height: 1px;
+    background: ${cssVar.colorBorderSecondary};
+    margin: 8px 0;
+  `,
+  vectorStatsGrid: css`
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+    margin-top: 4px;
+  `,
+  vectorStatCell: css`
+    padding: 4px 8px;
+    border-radius: ${cssVar.borderRadiusSM};
+    background: ${cssVar.colorFillQuaternary};
+    font-size: 11px;
+    text-align: center;
+  `,
+  vectorStatCellLabel: css`
+    color: ${cssVar.colorTextDescription};
+    font-size: 10px;
+  `,
+  vectorStatCellValue: css`
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    color: ${cssVar.colorText};
+  `,
+  benchmarkRow: css`
+    display: grid;
+    grid-template-columns: 1fr 1fr 80px 60px 50px;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 10px;
+    font-size: 12px;
+    border-bottom: 1px solid ${cssVar.colorBorderSecondary};
+    &:last-child {
+      border-bottom: none;
+    }
+  `,
+  benchmarkHeader: css`
+    display: grid;
+    grid-template-columns: 1fr 1fr 80px 60px 50px;
+    gap: 8px;
+    padding: 6px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    color: ${cssVar.colorTextDescription};
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border-bottom: 2px solid ${cssVar.colorBorder};
+  `,
+  benchmarkText: css`
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: ${cssVar.colorText};
+  `,
+  benchmarkPassBadge: css`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+  `,
+  benchmarkSummaryGrid: css`
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 8px;
+    margin-top: 10px;
   `,
   errorBox: css`
     margin-top: 8px;
@@ -166,6 +267,8 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   `
 }))
 
+// ==================== 常量 ====================
+
 interface Props {
   http: PrizmClient | null
   onLog?: (msg: string, type: 'info' | 'success' | 'error' | 'warning') => void
@@ -214,6 +317,345 @@ const DTYPE_OPTIONS = [
   { label: 'FP32 — 全精度浮点（最大体积）', value: 'fp32' }
 ]
 
+/** 相似度等级 → 颜色 */
+const SIMILARITY_COLORS: Record<SimilarityLevel, { color: string; bg: string }> = {
+  very_high: { color: 'var(--ant-color-success)', bg: 'var(--ant-color-success-bg)' },
+  high: { color: 'var(--ant-green-6, #52c41a)', bg: 'var(--ant-green-1, #f6ffed)' },
+  medium: { color: 'var(--ant-color-warning)', bg: 'var(--ant-color-warning-bg)' },
+  low: { color: 'var(--ant-orange-6, #fa8c16)', bg: 'var(--ant-orange-1, #fff7e6)' },
+  very_low: { color: 'var(--ant-color-error)', bg: 'var(--ant-color-error-bg)' }
+}
+
+// ==================== 子组件 ====================
+
+/** 向量统计展示 */
+function VectorStatsDisplay({ stats, label }: { stats: VectorStats; label?: string }) {
+  return (
+    <div>
+      {label && (
+        <span style={{ fontSize: 11, color: 'var(--ant-color-text-description)' }}>{label}</span>
+      )}
+      <div className={styles.vectorStatsGrid}>
+        {(['mean', 'std', 'min', 'max', 'norm'] as const).map((key) => (
+          <div key={key} className={styles.vectorStatCell}>
+            <div className={styles.vectorStatCellLabel}>{key}</div>
+            <div className={styles.vectorStatCellValue}>{stats[key]}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** 相似度徽章 */
+function SimilarityBadge({
+  score,
+  level,
+  label
+}: {
+  score: number
+  level: SimilarityLevel
+  label: string
+}) {
+  const colors = SIMILARITY_COLORS[level]
+  return (
+    <span className={styles.similarityBadge} style={{ color: colors.color, background: colors.bg }}>
+      {score} ({label})
+    </span>
+  )
+}
+
+/** 结构化测试结果卡片 */
+function TestResultCard({ result }: { result: EmbeddingTestResult }) {
+  const hasSimilarity = result.similarity !== undefined && result.similarityLevel
+
+  return (
+    <div className={styles.testResultCard}>
+      {/* 基本信息 */}
+      <div className={styles.testResultRow}>
+        <span className={styles.testResultLabel}>文本</span>
+        <span className={styles.testResultValue}>
+          {result.text.length > 120 ? result.text.slice(0, 120) + '...' : result.text}
+        </span>
+      </div>
+      <div className={styles.testResultRow}>
+        <span className={styles.testResultLabel}>字符数</span>
+        <span className={styles.testResultValue}>{result.textLength}</span>
+      </div>
+      <div className={styles.testResultRow}>
+        <span className={styles.testResultLabel}>维度</span>
+        <span className={styles.testResultValue}>{result.dimension}</span>
+      </div>
+      <div className={styles.testResultRow}>
+        <span className={styles.testResultLabel}>推理延迟</span>
+        <span className={styles.testResultValue}>{result.latencyMs}ms</span>
+      </div>
+      <div className={styles.testResultRow}>
+        <span className={styles.testResultLabel}>向量预览</span>
+        <span className={styles.testResultValue}>[{result.vectorPreview.join(', ')}...]</span>
+      </div>
+
+      {/* 向量统计 */}
+      {result.vectorStats && <VectorStatsDisplay stats={result.vectorStats} label="向量统计" />}
+
+      {/* 相似度比较结果 */}
+      {hasSimilarity && (
+        <>
+          <div className={styles.divider} />
+          <div className={styles.testResultRow}>
+            <span className={styles.testResultLabel}>比较文本</span>
+            <span className={styles.testResultValue}>
+              {result.compareWith && result.compareWith.length > 120
+                ? result.compareWith.slice(0, 120) + '...'
+                : result.compareWith}
+            </span>
+          </div>
+          <div className={styles.testResultRow}>
+            <span className={styles.testResultLabel}>比较字符数</span>
+            <span className={styles.testResultValue}>{result.compareTextLength}</span>
+          </div>
+          <div className={styles.testResultRow}>
+            <span className={styles.testResultLabel}>比较延迟</span>
+            <span className={styles.testResultValue}>{result.compareLatencyMs}ms</span>
+          </div>
+          {result.compareVectorPreview && (
+            <div className={styles.testResultRow}>
+              <span className={styles.testResultLabel}>比较向量</span>
+              <span className={styles.testResultValue}>
+                [{result.compareVectorPreview.join(', ')}...]
+              </span>
+            </div>
+          )}
+
+          {result.compareVectorStats && (
+            <VectorStatsDisplay stats={result.compareVectorStats} label="比较向量统计" />
+          )}
+
+          <div className={styles.divider} />
+          <div className={styles.testResultRow}>
+            <span className={styles.testResultLabel}>原始相似度</span>
+            <span className={styles.testResultValue}>{result.similarity}</span>
+          </div>
+          {result.calibratedSimilarity !== undefined && (
+            <div className={styles.testResultRow}>
+              <span className={styles.testResultLabel}>校准相似度</span>
+              <SimilarityBadge
+                score={result.calibratedSimilarity}
+                level={result.similarityLevel!}
+                label={result.similarityLabel!}
+              />
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+/** 期望类型 → 中文标签 */
+const EXPECTED_LABELS: Record<string, string> = {
+  high: '高',
+  low: '低',
+  cross_lang: '跨语言',
+  antonym: '反义'
+}
+
+/** 基准测试结果卡片 */
+function BenchmarkResultCard({ result }: { result: EmbeddingBenchmarkResult }) {
+  const { pairs, summary } = result
+  const passRatePct = Math.round(summary.passRate * 100)
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      {/* 汇总统计 */}
+      <div className={styles.benchmarkSummaryGrid}>
+        <div className={styles.statItem}>
+          <span className={styles.statLabel}>通过率</span>
+          <span
+            className={styles.statValue}
+            style={{
+              color: passRatePct >= 80 ? 'var(--ant-color-success)' : 'var(--ant-color-warning)'
+            }}
+          >
+            {passRatePct}%
+          </span>
+        </div>
+        <div className={styles.statItem}>
+          <span className={styles.statLabel}>通过/评分</span>
+          <span className={`${styles.statValue} ${styles.statValueSmall}`}>
+            {summary.passCount}/{summary.scorablePairs}
+          </span>
+        </div>
+        <div className={styles.statItem}>
+          <span className={styles.statLabel}>统一阈值</span>
+          <span className={`${styles.statValue} ${styles.statValueSmall}`}>
+            {summary.threshold}
+          </span>
+        </div>
+        {(summary.crossLangPairs > 0 || summary.antonymPairs > 0) && (
+          <div className={styles.statItem}>
+            <span className={styles.statLabel}>不计入评分</span>
+            <span
+              className={`${styles.statValue} ${styles.statValueSmall}`}
+              style={{ color: 'var(--ant-color-text-secondary)' }}
+            >
+              {summary.crossLangPairs + summary.antonymPairs}
+              <span className={styles.statUnit}>
+                （跨语言{summary.crossLangPairs} + 反义{summary.antonymPairs}）
+              </span>
+            </span>
+          </div>
+        )}
+        <div className={styles.statItem}>
+          <span className={styles.statLabel}>高相似校准均值</span>
+          <span className={`${styles.statValue} ${styles.statValueSmall}`}>
+            {summary.avgHighCalibratedSimilarity}
+          </span>
+        </div>
+        <div className={styles.statItem}>
+          <span className={styles.statLabel}>低相似校准均值</span>
+          <span className={`${styles.statValue} ${styles.statValueSmall}`}>
+            {summary.avgLowCalibratedSimilarity}
+          </span>
+        </div>
+        {summary.crossLangPairs > 0 && (
+          <div className={styles.statItem}>
+            <span className={styles.statLabel}>跨语言校准均值</span>
+            <span
+              className={`${styles.statValue} ${styles.statValueSmall}`}
+              style={{ color: 'var(--ant-color-text-secondary)' }}
+            >
+              {summary.avgCrossLangCalibratedSimilarity}
+            </span>
+          </div>
+        )}
+        <div className={styles.statItem}>
+          <span className={styles.statLabel}>区分度</span>
+          <span
+            className={`${styles.statValue} ${styles.statValueSmall}`}
+            style={{
+              color:
+                summary.discrimination >= 0.15
+                  ? 'var(--ant-color-success)'
+                  : 'var(--ant-color-error)'
+            }}
+          >
+            {summary.discrimination}
+          </span>
+        </div>
+        <div className={styles.statItem}>
+          <span className={styles.statLabel}>总耗时</span>
+          <span className={`${styles.statValue} ${styles.statValueSmall}`}>
+            {summary.totalLatencyMs}
+            <span className={styles.statUnit}>ms</span>
+          </span>
+        </div>
+      </div>
+
+      {/* 详细对比表 */}
+      <div style={{ marginTop: 12, overflowX: 'auto' }}>
+        <div className={styles.benchmarkHeader}>
+          <span>文本 A</span>
+          <span>文本 B</span>
+          <span>校准分</span>
+          <span>期望</span>
+          <span>结果</span>
+        </div>
+        {pairs.map((pair, idx) => {
+          const simColors = SIMILARITY_COLORS[pair.similarityLevel]
+          const isSkipped = pair.expected === 'antonym' || pair.expected === 'cross_lang'
+
+          let passDisplay: { text: string; color: string; bg: string }
+          if (isSkipped) {
+            passDisplay = {
+              text: 'SKIP',
+              color: 'var(--ant-color-text-quaternary)',
+              bg: 'var(--ant-color-fill-quaternary)'
+            }
+          } else if (pair.pass) {
+            passDisplay = {
+              text: 'PASS',
+              color: 'var(--ant-color-success)',
+              bg: 'var(--ant-color-success-bg)'
+            }
+          } else {
+            passDisplay = {
+              text: 'FAIL',
+              color: 'var(--ant-color-error)',
+              bg: 'var(--ant-color-error-bg)'
+            }
+          }
+
+          return (
+            <div
+              key={idx}
+              className={styles.benchmarkRow}
+              style={isSkipped ? { opacity: 0.7 } : undefined}
+            >
+              <span className={styles.benchmarkText} title={pair.textA}>
+                {pair.textA}
+              </span>
+              <span className={styles.benchmarkText} title={pair.textB}>
+                {pair.textB}
+              </span>
+              <span
+                style={{
+                  fontWeight: 600,
+                  fontVariantNumeric: 'tabular-nums',
+                  color: simColors.color
+                }}
+                title={`原始: ${pair.similarity}`}
+              >
+                {pair.calibratedSimilarity}
+              </span>
+              <span style={{ fontSize: 11, color: 'var(--ant-color-text-secondary)' }}>
+                {EXPECTED_LABELS[pair.expected] ?? pair.expected} ({pair.category})
+              </span>
+              <span
+                className={styles.benchmarkPassBadge}
+                style={{ color: passDisplay.color, background: passDisplay.bg }}
+              >
+                {passDisplay.text}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* SKIP 类型说明 */}
+      {(summary.crossLangPairs > 0 || summary.antonymPairs > 0) && (
+        <p
+          style={{
+            marginTop: 8,
+            fontSize: 11,
+            color: 'var(--ant-color-text-description)',
+            lineHeight: 1.6
+          }}
+        >
+          {summary.crossLangPairs > 0 && (
+            <>
+              * 跨语言对（SKIP）：小模型（{summary.modelName}
+              ）跨语言能力不足，无法可靠匹配不同语言的同义文本，不计入通过率。
+              <br />
+            </>
+          )}
+          {summary.antonymPairs > 0 && (
+            <>
+              * 反义词对（SKIP）：嵌入模型通过词汇/结构相似度工作，无法区分语义对立（如"好用"
+              vs"难用"），这是所有嵌入模型的已知限制，不计入通过率。
+            </>
+          )}
+          <br />
+          统一阈值 {summary.threshold}：calibrated &ge; {summary.threshold} 判定为相似，实际去重中由
+          LLM 二次校验兜底。
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ==================== 主组件 ====================
+
 export function EmbeddingStatus({ http, onLog }: Props) {
   const [status, setStatus] = useState<EmbeddingStatusType | null>(null)
   const [loading, setLoading] = useState(false)
@@ -222,7 +664,10 @@ export function EmbeddingStatus({ http, onLog }: Props) {
   const [testText, setTestText] = useState('')
   const [compareText, setCompareText] = useState('')
   const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState<string | null>(null)
+  const [testResult, setTestResult] = useState<EmbeddingTestResult | null>(null)
+  const [testError, setTestError] = useState<string | null>(null)
+  const [benchmarking, setBenchmarking] = useState(false)
+  const [benchmarkResult, setBenchmarkResult] = useState<EmbeddingBenchmarkResult | null>(null)
   const [clearModalOpen, setClearModalOpen] = useState(false)
   const [clearConfirmText, setClearConfirmText] = useState('')
   const [clearing, setClearing] = useState(false)
@@ -288,24 +733,33 @@ export function EmbeddingStatus({ http, onLog }: Props) {
     }
     setTesting(true)
     setTestResult(null)
+    setTestError(null)
     try {
       const result = await http.testEmbedding(testText.trim(), compareText.trim() || undefined)
-      const lines: string[] = [
-        `维度: ${result.dimension}`,
-        `推理延迟: ${result.latencyMs}ms`,
-        `向量预览: [${result.vectorPreview.join(', ')}...]`
-      ]
-      if (result.similarity !== undefined) {
-        lines.push(``)
-        lines.push(`相似度: ${result.similarity}`)
-        lines.push(`比较推理延迟: ${result.compareLatencyMs}ms`)
-      }
-      setTestResult(lines.join('\n'))
+      setTestResult(result)
       void loadStatus()
     } catch (e) {
-      setTestResult(`错误: ${e}`)
+      setTestError(`测试失败: ${e}`)
     } finally {
       setTesting(false)
+    }
+  }
+
+  async function handleBenchmark() {
+    if (!http) return
+    setBenchmarking(true)
+    setBenchmarkResult(null)
+    try {
+      const result = await http.runEmbeddingBenchmark()
+      setBenchmarkResult(result)
+      const passRate = Math.round(result.summary.passRate * 100)
+      toast.success(`基准测试完成: 通过率 ${passRate}%（${result.summary.totalLatencyMs}ms）`)
+      void loadStatus()
+    } catch (e) {
+      toast.error(`基准测试失败: ${e}`)
+      onLog?.(`基准测试失败: ${e}`, 'error')
+    } finally {
+      setBenchmarking(false)
     }
   }
 
@@ -361,7 +815,7 @@ export function EmbeddingStatus({ http, onLog }: Props) {
       </div>
 
       {/* 状态概览 */}
-      <div className={styles.card} style={{ marginTop: 12 }}>
+      <div className="settings-card">
         <div className={styles.cardHeader}>
           <div className={styles.sectionTitle} style={{ flex: 1 }}>
             <Cpu size={16} />
@@ -427,7 +881,7 @@ export function EmbeddingStatus({ http, onLog }: Props) {
 
       {/* 推理统计 */}
       {st && (
-        <div className={styles.card}>
+        <div className="settings-card">
           <div className={styles.sectionTitle}>
             <Activity size={16} />
             推理统计
@@ -489,7 +943,7 @@ export function EmbeddingStatus({ http, onLog }: Props) {
       )}
 
       {/* 相似度测试 */}
-      <div className={styles.card}>
+      <div className="settings-card">
         <div className={styles.sectionTitle}>
           <Search size={16} />
           相似度测试
@@ -507,7 +961,7 @@ export function EmbeddingStatus({ http, onLog }: Props) {
               style={{ resize: 'vertical' }}
             />
           </Form.Item>
-          <Form.Item label="比较文本（可选）" extra="填写后返回两段文本的余弦相似度">
+          <Form.Item label="比较文本（可选）" extra="填写后返回两段文本的余弦相似度与等级判定">
             <TextArea
               value={compareText}
               onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
@@ -530,7 +984,32 @@ export function EmbeddingStatus({ http, onLog }: Props) {
             </Button>
           </Form.Item>
         </Form>
-        {testResult && <div className={styles.testResult}>{testResult}</div>}
+        {testResult && <TestResultCard result={testResult} />}
+        {testError && <div className={styles.errorBox}>{testError}</div>}
+      </div>
+
+      {/* 基准评测 */}
+      <div className="settings-card">
+        <div className={styles.cardHeader}>
+          <div className={styles.sectionTitle} style={{ flex: 1 }}>
+            <FlaskConical size={16} />
+            基准评测
+          </div>
+          <Button
+            size="small"
+            onClick={() => void handleBenchmark()}
+            loading={benchmarking}
+            disabled={benchmarking || st?.state !== 'ready'}
+            type="primary"
+            icon={<Zap size={13} />}
+          >
+            运行基准测试
+          </Button>
+        </div>
+        <p className={`form-hint ${styles.formHintSpaced}`}>
+          使用内置语义对（同义改写、跨语言、不同主题、语义对立）评估模型的语义区分能力
+        </p>
+        {benchmarkResult && <BenchmarkResultCard result={benchmarkResult} />}
       </div>
 
       {/* 危险操作：清空记忆库 */}

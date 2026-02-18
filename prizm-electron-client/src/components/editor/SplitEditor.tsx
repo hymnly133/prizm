@@ -3,6 +3,7 @@
  * 左侧 CodeMirror 源码编辑，右侧 Markdown 实时渲染预览
  * 支持可拖拽调整比例 + 滚动同步 + 比例持久化
  */
+import type { ReactNode } from 'react'
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { Markdown } from '@lobehub/ui'
 import type { ReactCodeMirrorRef } from '@uiw/react-codemirror'
@@ -14,6 +15,7 @@ interface SplitEditorProps {
   readOnly?: boolean
   onSave?: () => void
   editorRef?: React.MutableRefObject<ReactCodeMirrorRef | null>
+  header?: React.ReactNode
 }
 
 const MIN_SPLIT = 0.25
@@ -46,7 +48,8 @@ export default function SplitEditor({
   onChange,
   readOnly = false,
   onSave,
-  editorRef
+  editorRef,
+  header
 }: SplitEditorProps) {
   const [splitRatio, setSplitRatio] = useState(loadSplitRatio)
   const [isDragging, setIsDragging] = useState(false)
@@ -158,6 +161,7 @@ export default function SplitEditor({
           minWidth: 0
         }}
       >
+        {header}
         <MarkdownEditor
           value={value}
           onChange={onChange}

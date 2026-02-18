@@ -1,4 +1,5 @@
-import { Input, List, Tag } from '@lobehub/ui'
+import { Input, Tag } from '@lobehub/ui'
+import { AccentList } from './ui/AccentList'
 import type { InputRef } from 'antd'
 import type { SearchResult } from '@prizm/client-core'
 import { useRef, useState, useEffect } from 'react'
@@ -133,7 +134,10 @@ export default function SearchSection({
     setShowResults(false)
     setResults([])
     try {
-      const doc = await http.createDocument({ title: content.slice(0, 50) || '未命名', content }, scope)
+      const doc = await http.createDocument(
+        { title: content.slice(0, 50) || '未命名', content },
+        scope
+      )
       addLog('已创建文档', 'success')
       onActiveTabChange('files')
       onRefreshFiles()
@@ -204,7 +208,7 @@ export default function SearchSection({
           {results.length === 0 && query.trim() ? (
             <div className="search-result-item search-result-empty">无匹配结果</div>
           ) : (
-            <List
+            <AccentList
               activeKey={
                 results[focusedIndex]
                   ? `${results[focusedIndex].id}-${results[focusedIndex].kind}`

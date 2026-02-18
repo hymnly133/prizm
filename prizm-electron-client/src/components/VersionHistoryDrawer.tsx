@@ -1,29 +1,87 @@
 /**
  * VersionHistoryDrawer - 版本历史侧边抽屉
- * 版本时间线列表、Diff 展示、版本恢复
+ * 版本时间线列表、Diff 展示、版本恢复、修改来源反向引用
  */
 import { useState, useCallback, useEffect } from 'react'
-import { Button, Modal, Timeline } from 'antd'
-import { CodeDiff, Drawer, Flexbox, Skeleton, toast } from '@lobehub/ui'
-import { History, RotateCcw, GitCompare } from 'lucide-react'
+import { Button, Modal, Timeline, Tag, Tooltip } from 'antd'
+import { CodeDiff, Flexbox, Skeleton, toast } from '@lobehub/ui'
+import { History, RotateCcw, GitCompare, Bot, User, Settings, ExternalLink } from 'lucide-react'
 import { useDocumentVersions } from '../hooks/useDocumentVersions'
 import { useScope } from '../hooks/useScope'
+import { useNavigation } from '../context/NavigationContext'
+import { useDocumentDetailSafe } from '../context/DocumentDetailContext'
+import { ModalSidebar } from './ui/ModalSidebar'
 
 interface VersionHistoryDrawerProps {
-  open: boolean
-  onClose: () => void
-  documentId: string
+  open?: boolean
+  onClose?: () => void
+  documentId?: string
   /** 恢复后的回调 */
   onRestore?: () => void
 }
 
-export default function VersionHistoryDrawer({
-  open,
-  onClose,
-  documentId,
-  onRestore
-}: VersionHistoryDrawerProps) {
+function ActorTag({
+  changedBy,
+  onNavigateToSession
+}: {
+  changedBy?: { type: 'agent' | 'user' | 'system'; sessionId?: string; source?: string }
+  onNavigateToSession?: (sessionId: string) => void
+}) {
+  if (!changedBy) return null
+
+  if (changedBy.type === 'agent') {
+    const shortId = changedBy.sessionId ? changedBy.sessionId.slice(0, 8) : ''
+    return (
+      <Tooltip title={changedBy.sessionId ? `会话 ${changedBy.sessionId}` : 'Agent'}>
+        <Tag
+          color="blue"
+          style={{ cursor: changedBy.sessionId && onNavigateToSession ? 'pointer' : 'default' }}
+          onClick={() => {
+            if (changedBy.sessionId && onNavigateToSession) {
+              onNavigateToSession(changedBy.sessionId)
+            }
+          }}
+        >
+          <Bot size={10} style={{ marginRight: 3, verticalAlign: -1 }} />
+          Agent{shortId ? ` ${shortId}` : ''}
+          {changedBy.sessionId && onNavigateToSession && (
+            <ExternalLink size={9} style={{ marginLeft: 3, verticalAlign: -1 }} />
+          )}
+        </Tag>
+      </Tooltip>
+    )
+  }
+
+  if (changedBy.type === 'user') {
+    const label = changedBy.source?.replace(/^api:/, '') ?? '手动'
+    return (
+      <Tooltip title={changedBy.source ?? '用户操作'}>
+        <Tag color="green">
+          <User size={10} style={{ marginRight: 3, verticalAlign: -1 }} />
+          {label}
+        </Tag>
+      </Tooltip>
+    )
+  }
+
+  return (
+    <Tag>
+      <Settings size={10} style={{ marginRight: 3, verticalAlign: -1 }} />
+      系统
+    </Tag>
+  )
+}
+
+export default function VersionHistoryDrawer(props: VersionHistoryDrawerProps) {
+  const ctx = useDocumentDetailSafe()
+
+  const open = props.open ?? ctx?.versionDrawerOpen ?? false
+  const onClose = props.onClose ?? (() => ctx?.setVersionDrawerOpen(false))
+  const documentId = props.documentId ?? ctx?.documentId ?? ''
+  const onRestore = props.onRestore ?? (() => void ctx?.reload())
+
   const { currentScope } = useScope()
+  const { chatWith } = useNavigation()
   const {
     versions,
     loading: versionsLoading,
@@ -37,7 +95,6 @@ export default function VersionHistoryDrawer({
   const [diffLoading, setDiffLoading] = useState(false)
   const [restoring, setRestoring] = useState(false)
 
-  // 打开时加载版本列表
   useEffect(() => {
     if (open && documentId) {
       void fetchVersions(documentId, currentScope)
@@ -46,7 +103,6 @@ export default function VersionHistoryDrawer({
     }
   }, [open, documentId, currentScope, fetchVersions])
 
-  // 对比两个版本
   const handleCompare = useCallback(
     async (from: number, to: number) => {
       setDiffLoading(true)
@@ -58,7 +114,6 @@ export default function VersionHistoryDrawer({
     [documentId, currentScope, fetchDiff]
   )
 
-  // 恢复版本
   const handleRestore = useCallback(
     (version: number) => {
       Modal.confirm({
@@ -83,17 +138,26 @@ export default function VersionHistoryDrawer({
     [documentId, currentScope, restoreVersion, onRestore, onClose]
   )
 
+  const handleNavigateToSession = useCallback(
+    (sessionId: string) => {
+      onClose()
+      chatWith({ sessionId })
+    },
+    [onClose, chatWith]
+  )
+
   return (
-    <Drawer
+    <ModalSidebar
       open={open}
       onClose={onClose}
       title={
-        <Flexbox horizontal align="center" gap={8}>
+        <>
           <History size={16} />
-          <span>版本历史</span>
-        </Flexbox>
+          版本历史
+        </>
       }
       width={560}
+      bodyStyle={{ padding: '12px 16px', overflow: 'auto' }}
     >
       <div className="version-drawer-body">
         {versionsLoading ? (
@@ -152,15 +216,37 @@ export default function VersionHistoryDrawer({
                             {isLatest && <span className="version-item-badge">当前</span>}
                           </Flexbox>
                         </Flexbox>
-                        <div className="version-item-time">
-                          {new Date(v.timestamp).toLocaleString('zh-CN', {
-                            year: 'numeric',
-                            month: 'short',
-                            day: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
-                        </div>
+                        <Flexbox
+                          horizontal
+                          align="center"
+                          gap={6}
+                          style={{ marginTop: 4, flexWrap: 'wrap' }}
+                        >
+                          <span className="version-item-time">
+                            {new Date(v.timestamp).toLocaleString('zh-CN', {
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </span>
+                          <ActorTag
+                            changedBy={v.changedBy}
+                            onNavigateToSession={handleNavigateToSession}
+                          />
+                        </Flexbox>
+                        {v.changeReason && (
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: 'var(--ant-color-text-tertiary)',
+                              marginTop: 2
+                            }}
+                          >
+                            {v.changeReason}
+                          </div>
+                        )}
                       </div>
                     )
                   }
@@ -198,6 +284,6 @@ export default function VersionHistoryDrawer({
           </>
         )}
       </div>
-    </Drawer>
+    </ModalSidebar>
   )
 }

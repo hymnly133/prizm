@@ -1,18 +1,16 @@
 /**
  * FileCardGrid - 工作页平铺视图：待办与文档卡片网格，含加载/空状态
+ *
+ * 卡片操作按钮（编辑、聊天、删除）内置于 DataCard，通过 CSS hover 显示。
  */
 import { memo } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { Button, Empty, Skeleton } from '@lobehub/ui'
 import DataCard from './DataCard'
-import { CardHoverOverlay } from './DataCardHoverMenu'
 import type { FileItem } from '../hooks/useFileList'
-import type { HoveredCardState } from './DataCardHoverMenu'
 
-export interface FileCardGridVariants {
-  enter: { opacity: number; scale: number; y?: number }
-  animate: { opacity: number; scale: number; y: number; transition?: object }
-  exit: { opacity: number; scale: number; transition?: object }
+export type FileCardGridVariants = {
+  [key: string]: { opacity: number; scale: number; y?: number; transition?: object }
 }
 
 export interface FileCardGridProps {
@@ -23,11 +21,10 @@ export interface FileCardGridProps {
   currentScope: string
   onSelectFile: (payload: { kind: FileItem['kind']; id: string }) => void
   onDeleteFile: (file: FileItem) => void
-  hoveredCard: HoveredCardState | null
-  onCardMouseEnter: (file: FileItem, anchorRect: DOMRect, mouseY: number) => void
-  onCardMouseLeave: () => void
-  onMenuEnter: () => void
-  onCloseHover: () => void
+  /** 编辑文档（直接进入编辑器） */
+  onEditDoc?: (docId: string) => void
+  /** 聊聊他 */
+  onChatFile?: (file: FileItem) => void
   cardVariants: FileCardGridVariants
   onAddDocument: () => void
   onAddTodo: () => void
@@ -41,11 +38,8 @@ function FileCardGrid({
   currentScope,
   onSelectFile,
   onDeleteFile,
-  hoveredCard,
-  onCardMouseEnter,
-  onCardMouseLeave,
-  onMenuEnter,
-  onCloseHover,
+  onEditDoc,
+  onChatFile,
   cardVariants,
   onAddDocument,
   onAddTodo
@@ -92,11 +86,7 @@ function FileCardGrid({
   }
 
   return (
-    <CardHoverOverlay
-      hoveredCard={hoveredCard}
-      onClose={onCloseHover}
-      onMenuEnter={onMenuEnter}
-    >
+    <>
       <div className="work-page__cards-grid work-page__cards-grid--variable">
         <AnimatePresence initial={false}>
           {todoItems.map((file) => (
@@ -107,17 +97,12 @@ function FileCardGrid({
               initial="enter"
               animate="animate"
               exit="exit"
-              style={{ position: 'relative' }}
-              onMouseEnter={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect()
-                onCardMouseEnter(file, rect, e.clientY)
-              }}
-              onMouseLeave={onCardMouseLeave}
             >
               <DataCard
                 file={file}
                 onClick={() => onSelectFile({ kind: file.kind, id: file.id })}
                 onDelete={() => onDeleteFile(file)}
+                onChat={onChatFile ? () => onChatFile(file) : undefined}
               />
             </motion.div>
           ))}
@@ -147,23 +132,21 @@ function FileCardGrid({
               initial="enter"
               animate="animate"
               exit="exit"
-              style={{ position: 'relative' }}
-              onMouseEnter={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect()
-                onCardMouseEnter(file, rect, e.clientY)
-              }}
-              onMouseLeave={onCardMouseLeave}
             >
               <DataCard
                 file={file}
                 onClick={() => onSelectFile({ kind: file.kind, id: file.id })}
                 onDelete={() => onDeleteFile(file)}
+                onEdit={
+                  file.kind === 'document' && onEditDoc ? () => onEditDoc(file.id) : undefined
+                }
+                onChat={onChatFile ? () => onChatFile(file) : undefined}
               />
             </motion.div>
           ))}
         </AnimatePresence>
       </div>
-    </CardHoverOverlay>
+    </>
   )
 }
 

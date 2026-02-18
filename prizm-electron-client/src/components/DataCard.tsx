@@ -1,12 +1,13 @@
 /**
- * DataCard - 大卡片展示便签/任务/文档，支持点击、删除、完成等操作
+ * DataCard - 大卡片展示便签/任务/文档，支持点击、删除、编辑、聊天等操作
+ * 底部操作按钮仅在卡片悬浮时显示
  */
 import { memo, useMemo } from 'react'
-import { Button, Tag } from '@lobehub/ui'
+import { ActionIcon, Tag } from '@lobehub/ui'
 import { Icon } from '@lobehub/ui'
 import type { FileItem } from '../hooks/useFileList'
 import type { TodoList, Document } from '@prizm/client-core'
-import { FileText, ListTodo } from 'lucide-react'
+import { FileText, ListTodo, MessageSquare, Pencil, Trash2 } from 'lucide-react'
 import { getKindLabel } from '../constants/todo'
 import TodoListPreview from './todo/TodoListPreview'
 
@@ -26,6 +27,10 @@ interface DataCardProps {
   onClick: () => void
   onDelete?: () => void
   onDone?: () => void
+  /** 编辑按钮（仅文档类型） */
+  onEdit?: () => void
+  /** 聊聊他按钮 */
+  onChat?: () => void
 }
 
 function stripMarkdown(text: string): string {
@@ -35,10 +40,11 @@ function stripMarkdown(text: string): string {
     .trim()
 }
 
-function DataCard({ file, onClick, onDelete, onDone }: DataCardProps) {
+function DataCard({ file, onClick, onDelete, onDone, onEdit, onChat }: DataCardProps) {
   const IconComponent = getKindIcon(file.kind)
   const isTodoList = file.kind === 'todoList'
   const todoList = file.raw as TodoList | undefined
+  const hasActions = !!(onEdit || onChat || onDelete)
 
   const previewText = useMemo(() => {
     if (file.kind !== 'document') return ''
@@ -85,23 +91,54 @@ function DataCard({ file, onClick, onDelete, onDone }: DataCardProps) {
         )}
       </div>
 
-      <div className="data-card__actions">
-        {onDelete && (
-          <Button
-            type="text"
-            danger
-            size="small"
-            onClick={(e) => {
-              e.stopPropagation()
-              onDelete()
-            }}
-          >
-            删除
-          </Button>
-        )}
-      </div>
+      {hasActions && (
+        <div className="data-card__actions">
+          {onEdit && (
+            <ActionIcon
+              icon={Pencil}
+              size="middle"
+              title="编辑"
+              onClick={(e) => {
+                e.stopPropagation()
+                onEdit()
+              }}
+            />
+          )}
+          {onChat && (
+            <ActionIcon
+              icon={MessageSquare}
+              size="middle"
+              title="聊聊他"
+              onClick={(e) => {
+                e.stopPropagation()
+                onChat()
+              }}
+            />
+          )}
+          <span className="data-card__actions-spacer" />
+          {onDelete && (
+            <ActionIcon
+              icon={Trash2}
+              size="middle"
+              title="删除"
+              onClick={(e) => {
+                e.stopPropagation()
+                onDelete()
+              }}
+              style={{ color: 'var(--ant-color-error)' }}
+            />
+          )}
+        </div>
+      )}
     </div>
   )
 }
 
-export default memo(DataCard, (prev, next) => prev.file === next.file)
+export default memo(
+  DataCard,
+  (prev, next) =>
+    prev.file === next.file &&
+    prev.onEdit === next.onEdit &&
+    prev.onChat === next.onChat &&
+    prev.onDelete === next.onDelete
+)

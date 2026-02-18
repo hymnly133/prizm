@@ -1,5 +1,7 @@
 export { default as MarkdownEditor } from './MarkdownEditor'
 export { default as EditorToolbar } from './EditorToolbar'
 export { default as SplitEditor } from './SplitEditor'
+export { default as EditorStatusBar } from './EditorStatusBar'
+export { createFloatingToolbar } from './FloatingToolbar'
 export { createLivePreviewExtension } from './LivePreviewExtension'
 export type { EditorMode, MarkdownEditorProps } from './MarkdownEditor'
