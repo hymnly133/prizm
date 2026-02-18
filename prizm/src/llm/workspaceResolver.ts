@@ -98,7 +98,8 @@ export function resolvePath(
 export function resolveFolder(
   ctx: WorkspaceContext,
   rawFolder: unknown,
-  wsArg?: string
+  wsArg?: string,
+  grantedPaths?: string[]
 ): { folder: string; wsType: WorkspaceType } | null {
   if (typeof rawFolder !== 'string' || !rawFolder.trim()) {
     // 无 folder 时根据 wsArg 确定工作区
@@ -112,8 +113,7 @@ export function resolveFolder(
   const folder = rawFolder.trim()
 
   if (path.isAbsolute(folder)) {
-    // 使用 resolvePath 进行绝对路径匹配
-    const resolved = resolvePath(ctx, folder)
+    const resolved = resolvePath(ctx, folder, undefined, grantedPaths)
     if (!resolved) return null
     return { folder: resolved.relativePath, wsType: resolved.wsType }
   }
@@ -143,10 +143,10 @@ export function resolveWorkspaceType(
   return { root: ctx.scopeRoot, wsType: 'main' }
 }
 
-/** 返回 workspace 标签（用于结果提示） */
+/** 返回 workspace 标签（用于结果提示），独占一行避免与内容混淆 */
 export function wsTypeLabel(wsType: WorkspaceType): string {
-  if (wsType === 'session') return ' [临时工作区]'
-  if (wsType === 'granted') return ' [授权路径]'
+  if (wsType === 'session') return '\n(临时工作区)'
+  if (wsType === 'granted') return '\n(授权路径)'
   return ''
 }
 

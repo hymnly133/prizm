@@ -16,7 +16,12 @@ export interface ToolCallInput {
 }
 
 /** 不产生 scope 交互的工具 */
-const NO_SCOPE_TOOLS = new Set(['prizm_notice', 'tavily_web_search', 'prizm_scope_stats'])
+const NO_SCOPE_TOOLS = new Set([
+  'prizm_notice',
+  'tavily_web_search',
+  'prizm_scope_stats',
+  'prizm_tool_guide'
+])
 
 /** 从 result 提取 ID 的正则：已创建/更新/删除 xxx {id} */
 const ID_FROM_RESULT = /(?:已创建|已更新|已删除)(?:便签|待办项|文档|剪贴板项?)\s+([a-zA-Z0-9_-]+)/
@@ -33,6 +38,26 @@ function safeParseJson<T = Record<string, unknown>>(str: string): T | null {
 function extractIdFromResult(result: string): string | undefined {
   const m = result.match(ID_FROM_RESULT)
   return m?.[1]
+}
+
+/** 复合工具（action enum）通用 scope 活动解析 */
+function deriveCompoundActivity(
+  out: ScopeActivityRecord[],
+  toolName: string,
+  args: Record<string, unknown>,
+  result: string,
+  timestamp: number,
+  itemKind: ScopeActivityItemKind,
+  actionMap: Record<string, ScopeActivityAction>,
+  idOpts: { idField?: string; titleField?: string }
+): void {
+  const action = actionMap[String(args.action ?? '')]
+  if (!action) return
+  const rec: ScopeActivityRecord = { toolName, action, itemKind, timestamp }
+  if (idOpts.idField && args[idOpts.idField]) rec.itemId = String(args[idOpts.idField])
+  if (idOpts.titleField && args[idOpts.titleField]) rec.title = String(args[idOpts.titleField])
+  if (action === 'create' && !rec.itemId) rec.itemId = extractIdFromResult(result)
+  out.push(rec)
 }
 
 /**
@@ -219,7 +244,74 @@ export function deriveScopeActivities(
 
       // === 搜索 ===
       case 'prizm_search':
-        out.push({ toolName: name, action: 'search', timestamp: ts })
+        out.push({
+          toolName: name,
+          action: (args.mode === 'stats' ? 'list' : 'search') as ScopeActivityAction,
+          timestamp: ts
+        })
+        break
+
+      // === 复合工具 ===
+      case 'prizm_document':
+        deriveCompoundActivity(
+          out,
+          name,
+          args,
+          result,
+          ts,
+          'document',
+          {
+            list: 'list',
+            read: 'read',
+            create: 'create',
+            update: 'update',
+            delete: 'delete'
+          },
+          { idField: 'documentId', titleField: 'title' }
+        )
+        break
+      case 'prizm_todo':
+        deriveCompoundActivity(
+          out,
+          name,
+          args,
+          result,
+          ts,
+          'todo',
+          {
+            list: 'list',
+            create_list: 'create',
+            delete_list: 'delete',
+            add_items: 'create',
+            update_item: 'update',
+            delete_item: 'delete'
+          },
+          { idField: 'itemId', titleField: 'title' }
+        )
+        break
+      case 'prizm_file':
+        deriveCompoundActivity(
+          out,
+          name,
+          args,
+          result,
+          ts,
+          'file',
+          {
+            list: 'list',
+            read: 'read',
+            write: 'create',
+            move: 'update',
+            delete: 'delete'
+          },
+          { idField: 'path' }
+        )
+        break
+      case 'prizm_knowledge':
+        out.push({ toolName: name, action: 'search', itemKind: 'document', timestamp: ts })
+        break
+      case 'prizm_lock':
+        // lock 操作不产生 scope 内容活动
         break
 
       default:

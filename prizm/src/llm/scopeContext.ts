@@ -15,16 +15,17 @@ import { getScopeStats } from './scopeItemRegistry'
 import { getDocumentOverview } from './EverMemService'
 
 /** 单条内容最大字符数（摘要时） */
-const MAX_CONTENT_LEN = 100
+const MAX_CONTENT_LEN = 80
 
-/** 整体摘要最大字符数（约 1000-1500 tokens） */
-const DEFAULT_MAX_SUMMARY_LEN = 2800
+/** 整体摘要最大字符数（约 800-1200 tokens） */
+const DEFAULT_MAX_SUMMARY_LEN = 2200
 
 /** 短内容阈值：低于此用全文 */
-const SHORT_THRESHOLD = 400
+const SHORT_THRESHOLD = 300
 
 /** 每类最大条数 */
-const MAX_TODO_ITEMS = 10
+const MAX_TODO_ITEMS = 8
+const MAX_TODO_DONE = 3
 const MAX_DOCUMENTS = 5
 
 function getMaxSummaryLen(): number {
@@ -42,34 +43,51 @@ function truncate(text: string, maxLen: number = MAX_CONTENT_LEN): string {
 }
 
 /**
- * 构建待办区块：遍历所有 list，全量
+ * 构建待办区块：未完成优先，已完成压缩为数量统计
  */
 function buildTodoSection(scope: string, data: ScopeData, maxItems: number): string {
   const lists = data.todoLists ?? []
-  const allItems: Array<{
+  type TodoEntry = {
     item: { id: string; title: string; status: string; updatedAt?: number; description?: string }
     listTitle: string
-  }> = []
+  }
+  const pending: TodoEntry[] = []
+  const done: TodoEntry[] = []
+
   for (const list of lists) {
     for (const it of list.items ?? []) {
-      allItems.push({ item: it, listTitle: list.title ?? '待办' })
+      const entry: TodoEntry = { item: it, listTitle: list.title ?? '待办' }
+      if (it.status === 'done') done.push(entry)
+      else pending.push(entry)
     }
   }
-  if (!allItems.length) return ''
+  if (!pending.length && !done.length) return ''
 
-  const sorted = [...allItems].sort((a, b) => (b.item.updatedAt ?? 0) - (a.item.updatedAt ?? 0))
-  const lines: string[] = []
-  for (const { item: it, listTitle } of sorted.slice(0, maxItems)) {
+  const byTime = (a: TodoEntry, b: TodoEntry) => (b.item.updatedAt ?? 0) - (a.item.updatedAt ?? 0)
+  pending.sort(byTime)
+  done.sort(byTime)
+
+  const multiList = lists.length > 1
+  const formatItem = ({ item: it, listTitle }: TodoEntry) => {
     const status = it.status === 'done' ? '✓' : it.status === 'doing' ? '◐' : '○'
     const desc = (it as { description?: string }).description
-      ? `: ${truncate((it as { description: string }).description, 60)}`
+      ? `: ${truncate((it as { description: string }).description, 50)}`
       : ''
-    const prefix = lists.length > 1 ? `[${listTitle}] ` : ''
-    lines.push(`- ${status} ${prefix}[id:${it.id}] ${it.title}${desc}`)
+    const prefix = multiList ? `[${listTitle}] ` : ''
+    return `- ${status} ${prefix}[id:${it.id}] ${it.title}${desc}`
   }
-  if (sorted.length > maxItems) {
-    lines.push(`  …共 ${sorted.length} 项`)
+
+  const lines: string[] = []
+  const pendingSlice = pending.slice(0, maxItems)
+  for (const entry of pendingSlice) lines.push(formatItem(entry))
+  if (pending.length > maxItems) lines.push(`  …还有 ${pending.length - maxItems} 项未完成`)
+
+  const doneSlice = done.slice(0, MAX_TODO_DONE)
+  if (doneSlice.length) {
+    for (const entry of doneSlice) lines.push(formatItem(entry))
   }
+  if (done.length > MAX_TODO_DONE) lines.push(`  …还有 ${done.length - MAX_TODO_DONE} 项已完成`)
+
   return `## 待办\n${lines.join('\n')}`
 }
 
