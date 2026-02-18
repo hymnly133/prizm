@@ -1,0 +1,6 @@
+export { registerAuditHandlers } from './auditHandlers'
+export { registerLockHandlers } from './lockHandlers'
+export { registerMemoryHandlers } from './memoryHandlers'
+export { registerWSBridgeHandlers, setWebSocketServer } from './wsBridgeHandlers'
+export { registerSearchHandlers, setSearchIndex } from './searchHandlers'
+export { registerBgSessionHandlers } from './bgSessionHandlers'
