@@ -43,6 +43,7 @@ export interface AgentOverviewSidebarProps {
   userMemoryCount: number
   scopeMemoryCount: number
   sessionMemoryCount: number
+  documentMemoryCount: number
   memoryByType?: Record<string, number>
   memoryCountsLoading: boolean
   activeLocks?: ResourceLockInfo[]
@@ -69,6 +70,7 @@ export const AgentOverviewSidebar = memo(function AgentOverviewSidebar({
   userMemoryCount,
   scopeMemoryCount,
   sessionMemoryCount,
+  documentMemoryCount,
   memoryByType,
   memoryCountsLoading,
   activeLocks,

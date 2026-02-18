@@ -83,6 +83,7 @@ export const AgentSessionSidebar = memo(function AgentSessionSidebar({
   userMemoryCount,
   scopeMemoryCount,
   sessionMemoryCount,
+  documentMemoryCount,
   memoryByType,
   memoryCountsLoading,
   sessionLocks
@@ -209,6 +210,7 @@ export const AgentSessionSidebar = memo(function AgentSessionSidebar({
           userMemoryCount={userMemoryCount}
           scopeMemoryCount={scopeMemoryCount}
           sessionMemoryCount={sessionMemoryCount}
+          documentMemoryCount={documentMemoryCount}
           memoryByType={memoryByType}
           memoryCountsLoading={memoryCountsLoading}
           onOpenInspector={() => setMemoryInspectorOpen(true)}
