@@ -4,7 +4,13 @@
 
 import fs from 'fs'
 import path from 'path'
-import type { AgentSession, AgentMessage, MessagePart } from '../../types'
+import type {
+  AgentSession,
+  AgentMessage,
+  MessagePart,
+  SessionCheckpoint,
+  CheckpointFileChange
+} from '../../types'
 import {
   getAgentSessionsDir,
   getSessionDir,
@@ -13,13 +19,7 @@ import {
   getSessionMemoriesPath,
   getSessionWorkspaceDir
 } from '../PathProviderCore'
-import {
-  EXT,
-  safeId,
-  readMd,
-  writeMd,
-  ensureDir
-} from './utils'
+import { EXT, safeId, readMd, writeMd, ensureDir } from './utils'
 
 function parseMessagePart(p: unknown): MessagePart | null {
   if (!p || typeof p !== 'object') return null
@@ -103,6 +103,30 @@ function parseAgentMessage(raw: unknown): AgentMessage | null {
   }
 }
 
+function parseCheckpoint(raw: unknown): SessionCheckpoint | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  if (typeof r.id !== 'string' || typeof r.sessionId !== 'string') return null
+  const fileChanges = Array.isArray(r.fileChanges)
+    ? (r.fileChanges as unknown[]).filter(
+        (fc): fc is CheckpointFileChange =>
+          !!fc &&
+          typeof fc === 'object' &&
+          typeof (fc as Record<string, unknown>).path === 'string' &&
+          typeof (fc as Record<string, unknown>).action === 'string'
+      )
+    : []
+  return {
+    id: r.id,
+    sessionId: r.sessionId,
+    messageIndex: typeof r.messageIndex === 'number' ? r.messageIndex : 0,
+    userMessage: typeof r.userMessage === 'string' ? r.userMessage : '',
+    createdAt: typeof r.createdAt === 'number' ? r.createdAt : 0,
+    fileChanges,
+    completed: r.completed === true
+  }
+}
+
 function parseAgentSession(
   fp: string,
   d: Record<string, unknown>,
@@ -124,6 +148,23 @@ function parseAgentSession(
   const grantedPaths = Array.isArray(d.grantedPaths)
     ? (d.grantedPaths as unknown[]).filter((p): p is string => typeof p === 'string')
     : undefined
+  const checkpoints = Array.isArray(d.checkpoints)
+    ? (d.checkpoints as unknown[])
+        .map(parseCheckpoint)
+        .filter((cp): cp is SessionCheckpoint => cp !== null)
+    : undefined
+
+  const kind = d.kind === 'background' ? ('background' as const) : undefined
+  const bgMeta =
+    kind === 'background' && d.bgMeta && typeof d.bgMeta === 'object'
+      ? (d.bgMeta as AgentSession['bgMeta'])
+      : undefined
+  const bgStatus =
+    typeof d.bgStatus === 'string' ? (d.bgStatus as AgentSession['bgStatus']) : undefined
+  const bgResult = typeof d.bgResult === 'string' ? d.bgResult : undefined
+  const startedAt = typeof d.startedAt === 'number' ? d.startedAt : undefined
+  const finishedAt = typeof d.finishedAt === 'number' ? d.finishedAt : undefined
+
   return {
     id,
     scope,
@@ -132,7 +173,14 @@ function parseAgentSession(
     updatedAt,
     ...(llmSummary != null && { llmSummary }),
     ...(compressedThroughRound != null && { compressedThroughRound }),
-    ...(grantedPaths && grantedPaths.length > 0 && { grantedPaths })
+    ...(grantedPaths && grantedPaths.length > 0 && { grantedPaths }),
+    ...(checkpoints && checkpoints.length > 0 && { checkpoints }),
+    ...(kind && { kind }),
+    ...(bgMeta && { bgMeta }),
+    ...(bgStatus && { bgStatus }),
+    ...(bgResult != null && { bgResult }),
+    ...(startedAt != null && { startedAt }),
+    ...(finishedAt != null && { finishedAt })
   }
 }
 
@@ -215,6 +263,13 @@ export function writeAgentSessions(
       updatedAt: s.updatedAt,
       ...(s.compressedThroughRound != null && { compressedThroughRound: s.compressedThroughRound }),
       ...(s.grantedPaths?.length && { grantedPaths: s.grantedPaths }),
+      ...(s.checkpoints?.length && { checkpoints: s.checkpoints }),
+      ...(s.kind && { kind: s.kind }),
+      ...(s.bgMeta && { bgMeta: s.bgMeta }),
+      ...(s.bgStatus && { bgStatus: s.bgStatus }),
+      ...(s.bgResult != null && { bgResult: s.bgResult }),
+      ...(s.startedAt != null && { startedAt: s.startedAt }),
+      ...(s.finishedAt != null && { finishedAt: s.finishedAt }),
       messages: s.messages.map((m) => ({
         id: m.id,
         role: m.role,
@@ -255,11 +310,7 @@ export function readSessionSummary(scopeRoot: string, sessionId: string): string
   return parsed.content.trim()
 }
 
-export function writeSessionSummary(
-  scopeRoot: string,
-  sessionId: string,
-  summary: string
-): void {
+export function writeSessionSummary(scopeRoot: string, sessionId: string, summary: string): void {
   const fp = getSessionSummaryPath(scopeRoot, sessionId)
   ensureDir(path.dirname(fp))
   writeMd(fp, { prizm_type: 'agent_session_summary' }, summary)
@@ -275,11 +326,7 @@ export function readSessionMemories(scopeRoot: string, sessionId: string): strin
   }
 }
 
-export function appendSessionMemories(
-  scopeRoot: string,
-  sessionId: string,
-  content: string
-): void {
+export function appendSessionMemories(scopeRoot: string, sessionId: string, content: string): void {
   const fp = getSessionMemoriesPath(scopeRoot, sessionId)
   ensureDir(path.dirname(fp))
   const existing = readSessionMemories(scopeRoot, sessionId)

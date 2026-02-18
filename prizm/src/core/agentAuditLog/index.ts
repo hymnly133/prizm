@@ -2,6 +2,7 @@ export type {
   AuditAction,
   AuditResourceType,
   AuditResult,
+  AuditActorType,
   AgentAuditEntry,
   AuditEntryInput,
   AuditQueryFilter

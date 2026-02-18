@@ -1,11 +1,11 @@
 /**
- * Agent 操作审计日志 - 类型定义
- * 与记忆系统枚举（MemoryType / DocumentSubType）对齐
+ * 操作审计日志 - 类型定义
+ * 支持 Agent 和 User 双来源审计
  */
 
 import type { ScopeActivityAction, ScopeActivityItemKind } from '@prizm/shared'
 
-/** 审计动作，扩展自 ScopeActivityAction + 锁定/领取/强制介入操作 */
+/** 审计动作，扩展自 ScopeActivityAction + 锁定/领取/强制介入/BG 相关操作 */
 export type AuditAction =
   | ScopeActivityAction
   | 'checkout'
@@ -14,18 +14,30 @@ export type AuditAction =
   | 'release'
   | 'force_release'
   | 'force_override'
+  | 'spawn'
+  | 'bg_trigger'
+  | 'bg_set_result'
+  | 'bg_cancel'
 
 /** 审计资源类型，复用 ScopeActivityItemKind 并扩展 */
-export type AuditResourceType = ScopeActivityItemKind | 'todo_list' | 'memory'
+export type AuditResourceType = ScopeActivityItemKind | 'todo_list' | 'memory' | 'session'
 
 /** 审计结果 */
 export type AuditResult = 'success' | 'error' | 'denied'
+
+/** 操作者类型 */
+export type AuditActorType = 'agent' | 'user' | 'system'
 
 /** 审计日志条目 */
 export interface AgentAuditEntry {
   id: string
   scope: string
-  sessionId: string
+  /** 操作者类型 */
+  actorType: AuditActorType
+  /** Agent session ID（actorType='agent' 时有值） */
+  sessionId?: string
+  /** API client ID（actorType='user' 时有值） */
+  clientId?: string
   toolName: string
   action: AuditAction
   resourceType: AuditResourceType
@@ -42,13 +54,18 @@ export interface AgentAuditEntry {
   timestamp: number
 }
 
-/** 创建审计条目时的输入（id/scope/sessionId/timestamp 由管理器自动填充） */
-export type AuditEntryInput = Omit<AgentAuditEntry, 'id' | 'scope' | 'sessionId' | 'timestamp'>
+/** 创建审计条目时的输入（id/scope/sessionId/clientId/actorType/timestamp 由管理器自动填充） */
+export type AuditEntryInput = Omit<
+  AgentAuditEntry,
+  'id' | 'scope' | 'sessionId' | 'clientId' | 'actorType' | 'timestamp'
+>
 
 /** 审计日志查询过滤器 */
 export interface AuditQueryFilter {
   scope?: string
   sessionId?: string
+  clientId?: string
+  actorType?: AuditActorType
   resourceType?: AuditResourceType
   resourceId?: string
   action?: AuditAction

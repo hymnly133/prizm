@@ -71,13 +71,12 @@ describe('ScopeStore', () => {
     const data = store.getScopeData('agent-scope')
     data.agentSessions.push({
       id: 's1',
-      title: '测试会话',
       scope: 'agent-scope',
       messages: [
         {
           id: 'm1',
           role: 'user',
-          content: 'hello',
+          parts: [{ type: 'text', content: 'hello' }],
           createdAt: Date.now()
         }
       ],
@@ -91,53 +90,5 @@ describe('ScopeStore', () => {
     expect(loaded.agentSessions).toHaveLength(1)
     expect(loaded.agentSessions[0].id).toBe('s1')
     expect(loaded.agentSessions[0].messages).toHaveLength(1)
-  })
-
-  it('从 prizm_type 用户文件加载便签 (V3 迁移 note->document)', () => {
-    const scopesDir = path.join(tempDir, 'scopes')
-    const scopeDir = path.join(scopesDir, 'file-scope')
-    const prizmDir = path.join(scopeDir, '.prizm')
-    fs.mkdirSync(prizmDir, { recursive: true })
-    fs.writeFileSync(
-      path.join(prizmDir, 'scope.json'),
-      JSON.stringify({ id: 'file-scope', label: 'File Scope', settings: {} }),
-      'utf-8'
-    )
-    fs.writeFileSync(
-      path.join(scopeDir, 'n1.md'),
-      '---\nprizm_type: note\nid: n1\ncreatedAt: 1\nupdatedAt: 1\n---\nmigrated',
-      'utf-8'
-    )
-    const scopeRegistryPath = path.join(tempDir, 'scope-registry.json')
-    const fileScopePath = path.resolve(tempDir, 'scopes', 'file-scope')
-    fs.writeFileSync(
-      scopeRegistryPath,
-      JSON.stringify({
-        version: 1,
-        scopes: {
-          default: {
-            path: 'scopes/default',
-            label: '默认',
-            builtin: true,
-            createdAt: 1
-          },
-          'file-scope': {
-            path: fileScopePath,
-            label: 'File Scope',
-            builtin: false,
-            createdAt: 1
-          }
-        }
-      }),
-      'utf-8'
-    )
-    const store2 = new ScopeStore(tempDir)
-    const data = store2.getScopeData('file-scope')
-    expect(data.documents).toHaveLength(1)
-    expect(data.documents[0].content).toBe('migrated')
-    expect(data.documents[0].id).toBe('n1')
-    expect(data.documents[0].title).toBe('migrated')
-    expect(fs.existsSync(path.join(scopeDir, 'n1.md'))).toBe(false)
-    expect(fs.existsSync(path.join(scopeDir, 'migrated.md'))).toBe(true)
   })
 })

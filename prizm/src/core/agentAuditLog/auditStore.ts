@@ -1,6 +1,7 @@
 /**
- * Agent 审计日志 SQLite 存储层
+ * 操作审计日志 SQLite 存储层
  * 文件位置：.prizm-data/agent_audit.db
+ * 支持 Agent 和 User 双来源
  */
 
 import Database from 'better-sqlite3'
@@ -29,7 +30,7 @@ function getDb(): Database.Database {
     CREATE TABLE IF NOT EXISTS audit_log (
       id TEXT PRIMARY KEY,
       scope TEXT NOT NULL,
-      session_id TEXT NOT NULL,
+      session_id TEXT,
       tool_name TEXT NOT NULL,
       action TEXT NOT NULL,
       resource_type TEXT NOT NULL,
@@ -40,7 +41,9 @@ function getDb(): Database.Database {
       document_sub_type TEXT,
       result TEXT NOT NULL DEFAULT 'success',
       error_message TEXT,
-      timestamp INTEGER NOT NULL
+      timestamp INTEGER NOT NULL,
+      actor_type TEXT NOT NULL DEFAULT 'agent',
+      client_id TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_audit_scope ON audit_log(scope);
     CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_log(session_id);
@@ -48,7 +51,24 @@ function getDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp);
     CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
   `)
+  // 迁移：为旧数据库添加新列（如果不存在）
+  migrateSchema(_db)
   return _db
+}
+
+/** 安全添加新列（忽略 "duplicate column name" 错误） */
+function migrateSchema(db: Database.Database): void {
+  const addColumnSafe = (col: string, type: string, defaultValue?: string) => {
+    try {
+      const def = defaultValue !== undefined ? ` DEFAULT ${defaultValue}` : ''
+      db.exec(`ALTER TABLE audit_log ADD COLUMN ${col} ${type}${def}`)
+    } catch {
+      // 列已存在，忽略
+    }
+  }
+  addColumnSafe('actor_type', 'TEXT NOT NULL', "'agent'")
+  addColumnSafe('client_id', 'TEXT', undefined)
+  // session_id 可能是 NOT NULL 的旧表，无法直接修改，但新插入可以传 null
 }
 
 /** 初始化数据库 */
@@ -72,15 +92,17 @@ export function insertEntry(entry: AgentAuditEntry): void {
     `
     INSERT INTO audit_log
       (id, scope, session_id, tool_name, action, resource_type, resource_id, resource_title,
-       detail, memory_type, document_sub_type, result, error_message, timestamp)
+       detail, memory_type, document_sub_type, result, error_message, timestamp,
+       actor_type, client_id)
     VALUES
       (@id, @scope, @sessionId, @toolName, @action, @resourceType, @resourceId, @resourceTitle,
-       @detail, @memoryType, @documentSubType, @result, @errorMessage, @timestamp)
+       @detail, @memoryType, @documentSubType, @result, @errorMessage, @timestamp,
+       @actorType, @clientId)
   `
   ).run({
     id: entry.id,
     scope: entry.scope,
-    sessionId: entry.sessionId,
+    sessionId: entry.sessionId ?? null,
     toolName: entry.toolName,
     action: entry.action,
     resourceType: entry.resourceType,
@@ -91,7 +113,9 @@ export function insertEntry(entry: AgentAuditEntry): void {
     documentSubType: entry.documentSubType ?? null,
     result: entry.result,
     errorMessage: entry.errorMessage ?? null,
-    timestamp: entry.timestamp
+    timestamp: entry.timestamp,
+    actorType: entry.actorType ?? 'agent',
+    clientId: entry.clientId ?? null
   })
 }
 
@@ -108,6 +132,14 @@ export function queryEntries(filter?: AuditQueryFilter): AgentAuditEntry[] {
   if (filter?.sessionId) {
     conditions.push('session_id = @sessionId')
     params.sessionId = filter.sessionId
+  }
+  if (filter?.clientId) {
+    conditions.push('client_id = @clientId')
+    params.clientId = filter.clientId
+  }
+  if (filter?.actorType) {
+    conditions.push('actor_type = @actorType')
+    params.actorType = filter.actorType
   }
   if (filter?.resourceType) {
     conditions.push('resource_type = @resourceType')
@@ -136,10 +168,8 @@ export function queryEntries(filter?: AuditQueryFilter): AgentAuditEntry[] {
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
 
-  // 参数绑定 LIMIT/OFFSET，防止注入
   const safeLimit = Math.max(1, Math.min(Number(filter?.limit) || 100, 500))
   const safeOffset = Math.max(0, Math.min(Number(filter?.offset) || 0, 100000))
-  conditions.length // no-op, keep reference
   params._limit = safeLimit
   params._offset = safeOffset
 
@@ -190,7 +220,9 @@ function rowToEntry(row: Record<string, unknown>): AgentAuditEntry {
   return {
     id: row.id as string,
     scope: row.scope as string,
-    sessionId: row.session_id as string,
+    actorType: (row.actor_type as AgentAuditEntry['actorType']) ?? 'agent',
+    sessionId: (row.session_id as string) || undefined,
+    clientId: (row.client_id as string) || undefined,
     toolName: row.tool_name as string,
     action: row.action as AgentAuditEntry['action'],
     resourceType: row.resource_type as AgentAuditEntry['resourceType'],

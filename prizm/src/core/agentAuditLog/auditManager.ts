@@ -1,12 +1,12 @@
 /**
- * Agent 审计日志管理器 - 核心逻辑
- * 提供日志记录和查询的高层 API
+ * 操作审计日志管理器 - 核心逻辑
+ * 支持 Agent 和 User 双来源审计
  */
 
 import { randomUUID } from 'node:crypto'
 import { createLogger } from '../../logger'
 import * as auditStore from './auditStore'
-import type { AgentAuditEntry, AuditEntryInput, AuditQueryFilter } from './types'
+import type { AgentAuditEntry, AuditEntryInput, AuditQueryFilter, AuditActorType } from './types'
 
 const log = createLogger('AuditManager')
 
@@ -34,15 +34,43 @@ export function shutdown(): void {
   auditStore.closeAuditStore()
 }
 
+/** Actor 参数用于 record() */
+export interface RecordActorInfo {
+  actorType: AuditActorType
+  sessionId?: string
+  clientId?: string
+}
+
 /**
  * 记录一条审计日志。
- * scope/sessionId/timestamp 由调用方显式传入（非自动填充），保持灵活性。
+ * 支持两种调用签名：
+ *   - record(scope, sessionId, input)          — 兼容旧 Agent 路径
+ *   - record(scope, actor, input)              — 新统一路径（支持 user/system）
  */
-export function record(scope: string, sessionId: string, input: AuditEntryInput): AgentAuditEntry {
+export function record(
+  scope: string,
+  sessionIdOrActor: string | RecordActorInfo,
+  input: AuditEntryInput
+): AgentAuditEntry {
+  let actorType: AuditActorType
+  let sessionId: string | undefined
+  let clientId: string | undefined
+
+  if (typeof sessionIdOrActor === 'string') {
+    actorType = 'agent'
+    sessionId = sessionIdOrActor
+  } else {
+    actorType = sessionIdOrActor.actorType
+    sessionId = sessionIdOrActor.sessionId
+    clientId = sessionIdOrActor.clientId
+  }
+
   const entry: AgentAuditEntry = {
     id: randomUUID(),
     scope,
+    actorType,
     sessionId,
+    clientId,
     timestamp: Date.now(),
     ...input
   }

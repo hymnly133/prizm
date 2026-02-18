@@ -56,6 +56,37 @@ describe('AuditManager', () => {
       expect(entry.timestamp).toBeGreaterThan(0)
     })
 
+    it('应支持 agent actorType（向后兼容 sessionId string）', () => {
+      const entry = auditManager.record('default', 'session-1', {
+        toolName: 'prizm_update_document',
+        action: 'update',
+        resourceType: 'document',
+        result: 'success'
+      })
+
+      expect(entry.actorType).toBe('agent')
+      expect(entry.sessionId).toBe('session-1')
+      expect(entry.clientId).toBeUndefined()
+    })
+
+    it('应支持 user actorType（新 RecordActorInfo 签名）', () => {
+      const entry = auditManager.record(
+        'default',
+        { actorType: 'user', clientId: 'client-abc' },
+        {
+          toolName: 'api:documents',
+          action: 'create',
+          resourceType: 'document',
+          resourceId: 'doc-new',
+          result: 'success'
+        }
+      )
+
+      expect(entry.actorType).toBe('user')
+      expect(entry.clientId).toBe('client-abc')
+      expect(entry.sessionId).toBeUndefined()
+    })
+
     it('应记录带记忆类型的审计条目', () => {
       const entry = auditManager.record('default', 'session-1', {
         toolName: 'prizm_search_docs_by_memory',
@@ -137,6 +168,24 @@ describe('AuditManager', () => {
       expect(page1.length).toBe(2)
       const page2 = auditManager.query({ scope: 'default', limit: 2, offset: 2 })
       expect(page2.length).toBe(1)
+    })
+
+    it('按 actorType 过滤', () => {
+      auditManager.record(
+        'default',
+        { actorType: 'user', clientId: 'client-x' },
+        {
+          toolName: 'api:documents',
+          action: 'create',
+          resourceType: 'document',
+          result: 'success'
+        }
+      )
+      const agents = auditManager.query({ scope: 'default', actorType: 'agent' })
+      expect(agents.length).toBe(3)
+      const users = auditManager.query({ scope: 'default', actorType: 'user' })
+      expect(users.length).toBe(1)
+      expect(users[0].clientId).toBe('client-x')
     })
   })
 

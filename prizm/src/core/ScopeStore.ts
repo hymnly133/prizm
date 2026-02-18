@@ -10,7 +10,6 @@ import { createLogger } from '../logger'
 import { genUniqueId } from '../id'
 import { ScopeRegistry, scopeRegistry } from './ScopeRegistry'
 import { getPrizmDir } from './PathProviderCore'
-import { migrateToV3 } from './migrate-v3'
 import * as mdStore from './mdStore'
 import { DEFAULT_SCOPE, ONLINE_SCOPE, BUILTIN_SCOPES } from '@prizm/shared'
 import type {
@@ -104,7 +103,6 @@ export class ScopeStore {
     if (!fs.existsSync(prizmDir)) {
       this.registry.initScopeDir(scopeId, rootPath)
     }
-    migrateToV3(rootPath)
     try {
       const data: ScopeData = {
         todoLists: (mdStore.readTodoLists(rootPath) ?? []).map(migrateTodoListItems),
@@ -115,6 +113,7 @@ export class ScopeStore {
       this.store.set(scopeId, data)
     } catch (e) {
       log.error('Failed to load scope', scopeId, e)
+      this.store.set(scopeId, createEmptyScopeData())
     }
   }
 
