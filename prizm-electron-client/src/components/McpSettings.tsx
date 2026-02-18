@@ -83,13 +83,6 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
       background: linear-gradient(to right, ${cssVar.colorBorder}, transparent);
     }
   `,
-  serverCard: css`
-    padding: ${cssVar.paddingMD};
-    border: 1px solid ${cssVar.colorBorder};
-    border-radius: ${cssVar.borderRadiusLG};
-    background: ${cssVar.colorFillAlter};
-    margin-bottom: ${cssVar.marginSM};
-  `,
   serverCardHeader: css`
     display: flex;
     align-items: center;
@@ -398,7 +391,7 @@ export function McpSettings({ http, onLog }: McpSettingsProps) {
           ) : (
             <Flexbox gap={8} style={{ width: '100%', flexBasis: '100%' }}>
               {servers.map((r) => (
-                <div key={r.id} className={styles.serverCard}>
+                <div key={r.id} className="settings-card">
                   <div className={styles.serverCardHeader}>
                     <Flexbox horizontal align="center" gap={8}>
                       <Text strong>{r.name}</Text>

@@ -1,24 +1,20 @@
 /**
  * RecentSessionsSection - 最近对话卡片
+ * 使用 LobeUI List 统一列表风格
  */
-import { memo } from 'react'
+import { useMemo } from 'react'
 import { motion } from 'motion/react'
-import { Button, Icon, Tag, Text } from '@lobehub/ui'
-import { MessageSquare, Plus, Clock } from 'lucide-react'
+import { Button, Icon } from '@lobehub/ui'
+import type { ListItemProps } from '@lobehub/ui'
+import { AccentList } from '../components/ui/AccentList'
+import { ArrowRight, MessageSquare, Plus, Clock } from 'lucide-react'
 import { getTextContent } from '@prizm/client-core'
 import type { AgentSession } from '@prizm/client-core'
 import { formatRelativeTime } from '../utils/formatRelativeTime'
-
-const STAGGER_DELAY = 0.06
-const EASE_SMOOTH = [0.33, 1, 0.68, 1] as const
-
-function fadeUp(index: number) {
-  return {
-    initial: { opacity: 0, y: 16 },
-    animate: { opacity: 1, y: 0 },
-    transition: { delay: index * STAGGER_DELAY, duration: 0.4, ease: EASE_SMOOTH }
-  }
-}
+import { fadeUpStagger } from '../theme/motionPresets'
+import { SectionHeader } from '../components/ui/SectionHeader'
+import { EmptyState } from '../components/ui/EmptyState'
+import { LoadingPlaceholder } from '../components/ui/LoadingPlaceholder'
 
 function getSessionTitle(session: AgentSession): string {
   if (session.llmSummary) return session.llmSummary.slice(0, 60)
@@ -33,41 +29,9 @@ export interface RecentSessionsSectionProps {
   sessionsCount: number
   onNewChat: () => void
   onOpenSession: (sessionId: string) => void
+  onViewAll?: () => void
   animationIndex?: number
 }
-
-const SessionItem = memo(function SessionItem({
-  session,
-  onClick
-}: {
-  session: AgentSession
-  onClick: () => void
-}) {
-  const title = getSessionTitle(session)
-  const msgCount = session.messages?.length ?? 0
-
-  return (
-    <div
-      className="home-session-item"
-      role="button"
-      tabIndex={0}
-      onClick={onClick}
-      onKeyDown={(e) => e.key === 'Enter' && onClick()}
-    >
-      <div className="home-session-item__icon">
-        <MessageSquare size={16} />
-      </div>
-      <div className="home-session-item__content">
-        <span className="home-session-item__title">{title}</span>
-        <span className="home-session-item__meta">
-          <Clock size={11} />
-          {formatRelativeTime(session.updatedAt)}
-          {msgCount > 0 && <span> · {msgCount} 条消息</span>}
-        </span>
-      </div>
-    </div>
-  )
-})
 
 export default function RecentSessionsSection({
   sessions,
@@ -75,50 +39,74 @@ export default function RecentSessionsSection({
   sessionsCount,
   onNewChat,
   onOpenSession,
+  onViewAll,
   animationIndex = 0
 }: RecentSessionsSectionProps) {
+  const listItems: ListItemProps[] = useMemo(() => {
+    const newItem: ListItemProps = {
+      key: '__new__',
+      avatar: <Plus size={18} />,
+      title: '新建对话',
+      description: '开始一段新的 AI 对话',
+      onClick: onNewChat
+    }
+    const sessionItems: ListItemProps[] = sessions.map((s) => {
+      const msgCount = s.messages?.length ?? 0
+      return {
+        key: s.id,
+        avatar: <MessageSquare size={16} />,
+        title: getSessionTitle(s),
+        description: (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <Clock size={11} />
+            {formatRelativeTime(s.updatedAt)}
+            {msgCount > 0 && <span> · {msgCount} 条消息</span>}
+          </span>
+        ),
+        onClick: () => onOpenSession(s.id)
+      }
+    })
+    return [newItem, ...sessionItems]
+  }, [sessions, onNewChat, onOpenSession])
+
   return (
-    <motion.div className="home-card home-card--sessions" {...fadeUp(animationIndex)}>
-      <div className="home-card__header">
-        <Icon icon={MessageSquare} size="small" />
-        <span className="home-card__title">最近对话</span>
-        <Tag size="small">{sessionsCount}</Tag>
-      </div>
-      <div className="home-card__body">
-        {sessionsLoading ? (
-          <div className="home-loading-placeholder">加载中...</div>
-        ) : sessions.length === 0 ? (
-          <div className="home-empty-state">
-            <Text type="secondary">暂无对话</Text>
-            <Button size="small" type="primary" onClick={onNewChat}>
-              开始第一个对话
-            </Button>
-          </div>
-        ) : (
-          <div className="home-session-list">
-            <div
-              className="home-session-item home-session-item--new"
-              role="button"
-              tabIndex={0}
-              onClick={onNewChat}
-              onKeyDown={(e) => e.key === 'Enter' && onNewChat()}
+    <motion.div
+      className="content-card content-card--default content-card--hoverable home-card--sessions"
+      {...fadeUpStagger(animationIndex)}
+    >
+      <SectionHeader
+        icon={MessageSquare}
+        title="最近对话"
+        count={sessionsCount}
+        className="content-card__header home-card__header"
+        extra={
+          onViewAll && (
+            <Button
+              size="small"
+              type="text"
+              icon={<Icon icon={ArrowRight} size="small" />}
+              iconPosition="end"
+              onClick={onViewAll}
             >
-              <div className="home-session-item__icon home-session-item__icon--new">
-                <Plus size={18} />
-              </div>
-              <div className="home-session-item__content">
-                <span className="home-session-item__title">新建对话</span>
-                <span className="home-session-item__meta">开始一段新的 AI 对话</span>
-              </div>
-            </div>
-            {sessions.map((session) => (
-              <SessionItem
-                key={session.id}
-                session={session}
-                onClick={() => onOpenSession(session.id)}
-              />
-            ))}
-          </div>
+              查看全部
+            </Button>
+          )
+        }
+      />
+      <div className="content-card__body">
+        {sessionsLoading ? (
+          <LoadingPlaceholder />
+        ) : sessions.length === 0 ? (
+          <EmptyState
+            description="暂无对话"
+            actions={
+              <Button size="small" type="primary" onClick={onNewChat}>
+                开始第一个对话
+              </Button>
+            }
+          />
+        ) : (
+          <AccentList items={listItems} />
         )}
       </div>
     </motion.div>

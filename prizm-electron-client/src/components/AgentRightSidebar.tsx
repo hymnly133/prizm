@@ -1,15 +1,19 @@
 /**
  * Agent 右侧边栏 - 总览模式显示 scope 统计；会话模式显示状态、活动、记忆
+ *
+ * documents/memoryCounts 从 scopeDataStore 读取；sessions 从 agentSessionStore 读取。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePrizmContext } from '../context/PrizmContext'
 import { useScope } from '../hooks/useScope'
+import { useScopeDataStore } from '../store/scopeDataStore'
+import { useAgentSessionStore } from '../store/agentSessionStore'
 import type {
-  Document,
-  AgentSession,
+  EnrichedSession,
   AgentMessage,
   ToolCallRecord,
-  AvailableModel
+  AvailableModel,
+  ResourceLockInfo
 } from '@prizm/client-core'
 import { getToolCalls } from '@prizm/client-core'
 import type { ActivityItem, SessionStats } from './agent/agentSidebarTypes'
@@ -19,7 +23,7 @@ import { AgentSessionSidebar } from './agent/AgentSessionSidebar'
 interface AgentRightSidebarProps {
   sending?: boolean
   error?: string | null
-  currentSession?: AgentSession | null
+  currentSession?: EnrichedSession | null
   optimisticMessages?: AgentMessage[]
   selectedModel?: string
   onModelChange?: (model: string | undefined) => void
@@ -39,12 +43,21 @@ export function AgentRightSidebar({
   const { manager } = usePrizmContext()
   const http = manager?.getHttpClient()
 
+  // --- 从 scopeDataStore 读取共享数据 ---
+  const documents = useScopeDataStore((s) => s.documents)
+  const documentsLoading = useScopeDataStore((s) => s.documentsLoading)
+  const refreshDocuments = useScopeDataStore((s) => s.refreshDocuments)
+  const memoryCounts = useScopeDataStore((s) => s.memoryCounts)
+  const memoryCountsLoading = useScopeDataStore((s) => s.memoryCountsLoading)
+  const refreshMemoryCounts = useScopeDataStore((s) => s.refreshMemoryCounts)
+  const sessions = useAgentSessionStore((s) => s.sessions)
+  const sessionsLoading = useAgentSessionStore((s) => s.loading)
+
+  // --- 侧边栏独有状态 ---
   const [models, setModels] = useState<AvailableModel[]>([])
   const [defaultModel, setDefaultModel] = useState<string>('')
   const [scopeContext, setScopeContext] = useState<string>('')
   const [scopeContextLoading, setScopeContextLoading] = useState(false)
-  const [documents, setDocuments] = useState<Document[]>([])
-  const [documentsLoading, setDocumentsLoading] = useState(false)
   const [contextModalOpen, setContextModalOpen] = useState(false)
   const [sessionContext, setSessionContext] = useState<{
     provisions: { itemId: string; kind: string; mode: string; charCount: number; stale: boolean }[]
@@ -54,14 +67,10 @@ export function AgentRightSidebar({
   const [systemPrompt, setSystemPrompt] = useState<string>('')
   const [systemPromptLoading, setSystemPromptLoading] = useState(false)
   const [systemPromptModalOpen, setSystemPromptModalOpen] = useState(false)
-  const [memoryEnabled, setMemoryEnabled] = useState(false)
-  const [userMemoryCount, setUserMemoryCount] = useState(0)
-  const [scopeMemoryCount, setScopeMemoryCount] = useState(0)
-  const [memoryCountsLoading, setMemoryCountsLoading] = useState(false)
-  const [sessionsCount, setSessionsCount] = useState(0)
-  const [sessionsCountLoading, setSessionsCountLoading] = useState(false)
   const [sessionStats, setSessionStats] = useState<SessionStats | null>(null)
   const [sessionStatsLoading, setSessionStatsLoading] = useState(false)
+
+  const sessionLocks = useMemo(() => currentSession?.heldLocks ?? [], [currentSession?.heldLocks])
 
   const loadSystemPrompt = useCallback(async () => {
     if (!http || !currentScope) return
@@ -89,19 +98,6 @@ export function AgentRightSidebar({
     }
   }, [http, currentScope])
 
-  const loadDocuments = useCallback(async () => {
-    if (!http || !currentScope) return
-    setDocumentsLoading(true)
-    try {
-      const docs = await http.listDocuments({ scope: currentScope })
-      setDocuments(docs || [])
-    } catch {
-      setDocuments([])
-    } finally {
-      setDocumentsLoading(false)
-    }
-  }, [http, currentScope])
-
   const loadModels = useCallback(async () => {
     if (!http) return
     try {
@@ -113,36 +109,6 @@ export function AgentRightSidebar({
       setDefaultModel('')
     }
   }, [http])
-
-  const loadMemoryCounts = useCallback(async () => {
-    if (!http || !currentScope) return
-    setMemoryCountsLoading(true)
-    try {
-      const res = await http.getMemoryCounts(currentScope)
-      setMemoryEnabled(res.enabled)
-      setUserMemoryCount(res.userCount)
-      setScopeMemoryCount(res.scopeCount)
-    } catch {
-      setMemoryEnabled(false)
-      setUserMemoryCount(0)
-      setScopeMemoryCount(0)
-    } finally {
-      setMemoryCountsLoading(false)
-    }
-  }, [http, currentScope])
-
-  const loadSessionsCount = useCallback(async () => {
-    if (!http || !currentScope) return
-    setSessionsCountLoading(true)
-    try {
-      const list = await http.listAgentSessions(currentScope)
-      setSessionsCount(list?.length ?? 0)
-    } catch {
-      setSessionsCount(0)
-    } finally {
-      setSessionsCountLoading(false)
-    }
-  }, [http, currentScope])
 
   const loadSessionContext = useCallback(async () => {
     if (!http || !currentScope || !currentSession?.id) return
@@ -175,14 +141,28 @@ export function AgentRightSidebar({
 
   useEffect(() => {
     void loadScopeContext()
-    void loadDocuments()
     void loadSystemPrompt()
-  }, [loadScopeContext, loadDocuments, loadSystemPrompt])
+  }, [loadScopeContext, loadSystemPrompt])
 
   useEffect(() => {
     if (currentSession?.id && currentScope) {
-      void loadSessionContext()
-      void loadSessionStats()
+      const _t0 = performance.now()
+      console.debug(
+        `[perf] RightSidebar: session changed → firing loadSessionContext + loadSessionStats`,
+        { sessionId: currentSession.id.slice(0, 8) }
+      )
+      void loadSessionContext().then(() =>
+        console.debug(
+          `[perf] RightSidebar loadSessionContext done %c${(performance.now() - _t0).toFixed(1)}ms`,
+          'color:#795548;font-weight:bold'
+        )
+      )
+      void loadSessionStats().then(() =>
+        console.debug(
+          `[perf] RightSidebar loadSessionStats done %c${(performance.now() - _t0).toFixed(1)}ms`,
+          'color:#607D8B;font-weight:bold'
+        )
+      )
     } else {
       setSessionContext(null)
       setSessionStats(null)
@@ -190,33 +170,33 @@ export function AgentRightSidebar({
   }, [currentSession?.id, currentScope, loadSessionContext, loadSessionStats])
 
   useEffect(() => {
-    if (currentScope) void loadMemoryCounts()
-  }, [currentScope, loadMemoryCounts])
-
-  useEffect(() => {
     void loadModels()
   }, [loadModels])
-
-  useEffect(() => {
-    if (overviewMode) void loadSessionsCount()
-  }, [overviewMode, loadSessionsCount])
 
   const prevSendingRef = useRef(sending)
   useEffect(() => {
     if (prevSendingRef.current && !sending && currentSession?.id) {
       void loadSessionContext()
-      void loadMemoryCounts()
+      void refreshMemoryCounts()
       void loadSessionStats()
+      void refreshDocuments()
     }
     prevSendingRef.current = sending
-  }, [sending, currentSession?.id, loadSessionContext, loadMemoryCounts, loadSessionStats])
+  }, [
+    sending,
+    currentSession?.id,
+    loadSessionContext,
+    refreshMemoryCounts,
+    loadSessionStats,
+    refreshDocuments
+  ])
 
   const latestToolCalls: ToolCallRecord[] = useMemo(() => {
     const messages: (AgentMessage & { streaming?: boolean })[] = [
       ...(currentSession?.messages ?? []),
       ...optimisticMessages
     ]
-    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
+    const lastAssistant = messages.findLast((m) => m.role === 'assistant')
     if (!lastAssistant) return []
     return getToolCalls(lastAssistant).filter(
       (t): t is ToolCallRecord =>
@@ -238,6 +218,21 @@ export function AgentRightSidebar({
     const parts = Object.entries(byKind).map(([k, n]) => `${k} x${n}`)
     return `引用了 ${provisions.length} 项 (${parts.join(', ')})`
   }, [sessionContext?.provisions])
+
+  const scopeDocLocks = useMemo(
+    () => documents.filter((d) => d.lockInfo).map((d) => d.lockInfo!),
+    [documents]
+  )
+
+  const scopeLocksByDoc = useMemo(() => {
+    const map = new Map<string, ResourceLockInfo>()
+    for (const doc of documents) {
+      if (doc.lockInfo) {
+        map.set(doc.id, doc.lockInfo)
+      }
+    }
+    return map
+  }, [documents])
 
   const isNewConversationReady = !overviewMode && !currentSession
 
@@ -264,13 +259,17 @@ export function AgentRightSidebar({
             onContextModalOpenChange={setContextModalOpen}
             documents={documents}
             documentsLoading={documentsLoading}
-            onRefreshDocuments={loadDocuments}
-            sessionsCount={sessionsCount}
-            sessionsCountLoading={sessionsCountLoading}
-            memoryEnabled={memoryEnabled}
-            userMemoryCount={userMemoryCount}
-            scopeMemoryCount={scopeMemoryCount}
+            onRefreshDocuments={refreshDocuments}
+            sessionsCount={sessions.length}
+            sessionsCountLoading={sessionsLoading}
+            memoryEnabled={memoryCounts.enabled}
+            userMemoryCount={memoryCounts.userCount}
+            scopeMemoryCount={memoryCounts.scopeCount}
+            sessionMemoryCount={memoryCounts.sessionCount}
+            memoryByType={memoryCounts.byType}
             memoryCountsLoading={memoryCountsLoading}
+            activeLocks={scopeDocLocks}
+            activeLocksByDoc={scopeLocksByDoc}
           />
         ) : (
           <AgentSessionSidebar
@@ -292,10 +291,13 @@ export function AgentRightSidebar({
             provisionsSummary={provisionsSummary}
             sessionStats={sessionStats}
             sessionStatsLoading={sessionStatsLoading}
-            memoryEnabled={memoryEnabled}
-            userMemoryCount={userMemoryCount}
-            scopeMemoryCount={scopeMemoryCount}
+            memoryEnabled={memoryCounts.enabled}
+            userMemoryCount={memoryCounts.userCount}
+            scopeMemoryCount={memoryCounts.scopeCount}
+            sessionMemoryCount={memoryCounts.sessionCount}
+            memoryByType={memoryCounts.byType}
             memoryCountsLoading={memoryCountsLoading}
+            sessionLocks={sessionLocks}
           />
         )}
       </div>

@@ -1,9 +1,9 @@
 /**
- * WorkPageToolbar - 工作页工具栏：类别筛选、Scope、搜索、新建与视图切换
+ * WorkPageToolbar - 工作页工具栏：类别筛选、搜索、新建与视图切换
+ * Scope 选择器已提升至标题栏（ScopeSwitcher）
  */
 import { memo } from 'react'
 import { ActionIcon, Checkbox } from '@lobehub/ui'
-import ScopeSidebar from './ui/ScopeSidebar'
 import SearchSection from './SearchSection'
 import { FileText, FolderTree, Import, LayoutGrid, ListTodo } from 'lucide-react'
 import type { FileKind } from '../hooks/useFileList'
@@ -11,11 +11,7 @@ import type { FileKind } from '../hooks/useFileList'
 export interface WorkPageToolbarProps {
   categoryFilter: Record<FileKind, boolean>
   onCategoryFilterChange: (kind: FileKind, checked: boolean) => void
-  scopes: string[]
-  getScopeLabel: (scope: string) => string
-  scopesLoading: boolean
   currentScope: string
-  onScopeSelect: (scope: string) => void
   activeTab: string
   onActiveTabChange: (value: string) => void
   onRefreshScope: () => void
@@ -30,11 +26,7 @@ export interface WorkPageToolbarProps {
 function WorkPageToolbar({
   categoryFilter,
   onCategoryFilterChange,
-  scopes,
-  getScopeLabel,
-  scopesLoading,
   currentScope,
-  onScopeSelect,
   activeTab,
   onActiveTabChange,
   onRefreshScope,
@@ -62,13 +54,6 @@ function WorkPageToolbar({
             文件
           </Checkbox>
         </div>
-        <ScopeSidebar
-          scopes={scopes}
-          getScopeLabel={getScopeLabel}
-          scopesLoading={scopesLoading}
-          currentScope={currentScope}
-          onSelect={onScopeSelect}
-        />
         <SearchSection
           activeTab={activeTab}
           scope={currentScope}

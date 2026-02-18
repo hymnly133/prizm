@@ -2,6 +2,8 @@
  * 工作区 (Scope) 管理 - 从文件夹添加、删除
  */
 import { Button, Form, Input, Modal } from '@lobehub/ui'
+import type { ListItemProps } from '@lobehub/ui'
+import { AccentList } from './ui/AccentList'
 import { useState, useCallback, useEffect } from 'react'
 import { buildServerUrl } from '@prizm/client-core'
 import { DEFAULT_SCOPE, ONLINE_SCOPE } from '@prizm/client-core'
@@ -128,28 +130,41 @@ export function ScopeManagement({ http, onLog }: ScopeManagementProps) {
         ) : scopes.length === 0 ? (
           <div className="scope-list-placeholder">暂无工作区</div>
         ) : (
-          scopes.map((id) => {
-            const detail = scopeDetails[id]
-            const builtin = detail?.builtin ?? (id === DEFAULT_SCOPE || id === ONLINE_SCOPE)
-            return (
-              <div key={id} className="scope-list-item">
-                <div className="scope-list-item-main">
-                  <span className="scope-id">{detail?.label ?? id}</span>
-                  {builtin && <span className="scope-badge">内置</span>}
-                  {detail?.path && (
-                    <span className="scope-path" title={detail.path}>
-                      {detail.path}
-                    </span>
-                  )}
-                </div>
-                {!builtin && (
+          <AccentList
+            items={scopes.map((id) => {
+              const detail = scopeDetails[id]
+              const builtin = detail?.builtin ?? (id === DEFAULT_SCOPE || id === ONLINE_SCOPE)
+              const item: ListItemProps = {
+                key: id,
+                title: (
+                  <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                    {detail?.label ?? id}
+                    {builtin && (
+                      <span
+                        style={{
+                          fontSize: 10,
+                          padding: '1px 6px',
+                          borderRadius: 4,
+                          background: 'var(--ant-color-primary-bg)',
+                          color: 'var(--ant-color-primary)'
+                        }}
+                      >
+                        内置
+                      </span>
+                    )}
+                  </span>
+                ),
+                description: detail?.path || undefined,
+                actions: !builtin ? (
                   <Button size="small" type="text" danger onClick={() => handleRemove(id)}>
                     移除
                   </Button>
-                )}
-              </div>
-            )
-          })
+                ) : undefined,
+                showAction: !builtin
+              }
+              return item
+            })}
+          />
         )}
       </div>
       <div className="config-actions" style={{ marginTop: 8 }}>

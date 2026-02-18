@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { FilePlus, MessageSquare, FileText, Sparkles } from 'lucide-react'
+import { FilePlus, MessageSquare, FileText, Sparkles, X } from 'lucide-react'
 
 export type QuickPanelAction =
   | 'create-document'
@@ -23,46 +23,53 @@ const TEXT_ITEMS: QuickPanelItem[] = [
   { id: 'ai-organize-to-document', label: 'AI 整理到文档', icon: <Sparkles size={18} /> }
 ]
 
-declare global {
-  interface Window {
-    quickPanelApi?: {
-      onShow: (cb: (data: { selectedText: string }) => void) => () => void
-      executeAction: (action: string, selectedText: string) => void
-      hidePanel: () => void
-    }
-  }
-}
-
 export default function QuickPanelApp() {
   const [selectedText, setSelectedText] = useState('')
+  const [clipboardText, setClipboardText] = useState('')
   const [focusedIndex, setFocusedIndex] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
 
+  const actionableText = selectedText.trim() || clipboardText.trim()
   const items: QuickPanelItem[] =
-    selectedText.trim().length > 0 ? [...BASE_ITEMS, ...TEXT_ITEMS] : BASE_ITEMS
+    actionableText.length > 0 ? [...BASE_ITEMS, ...TEXT_ITEMS] : BASE_ITEMS
   const maxIndex = items.length - 1
 
   useEffect(() => {
     const api = window.quickPanelApi
     if (!api) return
-    const unsubscribe = api.onShow((data) => {
-      setSelectedText(data.selectedText ?? '')
+    // 初始显示：重置全部状态
+    const unsubShow = api.onShow((data) => {
+      setSelectedText('')
+      setClipboardText(data.clipboardText ?? '')
       setFocusedIndex(0)
     })
-    return unsubscribe
+    // 增量更新：仅补充选中文字，不重置焦点位置
+    const unsubUpdate = api.onSelectionUpdate((data) => {
+      if (data.selectedText) {
+        setSelectedText(data.selectedText)
+      }
+    })
+    return () => {
+      unsubShow()
+      unsubUpdate()
+    }
+  }, [])
+
+  const hidePanel = useCallback(() => {
+    window.quickPanelApi?.hidePanel()
   }, [])
 
   const runAction = useCallback(
     (action: QuickPanelAction) => {
-      window.quickPanelApi?.executeAction(action, selectedText)
+      window.quickPanelApi?.executeAction(action, actionableText)
     },
-    [selectedText]
+    [actionableText]
   )
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        window.quickPanelApi?.hidePanel()
+        hidePanel()
         return
       }
       if (e.key === 'ArrowDown') {
@@ -83,7 +90,7 @@ export default function QuickPanelApp() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [items, focusedIndex, maxIndex, runAction])
+  }, [items, focusedIndex, maxIndex, runAction, hidePanel])
 
   useEffect(() => {
     const el = listRef.current
@@ -96,16 +103,106 @@ export default function QuickPanelApp() {
     <div
       className="quickpanel-root"
       style={{
-        padding: 12,
+        width: 280,
+        height: 256,
+        padding: 10,
+        background: '#16161c',
         borderRadius: 12,
-        background: 'rgba(22, 22, 28, 0.92)',
-        backdropFilter: 'blur(12px)',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.24)',
-        minWidth: 260,
-        maxWidth: 320
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden'
       }}
     >
-      <div ref={listRef} role="menu" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      {/* 标题栏 + 关闭按钮 */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 6,
+          paddingLeft: 4
+        }}
+      >
+        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', userSelect: 'none' }}>
+          快捷操作
+        </span>
+        <button
+          type="button"
+          onClick={hidePanel}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 22,
+            height: 22,
+            border: 'none',
+            borderRadius: 6,
+            background: 'transparent',
+            color: 'rgba(255,255,255,0.4)',
+            cursor: 'pointer',
+            padding: 0
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'rgba(255,255,255,0.1)'
+            e.currentTarget.style.color = 'rgba(255,255,255,0.8)'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent'
+            e.currentTarget.style.color = 'rgba(255,255,255,0.4)'
+          }}
+          aria-label="关闭面板"
+        >
+          <X size={14} />
+        </button>
+      </div>
+
+      {/* 可操作文字预览 */}
+      {actionableText.length > 0 && (
+        <div
+          style={{
+            marginBottom: 6,
+            padding: '4px 6px',
+            background: 'rgba(255,255,255,0.05)',
+            borderRadius: 6,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            minHeight: 0,
+            flexShrink: 0
+          }}
+        >
+          <span
+            style={{
+              fontSize: 10,
+              color: 'rgba(255,255,255,0.3)',
+              flexShrink: 0,
+              userSelect: 'none'
+            }}
+          >
+            {selectedText.trim() ? '选中' : '剪贴板'}
+          </span>
+          <span
+            style={{
+              fontSize: 10,
+              color: 'rgba(255,255,255,0.45)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              flex: 1,
+              userSelect: 'none'
+            }}
+          >
+            {actionableText.length > 60 ? actionableText.slice(0, 60) + '…' : actionableText}
+          </span>
+        </div>
+      )}
+
+      {/* 操作列表 */}
+      <div
+        ref={listRef}
+        role="menu"
+        style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}
+      >
         {items.map((item, index) => (
           <button
             key={item.id}
@@ -125,7 +222,8 @@ export default function QuickPanelApp() {
               cursor: 'pointer',
               fontSize: 14,
               textAlign: 'left',
-              width: '100%'
+              width: '100%',
+              flexShrink: 0
             }}
             onMouseEnter={() => setFocusedIndex(index)}
             onClick={() => runAction(item.id)}

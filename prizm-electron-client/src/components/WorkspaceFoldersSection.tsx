@@ -1,9 +1,11 @@
 /**
  * WorkspaceFoldersSection - 平铺视图底部的工作区文件夹列表
- * 显示顶层非系统文件夹，点击可切换到文件夹视图
+ * 使用 LobeUI List 统一列表风格
  */
 import { memo, useState, useMemo } from 'react'
-import { Folder, ChevronDown, ChevronRight } from 'lucide-react'
+import { Folder, ChevronDown, ChevronRight, FileText } from 'lucide-react'
+import type { ListItemProps } from '@lobehub/ui'
+import { AccentList } from './ui/AccentList'
 import { useFileTree } from '../hooks/useFileTree'
 import type { TreeNode } from '../hooks/useFileTree'
 
@@ -25,6 +27,27 @@ export const WorkspaceFoldersSection = memo<WorkspaceFoldersSectionProps>(
       return workspaceTree.filter((node) => !node.isDir && !node.prizmType)
     }, [workspaceTree])
 
+    const listItems: ListItemProps[] = useMemo(() => {
+      const folderItems: ListItemProps[] = topLevelFolders.map((folder) => ({
+        key: folder.id,
+        avatar: <Folder size={14} style={{ color: 'var(--ant-color-warning)' }} />,
+        title: folder.name,
+        addon:
+          folder.children && folder.children.length > 0 ? (
+            <span style={{ fontSize: 11, color: 'var(--ant-color-text-quaternary)' }}>
+              {folder.children.length} 项
+            </span>
+          ) : undefined,
+        onClick: () => onNavigateToFolder?.(folder)
+      }))
+      const fileItems: ListItemProps[] = topLevelFiles.map((file) => ({
+        key: file.id,
+        avatar: <FileText size={14} />,
+        title: file.name
+      }))
+      return [...folderItems, ...fileItems]
+    }, [topLevelFolders, topLevelFiles, onNavigateToFolder])
+
     const totalItems = topLevelFolders.length + topLevelFiles.length
     if (totalItems === 0) return null
 
@@ -44,38 +67,7 @@ export const WorkspaceFoldersSection = memo<WorkspaceFoldersSectionProps>(
           <span className="workspace-folders-section__count">{totalItems}</span>
         </div>
 
-        {expanded && (
-          <div className="workspace-folders-section__list">
-            {topLevelFolders.map((folder) => (
-              <div
-                key={folder.id}
-                className="workspace-folders-section__item"
-                role="button"
-                tabIndex={0}
-                onClick={() => onNavigateToFolder?.(folder)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') onNavigateToFolder?.(folder)
-                }}
-              >
-                <Folder size={14} style={{ color: 'var(--ant-color-warning)', flexShrink: 0 }} />
-                <span className="workspace-folders-section__item-name">{folder.name}</span>
-                {folder.children && folder.children.length > 0 && (
-                  <span className="workspace-folders-section__item-count">
-                    {folder.children.length} 项
-                  </span>
-                )}
-              </div>
-            ))}
-            {topLevelFiles.map((file) => (
-              <div
-                key={file.id}
-                className="workspace-folders-section__item workspace-folders-section__item--file"
-              >
-                <span className="workspace-folders-section__item-name">{file.name}</span>
-              </div>
-            ))}
-          </div>
-        )}
+        {expanded && <AccentList items={listItems} />}
       </div>
     )
   }

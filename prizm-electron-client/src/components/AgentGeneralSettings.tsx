@@ -21,8 +21,8 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
     display: flex;
     gap: ${cssVar.marginXS};
     align-items: center;
-    height: 32px;
-    font-size: ${cssVar.fontSizeLG};
+    height: 28px;
+    font-size: 13px;
     font-weight: 600;
     color: ${cssVar.colorTextHeading};
     &::after {
@@ -32,13 +32,6 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
       margin-inline-start: ${cssVar.marginMD};
       background: linear-gradient(to right, ${cssVar.colorBorder}, transparent);
     }
-  `,
-  serverCard: css`
-    padding: ${cssVar.paddingMD};
-    border: 1px solid ${cssVar.colorBorder};
-    border-radius: ${cssVar.borderRadiusLG};
-    background: ${cssVar.colorFillAlter};
-    margin-bottom: ${cssVar.marginSM};
   `
 }))
 
@@ -108,7 +101,7 @@ export function AgentGeneralSettings({ http, onLog }: AgentGeneralSettingsProps)
       </div>
 
       {/* LLM 模型 & 摘要配置 */}
-      <div className={styles.serverCard} style={{ marginTop: 12 }}>
+      <div className="settings-card">
         <div className={styles.sectionTitle}>
           <MessageSquare size={16} />
           LLM 模型 & 摘要
@@ -183,7 +176,7 @@ export function AgentGeneralSettings({ http, onLog }: AgentGeneralSettingsProps)
       </div>
 
       {/* 上下文窗口 A/B */}
-      <div className={styles.serverCard} style={{ marginTop: 12 }}>
+      <div className="settings-card">
         <div className={styles.sectionTitle}>
           <Layers size={16} />
           上下文窗口
@@ -231,7 +224,7 @@ export function AgentGeneralSettings({ http, onLog }: AgentGeneralSettingsProps)
       </div>
 
       {/* 记忆模块 */}
-      <div className={styles.serverCard} style={{ marginTop: 12 }}>
+      <div className="settings-card">
         <div className={styles.sectionTitle}>
           <Brain size={16} />
           记忆模块
@@ -271,7 +264,7 @@ export function AgentGeneralSettings({ http, onLog }: AgentGeneralSettingsProps)
       </div>
 
       {/* 终端设置 */}
-      <div className={styles.serverCard} style={{ marginTop: 12 }}>
+      <div className="settings-card">
         <div className={styles.sectionTitle}>
           <Terminal size={16} />
           终端
@@ -297,7 +290,7 @@ export function AgentGeneralSettings({ http, onLog }: AgentGeneralSettingsProps)
       </div>
 
       {/* 统一保存按钮 */}
-      <div style={{ marginTop: 12 }}>
+      <div>
         <Button onClick={() => void handleSave()} type="primary" loading={saving}>
           保存 Agent 设置
         </Button>

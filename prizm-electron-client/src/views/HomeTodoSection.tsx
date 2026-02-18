@@ -2,21 +2,14 @@
  * HomeTodoSection - 待办列表卡片（按列表分组）
  */
 import { motion } from 'motion/react'
-import { Icon, Tag, Text } from '@lobehub/ui'
-import { ListTodo } from 'lucide-react'
+import { Button, Icon, Tag } from '@lobehub/ui'
+import { ArrowRight, ListTodo } from 'lucide-react'
 import type { TodoList, TodoItem } from '@prizm/client-core'
 import TodoItemRow from '../components/todo/TodoItemRow'
-
-const STAGGER_DELAY = 0.06
-const EASE_SMOOTH = [0.33, 1, 0.68, 1] as const
-
-function fadeUp(index: number) {
-  return {
-    initial: { opacity: 0, y: 16 },
-    animate: { opacity: 1, y: 0 },
-    transition: { delay: index * STAGGER_DELAY, duration: 0.4, ease: EASE_SMOOTH }
-  }
-}
+import { fadeUpStagger } from '../theme/motionPresets'
+import { SectionHeader } from '../components/ui/SectionHeader'
+import { EmptyState } from '../components/ui/EmptyState'
+import { LoadingPlaceholder } from '../components/ui/LoadingPlaceholder'
 
 export interface TodoListGroup {
   list: TodoList
@@ -27,6 +20,7 @@ export interface HomeTodoSectionProps {
   todoLists: TodoListGroup[]
   loading: boolean
   onOpenTodoList: (listId: string) => void
+  onViewAll?: () => void
   animationIndex?: number
 }
 
@@ -34,21 +28,37 @@ export default function HomeTodoSection({
   todoLists,
   loading,
   onOpenTodoList,
+  onViewAll,
   animationIndex = 0
 }: HomeTodoSectionProps) {
   return (
-    <motion.div className="home-card home-card--todos" {...fadeUp(animationIndex)}>
-      <div className="home-card__header">
-        <Icon icon={ListTodo} size="small" />
-        <span className="home-card__title">待办列表</span>
-      </div>
-      <div className="home-card__body">
+    <motion.div
+      className="content-card content-card--default content-card--hoverable home-card--todos"
+      {...fadeUpStagger(animationIndex)}
+    >
+      <SectionHeader
+        icon={ListTodo}
+        title="待办列表"
+        className="content-card__header home-card__header"
+        extra={
+          onViewAll && (
+            <Button
+              size="small"
+              type="text"
+              icon={<Icon icon={ArrowRight} size="small" />}
+              iconPosition="end"
+              onClick={onViewAll}
+            >
+              查看全部
+            </Button>
+          )
+        }
+      />
+      <div className="content-card__body">
         {loading ? (
-          <div className="home-loading-placeholder">加载中...</div>
+          <LoadingPlaceholder />
         ) : todoLists.length === 0 ? (
-          <div className="home-empty-state">
-            <Text type="secondary">没有活跃的待办列表</Text>
-          </div>
+          <EmptyState description="没有活跃的待办列表" />
         ) : (
           <div className="home-todolist-groups">
             {todoLists.map(({ list, activeItems }) => {

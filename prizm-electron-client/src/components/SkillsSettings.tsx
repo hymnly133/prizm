@@ -3,7 +3,8 @@
  * 管理 Agent Skills 列表、创建/导入/激活
  */
 import { ActionIcon, Button, Flexbox, Input, Modal, Text, TextArea, toast } from '@lobehub/ui'
-import { BookOpen, Import, Plus, Trash2, Zap, ZapOff } from 'lucide-react'
+import { BookOpen, Import, Plus, Trash2, Zap } from 'lucide-react'
+import { SettingsListItem } from './ui/SettingsListItem'
 import { useCallback, useEffect, useState } from 'react'
 import type { PrizmClient } from '@prizm/client-core'
 
@@ -141,22 +142,12 @@ export function SkillsSettings({ http, onLog }: SkillsSettingsProps) {
       ) : (
         <Flexbox gap={4}>
           {skills.map((skill) => (
-            <Flexbox
+            <SettingsListItem
               key={skill.name}
-              horizontal
-              align="center"
-              justify="space-between"
-              style={{
-                padding: '8px 12px',
-                borderRadius: 6,
-                border: '1px solid var(--ant-color-border-secondary)',
-                background: 'var(--ant-color-fill-quaternary)'
-              }}
-            >
-              <Flexbox gap={4}>
-                <Flexbox horizontal gap={8} align="center">
-                  <Zap size={14} style={{ color: 'var(--ant-color-warning)' }} />
-                  <Text style={{ fontWeight: 600 }}>{skill.name}</Text>
+              icon={<Zap size={14} style={{ color: 'var(--ant-color-warning)' }} />}
+              title={skill.name}
+              badges={
+                <>
                   {skill.source && skill.source !== 'prizm' && (
                     <Text type="secondary" style={{ fontSize: 11 }}>
                       ({skill.source})
@@ -167,17 +158,17 @@ export function SkillsSettings({ http, onLog }: SkillsSettingsProps) {
                       {skill.license}
                     </Text>
                   )}
-                </Flexbox>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  {skill.description.length > 80
-                    ? skill.description.slice(0, 80) + '…'
-                    : skill.description}
-                </Text>
-              </Flexbox>
-              <Flexbox horizontal gap={4}>
+                </>
+              }
+              description={
+                skill.description.length > 80
+                  ? skill.description.slice(0, 80) + '…'
+                  : skill.description
+              }
+              actions={
                 <ActionIcon icon={Trash2} size="small" onClick={() => handleDelete(skill.name)} />
-              </Flexbox>
-            </Flexbox>
+              }
+            />
           ))}
         </Flexbox>
       )}

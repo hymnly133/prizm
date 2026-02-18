@@ -1,12 +1,12 @@
 /**
- * WorkPage - 工作页：中间大卡片展示便签/任务/文档，现代交互
+ * WorkPage - 统一内容管理页：卡片网格浏览（文档编辑已拆分至独立 DocumentEditorPage）
  */
 import { useState, useMemo, useEffect, useRef, useCallback, memo } from 'react'
 import { useReducedMotion } from 'motion/react'
 import { Button, Flexbox, Markdown, Modal, toast } from '@lobehub/ui'
 import { App } from 'antd'
 import FileDetailView from '../components/FileDetailView'
-import type { HoveredCardState } from '../components/DataCardHoverMenu'
+import DocumentPreviewModal from '../components/DocumentPreviewModal'
 import WorkPageToolbar from '../components/WorkPageToolbar'
 import FileCardGrid from '../components/FileCardGrid'
 import { useScope } from '../hooks/useScope'
@@ -14,6 +14,7 @@ import { useFileList, docToFileItem, todoToFileItem } from '../hooks/useFileList
 import { usePrizmContext } from '../context/PrizmContext'
 import { useLogsContext } from '../context/LogsContext'
 import { useWorkNavigation } from '../context/WorkNavigationContext'
+import { useDocumentNavigation, useChatWithFile } from '../context/NavigationContext'
 import type { FileKind, FileItem } from '../hooks/useFileList'
 import type { TodoItemStatus } from '@prizm/client-core'
 import type { SavePayload } from '../components/FileDetailView'
@@ -32,10 +33,12 @@ function WorkPage() {
   const { modal } = App.useApp()
   const { manager } = usePrizmContext()
   const { addLog } = useLogsContext()
-  const { currentScope, scopes, scopesLoading, getScopeLabel, setScope } = useScope()
+  const { currentScope } = useScope()
   const { fileList, fileListLoading, refreshFileList, optimisticAdd, optimisticRemove } =
     useFileList(currentScope)
   const { pendingWorkFile, consumePendingWorkFile } = useWorkNavigation()
+  const { navigateToDocs } = useDocumentNavigation()
+  const { chatWith } = useChatWithFile()
   const { startImportFromFileDialog } = useImportContext()
 
   const [activeTab, setActiveTab] = useState('files')
@@ -63,27 +66,6 @@ function WorkPage() {
     loading?: boolean
   } | null>(null)
   const filePreviewFetchingRef = useRef<string | null>(null)
-  const [hoveredCard, setHoveredCard] = useState<HoveredCardState | null>(null)
-  const hoverHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const clearHoverHideTimeout = useCallback(() => {
-    if (hoverHideTimeoutRef.current) {
-      clearTimeout(hoverHideTimeoutRef.current)
-      hoverHideTimeoutRef.current = null
-    }
-  }, [])
-
-  const clearHoveredCard = useCallback(() => setHoveredCard(null), [])
-
-  const scheduleHoverHide = useCallback(() => {
-    clearHoverHideTimeout()
-    hoverHideTimeoutRef.current = setTimeout(clearHoveredCard, 200)
-  }, [clearHoverHideTimeout, clearHoveredCard])
-
-  useEffect(() => {
-    return () => clearHoverHideTimeout()
-  }, [clearHoverHideTimeout])
-
   useEffect(() => {
     setSelectedFile(null)
     setGenericFilePreview(null)
@@ -123,14 +105,15 @@ function WorkPage() {
   useEffect(() => {
     if (!pendingWorkFile) return
     const { kind, id } = pendingWorkFile
+    consumePendingWorkFile()
+    // document 类型已由 NavigationContext.openFileAtWork 重定向到 docs 页
+    if (kind === 'document') return
     const exists = fileList.some((f) => f.kind === kind && f.id === id)
     if (exists) {
       setSelectedFile(pendingWorkFile)
-      consumePendingWorkFile()
     } else {
       refreshFileList(currentScope, { silent: true }).then(() => {
         setSelectedFile(pendingWorkFile)
-        consumePendingWorkFile()
       })
     }
   }, [pendingWorkFile, consumePendingWorkFile, fileList, currentScope, refreshFileList])
@@ -158,18 +141,19 @@ function WorkPage() {
     setSelectedFile(payload)
   }
 
-  async function onAddNote() {
-    const http = manager?.getHttpClient()
-    if (!http) return
-    try {
-      const doc = await http.createDocument({ title: '未命名', content: '' }, currentScope)
-      optimisticAdd(docToFileItem(doc))
-      setSelectedFile({ kind: 'document', id: doc.id })
-      addLog('已创建文档', 'success')
-    } catch (e) {
-      addLog(`创建文档失败: ${String(e)}`, 'error')
-    }
-  }
+  const handleEditDoc = useCallback(
+    (docId: string) => {
+      navigateToDocs(docId)
+    },
+    [navigateToDocs]
+  )
+
+  const handleChatFile = useCallback(
+    (file: FileItem) => {
+      chatWith({ files: [{ kind: file.kind, id: file.id, title: file.title }] })
+    },
+    [chatWith]
+  )
 
   async function onAddDocument() {
     const http = manager?.getHttpClient()
@@ -177,7 +161,7 @@ function WorkPage() {
     try {
       const doc = await http.createDocument({ title: '未命名文档', content: '' }, currentScope)
       optimisticAdd(docToFileItem(doc))
-      setSelectedFile({ kind: 'document', id: doc.id })
+      navigateToDocs(doc.id)
       addLog('已创建文档', 'success')
     } catch (e) {
       addLog(`创建文档失败: ${String(e)}`, 'error')
@@ -285,17 +269,9 @@ function WorkPage() {
     setCategoryFilter((f) => ({ ...f, [kind]: checked }))
   }, [])
 
-  const handleCardMouseEnter = useCallback(
-    (file: FileItem, anchorRect: DOMRect, mouseY: number) => {
-      clearHoverHideTimeout()
-      setHoveredCard({ file, scope: currentScope, anchorRect, mouseY })
-    },
-    [currentScope, clearHoverHideTimeout]
-  )
-
   const handleFolderNodeClick = useCallback((node: TreeNode) => {
     if (node.prizmId && node.prizmType) {
-      const kind: FileKind = node.prizmType === 'todo_list' ? 'todoList' : 'document'
+      const kind: FileKind = node.prizmType === 'document' ? 'document' : 'todoList'
       setSelectedFile({ kind, id: node.prizmId })
     } else {
       setGenericFilePreview({ path: node.id, name: node.name })
@@ -359,11 +335,7 @@ function WorkPage() {
       <WorkPageToolbar
         categoryFilter={categoryFilter}
         onCategoryFilterChange={handleCategoryFilterChange}
-        scopes={scopes}
-        getScopeLabel={getScopeLabel}
-        scopesLoading={scopesLoading}
         currentScope={currentScope}
-        onScopeSelect={setScope}
         activeTab={activeTab}
         onActiveTabChange={setActiveTab}
         onRefreshScope={refreshScope}
@@ -386,11 +358,8 @@ function WorkPage() {
               currentScope={currentScope}
               onSelectFile={onSelectFile}
               onDeleteFile={handleDeleteFile}
-              hoveredCard={hoveredCard}
-              onCardMouseEnter={handleCardMouseEnter}
-              onCardMouseLeave={scheduleHoverHide}
-              onMenuEnter={clearHoverHideTimeout}
-              onCloseHover={clearHoveredCard}
+              onEditDoc={handleEditDoc}
+              onChatFile={handleChatFile}
               cardVariants={cardVariants}
               onAddDocument={onAddDocument}
               onAddTodo={onAddTodo}
@@ -405,9 +374,19 @@ function WorkPage() {
         )}
       </div>
 
+      {/* 文档预览模态 */}
+      <DocumentPreviewModal
+        open={!!selectedFile && selectedFile.kind === 'document'}
+        documentId={selectedFile?.kind === 'document' ? selectedFile.id : null}
+        scope={currentScope}
+        onClose={closePreview}
+        onEdit={handleEditDoc}
+      />
+
+      {/* Todo 列表仍使用 Modal 编辑 */}
       <Modal
         destroyOnHidden
-        open={!!selectedFile}
+        open={!!selectedFile && selectedFile.kind !== 'document'}
         title={selectedFileData ? getKindLabel(selectedFileData.kind) : ''}
         width={800}
         onCancel={closePreview}
@@ -419,7 +398,7 @@ function WorkPage() {
           </Flexbox>
         }
       >
-        {selectedFileData && (
+        {selectedFileData && selectedFileData.kind !== 'document' && (
           <div style={{ paddingTop: 16, maxHeight: '80vh', overflowY: 'auto' }}>
             <FileDetailView
               file={selectedFileData}

@@ -4,42 +4,39 @@
  */
 import { useMemo, useCallback, memo } from 'react'
 import { motion } from 'motion/react'
-import { Button, Icon, Tag, Text } from '@lobehub/ui'
+import { Button, Icon, Tag } from '@lobehub/ui'
 import { SpotlightCard } from '@lobehub/ui/awesome'
+import { useTheme } from 'antd-style'
 import {
+  Activity,
+  ArrowRight,
   Brain,
   Clipboard,
+  Copy,
+  Eye,
   FileText,
   Import,
   ListTodo,
   MessageSquare,
   Plus,
-  RefreshCw,
-  Sparkles
+  Sparkles,
+  User as UserIcon
 } from 'lucide-react'
+import { fadeUpStagger } from '../theme/motionPresets'
+import { usePrizmContext } from '../context/PrizmContext'
 import { useHomeData } from '../hooks/useHomeData'
 import { useWorkNavigation } from '../context/WorkNavigationContext'
 import { useChatWithFile } from '../context/ChatWithFileContext'
 import { useImportContext } from '../context/ImportContext'
-import ScopeSidebar from '../components/ui/ScopeSidebar'
+import { SectionHeader } from '../components/ui/SectionHeader'
+import { LoadingPlaceholder } from '../components/ui/LoadingPlaceholder'
+import { HomeStatusBar } from '../components/HomeStatusBar'
 import { formatRelativeTime } from '../utils/formatRelativeTime'
 import HomeStatsSection, { type StatItem } from './HomeStatsSection'
 import RecentSessionsSection from './RecentSessionsSection'
 import HomeTodoSection, { type TodoListGroup } from './HomeTodoSection'
 import type { TodoList, Document as PrizmDocument } from '@prizm/client-core'
 import type { FileItem } from '../hooks/useFileList'
-
-/* ── 动画常量 ── */
-const STAGGER_DELAY = 0.06
-const EASE_SMOOTH = [0.33, 1, 0.68, 1] as const
-
-function fadeUp(index: number) {
-  return {
-    initial: { opacity: 0, y: 16 },
-    animate: { opacity: 1, y: 0 },
-    transition: { delay: index * STAGGER_DELAY, duration: 0.4, ease: EASE_SMOOTH }
-  }
-}
 
 /* ── 工具函数 ── */
 function getGreeting(): string {
@@ -61,15 +58,19 @@ function stripMarkdown(text: string): string {
 /* ── 主组件 ── */
 function HomePage({
   onNavigateToAgent,
-  onNavigateToWork
+  onNavigateToWork,
+  onNavigateToUser
 }: {
   onNavigateToAgent: () => void
   onNavigateToWork: () => void
+  onNavigateToUser: () => void
 }) {
+  const { manager } = usePrizmContext()
   const data = useHomeData()
   const { openFileAtWork } = useWorkNavigation()
   const { chatWith } = useChatWithFile()
   const { startImportFromFileDialog } = useImportContext()
+  const theme = useTheme()
 
   /* 最近 5 条会话，按 updatedAt 排序 */
   const recentSessions = useMemo(() => {
@@ -106,37 +107,74 @@ function HomePage({
       .slice(0, 4)
   }, [data.fileList])
 
-  /* 统计卡片数据 */
+  /* 统计卡片数据：会话、文档 + 按类型分组的记忆 */
+  const bt = data.stats.memoryByType
   const statItems = useMemo<StatItem[]>(
     () => [
       {
         icon: <MessageSquare size={20} />,
         label: '会话',
         value: data.statsLoading ? '...' : String(data.stats.sessionsCount),
-        color: 'var(--ant-color-primary)'
+        color: theme.colorInfo,
+        onClick: onNavigateToAgent
       },
       {
         icon: <FileText size={20} />,
         label: '文档',
         value: data.statsLoading ? '...' : String(data.stats.documentsCount),
-        color: 'var(--ant-color-success)'
+        color: theme.colorSuccess,
+        onClick: onNavigateToWork
       },
       {
-        icon: <Brain size={20} />,
-        label: 'User 记忆',
-        value: data.statsLoading ? '...' : String(data.stats.userMemoryCount),
-        color: 'var(--ant-color-warning)',
-        description: '画像 / 偏好'
+        icon: <UserIcon size={20} />,
+        label: '画像',
+        value: data.statsLoading ? '...' : String(bt.profile),
+        color: theme.colorWarning,
+        description: 'profile',
+        onClick: onNavigateToUser
       },
       {
         icon: <Sparkles size={20} />,
-        label: 'Scope 记忆',
-        value: data.statsLoading ? '...' : String(data.stats.scopeMemoryCount),
-        color: 'var(--ant-geekblue-6, #2f54eb)',
-        description: '叙事 / 文档'
+        label: '叙事',
+        value: data.statsLoading ? '...' : String(bt.narrative),
+        color: theme.geekblue,
+        description: 'narrative',
+        onClick: onNavigateToUser
+      },
+      {
+        icon: <Eye size={20} />,
+        label: '前瞻',
+        value: data.statsLoading ? '...' : String(bt.foresight),
+        color: theme.cyan,
+        description: 'foresight',
+        onClick: onNavigateToUser
+      },
+      {
+        icon: <Brain size={20} />,
+        label: '文档记忆',
+        value: data.statsLoading ? '...' : String(bt.document),
+        color: theme.colorSuccess,
+        description: 'document',
+        onClick: onNavigateToUser
+      },
+      {
+        icon: <Activity size={20} />,
+        label: '事件日志',
+        value: data.statsLoading ? '...' : String(bt.event_log),
+        color: theme.magenta,
+        description: 'event_log',
+        onClick: onNavigateToUser
       }
     ],
-    [data.statsLoading, data.stats]
+    [
+      data.statsLoading,
+      data.stats,
+      bt,
+      theme,
+      onNavigateToAgent,
+      onNavigateToWork,
+      onNavigateToUser
+    ]
   )
 
   /* 快捷操作 */
@@ -161,6 +199,18 @@ function HomePage({
     [openFileAtWork, onNavigateToWork]
   )
 
+  const handleNewDocument = useCallback(async () => {
+    const http = manager?.getHttpClient()
+    if (!http) return
+    try {
+      const doc = await http.createDocument({ title: '新文档' }, data.currentScope)
+      openFileAtWork('document', doc.id)
+      onNavigateToWork()
+    } catch {
+      /* ignore */
+    }
+  }, [manager, data.currentScope, openFileAtWork, onNavigateToWork])
+
   const handleOpenTodoList = useCallback(
     (listId: string) => {
       openFileAtWork('todoList', listId)
@@ -168,6 +218,10 @@ function HomePage({
     },
     [openFileAtWork, onNavigateToWork]
   )
+
+  const handleCopyClipboardItem = useCallback((content: string) => {
+    void navigator.clipboard.writeText(content)
+  }, [])
 
   const renderDocItem = useCallback(
     (file: FileItem) => {
@@ -201,27 +255,11 @@ function HomePage({
   return (
     <div className="home-page">
       <div className="home-scroll-container">
-        {/* ── Scope 选择器 ── */}
-        <div className="home-scope-bar">
-          <ScopeSidebar
-            scopes={data.scopes}
-            scopesLoading={data.scopesLoading}
-            currentScope={data.currentScope}
-            getScopeLabel={data.getScopeLabel}
-            onSelect={data.setScope}
-          />
-          <button
-            type="button"
-            className="home-refresh-btn"
-            onClick={data.refreshAll}
-            title="刷新全部"
-          >
-            <RefreshCw size={14} />
-          </button>
-        </div>
+        {/* ── 连接状态条 ── */}
+        <HomeStatusBar />
 
         {/* ── 问候 + 快捷操作 ── */}
-        <motion.div className="home-greeting" {...fadeUp(sectionIdx++)}>
+        <motion.div className="home-greeting" {...fadeUpStagger(sectionIdx++)}>
           <div className="home-greeting-text">
             <h1 className="home-greeting-title">{getGreeting()}</h1>
             <p className="home-greeting-subtitle">
@@ -272,26 +310,48 @@ function HomePage({
             sessionsCount={data.stats.sessionsCount}
             onNewChat={handleNewChat}
             onOpenSession={handleOpenSession}
+            onViewAll={onNavigateToAgent}
             animationIndex={sectionIdx++}
           />
           <HomeTodoSection
             todoLists={todoLists}
             loading={data.fileListLoading}
             onOpenTodoList={handleOpenTodoList}
+            onViewAll={onNavigateToWork}
             animationIndex={sectionIdx++}
           />
         </div>
 
         {/* ── 最近文档 (SpotlightCard) ── */}
         {recentDocuments.length > 0 && (
-          <motion.div {...fadeUp(sectionIdx++)}>
-            <div className="home-section-header">
-              <Icon icon={FileText} size="small" />
-              <span className="home-section-title">最近文档</span>
-              <Tag size="small">{data.stats.documentsCount}</Tag>
-            </div>
+          <motion.div {...fadeUpStagger(sectionIdx++)}>
+            <SectionHeader
+              icon={FileText}
+              title="最近文档"
+              count={data.stats.documentsCount}
+              extra={
+                <>
+                  <Button
+                    size="small"
+                    icon={<Icon icon={Plus} size="small" />}
+                    onClick={handleNewDocument}
+                  >
+                    新建
+                  </Button>
+                  <Button
+                    size="small"
+                    type="text"
+                    icon={<Icon icon={ArrowRight} size="small" />}
+                    iconPosition="end"
+                    onClick={onNavigateToWork}
+                  >
+                    查看全部
+                  </Button>
+                </>
+              }
+            />
             {data.fileListLoading ? (
-              <div className="home-loading-placeholder">加载中...</div>
+              <LoadingPlaceholder />
             ) : (
               <SpotlightCard
                 items={recentDocuments}
@@ -308,20 +368,42 @@ function HomePage({
 
         {/* ── 剪贴板历史条 ── */}
         {data.clipboard.length > 0 && (
-          <motion.div className="home-clipboard-strip" {...fadeUp(sectionIdx++)}>
+          <motion.div className="home-clipboard-strip" {...fadeUpStagger(sectionIdx++)}>
             <div className="home-clipboard-strip__header">
               <Icon icon={Clipboard} size="small" />
               <span className="home-card__title">最近剪贴板</span>
+              <span className="section-header__extra">
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<Icon icon={ArrowRight} size="small" />}
+                  iconPosition="end"
+                  onClick={onNavigateToWork}
+                >
+                  查看全部
+                </Button>
+              </span>
             </div>
             <div className="home-clipboard-strip__items">
               {data.clipboard.map((item) => (
-                <div key={item.id} className="home-clipboard-item" title={item.content}>
+                <div
+                  key={item.id}
+                  className="home-clipboard-item home-clipboard-item--clickable"
+                  title="点击复制到剪贴板"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handleCopyClipboardItem(item.content)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleCopyClipboardItem(item.content)}
+                >
                   <span className="home-clipboard-item__text">
                     {item.content.length > 80 ? item.content.slice(0, 80) + '...' : item.content}
                   </span>
-                  <span className="home-clipboard-item__time">
-                    {formatRelativeTime(item.createdAt)}
-                  </span>
+                  <div className="home-clipboard-item__footer">
+                    <span className="home-clipboard-item__time">
+                      {formatRelativeTime(item.createdAt)}
+                    </span>
+                    <Icon icon={Copy} size={12} className="home-clipboard-item__copy-icon" />
+                  </div>
                 </div>
               ))}
             </div>

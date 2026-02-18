@@ -5,6 +5,7 @@
 import { ActionIcon, Button, Flexbox, Input, Modal, Text, TextArea, toast } from '@lobehub/ui'
 import { Select } from './ui/Select'
 import { Edit, FileText, Import, Plus, Trash2 } from 'lucide-react'
+import { SettingsListItem } from './ui/SettingsListItem'
 import { useCallback, useEffect, useState } from 'react'
 import type { PrizmClient } from '@prizm/client-core'
 
@@ -200,23 +201,13 @@ export function CommandsSettings({ http, onLog }: CommandsSettingsProps) {
       ) : (
         <Flexbox gap={4}>
           {commands.map((cmd) => (
-            <Flexbox
+            <SettingsListItem
               key={cmd.id}
-              horizontal
-              align="center"
-              justify="space-between"
-              style={{
-                padding: '8px 12px',
-                borderRadius: 6,
-                border: '1px solid var(--ant-color-border-secondary)',
-                background: 'var(--ant-color-fill-quaternary)'
-              }}
-            >
-              <Flexbox gap={4}>
-                <Flexbox horizontal gap={8} align="center">
-                  <Text style={{ fontFamily: 'var(--ant-font-family-code)', fontWeight: 600 }}>
-                    /{cmd.id}
-                  </Text>
+              title={
+                <span style={{ fontFamily: 'var(--ant-font-family-code)' }}>/{cmd.id}</span>
+              }
+              badges={
+                <>
                   <Text
                     type="secondary"
                     style={{
@@ -236,18 +227,16 @@ export function CommandsSettings({ http, onLog }: CommandsSettingsProps) {
                       ({cmd.source})
                     </Text>
                   )}
-                </Flexbox>
-                {cmd.description && (
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {cmd.description}
-                  </Text>
-                )}
-              </Flexbox>
-              <Flexbox horizontal gap={4}>
-                <ActionIcon icon={Edit} size="small" onClick={() => openEdit(cmd)} />
-                <ActionIcon icon={Trash2} size="small" onClick={() => handleDelete(cmd.id)} />
-              </Flexbox>
-            </Flexbox>
+                </>
+              }
+              description={cmd.description}
+              actions={
+                <>
+                  <ActionIcon icon={Edit} size="small" onClick={() => openEdit(cmd)} />
+                  <ActionIcon icon={Trash2} size="small" onClick={() => handleDelete(cmd.id)} />
+                </>
+              }
+            />
           ))}
         </Flexbox>
       )}

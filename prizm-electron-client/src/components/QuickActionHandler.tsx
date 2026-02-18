@@ -8,7 +8,7 @@ import { useLogsContext } from '../context/LogsContext'
 export function QuickActionHandler({
   setActivePage
 }: {
-  setActivePage: (page: 'home' | 'work' | 'agent' | 'settings' | 'test' | 'user') => void
+  setActivePage: (page: 'home' | 'work' | 'docs' | 'agent' | 'collaboration' | 'settings' | 'test' | 'user') => void
 }) {
   const { manager } = usePrizmContext()
   const { currentScope } = useScope()
@@ -31,7 +31,6 @@ export function QuickActionHandler({
               currentScope
             )
             openFileAtWork('document', doc.id)
-            setActivePage('work')
             addLog('已创建文档', 'success')
           } catch (e) {
             addLog(`创建文档失败: ${String(e)}`, 'error')
@@ -49,7 +48,6 @@ export function QuickActionHandler({
               currentScope
             )
             openFileAtWork('document', doc.id)
-            setActivePage('work')
             addLog('已添加到文档', 'success')
           } catch (e) {
             addLog(`创建文档失败: ${String(e)}`, 'error')

@@ -2,7 +2,7 @@
  * DropZoneOverlay - 全局拖拽覆盖层
  * 监听 window 级 drag 事件，外部文件/文本拖入时显示半透明覆盖层
  * drop 后通过 ImportService 开始导入流程
- * 过滤应用内部拖拽（如 FileTreeNode 的 @file: 引用）
+ * 过滤应用内部拖拽（通过 application/x-prizm-internal MIME 类型标记）
  */
 import { createClientLogger } from '@prizm/client-core'
 import { memo, useState, useCallback, useEffect, useRef } from 'react'
@@ -13,6 +13,12 @@ import { Download } from 'lucide-react'
 import { useImportContext } from '../../context/ImportContext'
 import { textToImportItem } from '../../types/import'
 
+/** 检查 dataTransfer 是否来自应用内部拖拽 */
+function isInternalDrag(dt: DataTransfer | null): boolean {
+  if (!dt) return false
+  return dt.types.includes('application/x-prizm-internal')
+}
+
 const DropZoneOverlay = memo(() => {
   const { startImport, startImportFromFileResults } = useImportContext()
   const [isDragging, setIsDragging] = useState(false)
@@ -20,13 +26,12 @@ const DropZoneOverlay = memo(() => {
 
   const handleDragEnter = useCallback((e: DragEvent) => {
     e.preventDefault()
-    // 过滤应用内部拖拽（FileTreeNode 使用 text/plain + @file: 前缀）
+    // 过滤应用内部拖拽（通过自定义 MIME 类型在 dragenter 阶段即可识别）
+    if (isInternalDrag(e.dataTransfer)) return
+
     const types = e.dataTransfer?.types ?? []
     const hasFiles = types.includes('Files')
     const hasText = types.includes('text/plain')
-    // 内部拖拽只有 text/plain 且没有 Files；外部文本拖拽也只有 text/plain
-    // 区分：dragenter 时无法读取 data（安全限制），先都显示覆盖层
-    // 在 drop 时再过滤 @file: 前缀
     if (!hasFiles && !hasText) return
 
     dragCountRef.current++
@@ -36,6 +41,7 @@ const DropZoneOverlay = memo(() => {
   }, [])
 
   const handleDragOver = useCallback((e: DragEvent) => {
+    if (isInternalDrag(e.dataTransfer)) return
     e.preventDefault()
     if (e.dataTransfer) {
       e.dataTransfer.dropEffect = 'copy'
@@ -43,6 +49,7 @@ const DropZoneOverlay = memo(() => {
   }, [])
 
   const handleDragLeave = useCallback((e: DragEvent) => {
+    if (isInternalDrag(e.dataTransfer)) return
     e.preventDefault()
     dragCountRef.current--
     if (dragCountRef.current <= 0) {
@@ -53,6 +60,9 @@ const DropZoneOverlay = memo(() => {
 
   const handleDrop = useCallback(
     async (e: DragEvent) => {
+      // 内部拖拽直接放行，不拦截
+      if (isInternalDrag(e.dataTransfer)) return
+
       e.preventDefault()
       e.stopPropagation()
       dragCountRef.current = 0
@@ -87,8 +97,6 @@ const DropZoneOverlay = memo(() => {
       // 检查是否是纯文本拖拽（或文件拖拽时 path 均不可用，text/plain 可能含路径）
       const text = e.dataTransfer.getData('text/plain')
       if (text) {
-        // 过滤应用内部拖拽
-        if (text.startsWith('@file:')) return
         const trimmed = text.trim()
         if (!trimmed) return
         // 若 text 形如 Windows 路径（D:\path\file.md），当作文件路径读取
