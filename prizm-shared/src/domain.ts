@@ -120,17 +120,26 @@ export interface UpdateDocumentPayload {
   tags?: string[]
 }
 
-// ============ 文档版本 ============
+// ============ 统一操作者身份 ============
 
-/** 版本变更者信息 */
-export interface VersionChangedBy {
-  /** 变更者类型：user=用户手动操作，agent=AI agent 工具调用 */
-  type: 'user' | 'agent'
+/** 操作者身份标识 — Agent 和 User 统一使用 */
+export interface OperationActor {
+  /** 操作者类型：agent=AI agent，user=用户/API 客户端，system=系统内部 */
+  type: 'agent' | 'user' | 'system'
   /** Agent session ID（仅 type='agent' 时有值） */
   sessionId?: string
-  /** 操作来源标识，如 'tool:prizm_update_document' / 'api:PATCH' / 'api:restore' */
-  apiSource?: string
+  /** API 客户端 ID（仅 type='user' 时有值） */
+  clientId?: string
+  /** 操作来源标识，如 'tool:prizm_create_document' / 'api:documents' / 'api:restore' */
+  source?: string
 }
+
+// ============ 文档版本 ============
+
+/**
+ * @deprecated 使用 OperationActor 替代
+ */
+export type VersionChangedBy = OperationActor
 
 /** 文档版本快照 */
 export interface DocumentVersion {
@@ -254,6 +263,52 @@ export function getToolCalls(msg: Pick<AgentMessage, 'parts'>): MessagePartTool[
   return msg.parts.filter((p): p is MessagePartTool => p.type === 'tool')
 }
 
+// ============ Background Session 类型 ============
+
+/** 会话使用场景：interactive=用户对话驱动 background=触发器驱动 */
+export type SessionKind = 'interactive' | 'background'
+
+/** BG Session 触发方式 */
+export type BgTriggerType = 'tool_spawn' | 'api' | 'cron' | 'event_hook'
+
+/** BG Session 运行状态 */
+export type BgStatus = 'pending' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled'
+
+/** 会话级记忆策略 — 运行时可配置的豁免粒度 */
+export interface SessionMemoryPolicy {
+  /** 豁免 P1 每轮记忆抽取，BG 默认 true */
+  skipPerRoundExtract?: boolean
+  /** 豁免 P2 叙述性批量抽取，BG 默认 true */
+  skipNarrativeBatchExtract?: boolean
+  /** 豁免文档记忆抽取，BG 默认 false */
+  skipDocumentExtract?: boolean
+  /** 豁免对话摘要生成，BG 默认 true */
+  skipConversationSummary?: boolean
+  /** 自定义抽取提示词覆盖（BG 场景优化） */
+  extractionPromptOverride?: string
+}
+
+/** 后台会话元数据 — 仅 kind='background' 时有值 */
+export interface BgSessionMeta {
+  triggerType: BgTriggerType
+  /** 父会话 ID（tool_spawn 时有值） */
+  parentSessionId?: string
+  /** 人类可读标签 */
+  label?: string
+  /** 指定 LLM 模型（可用廉价模型降低成本） */
+  model?: string
+  /** 最大执行时间 ms，默认 600_000 */
+  timeoutMs?: number
+  /** 完成后自动删除会话数据 */
+  autoCleanup?: boolean
+  /** 结果回传目标 session */
+  announceTarget?: { sessionId: string; scope: string }
+  /** 记忆策略覆盖 */
+  memoryPolicy?: SessionMemoryPolicy
+  /** 嵌套深度（spawn 链追踪，根 = 0） */
+  depth?: number
+}
+
 export interface AgentSession {
   id: string
   scope: string
@@ -264,8 +319,54 @@ export interface AgentSession {
   compressedThroughRound?: number
   /** 用户授权的外部文件/文件夹路径列表（仅当前会话有效） */
   grantedPaths?: string[]
+  /** 会话 checkpoint 列表（按时间序，每轮对话前自动创建） */
+  checkpoints?: SessionCheckpoint[]
+  /** 会话使用场景，默认 'interactive'（向后兼容：无此字段 = interactive） */
+  kind?: SessionKind
+  /** 后台会话元数据 */
+  bgMeta?: BgSessionMeta
+  /** 后台运行状态 */
+  bgStatus?: BgStatus
+  /** 后台执行结果（由 prizm_set_result 工具写入） */
+  bgResult?: string
+  /** 后台运行开始时间 */
+  startedAt?: number
+  /** 后台运行结束时间 */
+  finishedAt?: number
   createdAt: number
   updatedAt: number
+}
+
+// ============ 会话 Checkpoint（回退点） ============
+
+/** Checkpoint 关联的文件变更记录 */
+export interface CheckpointFileChange {
+  /** 相对路径（scope root 或外部绝对路径） */
+  path: string
+  /** 操作类型 */
+  action: 'created' | 'modified' | 'deleted' | 'moved'
+  /** 变更前的文件内容快照（created 时为空） */
+  previousContent?: string
+  /** 移动操作的源路径 */
+  fromPath?: string
+}
+
+/** 会话 Checkpoint - 代表一个可回退的时间点 */
+export interface SessionCheckpoint {
+  /** 唯一 ID */
+  id: string
+  /** 所属会话 ID */
+  sessionId: string
+  /** checkpoint 创建时的消息数量（回退时截断到此处） */
+  messageIndex: number
+  /** 本轮用户消息内容（用于显示） */
+  userMessage: string
+  /** 创建时间 */
+  createdAt: number
+  /** 本轮完成后记录的文件变更列表 */
+  fileChanges: CheckpointFileChange[]
+  /** 本轮是否已完成（流式结束后标记） */
+  completed: boolean
 }
 
 // ============ 文件路径引用 ============
@@ -446,8 +547,12 @@ export interface MemoryItem {
   source_type?: string
   /** 来源会话 ID */
   source_session_id?: string
-  /** 来源轮次消息 ID */
+  /** 来源轮次消息 ID（Pipeline 1 单轮引用） */
   source_round_id?: string
+  /** 来源轮次消息 ID 列表（Pipeline 2 多轮引用） */
+  source_round_ids?: string[]
+  /** 来源文档 ID（文档记忆） */
+  source_document_id?: string
   /** 文档子类型：overview / fact / migration（仅 type=document 时有值） */
   sub_type?: string
   /** 累计被注入到对话上下文的次数（引用索引） */
@@ -493,13 +598,88 @@ export interface DedupLogEntry {
 export type TokenUsageCategory =
   | 'chat' // 对话
   | 'conversation_summary' // 对话轮次摘要
-  | 'memory:conversation_extract' // 对话记忆提取（profile+narrative+foresight+event_log）
+  | 'memory:conversation_extract' // 对话记忆提取（unified: profile+narrative+foresight+event_log）
+  | 'memory:per_round_extract' // Pipeline 1：每轮轻量抽取（event_log+profile+foresight）
+  | 'memory:narrative_batch_extract' // Pipeline 2：阈值触发叙述性批量抽取（narrative+profile+foresight）
   | 'memory:document_extract' // 文档记忆提取（overview+fact）
   | 'memory:document_migration' // 文档迁移记忆
   | 'memory:dedup' // 记忆语义去重
   | 'memory:profile_merge' // 画像合并
   | 'memory:query_expansion' // 记忆查询扩展
+  | 'memory:eventlog_extract' // 事件日志抽取（遗留 per-type，防御性保留）
+  | 'memory:foresight_extract' // 前瞻抽取（遗留 per-type，防御性保留）
+  | 'memory:episode_extract' // 叙事抽取（遗留 per-type，防御性保留）
+  | 'memory:profile_extract' // 画像抽取（遗留 per-type，防御性保留）
   | 'document_summary' // 文档摘要（兼容旧数据）
+
+/** Token 类别的中文标签，与 TokenUsageCategory 枚举对齐 */
+export const TOKEN_CATEGORY_LABELS: Partial<Record<TokenUsageCategory, string>> = {
+  chat: '对话',
+  conversation_summary: '对话摘要',
+  'memory:per_round_extract': '记忆提取（每轮·P1）',
+  'memory:narrative_batch_extract': '记忆提取（叙述·P2）',
+  'memory:conversation_extract': '记忆提取（对话·旧）',
+  'memory:document_extract': '记忆提取（文档）',
+  'memory:document_migration': '文档迁移记忆',
+  'memory:dedup': '记忆去重',
+  'memory:profile_merge': '画像合并',
+  'memory:query_expansion': '查询扩展',
+  'memory:eventlog_extract': '事件日志抽取',
+  'memory:foresight_extract': '前瞻抽取',
+  'memory:episode_extract': '叙事抽取',
+  'memory:profile_extract': '画像抽取',
+  document_summary: '文档摘要'
+}
+
+/** Token 类别的展示颜色 */
+export const TOKEN_CATEGORY_COLORS: Partial<Record<TokenUsageCategory, string>> = {
+  chat: '#1677ff',
+  conversation_summary: '#722ed1',
+  'memory:per_round_extract': '#08979c',
+  'memory:narrative_batch_extract': '#006d75',
+  'memory:conversation_extract': '#13c2c2',
+  'memory:document_extract': '#52c41a',
+  'memory:document_migration': '#fa8c16',
+  'memory:dedup': '#eb2f96',
+  'memory:profile_merge': '#faad14',
+  'memory:query_expansion': '#2f54eb',
+  'memory:eventlog_extract': '#597ef7',
+  'memory:foresight_extract': '#9254de',
+  'memory:episode_extract': '#36cfc9',
+  'memory:profile_extract': '#ffc53d',
+  document_summary: '#389e0d'
+}
+
+/** Token 类别的排序（UI 条形图 / 列表中的显示顺序） */
+export const TOKEN_CATEGORY_ORDER: TokenUsageCategory[] = [
+  'chat',
+  'conversation_summary',
+  'memory:per_round_extract',
+  'memory:narrative_batch_extract',
+  'memory:conversation_extract',
+  'memory:document_extract',
+  'memory:document_migration',
+  'memory:dedup',
+  'memory:profile_merge',
+  'memory:query_expansion',
+  'memory:eventlog_extract',
+  'memory:foresight_extract',
+  'memory:episode_extract',
+  'memory:profile_extract',
+  'document_summary'
+]
+
+/** 判断类别是否属于记忆系统 */
+export function isMemoryCategory(cat: string): boolean {
+  return cat.startsWith('memory:')
+}
+
+/** 格式化 token 数量为人类可读形式（1.2K / 3.5M） */
+export function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return String(n)
+}
 
 export interface TokenUsageRecord {
   /** UUID，唯一标识 */
@@ -587,4 +767,17 @@ export interface NotificationPayload {
   sourceClientId?: string
   /** 用于更新同一条通知而非新建，如 todo_list:{scope}:{id} 使 TODO 列表多次更新合并为一条 */
   updateId?: string
+}
+
+// ============ 路由层 DTO（富化响应类型） ============
+
+/** 富化文档 DTO — 路由返回时附加锁和版本信息，领域类型 Document 保持不变 */
+export interface EnrichedDocument extends Document {
+  lockInfo?: ResourceLockInfo | null
+  versionCount?: number
+}
+
+/** 富化会话 DTO — 路由返回时附加持有锁列表，领域类型 AgentSession 保持不变 */
+export interface EnrichedSession extends AgentSession {
+  heldLocks?: ResourceLockInfo[]
 }

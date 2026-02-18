@@ -33,7 +33,17 @@ export const EVENT_TYPES = [
   'terminal:exited',
   'terminal:killed',
   'resource:locked',
-  'resource:unlocked'
+  'resource:unlocked',
+  'agent:session.created',
+  'agent:session.deleted',
+  'agent:session.rolledBack',
+  'agent:message.completed',
+  'bg:session.triggered',
+  'bg:session.started',
+  'bg:session.completed',
+  'bg:session.failed',
+  'bg:session.timeout',
+  'bg:session.cancelled'
 ] as const
 
 export type EventType = (typeof EVENT_TYPES)[number]
@@ -61,7 +71,17 @@ export const EVENT_TYPES_OBJ = {
   TERMINAL_EXITED: 'terminal:exited',
   TERMINAL_KILLED: 'terminal:killed',
   RESOURCE_LOCKED: 'resource:locked',
-  RESOURCE_UNLOCKED: 'resource:unlocked'
+  RESOURCE_UNLOCKED: 'resource:unlocked',
+  AGENT_SESSION_CREATED: 'agent:session.created',
+  AGENT_SESSION_DELETED: 'agent:session.deleted',
+  AGENT_SESSION_ROLLED_BACK: 'agent:session.rolledBack',
+  AGENT_MESSAGE_COMPLETED: 'agent:message.completed',
+  BG_SESSION_TRIGGERED: 'bg:session.triggered',
+  BG_SESSION_STARTED: 'bg:session.started',
+  BG_SESSION_COMPLETED: 'bg:session.completed',
+  BG_SESSION_FAILED: 'bg:session.failed',
+  BG_SESSION_TIMEOUT: 'bg:session.timeout',
+  BG_SESSION_CANCELLED: 'bg:session.cancelled'
 } as const satisfies Record<string, EventType>
 
 /** 服务端全部事件类型（用于 subscribeEvents: "all"） */
@@ -83,7 +103,17 @@ export const DATA_SYNC_EVENTS = [
   'file:created',
   'file:updated',
   'file:deleted',
-  'file:moved'
+  'file:moved',
+  'agent:session.created',
+  'agent:session.deleted',
+  'agent:session.rolledBack',
+  'agent:message.completed',
+  'bg:session.triggered',
+  'bg:session.started',
+  'bg:session.completed',
+  'bg:session.failed',
+  'bg:session.timeout',
+  'bg:session.cancelled'
 ] as const
 
 export type DataSyncEventType = (typeof DATA_SYNC_EVENTS)[number]
@@ -150,6 +180,35 @@ export interface ResourceLockEventPayload extends EventPayloadBase {
   reason?: string
 }
 
+/** Agent 会话事件载荷 */
+export interface AgentSessionEventPayload extends EventPayloadBase {
+  sessionId: string
+}
+
+/** Agent 会话回退事件载荷 */
+export interface AgentSessionRolledBackPayload extends EventPayloadBase {
+  sessionId: string
+  checkpointId: string
+  remainingMessageCount: number
+}
+
+/** Agent 消息完成事件载荷 */
+export interface AgentMessageCompletedPayload extends EventPayloadBase {
+  sessionId: string
+}
+
+/** BG Session 事件载荷 */
+export interface BgSessionEventPayload extends EventPayloadBase {
+  sessionId: string
+  triggerType?: string
+  parentSessionId?: string
+  label?: string
+  result?: string
+  error?: string
+  durationMs?: number
+  timeoutMs?: number
+}
+
 /** 各事件类型对应的 payload 类型 */
 export interface EventPayloadMap {
   notification: NotificationPayload
@@ -174,6 +233,16 @@ export interface EventPayloadMap {
   'terminal:killed': { id: string } & EventPayloadBase
   'resource:locked': ResourceLockEventPayload
   'resource:unlocked': ResourceLockEventPayload
+  'agent:session.created': AgentSessionEventPayload
+  'agent:session.deleted': AgentSessionEventPayload
+  'agent:session.rolledBack': AgentSessionRolledBackPayload
+  'agent:message.completed': AgentMessageCompletedPayload
+  'bg:session.triggered': BgSessionEventPayload
+  'bg:session.started': BgSessionEventPayload
+  'bg:session.completed': BgSessionEventPayload
+  'bg:session.failed': BgSessionEventPayload
+  'bg:session.timeout': BgSessionEventPayload
+  'bg:session.cancelled': BgSessionEventPayload
 }
 
 /** 类型安全的 EventPushMessage，payload 与 eventType 对应 */
