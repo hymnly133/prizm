@@ -1,8 +1,12 @@
 /**
  * 内置工具定义：tool() 辅助函数与 getBuiltinTools()
+ *
+ * 复合工具设计：同类 CRUD 操作通过 action enum 合并为单一工具，
+ * 参考 v0 TodoManager、Notion update-page、Replit str_replace_editor 模式。
  */
 
 import type { LLMTool } from '../../adapters/interfaces'
+import { getGuardedGroupNames } from '../toolInstructions'
 
 /** 工具参数属性定义（支持 array 类型的 items） */
 export interface ToolPropertyDef {
@@ -37,10 +41,7 @@ export function tool(
 /** workspace 参数：选择操作主工作区还是会话临时工作区（仅在使用相对路径时生效） */
 export const WORKSPACE_PARAM: ToolPropertyDef = {
   type: 'string',
-  description:
-    '目标工作区（仅相对路径时生效）："main"（默认）= 主工作区，"session" = 当前会话临时工作区。' +
-    '草稿、临时计算结果等应写入 "session"；正式文件写入 "main"。' +
-    '使用绝对路径时可忽略此参数，系统会自动识别所属工作区。',
+  description: '"main"（默认）或 "session"（临时工作区）',
   enum: ['main', 'session']
 }
 
@@ -49,475 +50,319 @@ export const WORKSPACE_PARAM: ToolPropertyDef = {
  */
 export function getBuiltinTools(): LLMTool[] {
   return [
+    // ── 文件（复合） ──
     tool(
-      'prizm_file_list',
-      '列出工作区指定目录下的文件和子目录。path 为空时列出根目录。' +
-        '支持相对路径和绝对路径。设置 workspace="session" 可列出会话临时工作区。',
+      'prizm_file',
+      '文件操作。action: list(列出目录)/read(读取)/write(写入,不存在则创建)/move(移动或重命名)/delete(删除,需确认)',
       {
         properties: {
-          path: {
+          action: {
             type: 'string',
-            description: '目录路径（相对路径或绝对路径），默认为空表示根目录'
+            description: '操作类型',
+            enum: ['list', 'read', 'write', 'move', 'delete']
           },
+          path: { type: 'string', description: '文件或目录路径 (list/read/write/delete)' },
+          content: { type: 'string', description: '写入内容 (write)' },
+          from: { type: 'string', description: '源路径 (move)' },
+          to: { type: 'string', description: '目标路径 (move)' },
           workspace: WORKSPACE_PARAM
         },
-        required: []
+        required: ['action']
       }
     ),
+
+    // ── 待办（复合） ──
     tool(
-      'prizm_file_read',
-      '根据路径读取文件内容。支持相对路径和绝对路径（绝对路径自动识别所属工作区）。',
+      'prizm_todo',
+      '待办管理。action 分列表级和条目级：list(查看)/create_list(建列表)/delete_list(删列表)/add_items(加条目)/update_item(改条目)/delete_item(删条目)',
       {
         properties: {
-          path: { type: 'string', description: '文件路径（相对路径或绝对路径）' },
-          workspace: WORKSPACE_PARAM
-        },
-        required: ['path']
-      }
-    ),
-    tool(
-      'prizm_file_write',
-      '将内容写入指定路径的文件。若文件不存在则创建，存在则覆盖。支持相对路径和绝对路径。' +
-        '草稿、临时内容应设置 workspace="session" 或使用临时工作区绝对路径。',
-      {
-        properties: {
-          path: { type: 'string', description: '文件路径（相对路径或绝对路径）' },
-          content: { type: 'string', description: '要写入的内容' },
-          workspace: WORKSPACE_PARAM
-        },
-        required: ['path', 'content']
-      }
-    ),
-    tool(
-      'prizm_file_move',
-      '移动或重命名文件/目录。支持相对路径和绝对路径。源和目标必须在同一工作区内。',
-      {
-        properties: {
-          from: { type: 'string', description: '源路径（相对或绝对）' },
-          to: { type: 'string', description: '目标路径（相对或绝对）' },
-          workspace: WORKSPACE_PARAM
-        },
-        required: ['from', 'to']
-      }
-    ),
-    tool(
-      'prizm_file_delete',
-      '删除指定路径的文件或目录。删除前需二次确认用户意图。支持相对路径和绝对路径。',
-      {
-        properties: {
-          path: { type: 'string', description: '文件或目录路径（相对或绝对）' },
-          workspace: WORKSPACE_PARAM
-        },
-        required: ['path']
-      }
-    ),
-    tool(
-      'prizm_list_todos',
-      '列出待办项，含状态与标题，按列表分组。workspace="session" 列出临时工作区的待办。',
-      { properties: { workspace: WORKSPACE_PARAM }, required: [] }
-    ),
-    tool(
-      'prizm_list_todo_lists',
-      '列出所有待办列表的 id 与标题。在创建待办项前调用。workspace="session" 列出临时工作区。',
-      { properties: { workspace: WORKSPACE_PARAM }, required: [] }
-    ),
-    tool('prizm_read_todo', '根据待办项 ID 读取详情。workspace="session" 读取临时工作区。', {
-      properties: {
-        todoId: { type: 'string', description: '待办项 ID' },
-        workspace: WORKSPACE_PARAM
-      },
-      required: ['todoId']
-    }),
-    tool(
-      'prizm_create_todo',
-      '创建一条待办项。必须指定 listId 或 listTitle。workspace="session" 创建到临时工作区（不入全局列表）。',
-      {
-        properties: {
-          title: { type: 'string', description: '标题' },
-          description: { type: 'string', description: '可选描述' },
-          listId: {
+          action: {
             type: 'string',
-            description: '目标列表 id，追加到该列表（与 listTitle 二选一）'
+            description: '操作类型',
+            enum: ['list', 'create_list', 'delete_list', 'add_items', 'update_item', 'delete_item']
           },
-          listTitle: {
-            type: 'string',
-            description: '新建列表并添加，listTitle 作为新列表标题（与 listId 二选一）'
+          listId: { type: 'string', description: '列表 ID (list 查看详情/delete_list/add_items)' },
+          listTitle: { type: 'string', description: '新建列表标题 (create_list)' },
+          itemTitles: {
+            type: 'array',
+            description: '待办项标题数组 (create_list/add_items)',
+            items: { type: 'string' }
           },
-          folder: {
-            type: 'string',
-            description: '新建列表的存放目录，如 "projects"。不指定则放在工作区根目录。'
-          },
+          itemId: { type: 'string', description: '条目 ID (update_item/delete_item)' },
+          title: { type: 'string', description: '新标题 (update_item)' },
+          description: { type: 'string', description: '新描述 (update_item)' },
           status: {
             type: 'string',
-            description: 'todo | doing | done',
+            description: '条目状态 (create_list/add_items/update_item)',
             enum: ['todo', 'doing', 'done']
           },
+          folder: { type: 'string', description: '列表存放目录 (create_list)' },
           workspace: WORKSPACE_PARAM
         },
-        required: ['title']
+        required: ['action']
       }
     ),
-    tool('prizm_update_todo', '更新待办项状态、标题或描述。workspace="session" 更新临时工作区。', {
-      properties: {
-        todoId: { type: 'string', description: '待办项 ID' },
-        status: { type: 'string', enum: ['todo', 'doing', 'done'] },
-        title: { type: 'string' },
-        description: { type: 'string' },
-        workspace: WORKSPACE_PARAM
-      },
-      required: ['todoId']
-    }),
-    tool('prizm_delete_todo', '删除指定待办项。workspace="session" 删除临时工作区。', {
-      properties: {
-        todoId: { type: 'string', description: '待办项 ID' },
-        workspace: WORKSPACE_PARAM
-      },
-      required: ['todoId']
-    }),
+
+    // ── 文档（复合） ──
     tool(
-      'prizm_list_documents',
-      '列出文档（ID、标题、字数）。workspace="session" 列出临时工作区的文档。',
-      { properties: { workspace: WORKSPACE_PARAM }, required: [] }
-    ),
-    tool(
-      'prizm_get_document_content',
-      '根据文档 ID 获取完整正文。workspace="session" 读取临时工作区。',
+      'prizm_document',
+      '文档管理。action: list(列出)/read(读取正文)/create(创建)/update(更新,仅传需改字段)/delete(删除)',
       {
         properties: {
-          documentId: { type: 'string', description: '文档 ID' },
-          workspace: WORKSPACE_PARAM
-        },
-        required: ['documentId']
-      }
-    ),
-    tool(
-      'prizm_create_document',
-      '创建文档。workspace="session" 创建到临时工作区（不入全局列表，session 删除时清除）。' +
-        '可通过 folder 指定嵌套目录。',
-      {
-        properties: {
-          title: { type: 'string', description: '标题（同时作为文件名）' },
-          content: { type: 'string', description: '正文' },
-          folder: {
+          action: {
             type: 'string',
-            description: '存放目录，如 "research"。不指定则放在工作区根目录。'
+            description: '操作类型',
+            enum: ['list', 'read', 'create', 'update', 'delete']
           },
+          documentId: { type: 'string', description: '文档 ID (read/update/delete)' },
+          title: { type: 'string', description: '标题 (create/update)' },
+          content: { type: 'string', description: '正文 (create/update)' },
+          folder: { type: 'string', description: '存放目录 (create)' },
           workspace: WORKSPACE_PARAM
         },
-        required: ['title']
+        required: ['action']
       }
     ),
-    tool(
-      'prizm_update_document',
-      '更新文档标题或正文。workspace="session" 更新临时工作区。仅传入需要修改的字段。',
-      {
-        properties: {
-          documentId: { type: 'string', description: '文档 ID' },
-          title: { type: 'string' },
-          content: { type: 'string' },
-          workspace: WORKSPACE_PARAM
-        },
-        required: ['documentId']
-      }
-    ),
-    tool('prizm_delete_document', '删除指定文档。workspace="session" 删除临时工作区。', {
-      properties: {
-        documentId: { type: 'string', description: '文档 ID' },
-        workspace: WORKSPACE_PARAM
-      },
-      required: ['documentId']
-    }),
+
+    // ── 搜索（复合） ──
     tool(
       'prizm_search',
-      '在工作区便签、待办、文档中搜索关键词（分词索引 + 全文扫描混合搜索，保证不漏）。' +
-        '当用户询问特定内容但不确定在哪个类型中时使用。' +
-        '返回匹配条目列表（类型+ID+标题+内容预览+相关度评分）。' +
-        '支持中文分词，多个关键词用空格分隔。' +
-        '语义模糊查询请改用 prizm_search_memories。',
+      '工作区关键词搜索。mode: keyword(搜索文档/待办/剪贴板)/stats(工作区统计)。语义/记忆搜索请用 prizm_knowledge。',
       {
         properties: {
+          mode: {
+            type: 'string',
+            description: '搜索模式',
+            enum: ['keyword', 'stats']
+          },
           query: {
             type: 'string',
-            description: '搜索关键词或短语（多词用空格分隔，如"竞品 分析"）'
+            description: '搜索关键词 (keyword)'
           },
           types: {
             type: 'array',
-            description:
-              '限定搜索类型，可选 "document"、"todoList"、"clipboard"、"note"。不指定则搜索全部。',
+            description: '限定类型: document/todoList/clipboard (仅 keyword)',
             items: { type: 'string' }
           },
           tags: {
             type: 'array',
-            description: '按标签过滤（OR 逻辑：含任一指定 tag 即匹配）。不指定则不过滤。',
+            description: '按标签过滤 (仅 keyword)',
             items: { type: 'string' }
           }
         },
-        required: ['query']
+        required: ['mode']
       }
     ),
+
+    // ── 知识库（复合） ──
     tool(
-      'prizm_scope_stats',
-      '获取当前工作区数据统计（各类型条数、字数）。快速了解工作区数据全貌时使用。',
-      { properties: {}, required: [] }
-    ),
-    tool(
-      'prizm_list_memories',
-      '列出当前用户的所有长期记忆条目。当需要浏览记忆全貌时使用。查找特定记忆优先用 prizm_search_memories。',
-      { properties: {}, required: [] }
-    ),
-    tool(
-      'prizm_search_memories',
-      '按语义搜索用户长期记忆（过往对话、偏好、习惯）。' +
-        '当用户问"我之前说过什么"、"上次聊了什么"、"我的偏好是什么"时使用。' +
-        '与 prizm_search 不同：这是向量语义搜索，适合模糊/意图性查询。',
-      {
-        properties: { query: { type: 'string', description: '搜索问题或关键短语' } },
-        required: ['query']
-      }
-    ),
-    tool(
-      'prizm_promote_file',
-      '将临时工作区的 Prizm 文档或待办列表提升到主工作区（永久保留、全局可见、可搜索）。' +
-        '适用于在会话中创建的草稿文件，确认后需要保留时使用。',
+      'prizm_knowledge',
+      '知识库与记忆查询。action: search(语义搜索记忆，可反向定位文档；query 留空列出全部记忆)/memories(文档全部记忆)/versions(版本历史)/related(语义相关文档)/round_lookup(通过记忆 id 追溯到原始对话轮，推荐传 memoryId)',
       {
         properties: {
-          fileId: { type: 'string', description: '文档或待办列表的 ID' },
-          folder: {
+          action: {
             type: 'string',
-            description: '目标目录（可选，默认根目录）'
-          }
-        },
-        required: ['fileId']
-      }
-    ),
-    // ---- 知识库工具：文档-记忆双向查询 ----
-    tool(
-      'prizm_search_docs_by_memory',
-      '通过语义搜索记忆，反向定位关联文档。可指定记忆类型和检索方法。' +
-        '返回匹配文档列表（按记忆子类型分类：总览/事实/变更历史）。',
-      {
-        properties: {
-          query: { type: 'string', description: '搜索关键词或问题' },
+            description: '查询类型',
+            enum: ['search', 'memories', 'versions', 'related', 'round_lookup']
+          },
+          query: { type: 'string', description: '关键词或问题 (search)' },
+          documentId: { type: 'string', description: '文档 ID (memories/versions/related)' },
+          memoryId: {
+            type: 'string',
+            description: '记忆 ID (round_lookup 推荐，自动解析来源会话和消息)'
+          },
+          sessionId: {
+            type: 'string',
+            description: '会话 ID (round_lookup 后备，不传则使用当前会话)'
+          },
+          messageId: {
+            type: 'string',
+            description: '消息 ID (round_lookup 后备，不传则列出最近 N 条消息)'
+          },
           memoryTypes: {
             type: 'array',
-            description:
-              '限定搜索的记忆类型。默认 ["document"]。可选: profile, narrative, foresight, document, event_log',
+            description: '记忆类型: profile/narrative/foresight/document/event_log (search)',
             items: { type: 'string' }
           },
           method: {
             type: 'string',
-            description: '检索方法：keyword / vector / hybrid（默认） / rrf / agentic',
+            description: '检索方法 (search)',
             enum: ['keyword', 'vector', 'hybrid', 'rrf', 'agentic']
-          }
+          },
+          limit: { type: 'number', description: '返回数量 (versions/round_lookup, 默认 20/10)' }
         },
-        required: ['query']
+        required: ['action']
       }
     ),
+
+    // ── 资源锁（复合，详细用法见 prizm_tool_guide） ──
     tool(
-      'prizm_get_document_memories',
-      '获取文档的全部记忆（按子类型分组：总览/原子事实/变更历史）。' +
-        '用于深入了解文档内容摘要和历史变更。',
+      'prizm_lock',
+      '资源锁管理。action: checkout(签出文档获取编辑锁)/checkin(释放文档锁)/claim(领取待办列表)/set_active(设置待办为进行中)/release(释放待办列表)/status(查询锁定状态)',
       {
         properties: {
-          documentId: { type: 'string', description: '文档 ID' }
+          action: {
+            type: 'string',
+            description: '操作类型',
+            enum: ['checkout', 'checkin', 'claim', 'set_active', 'release', 'status']
+          },
+          documentId: { type: 'string', description: '文档 ID (checkout/checkin)' },
+          todoListId: { type: 'string', description: '待办列表 ID (claim/release)' },
+          todoId: { type: 'string', description: '待办项 ID (set_active)' },
+          reason: { type: 'string', description: '签出理由 (checkout)' },
+          resourceType: {
+            type: 'string',
+            description: '资源类型 (status)',
+            enum: ['document', 'todo_list']
+          },
+          resourceId: { type: 'string', description: '资源 ID (status)' }
         },
-        required: ['documentId']
+        required: ['action']
       }
     ),
-    tool(
-      'prizm_document_versions',
-      '查看文档版本历史，含变更者身份和变更原因。' + '显示谁在什么时候做了什么修改。',
-      {
-        properties: {
-          documentId: { type: 'string', description: '文档 ID' },
-          limit: { type: 'number', description: '返回最近的版本数，默认 20' }
-        },
-        required: ['documentId']
-      }
-    ),
-    tool(
-      'prizm_find_related_documents',
-      '基于文档记忆关联，查找与指定文档语义相关的其他文档。' + '用于发现知识关联和相关内容。',
-      {
-        properties: {
-          documentId: { type: 'string', description: '文档 ID' }
-        },
-        required: ['documentId']
-      }
-    ),
-    // ---- 锁定与领取工具 ----
-    tool(
-      'prizm_checkout_document',
-      '签出文档获取编辑锁。在修改文档前必须先签出。返回文档内容和 fenceToken。' +
-        '同一时间只有一个 agent 会话可以签出同一文档。',
-      {
-        properties: {
-          documentId: { type: 'string', description: '文档 ID' },
-          reason: { type: 'string', description: '签出理由（可选）' }
-        },
-        required: ['documentId']
-      }
-    ),
-    tool(
-      'prizm_checkin_document',
-      '签入文档释放编辑锁。完成编辑后调用，让其他 agent 可以编辑此文档。',
-      {
-        properties: {
-          documentId: { type: 'string', description: '文档 ID' }
-        },
-        required: ['documentId']
-      }
-    ),
-    tool(
-      'prizm_claim_todo_list',
-      '领取待办列表为当前会话的在线待办。领取后其他 agent 不能修改此列表中的待办项。',
-      {
-        properties: {
-          todoListId: { type: 'string', description: '待办列表 ID' }
-        },
-        required: ['todoListId']
-      }
-    ),
-    tool(
-      'prizm_set_active_todo',
-      '设置待办项为"正在实现"状态。需要先领取待办项所在列表。表示当前 agent 正在处理此待办项。',
-      {
-        properties: {
-          todoId: { type: 'string', description: '待办项 ID' }
-        },
-        required: ['todoId']
-      }
-    ),
-    tool('prizm_release_todo_list', '释放已领取的待办列表，让其他 agent 可以领取和修改。', {
+
+    // ── 提升文件（独立） ──
+    tool('prizm_promote_file', '将临时工作区文档/待办提升到主工作区（永久保留）。', {
       properties: {
-        todoListId: { type: 'string', description: '待办列表 ID' }
+        fileId: { type: 'string', description: '文档或待办列表 ID' },
+        folder: { type: 'string', description: '目标目录' }
       },
-      required: ['todoListId']
+      required: ['fileId']
     }),
-    tool('prizm_resource_status', '查询资源的状态信息，包括锁定状态、读取历史、活跃 agent 等。', {
-      properties: {
-        resourceType: {
-          type: 'string',
-          description: '资源类型：document / todo_list',
-          enum: ['document', 'todo_list']
-        },
-        resourceId: { type: 'string', description: '资源 ID' }
-      },
-      required: ['resourceType', 'resourceId']
-    }),
-    // ---- 终端工具 ----
+
+    // ── 终端工具（独立，详细用法见 prizm_tool_guide） ──
     tool(
       'prizm_terminal_execute',
-      '在工作区执行命令并返回输出。命令在 shell 中执行，完成或超时后自动返回结果。' +
-        '适用于一次性命令如 ls、git status、npm install 等。用户可在终端面板中查看实时输出。',
+      '执行一次性命令并返回输出（ls、git status 等）。超时后自动返回。',
       {
         properties: {
-          command: { type: 'string', description: '要执行的 shell 命令' },
-          cwd: {
-            type: 'string',
-            description: '工作目录（相对工作区根目录的路径），默认为工作区根目录'
-          },
-          workspace: {
-            type: 'string',
-            description: '工作目录所在工作区："main"（默认，全局目录）或 "session"（会话临时目录）'
-          },
-          timeout: {
-            type: 'number',
-            description: '超时秒数，默认 30，最大 300'
-          }
+          command: { type: 'string', description: 'shell 命令' },
+          cwd: { type: 'string', description: '工作目录（相对路径），默认根目录' },
+          workspace: WORKSPACE_PARAM,
+          timeout: { type: 'number', description: '超时秒数，默认 30' }
         },
         required: ['command']
       }
     ),
-    tool(
-      'prizm_terminal_spawn',
-      '创建持久终端会话。用于需要交互或长时间运行的场景（如 dev server、watch 模式）。' +
-        '用户可在终端面板中查看和交互。返回终端 ID，后续可通过 prizm_terminal_send_keys 交互。',
-      {
-        properties: {
-          cwd: {
-            type: 'string',
-            description: '工作目录（相对工作区根目录的路径），默认为工作区根目录'
-          },
-          workspace: {
-            type: 'string',
-            description: '工作目录所在工作区："main"（默认，全局目录）或 "session"（会话临时目录）'
-          },
-          title: { type: 'string', description: '终端标题，便于用户识别' }
-        },
-        required: []
-      }
-    ),
+    tool('prizm_terminal_spawn', '创建持久终端（dev server、watch 等长期进程）。返回终端 ID。', {
+      properties: {
+        cwd: { type: 'string', description: '工作目录（相对路径），默认根目录' },
+        workspace: WORKSPACE_PARAM,
+        title: { type: 'string', description: '终端标题' }
+      },
+      required: []
+    }),
     tool(
       'prizm_terminal_send_keys',
-      '向持久终端发送输入。通过 pressEnter 控制是否按回车：' +
-        'pressEnter=true（默认）自动追加回车执行命令，无需在 input 中包含换行符；' +
-        'pressEnter=false 仅键入文本不执行。' +
-        '支持分步调用：先 type（pressEnter=false）再单独 Enter（input=""，pressEnter=true）。' +
-        'input 中的 \\n 会原样发送给终端（不等同于回车执行）。',
+      '向持久终端发送输入。pressEnter=true（默认）自动按回车执行，false 仅键入。',
       {
         properties: {
-          terminalId: { type: 'string', description: '目标终端 ID' },
-          input: {
-            type: 'string',
-            description:
-              '要发送的文本内容。执行命令时只写命令本身（如 "ls -la"），不要手动加 \\n 或 \\r——回车由 pressEnter 控制。' +
-              '可以为空字符串 ""，配合 pressEnter=true 实现单独按回车。'
-          },
-          pressEnter: {
-            type: 'boolean',
-            description:
-              '是否在 input 之后自动按下回车键（发送 \\r）。' +
-              'true（默认）= 发送 input 后按回车，用于执行命令；' +
-              'false = 仅键入 input 文本，不按回车，用于交互式输入、密码、Tab 补全、分步输入等场景。'
-          },
-          waitMs: {
-            type: 'number',
-            description: '等待输出的时间（毫秒），默认 2000'
-          }
+          terminalId: { type: 'string', description: '终端 ID' },
+          input: { type: 'string', description: '文本内容，不要手动加 \\n' },
+          pressEnter: { type: 'boolean', description: 'true（默认）按回车执行，false 仅键入' },
+          waitMs: { type: 'number', description: '等待输出毫秒数，默认 2000' }
         },
         required: ['terminalId', 'input']
+      }
+    ),
+
+    // ── 后台任务工具（prizm_set_result 仅后台会话可见，见 getBackgroundOnlyTools()） ──
+    tool(
+      'prizm_spawn_task',
+      '派发子任务到后台会话执行。mode: async（默认，立即返回任务 ID）/ sync（阻塞等待结果，适合 <30s 短任务）',
+      {
+        properties: {
+          task: { type: 'string', description: '子任务指令' },
+          mode: {
+            type: 'string',
+            description: '执行模式',
+            enum: ['async', 'sync']
+          },
+          label: { type: 'string', description: '任务标签（用于管理面板展示）' },
+          model: { type: 'string', description: '指定模型（可用廉价模型节省成本）' },
+          context: { type: 'string', description: '额外上下文（JSON 字符串）' },
+          expected_output: { type: 'string', description: '期望的输出格式描述' },
+          timeout_seconds: { type: 'number', description: '超时秒数，默认 600' }
+        },
+        required: ['task']
+      }
+    ),
+
+    tool(
+      'prizm_task_status',
+      '查询/管理后台任务。action: list（列出我的子任务）/ status（查状态）/ result（取结果）/ cancel（取消）',
+      {
+        properties: {
+          action: {
+            type: 'string',
+            description: '操作类型',
+            enum: ['list', 'status', 'result', 'cancel']
+          },
+          task_id: { type: 'string', description: '任务 ID（status/result/cancel 时必需）' }
+        },
+        required: ['action']
+      }
+    ),
+
+    // ── 工具指南（类 Skill 按需查询） ──
+    tool(
+      'prizm_tool_guide',
+      '查看工具使用指南。受保护工具组（' +
+        getGuardedGroupNames().join('、') +
+        '）首次使用前必须查阅，否则会被拦截。',
+      {
+        properties: {
+          tool: { type: 'string', description: '工具名或组名（如 "terminal"），不传列出全部' }
+        },
+        required: []
       }
     )
   ]
 }
 
+/**
+ * 仅后台会话 (kind='background') 可见的工具定义
+ */
+export function getBackgroundOnlyTools(): LLMTool[] {
+  return [
+    tool('prizm_set_result', '设置当前后台会话的执行结果。必须调用此工具提交输出。', {
+      properties: {
+        output: { type: 'string', description: '执行结果内容（文本/Markdown）' },
+        status: {
+          type: 'string',
+          description: '结果状态',
+          enum: ['success', 'partial', 'failed']
+        },
+        structured_data: {
+          type: 'string',
+          description: '可选的结构化数据（JSON 字符串），供调用者程序化消费'
+        }
+      },
+      required: ['output']
+    })
+  ]
+}
+
+/** 判断工具是否仅限后台会话使用 */
+export function isBackgroundOnlyTool(name: string): boolean {
+  return name === 'prizm_set_result'
+}
+
 /** 内置工具名称集合，用于判断是否为内置工具 */
 export const BUILTIN_TOOL_NAMES = new Set([
-  'prizm_file_list',
-  'prizm_file_read',
-  'prizm_file_write',
-  'prizm_file_move',
-  'prizm_file_delete',
-  'prizm_list_todos',
-  'prizm_list_todo_lists',
-  'prizm_read_todo',
-  'prizm_create_todo',
-  'prizm_update_todo',
-  'prizm_delete_todo',
-  'prizm_list_documents',
-  'prizm_get_document_content',
-  'prizm_create_document',
-  'prizm_update_document',
-  'prizm_delete_document',
-  'prizm_promote_file',
+  'prizm_file',
+  'prizm_todo',
+  'prizm_document',
   'prizm_search',
-  'prizm_scope_stats',
-  'prizm_list_memories',
-  'prizm_search_memories',
+  'prizm_knowledge',
+  'prizm_lock',
+  'prizm_promote_file',
   'prizm_terminal_execute',
   'prizm_terminal_spawn',
   'prizm_terminal_send_keys',
-  // 知识库工具
-  'prizm_search_docs_by_memory',
-  'prizm_get_document_memories',
-  'prizm_document_versions',
-  'prizm_find_related_documents',
-  // 锁定与领取工具
-  'prizm_checkout_document',
-  'prizm_checkin_document',
-  'prizm_claim_todo_list',
-  'prizm_set_active_todo',
-  'prizm_release_todo_list',
-  'prizm_resource_status'
+  'prizm_set_result',
+  'prizm_spawn_task',
+  'prizm_task_status',
+  'prizm_tool_guide'
 ])

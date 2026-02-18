@@ -20,10 +20,6 @@ export interface BuiltinToolContext {
   data: ScopeData
   wsCtx: WorkspaceContext
   record: (itemId: string, itemKind: ScopeActivityItemKind, action: ScopeActivityAction) => void
-  /**
-   * @deprecated 使用 emitAudit() 替代。保留以兼容旧代码过渡期。
-   */
-  audit: (input: AuditEntryInput) => void
   /** 通过 EventBus 发布审计事件（tool:executed） */
   emitAudit: (input: AuditEntryInput) => void
   wsArg: string | undefined

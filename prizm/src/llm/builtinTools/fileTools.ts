@@ -1,15 +1,17 @@
 /**
  * 内置工具：文件 list/read/write/move/delete 执行逻辑
+ * 写操作通过 FileService 统一处理（事件发射 + 审计）
  */
 
 import * as mdStore from '../../core/mdStore'
+import * as fileService from '../../services/fileService'
+import { captureFileSnapshot } from '../../core/checkpointStore'
 import {
   resolvePath,
   wsTypeLabel,
   OUT_OF_BOUNDS_MSG,
   OUT_OF_BOUNDS_ERROR_CODE
 } from '../workspaceResolver'
-import { builtinToolEvents } from '../builtinToolEvents'
 import type { BuiltinToolContext, BuiltinToolResult } from './types'
 
 export async function executeFileList(ctx: BuiltinToolContext): Promise<BuiltinToolResult> {
@@ -48,14 +50,32 @@ export async function executeFileWrite(ctx: BuiltinToolContext): Promise<Builtin
   const resolved = resolvePath(ctx.wsCtx, pathArg, ctx.wsArg, ctx.grantedPaths)
   if (!resolved)
     return { text: `[${OUT_OF_BOUNDS_ERROR_CODE}] ${OUT_OF_BOUNDS_MSG}`, isError: true }
-  const ok = mdStore.writeFileByPath(resolved.fileRoot, resolved.relativePath, content)
-  if (!ok)
-    return { text: `写入失败: ${pathArg}${wsTypeLabel(resolved.wsType)}`, isError: true }
-  ctx.record(resolved.relativePath, 'file', 'create')
-  builtinToolEvents.emitFileEvent({
-    eventType: 'file:created',
+
+  // 写入前捕获快照（用于 checkpoint 回退）
+  if (ctx.sessionId) {
+    const existing = mdStore.readFileByPath(resolved.fileRoot, resolved.relativePath)
+    captureFileSnapshot(ctx.sessionId, resolved.relativePath, existing?.content ?? null)
+  }
+
+  const opCtx = {
     scope: ctx.scope,
-    relativePath: resolved.relativePath
+    actor: {
+      type: 'agent' as const,
+      sessionId: ctx.sessionId,
+      source: `tool:${ctx.toolName}`
+    }
+  }
+
+  const ok = await fileService.writeFile(opCtx, resolved.fileRoot, resolved.relativePath, content)
+  if (!ok) return { text: `写入失败: ${pathArg}${wsTypeLabel(resolved.wsType)}`, isError: true }
+
+  ctx.record(resolved.relativePath, 'file', 'create')
+  ctx.emitAudit({
+    toolName: ctx.toolName,
+    action: 'create',
+    resourceType: 'file',
+    resourceId: resolved.relativePath,
+    result: 'success'
   })
   return { text: `已写入 ${pathArg}${wsTypeLabel(resolved.wsType)}` }
 }
@@ -72,7 +92,23 @@ export async function executeFileMove(ctx: BuiltinToolContext): Promise<BuiltinT
       text: '移动失败：源路径和目标路径必须在同一工作区内。跨工作区请先 read 再 write + delete。',
       isError: true
     }
-  const ok = mdStore.moveFile(
+
+  if (ctx.sessionId) {
+    const existing = mdStore.readFileByPath(resolvedFrom.fileRoot, resolvedFrom.relativePath)
+    captureFileSnapshot(ctx.sessionId, resolvedFrom.relativePath, existing?.content ?? null)
+  }
+
+  const opCtx = {
+    scope: ctx.scope,
+    actor: {
+      type: 'agent' as const,
+      sessionId: ctx.sessionId,
+      source: `tool:${ctx.toolName}`
+    }
+  }
+
+  const ok = await fileService.moveFile(
+    opCtx,
     resolvedFrom.fileRoot,
     resolvedFrom.relativePath,
     resolvedTo.relativePath
@@ -82,11 +118,14 @@ export async function executeFileMove(ctx: BuiltinToolContext): Promise<BuiltinT
       text: `移动失败: ${from} -> ${to}${wsTypeLabel(resolvedFrom.wsType)}`,
       isError: true
     }
-  builtinToolEvents.emitFileEvent({
-    eventType: 'file:moved',
-    scope: ctx.scope,
-    relativePath: resolvedTo.relativePath,
-    fromPath: resolvedFrom.relativePath
+
+  ctx.emitAudit({
+    toolName: ctx.toolName,
+    action: 'update',
+    resourceType: 'file',
+    resourceId: resolvedTo.relativePath,
+    detail: `moved from ${resolvedFrom.relativePath}`,
+    result: 'success'
   })
   return { text: `已移动 ${from} -> ${to}${wsTypeLabel(resolvedFrom.wsType)}` }
 }
@@ -96,14 +135,31 @@ export async function executeFileDelete(ctx: BuiltinToolContext): Promise<Builti
   const resolved = resolvePath(ctx.wsCtx, pathArg, ctx.wsArg, ctx.grantedPaths)
   if (!resolved)
     return { text: `[${OUT_OF_BOUNDS_ERROR_CODE}] ${OUT_OF_BOUNDS_MSG}`, isError: true }
-  const ok = mdStore.deleteByPath(resolved.fileRoot, resolved.relativePath)
-  if (!ok)
-    return { text: `删除失败: ${pathArg}${wsTypeLabel(resolved.wsType)}`, isError: true }
-  ctx.record(resolved.relativePath, 'file', 'delete')
-  builtinToolEvents.emitFileEvent({
-    eventType: 'file:deleted',
+
+  if (ctx.sessionId) {
+    const existing = mdStore.readFileByPath(resolved.fileRoot, resolved.relativePath)
+    captureFileSnapshot(ctx.sessionId, resolved.relativePath, existing?.content ?? null)
+  }
+
+  const opCtx = {
     scope: ctx.scope,
-    relativePath: resolved.relativePath
+    actor: {
+      type: 'agent' as const,
+      sessionId: ctx.sessionId,
+      source: `tool:${ctx.toolName}`
+    }
+  }
+
+  const ok = await fileService.deleteFile(opCtx, resolved.fileRoot, resolved.relativePath)
+  if (!ok) return { text: `删除失败: ${pathArg}${wsTypeLabel(resolved.wsType)}`, isError: true }
+
+  ctx.record(resolved.relativePath, 'file', 'delete')
+  ctx.emitAudit({
+    toolName: ctx.toolName,
+    action: 'delete',
+    resourceType: 'file',
+    resourceId: resolved.relativePath,
+    result: 'success'
   })
   return { text: `已删除 ${pathArg}${wsTypeLabel(resolved.wsType)}` }
 }

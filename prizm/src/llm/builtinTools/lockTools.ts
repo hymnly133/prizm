@@ -7,7 +7,7 @@ import { scopeStore } from '../../core/ScopeStore'
 import { lockManager } from '../../core/resourceLockManager'
 import type { LockableResourceType } from '../../core/resourceLockManager'
 import { getScopeRefItem } from '../scopeItemRegistry'
-import { builtinToolEvents } from '../builtinToolEvents'
+import { emit } from '../../core/eventBus'
 import type { BuiltinToolContext, BuiltinToolResult } from './types'
 
 /**
@@ -42,7 +42,7 @@ export async function executeCheckoutDocument(ctx: BuiltinToolContext): Promise<
         ).toISOString()}起）${result.heldBy.reason ? `，原因: ${result.heldBy.reason}` : ''}`
       : '获取锁失败'
     return {
-      text: `文档签出失败: ${heldInfo}。可使用 prizm_resource_status 查看详情，或等待对方签入后重试。`,
+      text: `文档签出失败: ${heldInfo}。可使用 prizm_lock({ action: "status" }) 查看详情，或等待对方签入后重试。`,
       isError: true
     }
   }
@@ -58,14 +58,14 @@ export async function executeCheckoutDocument(ctx: BuiltinToolContext): Promise<
   })
   ctx.record(documentId, 'document', 'read')
 
-  builtinToolEvents.emitLockEvent({
-    eventType: 'resource:locked',
+  emit('resource:lock.changed', {
+    action: 'locked',
     scope: ctx.scope,
     resourceType: 'document',
     resourceId: documentId,
     sessionId: ctx.sessionId,
     reason
-  })
+  }).catch(() => {})
 
   const content = detail.content || '(无正文)'
   return {
@@ -94,15 +94,21 @@ export async function executeCheckinDocument(ctx: BuiltinToolContext): Promise<B
     errorMessage: released ? undefined : '未持有该文档的锁'
   })
 
-  if (!released) return { text: `签入失败: 当前会话未持有文档 ${documentId} 的锁。`, isError: true }
+  if (!released) {
+    const docExists = getScopeRefItem(ctx.scope, 'document', documentId)
+    if (!docExists) {
+      return { text: `文档 ${documentId} 已被删除，锁已自动释放，无需签入。` }
+    }
+    return { text: `签入失败: 当前会话未持有文档 ${documentId} 的锁。`, isError: true }
+  }
 
-  builtinToolEvents.emitLockEvent({
-    eventType: 'resource:unlocked',
+  emit('resource:lock.changed', {
+    action: 'unlocked',
     scope: ctx.scope,
     resourceType: 'document',
     resourceId: documentId,
     sessionId: ctx.sessionId
-  })
+  }).catch(() => {})
 
   return { text: `已签入文档 ${documentId}，编辑锁已释放。` }
 }
@@ -140,7 +146,7 @@ export async function executeClaimTodoList(ctx: BuiltinToolContext): Promise<Bui
     return {
       text: `领取失败: 待办列表「${list.title}」已被会话 ${result.heldBy?.sessionId} 领取（${
         result.heldBy ? new Date(result.heldBy.acquiredAt).toISOString() : ''
-      }起）。可使用 prizm_resource_status 查看详情，或等待对方释放后重试。`,
+      }起）。可使用 prizm_lock({ action: "status" }) 查看详情，或等待对方释放后重试。`,
       isError: true
     }
   }
@@ -159,14 +165,14 @@ export async function executeClaimTodoList(ctx: BuiltinToolContext): Promise<Bui
     result: 'success'
   })
 
-  builtinToolEvents.emitLockEvent({
-    eventType: 'resource:locked',
+  emit('resource:lock.changed', {
+    action: 'locked',
     scope: ctx.scope,
     resourceType: 'todo_list',
     resourceId: todoListId,
     sessionId: ctx.sessionId,
     reason: '领取在线待办'
-  })
+  }).catch(() => {})
 
   const itemsSummary =
     list.items.length > 0
@@ -260,13 +266,13 @@ export async function executeReleaseTodoList(ctx: BuiltinToolContext): Promise<B
   if (!released)
     return { text: `释放失败: 当前会话未持有待办列表 ${todoListId} 的领取。`, isError: true }
 
-  builtinToolEvents.emitLockEvent({
-    eventType: 'resource:unlocked',
+  emit('resource:lock.changed', {
+    action: 'unlocked',
     scope: ctx.scope,
     resourceType: 'todo_list',
     resourceId: todoListId,
     sessionId: ctx.sessionId
-  })
+  }).catch(() => {})
 
   return { text: `已释放待办列表 ${todoListId} 的领取。` }
 }

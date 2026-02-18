@@ -1,10 +1,9 @@
 /**
- * 内置工具：搜索、工作区统计、记忆 list/search 执行逻辑
+ * 内置工具：关键词搜索、工作区统计执行逻辑
  */
 
 import type { SearchIndexService } from '../../search/searchIndexService'
 import { getScopeStats } from '../scopeItemRegistry'
-import { isMemoryEnabled, getAllMemories, searchMemoriesWithOptions } from '../EverMemService'
 import type { BuiltinToolContext, BuiltinToolResult } from './types'
 
 /** SearchIndexService 实例注入 - 由 server 初始化时调用 */
@@ -48,29 +47,4 @@ export async function executeScopeStats(ctx: BuiltinToolContext): Promise<Builti
   const t = stats.byKind
   const text = `文档 ${t.document.count} 篇 / ${t.document.chars} 字；待办 ${t.todoList.count} 项 / ${t.todoList.chars} 字；会话 ${t.sessions.count} 个。总计 ${stats.totalItems} 项，${stats.totalChars} 字。`
   return { text }
-}
-
-export async function executeListMemories(ctx: BuiltinToolContext): Promise<BuiltinToolResult> {
-  if (!isMemoryEnabled()) return { text: '记忆模块未启用。', isError: true }
-  const memories = await getAllMemories(ctx.scope)
-  if (!memories.length) return { text: '当前无记忆条目。' }
-  const lines = memories
-    .slice(0, 50)
-    .map(
-      (m) =>
-        `- [${m.id}] ${(m.memory || '').slice(0, 120)}${
-          (m.memory?.length ?? 0) > 120 ? '...' : ''
-        }`
-    )
-  return { text: lines.join('\n') }
-}
-
-export async function executeSearchMemories(ctx: BuiltinToolContext): Promise<BuiltinToolResult> {
-  if (!isMemoryEnabled()) return { text: '记忆模块未启用。', isError: true }
-  const searchQuery = typeof ctx.args.query === 'string' ? ctx.args.query.trim() : ''
-  if (!searchQuery) return { text: '请提供搜索关键词。', isError: true }
-  const memories = await searchMemoriesWithOptions(searchQuery, ctx.scope)
-  if (!memories.length) return { text: '未找到相关记忆。' }
-  const lines = memories.map((m) => `- ${m.memory}`)
-  return { text: lines.join('\n') }
 }

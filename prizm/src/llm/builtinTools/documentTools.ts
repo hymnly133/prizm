@@ -1,13 +1,17 @@
 /**
  * 内置工具：文档 list/get/create/update/delete 与 promote_file 执行逻辑
+ * Scope 级 CRUD 通过 DocumentService 统一处理
+ * Session 工作区操作（临时文件）仍直接使用 mdStore
  */
 
-import { scopeStore } from '../../core/ScopeStore'
+import { randomUUID } from 'node:crypto'
 import * as mdStore from '../../core/mdStore'
-import { genUniqueId } from '../../id'
 import { listRefItems, getScopeRefItem } from '../scopeItemRegistry'
-import { scheduleDocumentMemory } from '../documentMemoryService'
 import { lockManager } from '../../core/resourceLockManager'
+import { emit } from '../../core/eventBus'
+import * as documentService from '../../services/documentService'
+import * as todoService from '../../services/todoService'
+import { ResourceLockedException, ResourceNotFoundException } from '../../services/errors'
 import {
   resolveWorkspaceType,
   resolveFolder,
@@ -15,6 +19,9 @@ import {
   OUT_OF_BOUNDS_MSG,
   OUT_OF_BOUNDS_ERROR_CODE
 } from '../workspaceResolver'
+import { captureFileSnapshot } from '../../core/checkpointStore'
+import { getLatestVersion } from '../../core/documentVersionStore'
+import { scopeStore } from '../../core/ScopeStore'
 import type { BuiltinToolContext, BuiltinToolResult } from './types'
 
 export async function executeListDocuments(ctx: BuiltinToolContext): Promise<BuiltinToolResult> {
@@ -42,7 +49,13 @@ export async function executeGetDocumentContent(
     return { text: doc.content || '(无正文)' }
   }
   const detail = getScopeRefItem(ctx.scope, 'document', documentId)
-  if (!detail) return { text: `文档不存在: ${documentId}`, isError: true }
+  if (!detail) {
+    if (ctx.wsCtx.sessionWorkspaceRoot) {
+      const sessionDoc = mdStore.readSingleDocumentById(ctx.wsCtx.sessionWorkspaceRoot, documentId)
+      if (sessionDoc) return { text: (sessionDoc.content || '(无正文)') + ' [临时工作区]' }
+    }
+    return { text: `文档不存在: ${documentId}`, isError: true }
+  }
 
   // 记录读取历史
   if (ctx.sessionId) {
@@ -69,33 +82,41 @@ export async function executeGetDocumentContent(
 export async function executeCreateDocument(ctx: BuiltinToolContext): Promise<BuiltinToolResult> {
   const title = typeof ctx.args.title === 'string' ? ctx.args.title : '未命名文档'
   const content = typeof ctx.args.content === 'string' ? ctx.args.content : ''
-  const folderResult = resolveFolder(ctx.wsCtx, ctx.args.folder, ctx.wsArg)
+  const folderResult = resolveFolder(ctx.wsCtx, ctx.args.folder, ctx.wsArg, ctx.grantedPaths)
   if (!folderResult)
     return { text: `[${OUT_OF_BOUNDS_ERROR_CODE}] ${OUT_OF_BOUNDS_MSG}`, isError: true }
   const { folder: folderPath, wsType } = folderResult
-  const sanitizedName = mdStore.sanitizeFileName(title) + '.md'
-  const relativePath = folderPath ? `${folderPath}/${sanitizedName}` : ''
-  const now = Date.now()
-  const doc = {
-    id: genUniqueId(),
-    title,
-    content,
-    relativePath,
-    createdAt: now,
-    updatedAt: now
-  }
+
+  // Session 工作区：直接 mdStore
   if (wsType === 'session' && ctx.wsCtx.sessionWorkspaceRoot) {
+    const sanitizedName = mdStore.sanitizeFileName(title) + '.md'
+    const relativePath = folderPath ? `${folderPath}/${sanitizedName}` : ''
+    const now = Date.now()
+    const doc = {
+      id: randomUUID(),
+      title,
+      content,
+      relativePath,
+      createdAt: now,
+      updatedAt: now
+    }
     mdStore.writeSingleDocument(ctx.wsCtx.sessionWorkspaceRoot, doc)
     ctx.record(doc.id, 'document', 'create')
     const folderHint = folderPath ? ` (${folderPath}/)` : ''
     return { text: `已创建文档 ${doc.id}${folderHint}${wsTypeLabel(wsType)}` }
   }
-  ctx.data.documents.push(doc)
-  scopeStore.saveScope(ctx.scope)
-  const changedBy = ctx.sessionId
-    ? { type: 'agent' as const, sessionId: ctx.sessionId, apiSource: 'tool:prizm_create_document' }
-    : undefined
-  scheduleDocumentMemory(ctx.scope, doc.id, { changedBy })
+
+  // Scope 主工作区：通过 DocumentService
+  const actor = ctx.sessionId
+    ? { type: 'agent' as const, sessionId: ctx.sessionId, source: 'tool:prizm_create_document' }
+    : { type: 'system' as const, source: 'tool:prizm_create_document' }
+
+  const doc = await documentService.createDocument({ scope: ctx.scope, actor }, { title, content })
+
+  if (ctx.sessionId) {
+    captureFileSnapshot(ctx.sessionId, `[doc:${doc.id}]`, JSON.stringify({ action: 'create' }))
+  }
+
   ctx.record(doc.id, 'document', 'create')
   ctx.emitAudit({
     toolName: ctx.toolName,
@@ -112,6 +133,8 @@ export async function executeCreateDocument(ctx: BuiltinToolContext): Promise<Bu
 export async function executeUpdateDocument(ctx: BuiltinToolContext): Promise<BuiltinToolResult> {
   const documentId = typeof ctx.args.documentId === 'string' ? ctx.args.documentId : ''
   const { wsType: ws } = resolveWorkspaceType(ctx.wsCtx, ctx.wsArg)
+
+  // Session 工作区：直接 mdStore
   if (ws === 'session' && ctx.wsCtx.sessionWorkspaceRoot) {
     const existing = mdStore.readSingleDocumentById(ctx.wsCtx.sessionWorkspaceRoot, documentId)
     if (!existing) return { text: `文档不存在: ${documentId} [临时工作区]`, isError: true }
@@ -125,12 +148,59 @@ export async function executeUpdateDocument(ctx: BuiltinToolContext): Promise<Bu
 
   if (!ctx.sessionId) return { text: '需要活跃的会话才能编辑文档。', isError: true }
 
-  // 主工作区：检查是否持有编辑锁
+  // main 找不到时自动回落到 session 工作区
+  const mainExists = getScopeRefItem(ctx.scope, 'document', documentId)
+  if (!mainExists && ctx.wsCtx.sessionWorkspaceRoot) {
+    const sessionDoc = mdStore.readSingleDocumentById(ctx.wsCtx.sessionWorkspaceRoot, documentId)
+    if (sessionDoc) {
+      if (typeof ctx.args.title === 'string') sessionDoc.title = ctx.args.title
+      if (typeof ctx.args.content === 'string') sessionDoc.content = ctx.args.content
+      sessionDoc.updatedAt = Date.now()
+      mdStore.writeSingleDocument(ctx.wsCtx.sessionWorkspaceRoot, sessionDoc)
+      ctx.record(documentId, 'document', 'update')
+      return { text: `已更新文档 ${documentId} [临时工作区]` }
+    }
+  }
+
+  // Checkpoint 快照：记录修改前的版本号
+  if (ctx.sessionId && mainExists) {
+    const scopeRoot = scopeStore.getScopeRootPath(ctx.scope)
+    const latestVer = getLatestVersion(scopeRoot, documentId)
+    captureFileSnapshot(
+      ctx.sessionId,
+      `[doc:${documentId}]`,
+      JSON.stringify({ action: 'update', versionBefore: latestVer?.version ?? 0 })
+    )
+  }
+
+  // 主工作区：检查编辑锁，无锁时自动签出
   const lock = lockManager.getLock(ctx.scope, 'document', documentId)
-  if (!lock || lock.sessionId !== ctx.sessionId) {
-    const heldInfo = lock
-      ? `文档已被会话 ${lock.sessionId} 签出${lock.reason ? ` (原因: ${lock.reason})` : ''}`
-      : '文档未签出'
+  let autoCheckedOut = false
+
+  if (!lock) {
+    const lockResult = lockManager.acquireLock(
+      ctx.scope,
+      'document',
+      documentId,
+      ctx.sessionId,
+      'auto-checkout'
+    )
+    if (!lockResult.success) {
+      return { text: `文档正被其他会话编辑，无法自动签出。`, isError: true }
+    }
+    autoCheckedOut = true
+    emit('resource:lock.changed', {
+      action: 'locked',
+      scope: ctx.scope,
+      resourceType: 'document',
+      resourceId: documentId,
+      sessionId: ctx.sessionId,
+      reason: 'auto-checkout'
+    }).catch(() => {})
+  } else if (lock.sessionId !== ctx.sessionId) {
+    const heldInfo = `文档已被会话 ${lock.sessionId} 签出${
+      lock.reason ? ` (原因: ${lock.reason})` : ''
+    }`
     ctx.emitAudit({
       toolName: ctx.toolName,
       action: 'update',
@@ -139,48 +209,51 @@ export async function executeUpdateDocument(ctx: BuiltinToolContext): Promise<Bu
       result: 'denied',
       errorMessage: heldInfo
     })
-    return {
-      text: `无法编辑文档 ${documentId}：${heldInfo}。请先调用 prizm_checkout_document 签出文档。`,
-      isError: true
-    }
+    return { text: `无法编辑文档 ${documentId}：${heldInfo}`, isError: true }
   }
 
-  const idx = ctx.data.documents.findIndex((d) => d.id === documentId)
-  if (idx < 0) return { text: `文档不存在: ${documentId}`, isError: true }
-  if (typeof ctx.args.title === 'string') ctx.data.documents[idx].title = ctx.args.title
-  if (typeof ctx.args.content === 'string') ctx.data.documents[idx].content = ctx.args.content
-  ctx.data.documents[idx].updatedAt = Date.now()
-
-  // 写前二次验证：确保锁未在操作过程中过期被抢占
-  const lockRecheck = lockManager.getLock(ctx.scope, 'document', documentId)
-  if (!lockRecheck || lockRecheck.sessionId !== ctx.sessionId) {
-    return {
-      text: `写入中止：编辑锁在操作过程中已过期或被释放，请重新签出文档 ${documentId}。`,
-      isError: true
-    }
-  }
-
-  scopeStore.saveScope(ctx.scope)
-
-  // 传入 changedBy 信息
-  const changedBy = {
-    type: 'agent' as const,
-    sessionId: ctx.sessionId,
-    apiSource: 'tool:prizm_update_document'
-  }
   const changeReason = typeof ctx.args.reason === 'string' ? ctx.args.reason : undefined
-  scheduleDocumentMemory(ctx.scope, documentId, { changedBy, changeReason })
-  ctx.record(documentId, 'document', 'update')
-  ctx.emitAudit({
-    toolName: ctx.toolName,
-    action: 'update',
-    resourceType: 'document',
-    resourceId: documentId,
-    resourceTitle: ctx.data.documents[idx].title,
-    detail: changeReason ? `reason="${changeReason}"` : undefined,
-    result: 'success'
-  })
-  return { text: `已更新文档 ${documentId}` }
+  const payload: Record<string, string> = {}
+  if (typeof ctx.args.title === 'string') payload.title = ctx.args.title
+  if (typeof ctx.args.content === 'string') payload.content = ctx.args.content
+
+  try {
+    const updated = await documentService.updateDocument(
+      {
+        scope: ctx.scope,
+        actor: { type: 'agent', sessionId: ctx.sessionId, source: 'tool:prizm_update_document' }
+      },
+      documentId,
+      payload,
+      { checkLock: true, lockSessionId: ctx.sessionId, changeReason }
+    )
+    ctx.record(documentId, 'document', 'update')
+    ctx.emitAudit({
+      toolName: ctx.toolName,
+      action: 'update',
+      resourceType: 'document',
+      resourceId: documentId,
+      resourceTitle: updated.title,
+      detail: changeReason ? `reason="${changeReason}"` : undefined,
+      result: 'success'
+    })
+    let msg = `已更新文档 ${documentId}`
+    if (autoCheckedOut) {
+      msg +=
+        '\n\n[自动签出] 系统已自动签出此文档。编辑完成后请调用 prizm_lock({ action: "checkin", documentId: "' +
+        documentId +
+        '" }) 释放锁。'
+    }
+    return { text: msg }
+  } catch (err) {
+    if (err instanceof ResourceLockedException) {
+      return { text: `写入中止：${err.message}`, isError: true }
+    }
+    if (err instanceof ResourceNotFoundException) {
+      return { text: err.message, isError: true }
+    }
+    throw err
+  }
 }
 
 export async function executeDeleteDocument(ctx: BuiltinToolContext): Promise<BuiltinToolResult> {
@@ -195,40 +268,98 @@ export async function executeDeleteDocument(ctx: BuiltinToolContext): Promise<Bu
     return { text: `已删除文档 ${documentId} [临时工作区]` }
   }
 
-  // 检查是否被其他 session 锁定
+  // 自动签出：删除前需持有锁，无锁时自动获取，删除后自动释放
   const lock = lockManager.getLock(ctx.scope, 'document', documentId)
-  if (lock && lock.sessionId !== ctx.sessionId) {
+  let autoCheckedOut = false
+
+  if (!lock) {
+    const lockResult = lockManager.acquireLock(
+      ctx.scope,
+      'document',
+      documentId,
+      ctx.sessionId,
+      'auto-checkout for delete'
+    )
+    if (!lockResult.success) {
+      return { text: `文档正被其他会话编辑，无法删除。`, isError: true }
+    }
+    autoCheckedOut = true
+  } else if (lock.sessionId !== ctx.sessionId) {
     ctx.emitAudit({
       toolName: ctx.toolName,
       action: 'delete',
       resourceType: 'document',
       resourceId: documentId,
       result: 'denied',
-      errorMessage: `文档被 session ${lock.sessionId} 签出，无法删除`
+      errorMessage: `文档已被会话 ${lock.sessionId} 签出`
     })
-    return {
-      text: `文档 ${documentId} 已被会话 ${lock.sessionId} 签出${
-        lock.reason ? ` (原因: ${lock.reason})` : ''
-      }，无法删除。请等待该会话签入或联系用户强制释放。`,
-      isError: true
-    }
+    return { text: `文档已被会话 ${lock.sessionId} 签出，无法删除。`, isError: true }
   }
 
-  const idx = ctx.data.documents.findIndex((d) => d.id === documentId)
-  if (idx < 0) return { text: `文档不存在: ${documentId}`, isError: true }
-  const deletedTitle = ctx.data.documents[idx].title
-  ctx.data.documents.splice(idx, 1)
-  scopeStore.saveScope(ctx.scope)
-  ctx.record(documentId, 'document', 'delete')
-  ctx.emitAudit({
-    toolName: ctx.toolName,
-    action: 'delete',
-    resourceType: 'document',
-    resourceId: documentId,
-    resourceTitle: deletedTitle,
-    result: 'success'
-  })
-  return { text: `已删除文档 ${documentId}` }
+  // Checkpoint 快照：记录删除前的版本号和元数据
+  if (ctx.sessionId) {
+    const docObj = await documentService.getDocument(ctx.scope, documentId)
+    const scopeRoot = scopeStore.getScopeRootPath(ctx.scope)
+    const latestVer = getLatestVersion(scopeRoot, documentId)
+    captureFileSnapshot(
+      ctx.sessionId,
+      `[doc:${documentId}]`,
+      JSON.stringify({
+        action: 'delete',
+        versionBefore: latestVer?.version ?? 0,
+        title: docObj?.title,
+        relativePath: docObj?.relativePath
+      })
+    )
+  }
+
+  try {
+    await documentService.deleteDocument(
+      {
+        scope: ctx.scope,
+        actor: { type: 'agent', sessionId: ctx.sessionId, source: 'tool:prizm_delete_document' }
+      },
+      documentId,
+      { checkLock: true, lockSessionId: ctx.sessionId }
+    )
+    ctx.record(documentId, 'document', 'delete')
+    ctx.emitAudit({
+      toolName: ctx.toolName,
+      action: 'delete',
+      resourceType: 'document',
+      resourceId: documentId,
+      result: 'success'
+    })
+    // 删除成功后自动释放锁
+    lockManager.releaseLock(ctx.scope, 'document', documentId, ctx.sessionId)
+    emit('resource:lock.changed', {
+      action: 'unlocked',
+      scope: ctx.scope,
+      resourceType: 'document',
+      resourceId: documentId,
+      sessionId: ctx.sessionId
+    }).catch(() => {})
+    return { text: `已删除文档 ${documentId}（锁已自动释放，无需 checkin）` }
+  } catch (err) {
+    if (autoCheckedOut) {
+      lockManager.releaseLock(ctx.scope, 'document', documentId, ctx.sessionId)
+    }
+    if (err instanceof ResourceLockedException) {
+      ctx.emitAudit({
+        toolName: ctx.toolName,
+        action: 'delete',
+        resourceType: 'document',
+        resourceId: documentId,
+        result: 'denied',
+        errorMessage: err.message
+      })
+      return { text: err.message, isError: true }
+    }
+    if (err instanceof ResourceNotFoundException) {
+      return { text: err.message, isError: true }
+    }
+    throw err
+  }
 }
 
 export async function executePromoteFile(ctx: BuiltinToolContext): Promise<BuiltinToolResult> {
@@ -237,7 +368,13 @@ export async function executePromoteFile(ctx: BuiltinToolContext): Promise<Built
   const fileId = typeof ctx.args.fileId === 'string' ? ctx.args.fileId : ''
   if (!fileId) return { text: '必须指定 fileId', isError: true }
   const targetFolder = typeof ctx.args.folder === 'string' ? ctx.args.folder.trim() : ''
-  const data = ctx.data
+
+  const actor = {
+    type: 'agent' as const,
+    sessionId: ctx.sessionId,
+    source: 'tool:prizm_promote_file'
+  }
+  const opCtx = { scope: ctx.scope, actor }
 
   const doc = mdStore.readSingleDocumentById(ctx.wsCtx.sessionWorkspaceRoot, fileId)
   if (doc) {
@@ -247,11 +384,16 @@ export async function executePromoteFile(ctx: BuiltinToolContext): Promise<Built
     } else {
       doc.relativePath = ''
     }
-    data.documents.push(doc)
-    scopeStore.saveScope(ctx.scope)
+    await documentService.importDocument(opCtx, doc)
     mdStore.deleteSingleDocument(ctx.wsCtx.sessionWorkspaceRoot, fileId)
-    scheduleDocumentMemory(ctx.scope, doc.id)
     ctx.record(doc.id, 'document', 'create')
+    ctx.emitAudit({
+      toolName: ctx.toolName,
+      action: 'create',
+      resourceType: 'document',
+      resourceId: doc.id,
+      result: 'success'
+    })
     return { text: `已将文档「${doc.title}」(${doc.id}) 从临时工作区提升到主工作区。` }
   }
 
@@ -263,11 +405,16 @@ export async function executePromoteFile(ctx: BuiltinToolContext): Promise<Built
     } else {
       todoList.relativePath = ''
     }
-    if (!data.todoLists) data.todoLists = []
-    data.todoLists.push(todoList)
-    scopeStore.saveScope(ctx.scope)
+    await todoService.importTodoList(opCtx, todoList)
     mdStore.deleteSingleTodoList(ctx.wsCtx.sessionWorkspaceRoot, fileId)
     ctx.record(todoList.id, 'todo', 'create')
+    ctx.emitAudit({
+      toolName: ctx.toolName,
+      action: 'create',
+      resourceType: 'todo',
+      resourceId: todoList.id,
+      result: 'success'
+    })
     return {
       text: `已将待办列表「${todoList.title}」(${todoList.id}) 从临时工作区提升到主工作区。`
     }
