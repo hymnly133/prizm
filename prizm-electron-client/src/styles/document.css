@@ -1,285 +1,61 @@
 /* ══════════════════════════════════════════════════════════════
-   文档知识库页面样式
+   文档编辑页样式 - 现代化知识库编辑器
    ══════════════════════════════════════════════════════════════ */
 
-/* ── 文档页面布局（三栏） ── */
+/* ── 编辑器页面布局 ── */
 
-.doc-page {
+.doc-editor-page {
   display: flex;
+  flex: 1;
+  min-height: 0;
   height: 100%;
   overflow: hidden;
-  background: var(--ant-color-bg-layout);
 }
 
-.doc-page-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
-  background: var(--ant-color-bg-container);
-  border-left: 1px solid var(--ant-color-border-secondary);
-  border-right: 1px solid var(--ant-color-border-secondary);
-}
+/* ── 编辑器主区 ── */
 
 .doc-page-editor {
   flex: 1;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   position: relative;
-}
-
-.doc-page-right {
-  flex-shrink: 0;
-  overflow-y: auto;
-  background: var(--ant-color-bg-container);
-}
-
-/* ── 文档侧边栏 ── */
-
-.doc-sidebar {
-  width: 260px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--ant-color-bg-container);
-}
-
-.doc-sidebar-header {
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--ant-color-border-secondary);
-}
-
-.doc-sidebar-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 4px 0;
-}
-
-.doc-sidebar-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 8px 12px;
-  cursor: pointer;
-  transition: background 0.15s;
-  border-left: 3px solid transparent;
-}
-
-.doc-sidebar-item:hover {
-  background: var(--ant-color-fill-quaternary);
-}
-
-.doc-sidebar-item--active {
-  background: var(--ant-color-primary-bg);
-  border-left-color: var(--ant-color-primary);
-}
-
-.doc-sidebar-item-icon {
-  flex-shrink: 0;
-  margin-top: 2px;
-  opacity: 0.5;
-}
-
-.doc-sidebar-item-content {
-  min-width: 0;
-  flex: 1;
-}
-
-.doc-sidebar-item-title {
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.4;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.doc-sidebar-item-meta {
-  font-size: 11px;
-  color: var(--ant-color-text-quaternary);
-  margin-top: 2px;
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-
-.doc-sidebar-item-tags {
-  color: var(--ant-color-text-tertiary);
-}
-
-.doc-sidebar-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 10px;
-  border: none;
-  background: none;
-  font-size: 12px;
-  color: var(--ant-color-text-tertiary);
-  cursor: pointer;
-  border-radius: var(--ant-border-radius);
-  transition: all 0.15s;
-}
-
-.doc-sidebar-tab:hover {
-  color: var(--ant-color-text);
-  background: var(--ant-color-fill-quaternary);
-}
-
-.doc-sidebar-tab--active {
-  color: var(--ant-color-primary);
-  background: var(--ant-color-primary-bg);
-  font-weight: 500;
-}
-
-.doc-sidebar-empty-guide {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 40px 20px;
-  text-align: center;
-  color: var(--ant-color-text-secondary);
-}
-
-.doc-sidebar-empty-guide p {
-  margin: 0;
-}
-
-/* ── 文档头部 ── */
-
-.doc-header {
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--ant-color-border-secondary);
-  flex-shrink: 0;
-}
-
-.doc-header-title {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0;
-  line-height: 1.4;
-  cursor: text;
-  padding: 2px 4px;
-  border-radius: var(--ant-border-radius);
-  transition: background 0.15s;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.doc-header-title:hover {
-  background: var(--ant-color-fill-quaternary);
-}
-
-.doc-header-title-input {
-  font-size: 18px;
-  font-weight: 600;
-  line-height: 1.4;
-  padding: 2px 4px;
-  border: 1px solid var(--ant-color-primary);
-  border-radius: var(--ant-border-radius);
-  outline: none;
-  background: var(--ant-color-bg-container);
-  color: var(--ant-color-text);
-  width: 100%;
-}
-
-.doc-header-dirty {
-  display: inline-flex;
-  align-items: center;
-  animation: pulse-dot 1.5s ease-in-out infinite;
-}
-
-@keyframes pulse-dot {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.4;
-  }
-}
-
-.doc-header-time {
-  font-size: 11px;
-  color: var(--ant-color-text-quaternary);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-/* ── 编辑器工具栏 ── */
-
-.editor-toolbar {
-  flex-shrink: 0;
-  background: var(--ant-color-bg-container);
-}
-
-.editor-toolbar-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  background: none;
-  border-radius: var(--ant-border-radius);
-  color: var(--ant-color-text-secondary);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.editor-toolbar-btn:hover:not(:disabled) {
-  background: var(--ant-color-fill-tertiary);
-  color: var(--ant-color-text);
-}
-
-.editor-toolbar-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.editor-toolbar-stats {
-  font-size: 11px;
-  color: var(--ant-color-text-quaternary);
-  white-space: nowrap;
+  min-height: 0;
 }
 
 /* ── Markdown 编辑器 ── */
 
 .prizm-md-editor {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
 .prizm-md-editor .cm-editor {
   height: 100%;
-  font-family: var(--ant-font-family-code, 'JetBrains Mono', 'Fira Code', monospace);
 }
 
 .prizm-md-editor .cm-editor .cm-scroller {
   overflow: auto;
-  font-size: 14px;
-  line-height: 1.7;
-  padding: 12px 16px;
 }
 
+/* Notion-style: center content */
 .prizm-md-editor .cm-editor .cm-content {
-  max-width: 860px;
+  max-width: 760px;
+  margin: 0 auto;
 }
 
-.prizm-md-editor .cm-editor .cm-line {
-  padding: 0 4px;
+.prizm-md-editor .cm-editor .cm-gutters {
+  position: sticky;
+  left: 0;
 }
 
-.prizm-md-editor .cm-editor.cm-focused {
-  outline: none;
-}
+/* ── 预览模式面板 ── */
 
-.prizm-md-editor .cm-editor .cm-placeholder {
-  color: var(--ant-color-text-quaternary);
-  font-style: italic;
+.doc-preview-pane {
+  height: 100%;
+  overflow: auto;
+  padding: 0 16px 48px;
 }
 
 /* ── 分栏编辑器 ── */
@@ -317,41 +93,40 @@
 
 /* ── 大纲面板 ── */
 
-.doc-outline-panel {
-  height: 100%;
-  padding: 0 4px;
-}
-
-.doc-outline-panel .ant-tabs {
-  height: 100%;
-}
-
-.doc-outline-panel .ant-tabs-content {
-  height: calc(100% - 40px);
-  overflow-y: auto;
-}
-
 .doc-outline-content {
-  padding: 4px 0;
+  padding: 2px 0;
+}
+
+.outline-tree.ant-tree {
+  font-size: 12px;
 }
 
 .outline-tree .ant-tree-treenode {
-  padding: 1px 0;
+  padding: 0;
+  align-items: center;
+}
+
+.outline-tree .ant-tree-switcher {
+  width: 16px;
+  line-height: 24px;
 }
 
 .outline-tree .ant-tree-node-content-wrapper {
   font-size: 12px;
-  line-height: 1.6;
+  line-height: 24px;
+  min-height: 24px;
+  padding: 0 4px;
+}
+
+.outline-tree .ant-tree-indent-unit {
+  width: 12px;
 }
 
 .outline-tree-text {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.outline-tree .ant-tree-treenode-selected .outline-tree-item {
-  font-weight: 500;
+  display: block;
 }
 
 .outline-tree .ant-tree-node-selected {
@@ -359,28 +134,9 @@
   border-radius: var(--ant-border-radius-sm);
 }
 
-/* ── 文档信息面板 ── */
-
-.doc-info-content {
-  padding: 8px 12px;
-}
-
-.doc-info-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 4px 0;
-  font-size: 12px;
-}
-
-.doc-info-label {
-  color: var(--ant-color-text-tertiary);
-}
-
-.doc-info-value {
-  color: var(--ant-color-text);
+.outline-tree .ant-tree-node-selected .outline-tree-text {
   font-weight: 500;
-  font-variant-numeric: tabular-nums;
+  color: var(--ant-color-primary);
 }
 
 /* ── 版本历史抽屉 ── */
@@ -442,73 +198,161 @@
   overflow: hidden;
 }
 
-/* ── 记忆面板 ── */
+/* ── Alert 不压缩 ── */
 
-.doc-memory-content {
-  padding: 8px 4px;
-}
-
-.doc-memory-section {
-  margin-bottom: 16px;
-}
-
-.doc-memory-section-title {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--ant-color-text-secondary);
-  margin-bottom: 8px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.doc-memory-overview {
-  padding: 10px 12px;
-  background: var(--ant-color-fill-quaternary);
-  border-radius: var(--ant-border-radius);
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.doc-memory-fact {
-  padding: 6px 10px;
-  background: var(--ant-color-fill-quaternary);
-  border-radius: var(--ant-border-radius);
-  font-size: 12px;
-  line-height: 1.5;
-  margin-bottom: 4px;
-}
-
-.doc-memory-migration-item {
-  padding: 6px 10px;
-  font-size: 12px;
-  border-left: 2px solid var(--ant-color-border);
-  margin-bottom: 6px;
-  padding-left: 12px;
-}
-
-.doc-memory-migration-version {
-  font-weight: 600;
-  color: var(--ant-color-primary);
-  font-size: 11px;
-}
-
-.doc-memory-migration-text {
-  color: var(--ant-color-text-secondary);
-  margin-top: 2px;
-}
-
-.doc-memory-empty {
-  text-align: center;
-  padding: 24px 0;
-  color: var(--ant-color-text-quaternary);
-  font-size: 12px;
-}
-
-/* ── 冲突 Alert ── */
-
-.doc-page-main .lobe-alert {
+.doc-editor-page .lobe-alert {
   flex-shrink: 0;
+}
+
+/* ── 文档预览模态 ── */
+
+.doc-preview-modal__content {
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.doc-preview-modal__content .lobe-markdown {
+  font-size: 14px;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Live Preview 样式 — 对齐 LobeUI <Markdown> 组件排版
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── 标题 — padding/font-weight/line-height 已迁入 EditorView.theme() ── */
+
+/* ── 加粗（LobeUI: font-weight 600） ── */
+
+.cm-lp-bold {
+  font-weight: 600;
+}
+
+/* ── 斜体 ── */
+
+.cm-lp-italic {
+  font-style: italic;
+}
+
+/* ── 删除线（LobeUI: colorTextDescription, line-through） ── */
+
+.cm-lp-strike {
+  text-decoration: line-through;
+  color: var(--ant-color-text-description);
+}
+
+/* ── 行内代码（LobeUI: border + colorFillSecondary bg, 无红色） ── */
+
+.cm-lp-code {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.875em;
+  line-height: 1;
+  padding: 0.2em 0.4em;
+  border: 1px solid var(--lobe-markdown-border-color, var(--ant-color-fill-quaternary));
+  border-radius: 0.25em;
+  background: var(--ant-color-fill-secondary);
+  word-break: break-word;
+}
+
+/* ── 代码块 — background/padding/border-radius 已迁入 EditorView.theme() ── */
+
+/* ── 引用块 — border/padding/color 已迁入 EditorView.theme() ── */
+
+/* ── 水平分割线（LobeUI: dashed, colorBorder） ── */
+
+.cm-lp-hr {
+  border: none;
+  border-top: 1px dashed var(--ant-color-border);
+  margin: 16px 0;
+}
+
+/* ── Block spacer widget（用于段落/标题之间的间距，CM6 完全追踪） ── */
+
+.cm-lp-block-spacer {
+  display: block;
+  height: 0.5em;
+}
+
+/* ── 光标所在块高亮（编辑器特有） ── */
+
+.cm-lp-active {
+  background: rgba(var(--ant-color-primary-rgb, 22, 119, 255), 0.03);
+  border-radius: 3px;
+}
+
+/* ── 列表项标记（LobeUI: '-' 字符, opacity 0.5） ── */
+
+.cm-lp-bullet {
+  opacity: 0.5;
+  margin-right: 4px;
+}
+
+/* ── 链接（LobeUI: colorInfoText, hover colorInfoHover, 无下划线） ── */
+
+.cm-lp-link {
+  color: var(--ant-color-info-text, var(--ant-color-primary));
+  cursor: default;
+}
+
+.cm-lp-link:hover {
+  color: var(--ant-color-info-hover, var(--ant-color-primary-hover));
+}
+
+/* ── 任务复选框（LobeUI: task-list-item checkbox margins） ── */
+
+.cm-lp-task-cb {
+  cursor: pointer;
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+  accent-color: var(--ant-color-primary);
+  vertical-align: middle;
+}
+
+/* ── 图片容器（LobeUI: border-radius + box-shadow border） ── */
+
+.cm-lp-img-wrap {
+  display: block;
+  margin: 8px 0;
+  text-align: center;
+}
+
+.cm-lp-img {
+  max-width: 100%;
+  border-radius: calc(var(--lobe-markdown-border-radius, 8) * 1px);
+  box-shadow: 0 0 0 1px var(--lobe-markdown-border-color, var(--ant-color-fill-quaternary));
+}
+
+.cm-lp-img-caption {
+  display: block;
+  font-size: 12px;
+  color: var(--ant-color-text-quaternary);
+  margin-top: 4px;
+  text-align: center;
+}
+
+.cm-lp-img-error {
+  padding: 12px;
+  border-radius: calc(var(--lobe-markdown-border-radius, 8) * 1px);
+  background: var(--ant-color-error-bg);
+  color: var(--ant-color-error);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* ── Spin animation for status bar ── */
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── Tooltip for floating toolbar ── */
+
+.cm-tooltip {
+  border: none !important;
+  background: transparent !important;
 }

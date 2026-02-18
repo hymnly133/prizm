@@ -1,0 +1,416 @@
+/* ═══════════════════════════════════════════════════════════
+ * accent-overrides.css — 恢复 LobeUI 移除的 accent color
+ *
+ * LobeUI 的 antdTheme 将 Input/Select/DatePicker 的
+ * activeBorderColor / hoverBorderColor 覆盖为中性色 colorBorder，
+ * 导致这些表单组件在 focus 时不显示主题色。
+ * 此文件通过 CSS 覆盖恢复 accent color 反馈。
+ * ═══════════════════════════════════════════════════════════ */
+
+/* ── 表单组件统一过渡 ── */
+
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-input-textarea-affix-wrapper,
+textarea.ant-input,
+.ant-select-selector,
+.ant-picker,
+.ant-input-number,
+.ant-mentions {
+  transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+
+/* ── Input focus ── */
+
+.ant-input:focus,
+.ant-input:focus-within,
+.ant-input-focused,
+.ant-input-affix-wrapper:focus,
+.ant-input-affix-wrapper-focused,
+.ant-input-affix-wrapper:focus-within {
+  border-color: var(--ant-color-primary) !important;
+  box-shadow: 0 0 0 2px var(--ant-color-primary-bg) !important;
+}
+
+.ant-input:hover:not(:focus):not(.ant-input-disabled),
+.ant-input-affix-wrapper:hover:not(:focus-within):not(.ant-input-affix-wrapper-disabled) {
+  border-color: var(--ant-color-primary-border-hover) !important;
+}
+
+/* ── TextArea focus ── */
+
+.ant-input-textarea-affix-wrapper:focus-within,
+textarea.ant-input:focus {
+  border-color: var(--ant-color-primary) !important;
+  box-shadow: 0 0 0 2px var(--ant-color-primary-bg) !important;
+}
+
+/* ── Select focus ── */
+
+.ant-select-focused .ant-select-selector {
+  border-color: var(--ant-color-primary) !important;
+  box-shadow: 0 0 0 2px var(--ant-color-primary-bg) !important;
+}
+
+.ant-select:not(.ant-select-disabled):hover .ant-select-selector {
+  border-color: var(--ant-color-primary-border-hover) !important;
+}
+
+/* ── DatePicker focus ── */
+
+.ant-picker-focused {
+  border-color: var(--ant-color-primary) !important;
+  box-shadow: 0 0 0 2px var(--ant-color-primary-bg) !important;
+}
+
+.ant-picker:hover:not(.ant-picker-disabled):not(.ant-picker-focused) {
+  border-color: var(--ant-color-primary-border-hover) !important;
+}
+
+/* ── InputNumber focus ── */
+
+.ant-input-number:focus,
+.ant-input-number-focused,
+.ant-input-number:focus-within {
+  border-color: var(--ant-color-primary) !important;
+  box-shadow: 0 0 0 2px var(--ant-color-primary-bg) !important;
+}
+
+.ant-input-number:hover:not(:focus-within):not(.ant-input-number-disabled) {
+  border-color: var(--ant-color-primary-border-hover) !important;
+}
+
+/* ── Mentions focus ── */
+
+.ant-mentions:focus,
+.ant-mentions-focused,
+.ant-mentions:focus-within {
+  border-color: var(--ant-color-primary) !important;
+  box-shadow: 0 0 0 2px var(--ant-color-primary-bg) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * 标题 / 图标 accent color
+ * 让关键标题和图标跟随 primaryColor，增强主题一致性
+ * ═══════════════════════════════════════════════════════════ */
+
+/* ── SectionHeader 图标 ── */
+
+.section-header > .anticon {
+  color: var(--ant-color-primary);
+  transition: color 0.2s ease;
+}
+
+/* ── Overview card-head 图标 ── */
+
+.overview-card-head > svg:first-child {
+  color: var(--ant-color-primary);
+  transition: color 0.2s ease;
+}
+
+/* ── Home card header 图标 ── */
+
+.home-card__header > .anticon {
+  color: var(--ant-color-primary);
+  transition: color 0.2s ease;
+}
+
+/* ── Home 剪贴板条头图标 ── */
+
+.home-clipboard-strip__header > .anticon {
+  color: var(--ant-color-primary);
+  transition: color 0.2s ease;
+}
+
+/* ── Settings section h2 左侧强调线 ── */
+
+.settings-section h2 {
+  position: relative;
+  padding-left: 10px;
+}
+
+.settings-section h2::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 3px;
+  bottom: 3px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--ant-color-primary);
+  transition: background 0.2s ease;
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * 交互态 accent — hover / active / focus 时的主题色点缀
+ * 所有交互元素均添加 transition 以实现平滑过渡
+ * ═══════════════════════════════════════════════════════════ */
+
+/* ── Agent 右侧栏 section 图标 ── */
+
+.agent-right-section-icon {
+  color: var(--ant-color-primary) !important;
+  opacity: 1 !important;
+  transition: color 0.2s ease, opacity 0.2s ease;
+}
+
+/* ── Data card hover 时图标变主题色 ── */
+
+.data-card__icon {
+  transition: color 0.2s ease;
+}
+
+.data-card:hover .data-card__icon {
+  color: var(--ant-color-primary);
+}
+
+/* ── 搜索结果 focused 项左侧指示条 ── */
+
+.search-result-item {
+  border-left: 3px solid transparent;
+  padding-left: 11px;
+  transition: border-color 0.2s ease, background 0.15s ease;
+}
+
+.search-result-item.focused {
+  border-left-color: var(--ant-color-primary);
+}
+
+/* home-session-item 已迁移至 LobeUI List */
+
+/* ── Home 待办组 hover 时左侧强调线（inset shadow 不破坏圆角） ── */
+
+.home-todolist-group {
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.2s ease;
+}
+
+.home-todolist-group:hover {
+  box-shadow: inset 3px 0 0 var(--ant-color-primary), 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+/* ── Agent 总览标签图标 ── */
+
+.agent-overview-tab svg:first-child {
+  transition: color 0.2s ease;
+}
+
+.agent-overview-tab:hover svg:first-child {
+  color: var(--ant-color-primary);
+}
+
+.agent-overview-tab.active svg:first-child {
+  color: var(--ant-color-primary);
+}
+
+/* ── 文档卡片 hover 图标 ── */
+
+.home-doc-card__icon {
+  transition: color 0.2s ease;
+}
+
+.home-doc-card:hover .home-doc-card__icon {
+  color: var(--ant-color-primary);
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * 通知 / 卡片 / 状态 — 更多微观 accent 点缀
+ * ═══════════════════════════════════════════════════════════ */
+
+/* ── Notification 左侧彩色指示条 ── */
+
+.notification-item {
+  border-left: 3px solid var(--ant-color-primary);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* ── Overview card hover 时边框微变 accent ── */
+
+.overview-card:hover {
+  border-color: var(--ant-color-primary-border);
+}
+
+/* ── DevTools 诊断卡片 hover 时图标变主题色 ── */
+
+.devtools-status-card__icon {
+  transition: color 0.2s ease;
+}
+
+.devtools-status-card:hover .devtools-status-card__icon {
+  color: var(--ant-color-primary);
+}
+
+/* ── Agent 空状态图标 ── */
+
+.agent-empty svg:first-child {
+  color: var(--ant-color-primary);
+  opacity: 0.6;
+  transition: color 0.2s ease, opacity 0.2s ease;
+}
+
+/* workspace-folders-section__item 已迁移至 LobeUI List */
+
+/* ── 品牌名首字母 accent ── */
+
+.app-brand-accent {
+  color: var(--ant-color-primary);
+  transition: color 0.2s ease;
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * Ant Design 组件 accent 强化
+ * 确保表单控件选中/激活态跟随 primaryColor
+ * ═══════════════════════════════════════════════════════════ */
+
+/* ── Checkbox 选中态 ── */
+
+.ant-checkbox-inner {
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.ant-checkbox-wrapper:not(.ant-checkbox-wrapper-disabled)
+  .ant-checkbox-checked
+  .ant-checkbox-inner {
+  background-color: var(--ant-color-primary) !important;
+  border-color: var(--ant-color-primary) !important;
+}
+
+.ant-checkbox-wrapper:not(.ant-checkbox-wrapper-disabled)
+  .ant-checkbox-indeterminate
+  .ant-checkbox-inner::after {
+  background-color: var(--ant-color-primary) !important;
+}
+
+/* ── Switch 开启态 ── */
+
+.ant-switch {
+  transition: background 0.2s ease;
+}
+
+.ant-switch-checked:not(.ant-switch-disabled) {
+  background: var(--ant-color-primary) !important;
+}
+
+/* ── Radio 选中态 ── */
+
+.ant-radio-inner {
+  transition: border-color 0.2s ease;
+}
+
+.ant-radio-inner::after {
+  transition: background-color 0.2s ease, transform 0.2s ease;
+}
+
+.ant-radio-wrapper:not(.ant-radio-wrapper-disabled) .ant-radio-checked .ant-radio-inner {
+  border-color: var(--ant-color-primary) !important;
+}
+
+.ant-radio-wrapper:not(.ant-radio-wrapper-disabled) .ant-radio-checked .ant-radio-inner::after {
+  background-color: var(--ant-color-primary) !important;
+}
+
+/* ── Tabs active 下划线 ── */
+
+.ant-tabs-ink-bar {
+  background: var(--ant-color-primary) !important;
+  transition: background 0.2s ease;
+}
+
+.ant-tabs-tab-btn {
+  transition: color 0.2s ease;
+}
+
+.ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: var(--ant-color-primary) !important;
+}
+
+/* ── Anchor link active ── */
+
+.ant-anchor-link-title {
+  transition: color 0.2s ease;
+}
+
+.ant-anchor-link-active > .ant-anchor-link-title {
+  color: var(--ant-color-primary) !important;
+}
+
+/* ── Pagination 当前页 ── */
+
+.ant-pagination-item {
+  transition: border-color 0.2s ease;
+}
+
+.ant-pagination-item a {
+  transition: color 0.2s ease;
+}
+
+.ant-pagination-item-active {
+  border-color: var(--ant-color-primary) !important;
+}
+
+.ant-pagination-item-active a {
+  color: var(--ant-color-primary) !important;
+}
+
+/* ── Steps 当前步骤 ── */
+
+.ant-steps-item-icon {
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.ant-steps-item-process .ant-steps-item-icon {
+  background-color: var(--ant-color-primary) !important;
+  border-color: var(--ant-color-primary) !important;
+}
+
+/* ── 滚动条 thumb accent 微调（WebKit） ── */
+
+::-webkit-scrollbar-thumb {
+  transition: background 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--ant-color-primary) 35%, var(--ant-color-text-quaternary));
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * LobeUI List / 统一列表项 accent 覆盖
+ *
+ * 容器加 .accent-list → 子项自动获得 transition + 点击反馈
+ * active 项加 .accent-list-active → accent 背景色
+ * ═══════════════════════════════════════════════════════════ */
+
+/* ── 列表容器：所有子项基础过渡 ── */
+
+.accent-list > * {
+  transition: background 0.12s ease, transform 0.1s ease, opacity 0.1s ease;
+}
+
+.accent-list > *:active {
+  transform: scale(0.98);
+  opacity: 0.85;
+}
+
+/* ── active 项：accent 背景 ── */
+
+.accent-list-active {
+  background: var(--ant-color-primary-bg) !important;
+}
+
+.accent-list-active:hover {
+  background: color-mix(
+    in srgb,
+    var(--ant-color-primary) 12%,
+    var(--ant-color-fill-quaternary, transparent)
+  ) !important;
+}
+
+.accent-list-active:active {
+  opacity: 1 !important;
+}
+
+/* ── Settings sidebar active ── */
+
+.settings-sidebar-item--active {
+  background: var(--ant-color-primary-bg);
+  transition: background 0.2s ease;
+}

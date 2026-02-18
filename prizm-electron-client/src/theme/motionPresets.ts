@@ -23,6 +23,15 @@ export function fadeUp(delay = 0) {
   }
 }
 
+/** stagger 版 fadeUp — 传入序号，自动计算 delay = index * STAGGER_DELAY */
+export function fadeUpStagger(index: number) {
+  return {
+    initial: { opacity: 0, y: 16 } as const,
+    animate: { opacity: 1, y: 0 } as const,
+    transition: { delay: index * STAGGER_DELAY, duration: 0.4, ease: EASE_SMOOTH } as Transition
+  }
+}
+
 export function fadeIn(delay = 0) {
   return {
     initial: { opacity: 0 } as const,

@@ -67,15 +67,14 @@
   align-self: stretch;
   display: flex;
   min-height: 0;
-  overflow: hidden;
-  will-change: transform, opacity;
-  backface-visibility: hidden;
+  /* overflow: visible 让 data-card 的 hover box-shadow 不被裁剪 */
+  /* will-change 仅在动画期间由 motion 自动管理，不再永久占用 GPU 层 */
 }
 .work-page--cards .work-page__cards-grid--variable .work-page__card-item .data-card {
   width: 100%;
   height: 100%;
   min-height: 0;
-  overflow: hidden;
+  /* overflow 由内部 data-card__body 处理，此处不设避免裁剪 hover 阴影 */
   display: flex;
   flex-direction: column;
 }
@@ -209,40 +208,7 @@
   gap: 4px;
   padding: 4px 0 8px;
 }
-.workspace-folders-section__item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--ant-color-text);
-  background: var(--ant-color-fill-quaternary);
-  transition: background 0.15s, color 0.15s;
-  user-select: none;
-}
-.workspace-folders-section__item:hover {
-  background: var(--ant-color-fill-tertiary);
-}
-.workspace-folders-section__item--file {
-  color: var(--ant-color-text-secondary);
-  cursor: default;
-}
-.workspace-folders-section__item--file:hover {
-  background: var(--ant-color-fill-quaternary);
-}
-.workspace-folders-section__item-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 160px;
-}
-.workspace-folders-section__item-count {
-  font-size: 11px;
-  color: var(--ant-color-text-quaternary);
-  flex-shrink: 0;
-}
+/* workspace-folders-section__item 已迁移至 LobeUI List（WorkspaceFoldersSection） */
 
 /* ── 文件夹视图 ── */
 .work-folder-view {
@@ -265,15 +231,27 @@
 
 /* 大卡片 - 基础样式 */
 .data-card {
+  position: relative;
   background: var(--ant-color-bg-elevated);
   border: 1px solid var(--ant-color-border-secondary);
   border-radius: var(--ant-border-radius-lg, 12px);
   padding: 16px;
   cursor: pointer;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color 0.2s ease;
   display: flex;
   flex-direction: column;
   min-height: 120px;
+}
+/* 用 opacity 伪元素替代 box-shadow 过渡 — opacity 可 GPU 合成，不触发主线程重绘 */
+.data-card::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
 }
 /* 便签：紧凑型，少行预览 */
 .data-card--note {
@@ -297,7 +275,9 @@
 }
 .data-card:hover {
   border-color: var(--ant-color-primary);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+}
+.data-card:hover::after {
+  opacity: 1;
 }
 .data-card--done {
   opacity: 0.75;
@@ -362,29 +342,25 @@
 }
 .data-card__actions {
   display: flex;
-  gap: 8px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--ant-color-border-secondary);
+  align-items: center;
+  gap: 2px;
+  margin-top: auto;
+  padding-top: 10px;
   flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+.data-card:hover .data-card__actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+.data-card__actions-spacer {
+  flex: 1;
 }
 .data-card--skeleton {
   min-height: 160px;
 }
-.data-card-hover-menu {
-  background: var(--ant-color-bg-elevated);
-  border-radius: 8px;
-  padding: 4px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-  border: 1px solid var(--ant-color-border-secondary);
-}
-
-/* 卡片悬浮菜单的子菜单弹出层加边框 */
-.ant-menu-submenu-popup .ant-menu-sub {
-  border: 2px solid var(--ant-color-border, rgba(0, 0, 0, 0.15));
-  border-radius: var(--ant-border-radius-lg, 8px);
-}
-
 .work-content {
   flex: 1;
   display: flex;

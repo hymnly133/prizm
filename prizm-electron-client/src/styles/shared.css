@@ -1,0 +1,265 @@
+/* ═══════════════════════════════════════════════════════════
+ * shared.css — 跨页面复用的公共样式
+ * 提取自 home.css / agent-overview.css / settings.css
+ * ═══════════════════════════════════════════════════════════ */
+
+/* ── Section Header ── */
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: var(--ant-color-text-secondary);
+  font-size: 13px;
+}
+
+.section-header__title {
+  font-weight: 600;
+  color: var(--ant-color-text);
+  font-size: 14px;
+}
+
+.section-header__extra {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ── Empty State ── */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px 0;
+}
+
+.empty-state__actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ── Refresh Button ── */
+
+/* ── Stat Card (统一统计卡片) ── */
+
+.stat-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 14px;
+  height: 100%;
+  border-radius: 10px;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+
+.stat-card--clickable {
+  cursor: pointer;
+}
+.stat-card--clickable:hover {
+  background: var(--ant-color-fill-quaternary);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.04);
+}
+.stat-card--clickable:focus-visible {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: -2px;
+}
+.stat-card--clickable:active {
+  background: var(--ant-color-fill-tertiary);
+}
+
+.stat-card__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--ant-color-bg-container);
+  flex-shrink: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.stat-card__info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.stat-card__value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ant-color-text);
+  line-height: 1.2;
+}
+
+.stat-card__label {
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
+}
+
+.stat-card__desc {
+  font-size: 10px;
+  color: var(--ant-color-text-quaternary);
+  line-height: 1;
+  margin-top: 1px;
+}
+
+/* compact 变体 — 紧凑统计行 */
+.stat-card--compact {
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--ant-color-fill-quaternary);
+  border-radius: var(--ant-border-radius, 8px);
+  border: 1px solid var(--ant-color-border-secondary);
+  transition: border-color 0.15s;
+}
+.stat-card--compact:hover {
+  border-color: var(--ant-color-border);
+}
+.stat-card--compact .stat-card__icon {
+  width: auto;
+  height: auto;
+  background: none;
+  box-shadow: none;
+  color: var(--ant-color-text-secondary);
+}
+.stat-card--compact .stat-card__label {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.stat-card--compact .stat-card__value {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* ── Content Card (统一卡片容器) ── */
+
+.content-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--ant-color-border-secondary, var(--ant-color-border));
+  border-radius: 12px;
+  overflow: hidden;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.content-card--default {
+  background: var(--ant-color-bg-container);
+}
+.content-card--elevated {
+  background: var(--ant-color-bg-elevated);
+}
+.content-card--subtle {
+  background: var(--ant-color-fill-quaternary);
+}
+.content-card--hoverable:hover {
+  border-color: var(--ant-color-border);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+}
+.content-card--clickable {
+  cursor: pointer;
+}
+
+.content-card__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+  border-bottom: 1px solid var(--ant-color-border-secondary, var(--ant-color-fill-quaternary));
+  flex-shrink: 0;
+}
+
+.content-card__body {
+  flex: 1;
+  padding: 12px 16px 16px;
+  min-height: 0;
+}
+
+/* ── Loading Placeholder ── */
+
+.loading-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 24px 0;
+  color: var(--ant-color-text-quaternary);
+  font-size: 13px;
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * ModalSidebar — 统一模态侧边栏
+ * 关闭按钮靠内侧（朝屏幕中间），header 一致对齐
+ * ═══════════════════════════════════════════════════════════ */
+
+.modal-sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+/* 关闭按钮使用 accent 色，视觉突出便于识别 */
+.modal-sidebar-close {
+  flex-shrink: 0;
+  color: var(--ant-color-primary) !important;
+}
+.modal-sidebar-close:hover {
+  background: var(--ant-color-primary-bg-hover) !important;
+  color: var(--ant-color-primary-hover) !important;
+}
+
+.modal-sidebar-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ant-color-text);
+}
+
+.modal-sidebar-extra {
+  flex-shrink: 0;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* antd Drawer 内部微调：去掉 header-title 默认间距，title 区域占满 */
+.modal-sidebar .ant-drawer-header-title {
+  flex: 1;
+}
+.modal-sidebar .ant-drawer-title {
+  flex: 1;
+}
+
+/* Drawer 区域排除标题栏，不遮挡窗口控制按钮 */
+.modal-sidebar.ant-drawer {
+  top: 36px !important;
+  height: calc(100vh - 36px) !important;
+  inset: unset !important;
+  position: fixed !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+}
+.modal-sidebar .ant-drawer-mask {
+  top: 0 !important;
+}
+.modal-sidebar .ant-drawer-content-wrapper {
+  height: 100% !important;
+}

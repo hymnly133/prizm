@@ -1,0 +1,195 @@
+/* ══════════════════════════════════════════════════════════════
+   协作分屏页面样式
+   自定义 SplitPane + Agent/文档半屏面板 + 拖拽手柄
+   方向切换通过 CSS order 实现，组件始终挂载不重建
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── 页面根 ── */
+.collab-page {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--ant-color-bg-layout);
+}
+
+/* ── 分屏容器 ── */
+.collab-split-container {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.collab-split-pane {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  transition: width 0s;
+}
+
+/* 方向切换时面板交换添加短暂过渡 */
+.collab-page[data-direction] .collab-split-pane {
+  transition: order 0s;
+}
+
+/* ── 分割线拖拽手柄 ── */
+.collab-resize-handle {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 8px;
+  flex-shrink: 0;
+  background: var(--ant-color-bg-layout);
+  border-left: 1px solid var(--ant-color-border-secondary);
+  border-right: 1px solid var(--ant-color-border-secondary);
+  transition: background 0.15s;
+  cursor: col-resize;
+  z-index: 2;
+  touch-action: none;
+}
+
+.collab-resize-handle:hover,
+.collab-resize-handle:active {
+  background: var(--ant-color-primary-bg);
+}
+
+.collab-resize-handle-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 40px;
+  border-radius: 8px;
+  color: var(--ant-color-text-quaternary);
+  transition: color 0.15s, background 0.15s, transform 0.15s;
+}
+
+.collab-resize-handle:hover .collab-resize-handle-bar,
+.collab-resize-handle:active .collab-resize-handle-bar {
+  color: var(--ant-color-primary);
+  background: var(--ant-color-primary-bg-hover);
+  transform: scaleY(1.2);
+}
+
+/* ── 面板公共头部 ── */
+.collab-pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+  flex-shrink: 0;
+  background: var(--ant-color-bg-layout);
+  min-height: 36px;
+}
+
+.collab-pane-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ant-color-text-secondary);
+  user-select: none;
+}
+
+.collab-pane-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+/* ── Agent 半屏面板 ── */
+.collab-agent-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--ant-color-bg-layout);
+}
+
+.collab-agent-chat-area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.collab-agent-pane .agent-sidebar {
+  width: 100%;
+}
+
+.collab-agent-pane .agent-sidebar-header {
+  padding: 8px 10px;
+}
+
+.collab-agent-pane .agent-input-floating {
+  padding: 8px 12px;
+}
+
+/* ── 文档半屏面板 ── */
+.collab-doc-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--ant-color-bg-layout);
+}
+
+.collab-doc-pane .editor-toolbar {
+  padding: 4px 8px;
+}
+
+.collab-doc-pane .doc-page-editor {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.collab-doc-pane .doc-preview-pane {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+/* ── 详情面板公共样式 ── */
+.collab-detail-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 8px;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.collab-detail-panel .agent-session-stats {
+  font-size: 12px;
+}
+
+.collab-detail-panel .agent-stats-group {
+  margin-bottom: 12px;
+}
+
+/* ── 分屏内的 ResizableSidebar 边框优化 ── */
+.collab-agent-pane .resizable-sidebar-handle,
+.collab-doc-pane .resizable-sidebar-handle {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.collab-agent-pane:hover .resizable-sidebar-handle,
+.collab-doc-pane:hover .resizable-sidebar-handle {
+  opacity: 1;
+}

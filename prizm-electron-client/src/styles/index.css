@@ -2,6 +2,7 @@
  * 使用 Lobe UI / Ant Design 设计 token（通过 theme.cssVar 注入的 CSS 变量）
  */
 
+@import './shared.css';
 @import './shell.css';
 @import './notification.css';
 @import './work.css';
@@ -10,3 +11,6 @@
 @import './agent-overview.css';
 @import './home.css';
 @import './document.css';
+@import './collaboration.css';
+@import './accent-overrides.css';
+@import './soft-light.css';

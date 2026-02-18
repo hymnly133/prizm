@@ -10,23 +10,88 @@
 .settings-page {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 0;
+}
+
+/* Settings sidebar layout */
+.settings-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 0;
+}
+.settings-sidebar {
+  width: 140px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 12px 4px 0;
+  border-right: 1px solid var(--ant-color-border-secondary);
+  overflow-y: auto;
+}
+.settings-sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: var(--ant-border-radius, 8px);
+  background: transparent;
+  color: var(--ant-color-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  text-align: left;
+  width: 100%;
+  line-height: 1.4;
+}
+.settings-sidebar-item:hover {
+  background: var(--ant-color-fill-tertiary);
+  color: var(--ant-color-text);
+}
+.settings-sidebar-item--active {
+  background: var(--ant-color-primary-bg);
+  color: var(--ant-color-primary);
+}
+.settings-sidebar-item--active:hover {
+  background: var(--ant-color-primary-bg-hover, var(--ant-color-primary-bg));
+  color: var(--ant-color-primary);
+}
+.settings-content {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 0 0 0 20px;
 }
 .settings-section {
-  background: var(--ant-color-bg-elevated);
-  border: 1px solid var(--ant-color-border-secondary);
-  border-radius: var(--ant-border-radius-lg, 12px);
-  padding: 16px 20px;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-.settings-section:hover {
-  border-color: var(--ant-color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0;
 }
 .settings-section-header {
-  margin-bottom: 12px;
+  margin-bottom: 4px;
+}
+/* 内容卡片 — settings 特有覆盖：更宽的内边距 + elevated 背景 */
+.settings-card {
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px;
+  background: var(--ant-color-bg-elevated);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.settings-card:hover {
+  border-color: var(--ant-color-border);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
 }
 /* 紧凑表单：Lobe Form 默认 gap 16px + FormItem padding-block 16px 过大，使用 compact-form 覆盖 */
 .compact-form.ant-form {
@@ -53,9 +118,9 @@
   margin-top: 2px;
 }
 .settings-section h2 {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
-  margin: 0 0 6px 0;
+  margin: 0 0 4px 0;
   color: var(--ant-color-text);
   letter-spacing: -0.01em;
 }
@@ -124,42 +189,7 @@
   padding: 12px 0;
   font-size: 13px;
 }
-.scope-list-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 10px;
-  background: var(--ant-color-bg-container);
-  border: 1px solid var(--ant-color-border-secondary);
-  border-radius: var(--ant-border-radius);
-}
-.scope-list-item-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.scope-id {
-  font-weight: 500;
-  flex-shrink: 0;
-}
-.scope-badge {
-  font-size: 11px;
-  padding: 2px 6px;
-  background: var(--ant-color-primary-bg);
-  color: var(--ant-color-primary);
-  border-radius: 4px;
-  flex-shrink: 0;
-}
-.scope-path {
-  font-size: 12px;
-  color: var(--ant-color-text-tertiary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* scope-list-item / scope-id / scope-badge / scope-path 已迁移至 LobeUI List（ScopeManagement） */
 
 .config-actions {
   display: flex;
@@ -290,4 +320,112 @@
 }
 .test-result-hint.text-error {
   color: var(--ant-color-error);
+}
+
+/* DevTools page — 无 sidebar layout，整页可滚动 */
+.devtools-page {
+  overflow-y: auto;
+  gap: 0;
+}
+
+/* DevTools diagnostics grid */
+.devtools-diagnostics {
+  display: flex;
+  flex-direction: column;
+}
+.devtools-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+}
+.devtools-status-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--ant-color-fill-quaternary);
+  border-radius: var(--ant-border-radius, 8px);
+  border: 1px solid var(--ant-color-border-secondary);
+  transition: border-color 0.15s;
+}
+.devtools-status-card:hover {
+  border-color: var(--ant-color-border);
+}
+.devtools-status-card__icon {
+  color: var(--ant-color-text-secondary);
+  flex-shrink: 0;
+}
+.devtools-status-card__info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.devtools-status-card__label {
+  font-size: 11px;
+  color: var(--ant-color-text-tertiary);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.devtools-status-card__value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+}
+
+/* Onboarding Wizard */
+.onboarding-wizard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 32px 20px;
+  gap: 28px;
+}
+.onboarding-wizard__header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+.onboarding-wizard__title {
+  font-size: 24px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--ant-color-text);
+}
+.onboarding-wizard__subtitle {
+  font-size: 14px;
+  color: var(--ant-color-text-secondary);
+  margin: 0;
+}
+.onboarding-wizard__steps {
+  width: 100%;
+}
+.onboarding-wizard__content {
+  width: 100%;
+}
+.onboarding-wizard__step {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.onboarding-wizard__step h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--ant-color-text);
+}
+.onboarding-wizard__step--done {
+  align-items: center;
+  text-align: center;
+  padding: 24px 0;
+}
+.onboarding-wizard__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
 }

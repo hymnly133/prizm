@@ -165,40 +165,7 @@
   overflow-y: auto;
   margin-bottom: 6px;
 }
-.agent-documents-ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.agent-document-item {
-  display: flex;
-  gap: 8px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--ant-color-border-secondary);
-  font-size: 12px;
-}
-.agent-document-item:last-child {
-  border-bottom: none;
-}
-.agent-doc-icon {
-  flex-shrink: 0;
-  color: var(--ant-color-text-tertiary);
-  margin-top: 2px;
-}
-.agent-document-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.agent-document-title {
-  font-weight: 500;
-  color: var(--ant-color-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* agent-documents-ul / agent-document-item / agent-doc-icon / agent-document-title 已迁移至 LobeUI List */
 .agent-document-status {
   display: flex;
   align-items: center;
@@ -231,18 +198,7 @@
   color: var(--ant-color-text-tertiary);
   cursor: not-allowed;
 }
-.agent-right-loading,
-.agent-right-empty {
-  font-size: 12px;
-  color: var(--ant-color-text-tertiary);
-  margin: 0;
-  padding: 8px 0;
-}
-.agent-right-loading {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
+/* agent-right-loading / agent-right-empty — 已迁移到 LoadingPlaceholder / EmptyState 组件 */
 .agent-right-hint {
   font-size: 11px;
   font-style: italic;
@@ -273,26 +229,18 @@
   font-variant-numeric: tabular-nums;
   color: var(--ant-color-text);
 }
-/* 简化文档列表（总览模式） */
-.agent-documents-compact {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+/* agent-documents-compact / agent-document-item-compact 已迁移至 LobeUI List */
+.agent-lock-session-link {
+  font-size: 10px;
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  color: var(--ant-color-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-left: auto;
 }
-.agent-document-item-compact {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 0;
-  font-size: 12px;
-  min-width: 0;
-}
-.agent-document-item-compact .agent-doc-icon {
-  margin-top: 0;
-}
-.agent-document-item-compact .agent-document-title {
-  flex: 1;
-  min-width: 0;
+.agent-lock-session-link:hover {
+  text-decoration: underline;
 }
 
 /* 会话活动（合并区块） */
@@ -342,6 +290,14 @@
 }
 .agent-activity-item.error {
   background: var(--ant-color-error-bg, #fff2f0);
+}
+.agent-activity-item-clickable {
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+.agent-activity-item-clickable:hover {
+  background: var(--ant-color-primary-bg);
+  color: var(--ant-color-primary);
 }
 .agent-activity-tool-name {
   font-weight: 500;
@@ -416,6 +372,25 @@
   padding-left: 16px;
   background: none;
   font-size: 11px;
+}
+.agent-stats-row-memory .agent-stats-key {
+  color: var(--ant-color-primary);
+}
+.agent-stats-row-highlight {
+  margin-top: 2px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--ant-color-primary-bg);
+  border: 1px solid var(--ant-color-primary-border);
+  font-size: 12px;
+}
+.agent-stats-row-highlight .agent-stats-key {
+  color: var(--ant-color-primary);
+  font-weight: 600;
+}
+.agent-stats-row-highlight .agent-stats-value {
+  color: var(--ant-color-primary);
+  font-weight: 600;
 }
 .agent-stats-key {
   color: var(--ant-color-text-secondary);
@@ -515,32 +490,6 @@
   color: var(--ant-color-text-secondary);
   text-align: center;
 }
-.agent-session-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.agent-session-item-summary {
-  font-size: 13px;
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  display: block;
-}
-/* 会话列表操作按钮：默认隐藏，hover 或编辑时显示（纯 CSS，无 React 状态） */
-.agent-session-actions {
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.12s ease;
-}
-/* 鼠标悬停在列表行上时显示操作按钮 */
-.agent-sessions-list *:hover > .agent-session-actions {
-  opacity: 1;
-  pointer-events: auto;
-}
-
 /* ── 文件树面板样式 ── */
 .agent-sidebar .react-arborist {
   font-size: 12px;
@@ -556,7 +505,7 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: var(--ant-color-bg-container);
+  background: transparent;
 }
 .agent-messages {
   flex: 1;
@@ -626,6 +575,26 @@
     opacity: 0.5;
   }
 }
+/* 记忆来源高亮：滚动到目标消息后闪烁 */
+.agent-message-highlight {
+  animation: message-highlight-flash 3s ease-out;
+  border-radius: var(--ant-border-radius-lg);
+}
+@keyframes message-highlight-flash {
+  0% {
+    background: var(--ant-color-primary-bg);
+    box-shadow: 0 0 0 2px var(--ant-color-primary-border);
+  }
+  30% {
+    background: var(--ant-color-primary-bg);
+    box-shadow: 0 0 0 2px var(--ant-color-primary-border);
+  }
+  100% {
+    background: transparent;
+    box-shadow: none;
+  }
+}
+
 /* ChatInputArea 容器：底部固定，限制高度不占满窗口 */
 .agent-input-hint {
   margin: 0 0 6px 0;
@@ -680,8 +649,8 @@
 
 .agent-input-wrap {
   width: 100%;
-  border-top: 1px solid var(--ant-color-border);
-  background: var(--ant-color-bg-elevated);
+  border-top: 1px solid var(--ant-color-border-secondary);
+  background: var(--ant-color-bg-layout);
   flex-shrink: 0;
   max-height: 360px;
 }
@@ -693,7 +662,7 @@
 .agent-input-floating {
   padding: 8px 16px 16px;
   border-top: none;
-  background: var(--ant-color-bg-container);
+  background: transparent;
 }
 .agent-empty {
   flex: 1;
@@ -787,6 +756,7 @@
   font-size: 12px;
   font-weight: 500;
   color: var(--ant-color-text-secondary);
+  transition: color 0.15s ease;
 }
 .reasoning-summary:hover {
   color: var(--ant-color-text);
@@ -816,6 +786,7 @@
   font-size: 12px;
   font-weight: 500;
   color: var(--ant-color-text-secondary);
+  transition: color 0.15s ease;
 }
 .tool-calls-summary:hover {
   color: var(--ant-color-text);
@@ -1087,6 +1058,114 @@
   }
 }
 
+/* ── 底部交互授权面板（固定在消息区底部） ── */
+.interact-panel {
+  background: color-mix(
+    in srgb,
+    var(--ant-color-warning-bg, #fffbe6) 60%,
+    var(--ant-color-bg-container)
+  );
+  border: 1px solid var(--ant-color-warning-border, #ffe58f);
+  border-radius: 12px;
+  padding: 14px 16px;
+  animation: interact-panel-enter 0.3s ease-out;
+}
+@keyframes interact-panel-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.interact-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.interact-panel__icon {
+  color: var(--ant-color-warning, #faad14);
+  flex-shrink: 0;
+}
+.interact-panel__title {
+  font-size: 13px;
+  color: var(--ant-color-text);
+}
+.interact-panel__title strong {
+  font-weight: 600;
+}
+.interact-panel__desc {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+  margin-bottom: 8px;
+}
+.interact-panel__paths {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.interact-panel__path-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+}
+.interact-panel__path-item code {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 8px;
+  background: var(--ant-color-fill-quaternary);
+  border-radius: 4px;
+  color: var(--ant-color-text);
+  word-break: break-all;
+  font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+}
+.interact-panel__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.interact-panel__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.interact-panel__btn--approve {
+  background: var(--ant-color-success, #52c41a);
+  border-color: var(--ant-color-success, #52c41a);
+  color: #fff;
+}
+.interact-panel__btn--approve:hover:not(:disabled) {
+  background: var(--ant-color-success-hover, #73d13d);
+  border-color: var(--ant-color-success-hover, #73d13d);
+}
+.interact-panel__btn--approve:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.interact-panel__btn--deny {
+  background: var(--ant-color-bg-container);
+  border-color: var(--ant-color-border);
+  color: var(--ant-color-text-secondary);
+}
+.interact-panel__btn--deny:hover:not(:disabled) {
+  border-color: var(--ant-color-error, #ff4d4f);
+  color: var(--ant-color-error, #ff4d4f);
+}
+.interact-panel__btn--deny:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
 /* 展开内容 */
 .tool-card__body {
   display: flex;
@@ -1183,7 +1262,7 @@
   animation: agent-interact-pulse 1s ease-in-out infinite;
 }
 
-/* ── 文件内嵌预览面板（Agent 页右侧） ── */
+/* ── 文件内嵌预览面板（Agent 页右侧，保留向后兼容） ── */
 .file-preview-panel {
   display: flex;
   flex-direction: column;
@@ -1216,4 +1295,156 @@
 .file-preview-panel__body .md-preview-wrap {
   font-size: 13px;
   line-height: 1.7;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Agent 中央分割布局 — CodeViewer | Chat（类 IDE 体验）
+   ══════════════════════════════════════════════════════════════ */
+
+/* 分割模式：水平 flex，让 CodeViewer + Chat 并排 */
+.agent-content--split {
+  flex-direction: row;
+}
+/* Chat 区域：分割时占据剩余空间 */
+.agent-chat-area {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── CodeViewerPanel（基于 CodeMirror 6 的只读文件查看器） ── */
+.code-viewer-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--ant-color-bg-container);
+}
+.code-viewer-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+  flex-shrink: 0;
+  gap: 8px;
+  background: var(--ant-color-bg-layout);
+}
+.code-viewer-panel__title {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  color: var(--ant-color-text);
+}
+.code-viewer-panel__body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+/* CodeMirror 填充容器 */
+.code-viewer-panel__body .cm-editor {
+  height: 100%;
+}
+.code-viewer-panel__body .cm-scroller {
+  overflow: auto;
+}
+
+/* 底栏 Ctrl+L 快捷键提示 */
+.code-viewer-panel__hint {
+  padding: 4px 12px;
+  font-size: 11px;
+  color: var(--ant-color-text-tertiary);
+  background: var(--ant-color-bg-layout);
+  border-top: 1px solid var(--ant-color-border-secondary);
+  flex-shrink: 0;
+  text-align: center;
+}
+.code-viewer-panel__hint kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  background: var(--ant-color-fill-quaternary);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 3px;
+  margin-right: 4px;
+  box-shadow: 0 1px 0 var(--ant-color-border-secondary);
+}
+
+/* ── 消息悬浮操作栏增强 ── */
+.agent-messages div[role='menubar'] {
+  background: var(--ant-color-bg-elevated);
+  border: 1px solid var(--ant-color-border);
+  border-radius: 8px;
+  padding: 2px;
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.08),
+    0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: opacity 150ms ease, box-shadow 150ms ease;
+  gap: 1px;
+}
+.agent-messages div[role='menubar'] button {
+  border-radius: 6px;
+  transition: background 120ms ease, color 120ms ease;
+}
+.agent-messages div[role='menubar'] button:hover {
+  background: var(--ant-color-fill-secondary);
+  color: var(--ant-color-primary);
+}
+
+/* ── 用户消息内联编辑器 ── */
+.user-message-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+.user-message-editor__textarea {
+  width: 100%;
+  min-height: 60px;
+  max-height: 240px;
+  padding: 10px 12px;
+  font-size: 14px;
+  line-height: 1.6;
+  font-family: inherit;
+  color: var(--ant-color-text);
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-primary);
+  border-radius: 8px;
+  resize: none;
+  overflow-y: auto;
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ant-color-primary-bg);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.user-message-editor__textarea:focus {
+  border-color: var(--ant-color-primary);
+  box-shadow: 0 0 0 2px var(--ant-color-primary-bg-hover);
+}
+.user-message-editor__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+/* ── Snippet 引用标签（紫色主题） ── */
+:root {
+  --prizm-snippet-color: #722ed1;
+  --prizm-snippet-bg: #f9f0ff;
+  --prizm-snippet-border: #d3adf7;
+}
+/* 暗色模式覆盖 */
+html[data-theme='dark'],
+.dark {
+  --prizm-snippet-color: #b37feb;
+  --prizm-snippet-bg: rgba(114, 46, 209, 0.15);
+  --prizm-snippet-border: rgba(114, 46, 209, 0.35);
 }

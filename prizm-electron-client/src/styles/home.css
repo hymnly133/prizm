@@ -12,11 +12,16 @@
 
 .home-scroll-container {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 20px 28px 32px;
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+
+.home-scroll-container > * {
+  flex-shrink: 0;
 }
 
 /* ── Scope 选择栏 ── */
@@ -25,26 +30,6 @@
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.home-refresh-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--ant-color-border);
-  border-radius: var(--ant-border-radius);
-  background: var(--ant-color-bg-container);
-  color: var(--ant-color-text-secondary);
-  cursor: pointer;
-  transition: all 0.2s;
-  flex-shrink: 0;
-}
-.home-refresh-btn:hover {
-  color: var(--ant-color-primary);
-  border-color: var(--ant-color-primary);
-  background: var(--ant-color-primary-bg);
 }
 
 /* ── 问候区 ── */
@@ -111,30 +96,11 @@
   }
 }
 
-/* ── 通用卡片 ── */
-
-.home-card {
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--ant-color-border-secondary, var(--ant-color-border));
-  border-radius: 12px;
-  background: var(--ant-color-bg-container);
-  overflow: hidden;
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
-.home-card:hover {
-  border-color: var(--ant-color-border);
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
-}
+/* ── 通用卡片 — 基于 shared.css .content-card，仅保留 home 特有的覆盖 ── */
 
 .home-card__header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   padding: 14px 16px 10px;
   color: var(--ant-color-text-secondary);
-  font-size: 13px;
-  border-bottom: 1px solid var(--ant-color-border-secondary, var(--ant-color-fill-quaternary));
 }
 
 .home-card__title {
@@ -143,105 +109,9 @@
   font-size: 14px;
 }
 
-.home-card__body {
-  flex: 1;
-  padding: 12px 16px 16px;
-  min-height: 0;
-}
+/* 会话列表已迁移至 LobeUI List（RecentSessionsSection） */
 
-/* ── 会话列表 ── */
-
-.home-session-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.home-session-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background 0.15s;
-  border: 1px solid transparent;
-}
-.home-session-item:hover {
-  background: var(--ant-color-fill-quaternary);
-  border-color: var(--ant-color-border-secondary);
-}
-.home-session-item:focus-visible {
-  outline: 2px solid var(--ant-color-primary);
-  outline-offset: -2px;
-}
-
-.home-session-item__icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  background: var(--ant-color-fill-tertiary);
-  color: var(--ant-color-text-tertiary);
-  flex-shrink: 0;
-}
-.home-session-item__icon--new {
-  background: var(--ant-color-primary-bg);
-  color: var(--ant-color-primary);
-}
-
-.home-session-item--new {
-  border: 1px dashed var(--ant-color-primary-border, var(--ant-color-primary));
-  background: var(--ant-color-primary-bg, rgba(22, 119, 255, 0.04));
-}
-.home-session-item--new:hover {
-  background: var(--ant-color-primary-bg-hover, rgba(22, 119, 255, 0.08));
-  border-color: var(--ant-color-primary);
-}
-
-.home-session-item__content {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.home-session-item__title {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--ant-color-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.home-session-item__meta {
-  font-size: 11px;
-  color: var(--ant-color-text-quaternary);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-/* ── Section 标题 ── */
-
-.home-section-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
-  color: var(--ant-color-text-secondary);
-  font-size: 13px;
-}
-
-.home-section-title {
-  font-weight: 600;
-  color: var(--ant-color-text);
-  font-size: 14px;
-}
+/* ── Section 标题 — 统一使用 SectionHeader 组件 + shared.css .section-header ── */
 
 /* ── SpotlightCard 统计与文档 ── */
 
@@ -250,52 +120,7 @@
   width: 100%;
 }
 
-/* ── 统计卡片（内置于 SpotlightCard） ── */
-
-.home-stat-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 16px 14px;
-  height: 100%;
-}
-
-.home-stat-card__icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  background: var(--ant-color-bg-container);
-  flex-shrink: 0;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-}
-
-.home-stat-card__info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.home-stat-card__value {
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--ant-color-text);
-  line-height: 1.2;
-}
-
-.home-stat-card__label {
-  font-size: 12px;
-  color: var(--ant-color-text-tertiary);
-}
-
-.home-stat-card__desc {
-  font-size: 10px;
-  color: var(--ant-color-text-quaternary);
-  line-height: 1;
-  margin-top: 1px;
-}
+/* home-stat-card — 已迁移到 StatCard 组件 + shared.css .stat-card */
 
 /* ── 待办列表分组 ── */
 
@@ -414,6 +239,9 @@
   color: var(--ant-color-text-secondary);
   font-size: 13px;
 }
+.home-clipboard-strip__header .section-header__extra {
+  margin-left: auto;
+}
 
 .home-clipboard-strip__items {
   display: flex;
@@ -432,10 +260,25 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  transition: background 0.15s;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
 .home-clipboard-item:hover {
   background: var(--ant-color-fill-tertiary);
+}
+
+.home-clipboard-item--clickable {
+  cursor: pointer;
+}
+.home-clipboard-item--clickable:hover {
+  border-color: var(--ant-color-primary-border, var(--ant-color-primary));
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.06);
+}
+.home-clipboard-item--clickable:focus-visible {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: -2px;
+}
+.home-clipboard-item--clickable:active {
+  background: var(--ant-color-fill-secondary);
 }
 
 .home-clipboard-item__text {
@@ -446,27 +289,58 @@
   text-overflow: ellipsis;
 }
 
+.home-clipboard-item__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
 .home-clipboard-item__time {
   font-size: 10px;
   color: var(--ant-color-text-quaternary);
 }
 
-/* ── 空状态 & 加载占位 ── */
-
-.home-empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 24px 0;
+.home-clipboard-item__copy-icon {
+  color: var(--ant-color-text-quaternary);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.home-clipboard-item--clickable:hover .home-clipboard-item__copy-icon {
+  opacity: 1;
 }
 
-.home-loading-placeholder {
+/* home-empty-state / home-loading-placeholder — 已迁移到 EmptyState / LoadingPlaceholder 组件 */
+
+/* ── 状态条 ── */
+
+.home-status-bar {
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 24px 0;
-  color: var(--ant-color-text-quaternary);
-  font-size: 13px;
+  gap: 12px;
+  padding: 6px 10px;
+  background: var(--ant-color-fill-quaternary);
+  border: 1px solid var(--ant-color-border);
+  border-radius: var(--ant-border-radius);
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+}
+
+.home-status-bar__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.home-status-bar__item--ok {
+  color: var(--ant-color-success);
+}
+
+.home-status-bar__item--warn {
+  color: var(--ant-color-warning);
+}
+
+.home-status-bar__item--loading {
+  color: var(--ant-color-text-tertiary);
 }

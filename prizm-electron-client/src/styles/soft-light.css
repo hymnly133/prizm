@@ -1,0 +1,22 @@
+/* ═══════════════════════════════════════════════════════════
+ * soft-light.css — 柔和浅色主题
+ *
+ * 通过 html.prizm-light class 激活（由 main.tsx ThemeWrapper 同步切换）
+ * 覆盖 lobe-ui / Ant Design 默认的纯白背景为暖色调，降低浅色模式刺眼感
+ * 深色模式不受影响：html 上无 .prizm-light class 时规则不匹配
+ * ═══════════════════════════════════════════════════════════ */
+
+/* ── body 背景（覆盖 lobe-ui GlobalStyle 的 CSS-in-JS） ── */
+
+html.prizm-light body {
+  background-color: #f5f4f2 !important;
+}
+
+/* ── Ant Design CSS 变量覆盖（覆盖 :where(.css-var-*) 生成的变量） ── */
+
+html.prizm-light {
+  --ant-color-bg-layout: #f5f4f2;
+  --ant-color-bg-container: #fdfcfa;
+  --ant-color-bg-elevated: #ffffff;
+  --ant-color-border-secondary: #eeedeb;
+}
