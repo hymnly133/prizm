@@ -9,9 +9,11 @@
 import { create } from 'zustand'
 import type {
   AgentSession,
+  EnrichedSession,
   AgentMessage,
   InteractRequestPayload,
-  PrizmClient
+  PrizmClient,
+  RollbackResult
 } from '@prizm/client-core'
 import { createClientLogger, getTextContent } from '@prizm/client-core'
 import type { FilePathRef } from '@prizm/shared'
@@ -41,7 +43,7 @@ export type { SessionStreamingState }
 
 export interface AgentSessionStoreState {
   // --- 会话数据 ---
-  sessions: AgentSession[]
+  sessions: EnrichedSession[]
   currentSessionId: string | null
 
   // --- 每会话流式状态（key = sessionId）---
@@ -79,353 +81,532 @@ export interface AgentSessionStoreState {
     scope: string,
     paths?: string[]
   ): Promise<void>
-  handleSyncEvent(event: string, scope: string): void
+  rollbackToCheckpoint(
+    sessionId: string,
+    checkpointId: string,
+    scope: string,
+    restoreFiles?: boolean
+  ): Promise<RollbackResult | null>
+  handleSyncEvent(event: string, scope: string, payload?: Record<string, unknown>): void
   setSelectedModel(model: string | undefined): void
 }
 
 /** 模块级：HTTP client 引用（避免存入 zustand state） */
 let _httpClient: PrizmClient | null = null
 
+/** 模块级：loadSession in-flight 去重 */
+const _loadInflight = new Map<string, Promise<AgentSession | null>>()
+
+/** 模块级：每个 session 的最后成功 fetch 时间（用于 stale-while-revalidate） */
+const _lastFetchTime = new Map<string, number>()
+
+/** 缓存新鲜期：距上次 fetch 未超过此时间的 session 不发起后台刷新 */
+const STALE_THRESHOLD_MS = 30_000
+
+/**
+ * 后台静默刷新：stale-while-revalidate 模式。
+ * 仅在距上次 fetch 超过 STALE_THRESHOLD_MS 时才发起 HTTP，
+ * 且不设 loading 状态，不阻塞 UI。
+ */
+function _backgroundRevalidate(id: string, scope: string): void {
+  const lastFetch = _lastFetchTime.get(id) ?? 0
+  if (Date.now() - lastFetch < STALE_THRESHOLD_MS) return
+  const http = _httpClient
+  if (!http) return
+
+  _lastFetchTime.set(id, Date.now())
+
+  http
+    .getAgentSession(id, scope)
+    .then((session) => {
+      useAgentSessionStore.setState((s) => {
+        const ex = s.sessions.find((sess) => sess.id === id)
+        if (
+          ex &&
+          ex.updatedAt === session.updatedAt &&
+          ex.messages.length === session.messages.length
+        ) {
+          return {}
+        }
+        log.debug('Background revalidate: merging updated data for session:', id.slice(0, 8))
+        return {
+          sessions: s.sessions.map((sess) => (sess.id === id ? session : sess))
+        }
+      })
+    })
+    .catch((err) => {
+      log.debug('Background revalidate failed for session:', id.slice(0, 8), err)
+    })
+}
+
+/** 将指定 session 标记为 stale（清除 fetch 时间），下次访问时触发后台刷新 */
+function _invalidateSessionCache(id: string): void {
+  _lastFetchTime.delete(id)
+}
+
 export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) => {
   const setStreaming = set as SetStateLike
   const getStreaming = get as GetStateLike
 
   return {
-  // --- Initial State ---
-  sessions: [],
-  currentSessionId: null,
-  streamingStates: {},
-  loading: false,
-  error: null,
-  selectedModel: undefined,
+    // --- Initial State ---
+    sessions: [],
+    currentSessionId: null,
+    streamingStates: {},
+    loading: false,
+    error: null,
+    selectedModel: undefined,
 
-  // --- Actions ---
+    // --- Actions ---
 
-  setHttpClient(http: PrizmClient) {
-    _httpClient = http
-  },
+    setHttpClient(http: PrizmClient) {
+      _httpClient = http
+    },
 
-  setSelectedModel(model: string | undefined) {
-    set({ selectedModel: model })
-  },
+    setSelectedModel(model: string | undefined) {
+      set({ selectedModel: model })
+    },
 
-  async refreshSessions(scope: string) {
-    const http = _httpClient
-    if (!http || !scope) return
-    log.debug('Refreshing sessions, scope:', scope)
-    set({ loading: true })
-    try {
-      const list = await http.listAgentSessions(scope)
-      set({ sessions: list })
-      log.debug('Sessions loaded:', list.length)
-    } catch (err) {
-      log.error('Failed to refresh sessions:', err)
-      set({ sessions: [] })
-    } finally {
-      set({ loading: false })
-    }
-  },
+    async refreshSessions(scope: string) {
+      const http = _httpClient
+      if (!http || !scope) return
+      log.debug('Refreshing sessions, scope:', scope)
+      set({ loading: true })
+      try {
+        const list = await http.listAgentSessions(scope)
+        _lastFetchTime.clear()
+        set({ sessions: list })
+        log.debug('Sessions loaded:', list.length)
+      } catch (err) {
+        log.error('Failed to refresh sessions:', err)
+        set({ sessions: [] })
+      } finally {
+        set({ loading: false })
+      }
+    },
 
-  async createSession(scope: string) {
-    const http = _httpClient
-    if (!http || !scope) return null
-    log.info('Creating session, scope:', scope)
-    set({ loading: true })
-    try {
-      const session = await http.createAgentSession(scope)
-      await get().refreshSessions(scope)
-      set({ currentSessionId: session.id })
-      log.info('Session created:', session.id)
-      return session
-    } catch (err) {
-      log.error('Failed to create session:', err)
-      return null
-    } finally {
-      set({ loading: false })
-    }
-  },
+    async createSession(scope: string) {
+      const http = _httpClient
+      if (!http || !scope) return null
+      log.info('Creating session, scope:', scope)
+      set({ loading: true })
+      try {
+        const session = await http.createAgentSession(scope)
+        const enriched = await http.getAgentSession(session.id, scope)
+        _lastFetchTime.set(session.id, Date.now())
+        set((s) => ({
+          sessions: [enriched, ...s.sessions.filter((sess) => sess.id !== session.id)],
+          currentSessionId: session.id
+        }))
+        log.info('Session created:', session.id)
+        return session
+      } catch (err) {
+        log.error('Failed to create session:', err)
+        return null
+      } finally {
+        set({ loading: false })
+      }
+    },
 
-  async deleteSession(id: string, scope: string) {
-    const http = _httpClient
-    if (!http || !scope) return
-    log.info('Deleting session:', id)
-    set({ loading: true })
-    try {
-      await http.deleteAgentSession(id, scope)
+    async deleteSession(id: string, scope: string) {
+      const http = _httpClient
+      if (!http || !scope) return
+      log.info('Deleting session:', id)
+      set({ loading: true })
+      try {
+        await http.deleteAgentSession(id, scope)
+      } catch (err) {
+        log.warn('Server delete failed (removing locally):', err)
+      }
+      _lastFetchTime.delete(id)
       const state = get()
       if (state.currentSessionId === id) {
         set({ currentSessionId: null })
         const { [id]: _, ...rest } = state.streamingStates
         set({ streamingStates: rest })
       }
-      await get().refreshSessions(scope)
-    } finally {
+      set((s) => ({
+        sessions: s.sessions.filter((sess) => sess.id !== id)
+      }))
       set({ loading: false })
-    }
-  },
+    },
 
-  async loadSession(id: string, scope: string) {
-    const http = _httpClient
-    if (!http || !scope) return null
-    log.debug('Loading session:', id)
-    set({ loading: true, error: null })
-    try {
-      const session = await http.getAgentSession(id, scope)
-      const state = get()
-      const isStreaming = state.streamingStates[id]?.sending
+    async loadSession(id: string, scope: string) {
+      const http = _httpClient
+      if (!http || !scope) return null
+
+      const _t0 = performance.now()
+
+      // In-flight dedup: if a request for the same session is already pending, reuse it
+      const inflightKey = `${id}:${scope}`
+      const existing = _loadInflight.get(inflightKey)
+
+      // Always optimistically switch to this session
+      const prevState = get()
+      const isStreaming = prevState.streamingStates[id]?.sending
+      const prevSessionId = prevState.currentSessionId
       set({
         currentSessionId: id,
+        error: null,
         ...(isStreaming
           ? {}
           : {
               streamingStates: {
-                ...state.streamingStates,
+                ...prevState.streamingStates,
                 [id]: { ...DEFAULT_STREAMING_STATE }
               }
             })
       })
-      set((s) => {
-        const exists = s.sessions.some((sess) => sess.id === id)
-        return {
-          sessions: exists
-            ? s.sessions.map((sess) => (sess.id === id ? session : sess))
-            : [...s.sessions, session]
-        }
-      })
-      return session
-    } catch (err) {
-      log.error('Failed to load session:', err)
-      return null
-    } finally {
-      set({ loading: false })
-    }
-  },
 
-  async updateSession(id: string, update: { llmSummary?: string }, scope: string) {
-    const http = _httpClient
-    if (!http || !scope) return null
-    try {
-      const session = await http.updateAgentSession(id, update, scope)
-      set((s) => ({
-        sessions: s.sessions.map((sess) => (sess.id === id ? { ...sess, ...session } : sess))
-      }))
-      await get().refreshSessions(scope)
-      return session
-    } catch (err) {
-      log.error('Failed to update session:', err)
-      return null
-    }
-  },
-
-  switchSession(id: string | null) {
-    log.debug('Switching session:', id)
-    set({ currentSessionId: id })
-  },
-
-  async stopGeneration(sessionId: string, scope: string) {
-    log.info('Stopping generation:', sessionId)
-    const http = _httpClient
-    if (http) {
-      try {
-        await http.stopAgentChat(sessionId, scope)
-      } catch (err) {
-        log.warn('Stop generation request failed:', err)
+      if (existing) {
+        log.debug('Reusing in-flight loadSession for:', id)
+        return existing
       }
-    }
-    const internals = getInternals(sessionId)
-    const ac = internals.abortController
-    if (ac) {
-      const timer = setTimeout(() => {
-        const current = getInternals(sessionId)
-        if (current.abortController === ac) {
-          ac.abort()
-          current.abortController = null
-        }
-      }, 3000)
-      internals.stopTimeout = timer
-    }
-  },
 
-  async respondToInteract(
-    sessionId: string,
-    requestId: string,
-    approved: boolean,
-    scope: string,
-    paths?: string[]
-  ) {
-    const http = _httpClient
-    if (!http) return
-    try {
-      await http.respondToInteract(sessionId, requestId, approved, { paths, scope })
-      log.debug('Interact response sent:', requestId, approved)
-    } catch (err) {
-      log.error('Failed to send interact response:', err)
-      const internals = getInternals(sessionId)
-      internals.pendingInteractRef = null
-      updateStreamingState(setStreaming, sessionId, { pendingInteract: null })
-    }
-  },
-
-  handleSyncEvent(event: string, scope: string) {
-    if (!event.startsWith('agent:')) return
-    log.debug('Sync event received:', event, 'scope:', scope)
-    if (scope) void get().refreshSessions(scope)
-    const state = get()
-    const currentId = state.currentSessionId
-    if (currentId) {
-      const isStreaming = state.streamingStates[currentId]?.sending
-      if (!isStreaming) {
-        void get().loadSession(currentId, scope)
-      }
-    }
-  },
-
-  async sendMessage(
-    sessionId: string,
-    content: string,
-    scope: string,
-    fileRefs?: FilePathRef[],
-    model?: string
-  ): Promise<string | null> {
-    const http = _httpClient
-    if (!http || !content.trim()) return null
-
-    const sessionObj = get().sessions.find((s) => s.id === sessionId)
-    if (!sessionObj) return null
-
-    const internals = getInternals(sessionId)
-    const selectedModel = model ?? get().selectedModel
-    log.info('Sending message, session:', sessionId, 'model:', selectedModel, 'contentLen:', content.trim().length)
-
-    updateStreamingState(setStreaming, sessionId, {
-      sending: true,
-      thinking: false,
-      pendingInteract: null
-    })
-    set({ error: null })
-    internals.lastContentTime = Date.now()
-    internals.pendingInteractRef = null
-
-    const ac = new AbortController()
-    internals.abortController = ac
-
-    const now = Date.now()
-    const userMsg: AgentMessage = {
-      id: tmpId('user'),
-      role: 'user',
-      parts: [{ type: 'text', content: content.trim() }],
-      createdAt: now
-    }
-    const assistantMsg: AgentMessage = {
-      id: tmpId('assistant'),
-      role: 'assistant',
-      parts: [],
-      createdAt: now
-    }
-
-    updateStreamingState(setStreaming, sessionId, {
-      optimisticMessages: [userMsg, assistantMsg]
-    })
-
-    const acc = createStreamAccumulator()
-    const chunkCtx = { set: setStreaming, get: getStreaming, sessionId, internals, acc }
-
-    try {
-      await http.streamChat(sessionId, content.trim(), {
-        scope,
-        signal: ac.signal,
-        model: selectedModel,
-        fileRefs,
-        onChunk: (chunk) => processStreamChunk(chunk, chunkCtx),
-        onError: (msg) => set({ error: msg })
-      })
-
-      mergeOptimisticIntoSession(setStreaming, getStreaming, sessionId, acc, userMsg, assistantMsg)
-      log.info('Stream completed, session:', sessionId)
-      updateStreamingState(setStreaming, sessionId, { optimisticMessages: [] })
-      await get().refreshSessions(scope)
-      return acc.commandResultContent ?? getTextContent({ parts: acc.parts })
-    } catch (err) {
-      const isAbort = err instanceof Error && err.name === 'AbortError'
-      if (isAbort) {
-        log.info('Stream aborted, session:', sessionId)
-        mergeAbortedIntoSession(
-          setStreaming,
-          getStreaming,
-          sessionId,
-          userMsg,
-          acc.lastModel,
-          acc.lastUsage
+      // Cache hit: session already in store → return immediately, optionally revalidate in background
+      const cached = prevState.sessions.find((s) => s.id === id)
+      if (cached) {
+        console.log(
+          `[perf] loadSession CACHE HIT %c${(performance.now() - _t0).toFixed(1)}ms`,
+          'color:#4CAF50;font-weight:bold',
+          {
+            from: prevSessionId?.slice(0, 8),
+            to: id.slice(0, 8),
+            messages: cached.messages?.length
+          }
         )
-        updateStreamingState(setStreaming, sessionId, { optimisticMessages: [] })
-      } else {
-        log.error('Stream error:', err instanceof Error ? err.message : String(err))
-        set({ error: err instanceof Error ? err.message : '发送失败' })
-        updateStreamingState(setStreaming, sessionId, { optimisticMessages: [] })
+        _backgroundRevalidate(id, scope)
+        return cached
       }
-      return null
-    } finally {
-      internals.abortController = null
-      if (internals.stopTimeout) {
-        clearTimeout(internals.stopTimeout)
-        internals.stopTimeout = null
+
+      // Cache miss: first-time load via HTTP
+      log.debug('Loading session (cache miss):', id)
+      set({ loading: true })
+
+      const promise = (async (): Promise<AgentSession | null> => {
+        const _tHttp0 = performance.now()
+        try {
+          const session = await http.getAgentSession(id, scope)
+          _lastFetchTime.set(id, Date.now())
+          console.log(
+            `[perf] loadSession HTTP %c${(performance.now() - _tHttp0).toFixed(1)}ms`,
+            'color:#2196F3;font-weight:bold',
+            { messages: session.messages?.length }
+          )
+
+          set((s) => {
+            const exists = s.sessions.some((sess) => sess.id === id)
+            return {
+              sessions: exists
+                ? s.sessions.map((sess) => (sess.id === id ? session : sess))
+                : [...s.sessions, session]
+            }
+          })
+
+          return session
+        } catch (err) {
+          log.error('Failed to load session:', err)
+          return null
+        } finally {
+          _loadInflight.delete(inflightKey)
+          set({ loading: false })
+          console.log(
+            `[perf] loadSession TOTAL %c${(performance.now() - _t0).toFixed(1)}ms`,
+            'color:#E91E63;font-weight:bold'
+          )
+        }
+      })()
+
+      _loadInflight.set(inflightKey, promise)
+      return promise
+    },
+
+    async updateSession(id: string, update: { llmSummary?: string }, scope: string) {
+      const http = _httpClient
+      if (!http || !scope) return null
+      try {
+        const session = await http.updateAgentSession(id, update, scope)
+        set((s) => ({
+          sessions: s.sessions.map((sess) => (sess.id === id ? { ...sess, ...session } : sess))
+        }))
+        return session
+      } catch (err) {
+        log.error('Failed to update session:', err)
+        return null
       }
-      internals.lastContentTime = 0
-      internals.pendingInteractRef = null
+    },
+
+    switchSession(id: string | null) {
+      log.debug('Switching session:', id)
+      set({ currentSessionId: id })
+    },
+
+    async stopGeneration(sessionId: string, scope: string) {
+      log.info('Stopping generation:', sessionId)
+      const http = _httpClient
+      if (http) {
+        try {
+          await http.stopAgentChat(sessionId, scope)
+        } catch (err) {
+          log.warn('Stop generation request failed:', err)
+        }
+      }
+      const internals = getInternals(sessionId)
+      const ac = internals.abortController
+      if (ac) {
+        const timer = setTimeout(() => {
+          const current = getInternals(sessionId)
+          if (current.abortController === ac) {
+            ac.abort()
+            current.abortController = null
+          }
+        }, 3000)
+        internals.stopTimeout = timer
+      }
+    },
+
+    async respondToInteract(
+      sessionId: string,
+      requestId: string,
+      approved: boolean,
+      scope: string,
+      paths?: string[]
+    ) {
+      const http = _httpClient
+      if (!http) return
+      try {
+        await http.respondToInteract(sessionId, requestId, approved, {
+          paths,
+          scope
+        })
+      } catch (err) {
+        log.error('respondToInteract failed:', err)
+        const internals = getInternals(sessionId)
+        internals.pendingInteractRef = null
+        updateStreamingState(setStreaming, sessionId, { pendingInteract: null })
+      }
+    },
+
+    async rollbackToCheckpoint(
+      sessionId: string,
+      checkpointId: string,
+      scope: string,
+      restoreFiles = true
+    ): Promise<RollbackResult | null> {
+      const http = _httpClient
+      if (!http) return null
+      log.info('Rolling back session:', sessionId, 'to checkpoint:', checkpointId)
+      set({ loading: true, error: null })
+      try {
+        const result = await http.rollbackToCheckpoint(sessionId, checkpointId, {
+          restoreFiles,
+          scope
+        })
+        set((s) => ({
+          sessions: s.sessions.map((sess) =>
+            sess.id === sessionId ? { ...sess, ...result.session } : sess
+          )
+        }))
+        _lastFetchTime.set(sessionId, Date.now())
+        updateStreamingState(setStreaming, sessionId, {
+          sending: false,
+          thinking: false,
+          optimisticMessages: [],
+          pendingInteract: null
+        })
+        log.info(
+          'Rollback complete: removed %d messages, restored %d files',
+          result.rolledBackMessageCount,
+          result.restoredFiles.length
+        )
+        return result
+      } catch (err) {
+        log.error('Rollback failed:', err)
+        set({ error: err instanceof Error ? err.message : '回退失败' })
+        return null
+      } finally {
+        set({ loading: false })
+      }
+    },
+
+    handleSyncEvent(event: string, scope: string, payload?: Record<string, unknown>) {
+      if (!event.startsWith('agent:')) return
+      const http = _httpClient
+      log.debug('Sync event received:', event, 'scope:', scope)
+
+      if (event === 'agent:session.created') {
+        const sessionId = payload?.sessionId as string | undefined
+        if (sessionId && http && scope) {
+          void http
+            .getAgentSession(sessionId, scope)
+            .then((session) => {
+              _lastFetchTime.set(sessionId, Date.now())
+              set((s) => {
+                const exists = s.sessions.some((sess) => sess.id === sessionId)
+                return exists ? s : { sessions: [session, ...s.sessions] }
+              })
+            })
+            .catch(() => {
+              if (scope) void get().refreshSessions(scope)
+            })
+        }
+        return
+      }
+
+      if (event === 'agent:session.deleted') {
+        const sessionId = payload?.sessionId as string | undefined
+        if (sessionId) {
+          _lastFetchTime.delete(sessionId)
+          set((s) => {
+            const next: Partial<AgentSessionStoreState> = {
+              sessions: s.sessions.filter((sess) => sess.id !== sessionId)
+            }
+            if (s.currentSessionId === sessionId) {
+              next.currentSessionId = null
+              const { [sessionId]: _, ...rest } = s.streamingStates
+              next.streamingStates = rest
+            }
+            return next
+          })
+        }
+        return
+      }
+
+      // agent:message.completed / agent:session.compressing / agent:session.rolledBack
+      // Mark affected session as stale and trigger background revalidation (no blocking HTTP).
+      const affectedSessionId = (payload?.sessionId as string | undefined) ?? get().currentSessionId
+      if (affectedSessionId) {
+        _invalidateSessionCache(affectedSessionId)
+        const state = get()
+        const isStreaming = state.streamingStates[affectedSessionId]?.sending
+        if (!isStreaming) {
+          _backgroundRevalidate(affectedSessionId, scope)
+        }
+      }
+    },
+
+    async sendMessage(
+      sessionId: string,
+      content: string,
+      scope: string,
+      fileRefs?: FilePathRef[],
+      model?: string
+    ): Promise<string | null> {
+      const http = _httpClient
+      if (!http || !content.trim()) return null
+
+      const sessionObj = get().sessions.find((s) => s.id === sessionId)
+      if (!sessionObj) return null
+
+      const internals = getInternals(sessionId)
+      const selectedModel = model ?? get().selectedModel
+      log.info(
+        'Sending message, session:',
+        sessionId,
+        'model:',
+        selectedModel,
+        'contentLen:',
+        content.trim().length
+      )
+
       updateStreamingState(setStreaming, sessionId, {
-        sending: false,
+        sending: true,
         thinking: false,
         pendingInteract: null
       })
+      set({ error: null })
+      internals.lastContentTime = Date.now()
+      internals.pendingInteractRef = null
+
+      const ac = new AbortController()
+      internals.abortController = ac
+
+      const now = Date.now()
+      const userMsg: AgentMessage = {
+        id: tmpId('user'),
+        role: 'user',
+        parts: [{ type: 'text', content: content.trim() }],
+        createdAt: now
+      }
+      const assistantMsg: AgentMessage = {
+        id: tmpId('assistant'),
+        role: 'assistant',
+        parts: [],
+        createdAt: now
+      }
+
+      updateStreamingState(setStreaming, sessionId, {
+        optimisticMessages: [userMsg, assistantMsg]
+      })
+
+      const acc = createStreamAccumulator()
+      const chunkCtx = { set: setStreaming, get: getStreaming, sessionId, internals, acc }
+
+      try {
+        await http.streamChat(sessionId, content.trim(), {
+          scope,
+          signal: ac.signal,
+          model: selectedModel,
+          fileRefs,
+          onChunk: (chunk) => processStreamChunk(chunk, chunkCtx),
+          onError: (msg) => set({ error: msg })
+        })
+
+        mergeOptimisticIntoSession(
+          setStreaming,
+          getStreaming,
+          sessionId,
+          acc,
+          userMsg,
+          assistantMsg
+        )
+        _lastFetchTime.set(sessionId, Date.now())
+        log.info('Stream completed, session:', sessionId)
+        updateStreamingState(setStreaming, sessionId, { optimisticMessages: [] })
+        return acc.commandResultContent ?? getTextContent({ parts: acc.parts })
+      } catch (err) {
+        const isAbort = err instanceof Error && err.name === 'AbortError'
+        if (isAbort) {
+          log.info('Stream aborted, session:', sessionId)
+          mergeAbortedIntoSession(
+            setStreaming,
+            getStreaming,
+            sessionId,
+            userMsg,
+            acc.lastModel,
+            acc.lastUsage
+          )
+          updateStreamingState(setStreaming, sessionId, { optimisticMessages: [] })
+        } else {
+          log.error('Stream error:', err instanceof Error ? err.message : String(err))
+          set({ error: err instanceof Error ? err.message : '发送失败' })
+          updateStreamingState(setStreaming, sessionId, { optimisticMessages: [] })
+        }
+        return null
+      } finally {
+        internals.abortController = null
+        if (internals.stopTimeout) {
+          clearTimeout(internals.stopTimeout)
+          internals.stopTimeout = null
+        }
+        internals.lastContentTime = 0
+        internals.pendingInteractRef = null
+        updateStreamingState(setStreaming, sessionId, {
+          sending: false,
+          thinking: false,
+          pendingInteract: null
+        })
+      }
     }
-  }
   }
 })
 
-// --- 选择器 ---
-
-/** 获取当前会话对象（从 sessions 列表中查找） */
-export function selectCurrentSession(state: AgentSessionStoreState): AgentSession | null {
-  if (!state.currentSessionId) return null
-  return state.sessions.find((s) => s.id === state.currentSessionId) ?? null
-}
-
-/** 获取当前会话的流式状态 */
-export function selectCurrentStreamingState(
-  state: AgentSessionStoreState
-): SessionStreamingState | undefined {
-  if (!state.currentSessionId) return undefined
-  return state.streamingStates[state.currentSessionId]
-}
-
-/** 是否有任何会话正在流式输出（用于导航栏后台指示器） */
-export function selectAnySessionSending(state: AgentSessionStoreState): boolean {
-  return Object.values(state.streamingStates).some((ss) => ss.sending)
-}
-
-/** 是否有任何会话正在等待用户交互（用于全局提示） */
-export function selectAnyPendingInteract(state: AgentSessionStoreState): boolean {
-  return Object.values(state.streamingStates).some((ss) => ss.pendingInteract != null)
-}
-
-/** 获取所有有待交互请求的会话 ID 集合 */
-export function selectPendingInteractSessionIds(state: AgentSessionStoreState): Set<string> {
-  const ids = new Set<string>()
-  for (const [sessionId, ss] of Object.entries(state.streamingStates)) {
-    if (ss.pendingInteract != null) ids.add(sessionId)
-  }
-  return ids
-}
-
-/** 获取第一个待交互请求的详细信息（用于全局通知） */
-export function selectFirstPendingInteract(state: AgentSessionStoreState): {
-  sessionId: string
-  interact: InteractRequestPayload
-} | null {
-  for (const [sessionId, ss] of Object.entries(state.streamingStates)) {
-    if (ss.pendingInteract != null) {
-      return { sessionId, interact: ss.pendingInteract }
-    }
-  }
-  return null
-}
+// --- 选择器（从独立文件导入，避免 Vite ESM 分析问题） ---
+export {
+  selectCurrentSession,
+  selectCurrentStreamingState,
+  selectAnySessionSending,
+  selectAnyPendingInteract,
+  selectPendingInteractSessionIds,
+  selectFirstPendingInteract
+} from './agentSessionSelectors'

@@ -10,6 +10,8 @@ interface VersionSummary {
   timestamp: string
   title: string
   contentHash: string
+  changedBy?: { type: 'agent' | 'user' | 'system'; sessionId?: string; source?: string }
+  changeReason?: string
 }
 
 interface UseDocumentVersionsReturn {

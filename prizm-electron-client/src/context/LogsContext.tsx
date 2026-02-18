@@ -1,7 +1,15 @@
 /**
  * 日志共享上下文
  */
-import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react'
+import {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useEffect,
+  useMemo,
+  type ReactNode
+} from 'react'
 
 export type LogType = 'info' | 'success' | 'error' | 'warning'
 
@@ -69,7 +77,9 @@ export function LogsProvider({ children }: { children: ReactNode }) {
     return unsubscribe
   }, [])
 
-  return <LogsContext.Provider value={{ logs, addLog, clearLogs }}>{children}</LogsContext.Provider>
+  const contextValue = useMemo(() => ({ logs, addLog, clearLogs }), [logs, addLog, clearLogs])
+
+  return <LogsContext.Provider value={contextValue}>{children}</LogsContext.Provider>
 }
 
 export function useLogsContext(): LogsContextValue {

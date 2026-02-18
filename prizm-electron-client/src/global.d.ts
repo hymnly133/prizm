@@ -69,9 +69,12 @@ declare global {
         symbolColor?: string
         height?: number
       }): Promise<boolean>
+      /** 设置原生主题模式，同步到主进程 nativeTheme 并持久化 */
+      setNativeTheme(mode: 'auto' | 'light' | 'dark'): Promise<boolean>
     }
     quickPanelApi?: {
-      onShow(callback: (data: { selectedText: string }) => void): () => void
+      onShow(callback: (data: { clipboardText: string }) => void): () => void
+      onSelectionUpdate(callback: (data: { selectedText: string }) => void): () => void
       executeAction(action: string, selectedText: string): void
       hidePanel(): void
     }

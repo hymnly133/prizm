@@ -5,7 +5,7 @@ import { createClientLogger } from '@prizm/client-core'
 import { memo, useCallback, useEffect } from 'react'
 
 const log = createClientLogger('ChatInput')
-import { X, FileText, StickyNote, ListTodo, File } from 'lucide-react'
+import { X, FileText, StickyNote, ListTodo, File, Code2 } from 'lucide-react'
 import { useChatInputStore } from './store'
 import type { InputRef } from './store/initialState'
 
@@ -36,6 +36,12 @@ const typeConfig: Record<
     color: 'var(--ant-color-warning-text, #d46b08)',
     bg: 'var(--ant-color-warning-bg, #fff7e6)',
     border: 'var(--ant-color-warning-border, #ffd591)'
+  },
+  snippet: {
+    icon: Code2,
+    color: 'var(--prizm-snippet-color, #722ed1)',
+    bg: 'var(--prizm-snippet-bg, #f9f0ff)',
+    border: 'var(--prizm-snippet-border, #d3adf7)'
   }
 }
 

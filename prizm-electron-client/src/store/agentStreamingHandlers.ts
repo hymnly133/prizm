@@ -149,7 +149,6 @@ export function processStreamChunk(chunk: StreamChatChunk, ctx: ProcessChunkCont
     'requestId' in chunk.value
   ) {
     const interact = chunk.value as InteractRequestPayload
-    log.debug('Interact request:', interact.requestId, interact.toolName, interact.paths.join(', '))
     internals.pendingInteractRef = interact
     updateStreamingState(set, sessionId, { pendingInteract: interact })
   }
@@ -176,10 +175,7 @@ export function processStreamChunk(chunk: StreamChatChunk, ctx: ProcessChunkCont
     acc.segmentContent += chunk.value
     updateOptimisticMessages(set, get, sessionId, (prev) => {
       if (prev.length < 2) return prev
-      const liveParts = [
-        ...acc.parts,
-        { type: 'text' as const, content: acc.segmentContent }
-      ]
+      const liveParts = [...acc.parts, { type: 'text' as const, content: acc.segmentContent }]
       return [prev[0], { ...prev[1], parts: liveParts }]
     })
   }
@@ -206,9 +202,7 @@ export function processStreamChunk(chunk: StreamChatChunk, ctx: ProcessChunkCont
       acc.parts.push({ type: 'text', content: acc.segmentContent })
       acc.segmentContent = ''
     }
-    const existing = acc.parts.find(
-      (p): p is MessagePartTool => p.type === 'tool' && p.id === id
-    )
+    const existing = acc.parts.find((p): p is MessagePartTool => p.type === 'tool' && p.id === id)
     const newParts: MessagePart[] = existing
       ? acc.parts.map((p) =>
           p.type === 'tool' && p.id === id ? { ...p, result: p.result + chunkText } : p
@@ -240,7 +234,6 @@ export function processStreamChunk(chunk: StreamChatChunk, ctx: ProcessChunkCont
     'id' in chunk.value
   ) {
     const tc = chunk.value as ToolCallRecord
-    log.debug('Tool call:', tc.status ?? 'done', tc.id, tc.name)
     if (
       internals.pendingInteractRef &&
       tc.id === internals.pendingInteractRef.toolCallId &&
@@ -329,10 +322,7 @@ export function mergeOptimisticIntoSession(
     const baseSession = s.sessions.find((sess) => sess.id === sessionId)
     if (!baseSession) return {}
 
-    if (
-      acc.lastMessageId &&
-      baseSession.messages.some((m) => m.id === acc.lastMessageId)
-    ) {
+    if (acc.lastMessageId && baseSession.messages.some((m) => m.id === acc.lastMessageId)) {
       return {}
     }
 

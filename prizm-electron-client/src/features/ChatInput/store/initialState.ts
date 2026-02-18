@@ -6,12 +6,12 @@ import type { ActionKeys } from '../ActionBar/config'
 /** 输入框中的一条引用（显示在引用栏，不嵌入编辑器） */
 export interface InputRef {
   /** 引用类型 */
-  type: 'doc' | 'note' | 'todo' | 'file'
-  /** 标识：doc/note/todo 为 id，file 为编码后路径 */
+  type: 'doc' | 'note' | 'todo' | 'file' | 'snippet'
+  /** 标识：doc/note/todo 为 id，file 为编码后路径，snippet 为 source#timestamp */
   key: string
   /** 显示名称 */
   label: string
-  /** 发送时注入消息的 markdown，如 @(doc:id) 或 @(file:path) */
+  /** 发送时注入消息的 markdown，如 @(doc:id) 或 @(file:path) 或代码块 */
   markdown: string
 }
 

@@ -5,7 +5,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { usePrizmContext } from '../context/PrizmContext'
 import { subscribeSyncEvents } from '../events/syncEventEmitter'
-import type { Document } from '@prizm/client-core'
+import type { EnrichedDocument } from '@prizm/client-core'
 
 interface UseDocumentOptions {
   scope?: string
@@ -14,7 +14,7 @@ interface UseDocumentOptions {
 }
 
 interface UseDocumentReturn {
-  document: Document | null
+  document: EnrichedDocument | null
   loading: boolean
   saving: boolean
   error: string | null
@@ -64,7 +64,7 @@ export function useDocument(options: UseDocumentOptions = {}): UseDocumentReturn
   const { manager } = usePrizmContext()
   const { scope, autoSaveMs = 5000 } = options
 
-  const [document, setDocument] = useState<Document | null>(null)
+  const [document, setDocument] = useState<EnrichedDocument | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)

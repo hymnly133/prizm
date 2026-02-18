@@ -5,7 +5,8 @@
  * @ 引用：选中后添加到 inputRefs（引用栏），清除输入中的 @xxx 文本
  * / 命令：选中后替换为纯文本 /(cmd)
  */
-import { List, Tag } from '@lobehub/ui'
+import { Tag } from '@lobehub/ui'
+import { AccentList } from '../../components/ui/AccentList'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useChatInputStore, useStoreApi } from './store'
 import type { ScopeRefItem, SlashCommandItem } from './store/initialState'
@@ -244,6 +245,7 @@ const MentionSlashOverlay = memo(() => {
 
   const listItems = useMemo(() => {
     return candidates.map((c, i) => {
+      const isActive = selectedIndex === i
       if (isAt) {
         const item = c as ScopeRefItem
         const key = `${item.kind}:${item.id}`
@@ -253,7 +255,7 @@ const MentionSlashOverlay = memo(() => {
           key,
           title: `@${refKey}:${item.id.slice(0, 8)} ${title}`,
           addon: <Tag>{refKey}</Tag>,
-          active: selectedIndex === i,
+          active: isActive,
           onClick: () => selectItem(i),
           onMouseEnter: () => setSelectedIndex(i)
         }
@@ -272,7 +274,7 @@ const MentionSlashOverlay = memo(() => {
             {cmd.description}
           </span>
         ),
-        active: selectedIndex === i,
+        active: isActive,
         onClick: () => selectItem(i),
         onMouseEnter: () => setSelectedIndex(i)
       }
@@ -313,7 +315,7 @@ const MentionSlashOverlay = memo(() => {
         padding: 4
       }}
     >
-      <List activeKey={activeKey} items={listItems} />
+      <AccentList activeKey={activeKey} items={listItems} />
     </div>
   )
 })

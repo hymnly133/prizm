@@ -7,13 +7,13 @@
  * 否则 useSyncExternalStore 的 getSnapshot 每次返回新引用会触发无限循环。
  */
 import { useStoreWithEqualityFn } from 'zustand/traditional'
+import { useAgentSessionStore } from '../store/agentSessionStore'
 import {
-  useAgentSessionStore,
   selectAnySessionSending,
   selectAnyPendingInteract,
   selectPendingInteractSessionIds,
   selectFirstPendingInteract
-} from '../store/agentSessionStore'
+} from '../store/agentSessionSelectors'
 import type { InteractRequestPayload } from '@prizm/client-core'
 
 /** Set 浅比较 */

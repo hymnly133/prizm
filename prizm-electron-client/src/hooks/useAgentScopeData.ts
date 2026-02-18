@@ -1,8 +1,9 @@
 /**
  * 获取 @ 引用候选与 slash 命令列表，供输入框 @ / 下拉使用
  */
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { usePrizmContext } from '../context/PrizmContext'
+import { subscribeSyncEvents } from '../events/syncEventEmitter'
 
 export interface ScopeRefItem {
   id: string
@@ -51,6 +52,29 @@ export function useAgentScopeData(scope: string) {
 
   useEffect(() => {
     load()
+  }, [load])
+
+  // WS 订阅：文档/待办变更时刷新 @引用候选（防抖 1s）
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    const SCOPE_DATA_EVENTS = new Set([
+      'document:created',
+      'document:deleted',
+      'todo_list:created',
+      'todo_list:deleted'
+    ])
+    const unsub = subscribeSyncEvents((eventType) => {
+      if (!SCOPE_DATA_EVENTS.has(eventType)) return
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+      debounceRef.current = setTimeout(() => {
+        debounceRef.current = null
+        void load()
+      }, 1000)
+    })
+    return () => {
+      unsub()
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
   }, [load])
 
   return { scopeItems, slashCommands, loading, reload: load }

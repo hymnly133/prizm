@@ -3,47 +3,35 @@
  *
  * 所有数据和流式逻辑由 agentSessionStore（Zustand）管理，
  * 此 hook 负责：
- * 1. 向 Store 注入 HTTP client
- * 2. 将 sync events 转发给 Store
- * 3. 绑定 scope 参数，向 AgentPage 暴露与旧 API 兼容的返回值
+ * 1. 将 sync events 转发给 Store
+ * 2. 绑定 scope 参数，向 AgentPage 暴露与旧 API 兼容的返回值
+ *
+ * HTTP client 注入和 sessions 初始加载由 useScopeDataBinding 统一处理。
  */
-import { useEffect, useCallback } from 'react'
-import { usePrizmContext, useSyncEventContext } from '../context/PrizmContext'
-import {
-  useAgentSessionStore,
-  selectCurrentSession,
-  selectCurrentStreamingState
-} from '../store/agentSessionStore'
-import type { AgentSession } from '@prizm/client-core'
+import { useEffect, useCallback, useRef } from 'react'
+import { useAgentSessionStore } from '../store/agentSessionStore'
+import { selectCurrentSession, selectCurrentStreamingState } from '../store/agentSessionSelectors'
+import { subscribeSyncEvents, type SyncEventPayload } from '../events/syncEventEmitter'
+import type { EnrichedSession } from '@prizm/client-core'
 import type { FilePathRef } from '@prizm/shared'
 
 export function useAgent(scope: string) {
-  const { manager } = usePrizmContext()
-  const { lastSyncEvent } = useSyncEventContext()
+  const scopeRef = useRef(scope)
+  scopeRef.current = scope
 
-  // --- 注入 HTTP client ---
+  // --- 转发 sync events（使用 emitter 获取完整 payload）---
   useEffect(() => {
-    const http = manager?.getHttpClient()
-    if (http) {
-      useAgentSessionStore.getState().setHttpClient(http)
-    }
-  }, [manager])
-
-  // --- 转发 sync events ---
-  useEffect(() => {
-    if (lastSyncEvent?.startsWith('agent:') && scope) {
-      useAgentSessionStore.getState().handleSyncEvent(lastSyncEvent, scope)
-    }
-  }, [lastSyncEvent, scope])
-
-  // --- 初始化加载 ---
-  useEffect(() => {
-    const http = manager?.getHttpClient()
-    if (http && scope) {
-      useAgentSessionStore.getState().setHttpClient(http)
-      void useAgentSessionStore.getState().refreshSessions(scope)
-    }
-  }, [manager, scope])
+    const unsub = subscribeSyncEvents((eventType: string, payload?: SyncEventPayload) => {
+      if (eventType.startsWith('agent:') && scopeRef.current) {
+        useAgentSessionStore.getState().handleSyncEvent(
+          eventType,
+          scopeRef.current,
+          payload as Record<string, unknown> | undefined
+        )
+      }
+    })
+    return unsub
+  }, [])
 
   // --- 从 Store 选取状态 ---
   const sessions = useAgentSessionStore((s) => s.sessions)
@@ -87,7 +75,7 @@ export function useAgent(scope: string) {
   )
 
   const sendMessage = useCallback(
-    (content: string, sessionOverride?: AgentSession | null, fileRefs?: FilePathRef[]) => {
+    (content: string, sessionOverride?: EnrichedSession | null, fileRefs?: FilePathRef[]) => {
       const state = useAgentSessionStore.getState()
       const sid = sessionOverride?.id ?? state.currentSessionId
       if (!sid) return Promise.resolve(null)
@@ -104,7 +92,7 @@ export function useAgent(scope: string) {
     return Promise.resolve()
   }, [scope])
 
-  const setCurrentSession = useCallback((s: AgentSession | null) => {
+  const setCurrentSession = useCallback((s: EnrichedSession | null) => {
     useAgentSessionStore.getState().switchSession(s?.id ?? null)
   }, [])
 
@@ -119,6 +107,17 @@ export function useAgent(scope: string) {
         return state.respondToInteract(state.currentSessionId, requestId, approved, scope, paths)
       }
       return Promise.resolve()
+    },
+    [scope]
+  )
+
+  const rollbackToCheckpoint = useCallback(
+    (checkpointId: string, restoreFiles?: boolean) => {
+      const state = useAgentSessionStore.getState()
+      if (state.currentSessionId) {
+        return state.rollbackToCheckpoint(state.currentSessionId, checkpointId, scope, restoreFiles)
+      }
+      return Promise.resolve(null)
     },
     [scope]
   )
@@ -143,7 +142,8 @@ export function useAgent(scope: string) {
     setSelectedModel,
     lastInjectedMemories,
     pendingInteract,
-    respondToInteract
+    respondToInteract,
+    rollbackToCheckpoint
   }
 }
 

@@ -4,7 +4,7 @@
  * 与触发方式（拖拽 / 手动按钮）解耦
  */
 import { createClientLogger } from '@prizm/client-core'
-import { createContext, useContext, useCallback, useState } from 'react'
+import { createContext, useContext, useCallback, useState, useMemo } from 'react'
 
 const log = createClientLogger('Import')
 import type { ImportItem, ReadFileResult } from '../types/import'
@@ -125,20 +125,28 @@ export function ImportProvider({ children }: { children: React.ReactNode }) {
     setImportState({ open: false, items: [] })
   }, [])
 
-  return (
-    <ImportContext.Provider
-      value={{
-        startImport,
-        startImportFromText,
-        startImportFromFileResults,
-        startImportFromFileDialog,
-        importState,
-        updateItemStatus,
-        updateAllItemsStatus,
-        closeImport
-      }}
-    >
-      {children}
-    </ImportContext.Provider>
+  const contextValue = useMemo<ImportContextValue>(
+    () => ({
+      startImport,
+      startImportFromText,
+      startImportFromFileResults,
+      startImportFromFileDialog,
+      importState,
+      updateItemStatus,
+      updateAllItemsStatus,
+      closeImport
+    }),
+    [
+      startImport,
+      startImportFromText,
+      startImportFromFileResults,
+      startImportFromFileDialog,
+      importState,
+      updateItemStatus,
+      updateAllItemsStatus,
+      closeImport
+    ]
   )
+
+  return <ImportContext.Provider value={contextValue}>{children}</ImportContext.Provider>
 }
