@@ -116,6 +116,21 @@ export function refreshStale(scope: string, sessionId: string): void {
 }
 
 /**
+ * 重置会话上下文状态（回退场景专用）。
+ * 回退后 provisions 和 activities 全部失效（引用了被回退的操作），
+ * 下一轮对话会自然重建。
+ */
+export function resetSessionContext(scope: string, sessionId: string): void {
+  const k = key(scope, sessionId)
+  const had = sessionMap.has(k)
+  sessionMap.delete(k)
+  if (had) {
+    // eslint-disable-next-line no-console
+    console.debug('[ContextTracker] resetSessionContext: scope=%s session=%s', scope, sessionId)
+  }
+}
+
+/**
  * 获取会话上下文状态（含最新 stale）
  */
 export function getSessionContext(scope: string, sessionId: string): SessionContextState | null {

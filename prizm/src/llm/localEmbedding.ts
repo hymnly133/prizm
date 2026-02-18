@@ -382,6 +382,14 @@ export class LocalEmbeddingService {
       this.state = 'idle'
       this.readyTimestamp = null
       this.dimension = 0
+
+      // 拒绝所有排队中的推理请求，防止 Promise 永远挂起
+      const pending = this.inferenceQueue.splice(0)
+      for (const p of pending) {
+        p.reject(new Error('Embedding model disposed'))
+      }
+      this.activeInferences = 0
+
       log.info('Embedding model disposed')
     }
   }

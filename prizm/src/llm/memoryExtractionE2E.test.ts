@@ -190,20 +190,17 @@ function buildMemCell(rounds: Round[], eventId: string): MemCell {
   }
 }
 
-function assertResultShape(r: NonNullable<Awaited<ReturnType<UnifiedExtractor['extractAll']>>>) {
+function assertResultShape(
+  r: NonNullable<Awaited<ReturnType<UnifiedExtractor['extractPerRound']>>>
+) {
   if (r.narrative) {
     expect(r.narrative.content, 'NARRATIVE.CONTENT 应为非空字符串').toBeTruthy()
     expect(typeof r.narrative.content).toBe('string')
     if (r.narrative.summary) expect(typeof r.narrative.summary).toBe('string')
-    if (r.narrative.keywords) {
-      expect(Array.isArray(r.narrative.keywords)).toBe(true)
-      r.narrative.keywords.forEach((k) => expect(typeof k).toBe('string'))
-    }
   }
   if (r.event_log?.atomic_fact?.length) {
     r.event_log.atomic_fact.forEach((f) => expect(typeof f).toBe('string'))
   }
-  if (r.event_log?.time) expect(typeof r.event_log.time).toBe('string')
   if (r.foresight?.length) {
     r.foresight.forEach((item) => {
       expect(item.content, 'FORESIGHT 条目的 content 应为非空').toBeTruthy()
@@ -228,9 +225,9 @@ describe.skipIf(!hasMimoKey)('记忆抽取 E2E（小米 MiMo + 多场景对话�
     '场景「%s」应抽到期望维度',
     async (_, scenario, index) => {
       const memcell = buildMemCell(scenario.rounds, `e2e-ev-${index}`)
-      const result = await extractor.extractAll(memcell)
+      const result = await extractor.extractPerRound(memcell)
 
-      expect(result, `[${scenario.name}] 统一抽取应返回非 null`).not.toBeNull()
+      expect(result, `[${scenario.name}] Pipeline 1 抽取应返回非 null`).not.toBeNull()
       const r = result!
 
       assertResultShape(r)

@@ -22,6 +22,7 @@ import fs from 'fs'
 import { randomUUID } from 'node:crypto'
 // DEFAULT_USER_ID 已迁移到 @prizm/evermemos 的 DEFAULT_USER_ID
 import { createLogger } from '../logger'
+import { memLog } from './memoryLogger'
 import {
   ensureMemoryDir,
   getUserMemoryDbPath,
@@ -55,20 +56,29 @@ interface ScopeManagerSet {
   memory: MemoryManager
   scopeOnlyMemory: MemoryManager
   retrieval: RetrievalManager
+  llmProvider: PrizmLLMAdapter
 }
 const _scopeManagers = new Map<string, ScopeManagerSet>()
-
-/** 当前请求的 dataScope，由 addMemoryInteraction 等设置 */
-let _currentDataScope: string = 'default'
-
-/** 当前请求的 sessionId（可选） */
-let _currentSessionId: string | undefined
 
 /** 仅测试用：注入后所有 retrieval（含 scope）均使用此 mock */
 let _testRetrievalOverride: RetrievalManager | null = null
 
-// Adapter for Prizm LLM Provider to EverMemOS LLM Provider
+/**
+ * Adapter for Prizm LLM Provider to EverMemOS LLM Provider.
+ *
+ * 每个实例绑定固定的 scope（不可变）和可变的 sessionId，
+ * 避免模块级全局变量在并发 async 操作中互相覆盖。
+ */
 class PrizmLLMAdapter implements ICompletionProvider {
+  private _sessionId: string | undefined
+
+  constructor(private readonly _scope: string = 'default') {}
+
+  /** 设置当前会话 ID（在每次记忆抽取前调用） */
+  setSessionId(sessionId: string | undefined): void {
+    this._sessionId = sessionId
+  }
+
   async generate(request: CompletionRequest): Promise<string> {
     const provider = getLLMProvider()
     const messages = [{ role: 'user', content: request.prompt }]
@@ -97,17 +107,17 @@ class PrizmLLMAdapter implements ICompletionProvider {
     } catch (err) {
       recordTokenUsage(
         category,
-        _currentDataScope,
+        this._scope,
         usage ?? { totalInputTokens: 0, totalOutputTokens: 0, totalTokens: 0 },
         model,
-        _currentSessionId,
+        this._sessionId,
         !usage
       )
       recordedInCatch = true
       throw err
     } finally {
       if (usage && !recordedInCatch) {
-        recordTokenUsage(category, _currentDataScope, usage, model, _currentSessionId)
+        recordTokenUsage(category, this._scope, usage, model, this._sessionId)
       }
     }
 
@@ -115,7 +125,6 @@ class PrizmLLMAdapter implements ICompletionProvider {
   }
 
   async getEmbedding(text: string): Promise<number[]> {
-    // 优先使用本地 embedding provider
     if (_localEmbeddingProvider) {
       return _localEmbeddingProvider(text)
     }
@@ -127,10 +136,6 @@ class PrizmLLMAdapter implements ICompletionProvider {
       return resp[0]
     }
 
-    // 无可用 embedding provider：返回空数组。
-    // MemoryManager 检查 embedding?.length，空数组会跳过向量插入。
-    // 文本去重（jieba Dice 系数）仍然有效。
-    // 当本地模型稍后就绪时，向量迁移任务会自动补全。
     if (!_mockEmbeddingWarned) {
       log.warn(
         'No embedding provider available — memories will be saved without vectors. ' +
@@ -260,7 +265,7 @@ export async function initEverMemService() {
     vector: userLancedb
   }
 
-  const llmProvider = new PrizmLLMAdapter()
+  const llmProvider = new PrizmLLMAdapter('__user__')
   const unifiedExtractor = new UnifiedExtractor(llmProvider)
   const userMemory = new MemoryManager(userStorage, {
     unifiedExtractor,
@@ -281,7 +286,7 @@ export async function initEverMemService() {
 
 // ==================== 向量迁移（Backfill） ====================
 
-let _backfillRunning = false
+let _backfillPromise: Promise<void> | null = null
 
 /**
  * 安排向量补全任务。
@@ -294,16 +299,24 @@ function scheduleVectorBackfill(): void {
 
 /** 执行向量补全。可被热重载或外部事件触发。 */
 export async function runVectorBackfill(): Promise<void> {
-  if (_backfillRunning) return
+  if (_backfillPromise) return _backfillPromise
   if (!_localEmbeddingProvider) {
     log.info('[VectorBackfill] No local embedding provider available, skipping')
     return
   }
 
-  _backfillRunning = true
+  _backfillPromise = doVectorBackfill()
+  try {
+    await _backfillPromise
+  } finally {
+    _backfillPromise = null
+  }
+}
+
+async function doVectorBackfill(): Promise<void> {
   log.info('[VectorBackfill] Starting vector backfill scan...')
 
-  const embeddingProvider = new PrizmLLMAdapter()
+  const embeddingProvider = new PrizmLLMAdapter('__backfill__')
   let totalBackfilled = 0
   let totalFailed = 0
 
@@ -354,8 +367,6 @@ export async function runVectorBackfill(): Promise<void> {
     }
   } catch (e) {
     log.error('[VectorBackfill] Backfill error:', e)
-  } finally {
-    _backfillRunning = false
   }
 
   if (totalBackfilled > 0 || totalFailed > 0) {
@@ -377,13 +388,30 @@ function getScopeManagers(scope: string): ScopeManagerSet {
       m = {
         memory: {} as MemoryManager,
         scopeOnlyMemory: {} as MemoryManager,
-        retrieval: _testRetrievalOverride
+        retrieval: _testRetrievalOverride,
+        llmProvider: new PrizmLLMAdapter(scope)
       }
       _scopeManagers.set(`__test__${scope}`, m)
     }
     return m
   }
   let m = _scopeManagers.get(scope)
+  if (m) {
+    // 校验缓存的 DB 文件仍然存在，否则失效重建
+    const cachedScopeRoot = scopeStore.getScopeRootPath(scope)
+    if (cachedScopeRoot) {
+      const expectedDbPath = getScopeMemoryDbPath(cachedScopeRoot)
+      if (!fs.existsSync(expectedDbPath)) {
+        memLog('cache:invalidate', {
+          scope,
+          detail: { reason: 'db_file_missing', expectedDbPath }
+        })
+        log.warn('Scope memory DB missing, invalidating cache:', scope, expectedDbPath)
+        _scopeManagers.delete(scope)
+        m = undefined
+      }
+    }
+  }
   if (m) return m
 
   const scopeRoot = scopeStore.getScopeRootPath(scope)
@@ -392,6 +420,7 @@ function getScopeManagers(scope: string): ScopeManagerSet {
   ensureScopeMemoryDir(scopeRoot)
   const scopeDbPath = getScopeMemoryDbPath(scopeRoot)
   const scopeVecPath = getScopeMemoryVecPath(scopeRoot)
+  memLog('cache:init', { scope, detail: { scopeDbPath, scopeVecPath } })
 
   const scopeSqlite = new SQLiteAdapter(scopeDbPath)
   const scopeLancedb = new LanceDBAdapter(scopeVecPath)
@@ -406,7 +435,7 @@ function getScopeManagers(scope: string): ScopeManagerSet {
   }
   const compositeStorage = createCompositeStorageAdapter(userStorage, scopeStorage)
 
-  const llmProvider = new PrizmLLMAdapter()
+  const llmProvider = new PrizmLLMAdapter(scope)
   const unifiedExtractor = new UnifiedExtractor(llmProvider)
 
   // composite: 写入按 group_id 路由（PROFILE→userDB，其余→scopeDB）
@@ -429,7 +458,7 @@ function getScopeManagers(scope: string): ScopeManagerSet {
     agenticCompletionProvider: llmProvider
   })
 
-  m = { memory, scopeOnlyMemory, retrieval }
+  m = { memory, scopeOnlyMemory, retrieval, llmProvider }
   _scopeManagers.set(scope, m)
   return m
 }
@@ -474,81 +503,125 @@ export function setRetrievalManagerForTest(manager: RetrievalManager | null): vo
   }
 }
 
-// ==================== P2: MemCell 边界检测（消息累积缓冲区） ====================
+// ==================== 双流水线对话记忆抽取 ====================
 
-/** 边界检测硬限制 */
-const BOUNDARY_HARD_TOKEN_LIMIT = 4096
-const BOUNDARY_HARD_MESSAGE_LIMIT = 30
-/** 消息间隔超过此值（毫秒）视为新话题 */
-const BOUNDARY_TIME_GAP_MS = 2 * 60 * 60 * 1000 // 2 hours
+// ---- 累积器状态 ----
 
-interface SessionBuffer {
+interface AccumulatedRound {
+  roundMessageId: string
   messages: Array<{ role: string; content: string }>
-  lastTimestamp: number
-  /** 粗略的 token 估算（按 char 数 / 2 近似，中文 1 char ≈ 1 token，英文约 4 char ≈ 1 token） */
-  estimatedTokens: number
+  tokenEstimate: number
+  /** Pipeline 1 产出的记忆 ID */
+  p1MemoryIds: string[]
 }
 
-/** 按 scope:sessionId 维度维护消息累积缓冲区 */
-const _sessionBuffers = new Map<string, SessionBuffer>()
+interface RoundAccumulator {
+  rounds: AccumulatedRound[]
+  totalTokens: number
+  totalRounds: number
+}
 
-function estimateTokens(text: string): number {
-  let cjkCount = 0
-  for (const ch of text) {
-    const code = ch.charCodeAt(0)
-    if (
-      (code >= 0x4e00 && code <= 0x9fff) ||
-      (code >= 0x3400 && code <= 0x4dbf) ||
-      (code >= 0xf900 && code <= 0xfaff)
-    ) {
-      cjkCount++
-    }
+/** 以 `scope:sessionId` 为 key 维护累积器 */
+const _accumulators = new Map<string, RoundAccumulator>()
+
+/** Pipeline 2 阈值配置 */
+const NARRATIVE_TOKEN_THRESHOLD = 4096
+const NARRATIVE_ROUND_THRESHOLD = 8
+
+/** 并发控制：per-session 的 mutex promise chain */
+const _pipelineLocks = new Map<string, Promise<void>>()
+
+function accumulatorKey(scope: string, sessionId?: string): string {
+  return `${scope}:${sessionId ?? '__nosession__'}`
+}
+
+function getOrCreateAccumulator(key: string): RoundAccumulator {
+  let acc = _accumulators.get(key)
+  if (!acc) {
+    acc = { rounds: [], totalTokens: 0, totalRounds: 0 }
+    _accumulators.set(key, acc)
   }
-  const nonCjkLen = text.length - cjkCount
-  return cjkCount + Math.ceil(nonCjkLen / 4)
+  return acc
 }
 
-function getBufferKey(scope: string, sessionId?: string): string {
-  return sessionId ? `${scope}:${sessionId}` : `${scope}:__nosession__`
+/** 粗略估算 token 数（中文按字符数 ÷ 1.5，英文按空格分词） */
+function estimateTokens(messages: Array<{ role: string; content: string }>): number {
+  let total = 0
+  for (const m of messages) {
+    const len = m.content.length
+    total += Math.ceil(len / 1.5)
+  }
+  return total
+}
+
+/** 清理所有会话累积器 */
+export function clearSessionBuffers(): void {
+  _accumulators.clear()
+  _pipelineLocks.clear()
 }
 
 /**
- * 判断缓冲区是否应当 flush（边界检测）。
- * 返回 true 表示应当将当前 buffer 作为一个 MemCell 提交。
+ * 重置指定会话的累积器（回退场景专用）。
+ * 与 flushSessionBuffer 不同，此方法直接丢弃累积数据而非提取记忆，
+ * 因为回退场景下累积器可能包含被回退轮次的无效数据。
  */
-function shouldFlushBuffer(buffer: SessionBuffer, now: number): boolean {
-  if (buffer.messages.length >= BOUNDARY_HARD_MESSAGE_LIMIT) return true
-  if (buffer.estimatedTokens >= BOUNDARY_HARD_TOKEN_LIMIT) return true
-  if (now - buffer.lastTimestamp > BOUNDARY_TIME_GAP_MS) return true
-  return false
+export function resetSessionAccumulator(scope: string, sessionId?: string): void {
+  const key = accumulatorKey(scope, sessionId)
+  const acc = _accumulators.get(key)
+  memLog('pipeline:accumulator_rollback_reset', {
+    scope,
+    sessionId,
+    detail: {
+      hadAccumulator: !!acc,
+      discardedRounds: acc?.totalRounds ?? 0,
+      discardedTokens: acc?.totalTokens ?? 0
+    }
+  })
+  _accumulators.delete(key)
+  _pipelineLocks.delete(key)
 }
 
-/** 清理所有会话缓冲区（用于 shutdown） */
-export function clearSessionBuffers(): void {
-  _sessionBuffers.clear()
-}
-
-/** 强制 flush 指定会话的缓冲区并提取记忆（会话结束时调用） */
+/**
+ * 强制 flush 指定会话的累积器并提取记忆（session 结束时调用）。
+ * 如果累积器中有未达阈值的轮次，强制触发 Pipeline 2。
+ */
 export async function flushSessionBuffer(
   scope: string,
   sessionId?: string
 ): Promise<MemoryIdsByLayer | null> {
-  const key = getBufferKey(scope, sessionId)
-  const buffer = _sessionBuffers.get(key)
-  if (!buffer || buffer.messages.length === 0) return null
-  _sessionBuffers.delete(key)
-  return processBufferedMemCell(buffer.messages, scope, sessionId)
+  const key = accumulatorKey(scope, sessionId)
+  const acc = _accumulators.get(key)
+  if (!acc || acc.rounds.length === 0) {
+    memLog('pipeline:session_flush', {
+      scope,
+      sessionId,
+      detail: { note: 'no_pending_rounds' }
+    })
+    return null
+  }
+
+  memLog('pipeline:session_flush', {
+    scope,
+    sessionId,
+    detail: {
+      pendingRounds: acc.rounds.length,
+      pendingTokens: acc.totalTokens
+    }
+  })
+
+  // 强制触发 Pipeline 2
+  const byLayer = await executePipeline2(scope, sessionId, key, acc)
+  _accumulators.delete(key)
+  _pipelineLocks.delete(key)
+  return byLayer
 }
 
 /**
- * 三层路由：将对话记忆写入 User/Scope/Session 层。
- * 消息先进入 per-session 累积缓冲区，触发边界条件后才 flush 为 MemCell 提交抽取。
+ * 双流水线入口：每轮对话完成后调用。
  *
- * @param messages 本轮对话消息（user+assistant）
- * @param scope    数据 scope
- * @param sessionId 当前会话 ID
- * @param roundMessageId 关联的 assistant 消息 ID，用于按轮次查询记忆增长
- * @returns 按存储层分类的新记忆 ID（MemoryIdsByLayer），用于 memoryRefs.created；若未触发 flush 返回 null
+ * Pipeline 1（立即执行）：对本轮 messages 执行 processPerRound，提取 event_log / profile / foresight。
+ * Pipeline 2（条件触发）：当累积 token >= NARRATIVE_TOKEN_THRESHOLD 或 rounds >= NARRATIVE_ROUND_THRESHOLD 时，
+ *   等待 Pipeline 1 完成后，对累积轮次执行 processNarrativeBatch，提取 narrative / foresight / profile。
  */
 export async function addMemoryInteraction(
   messages: Array<{ role: string; content: string }>,
@@ -556,80 +629,98 @@ export async function addMemoryInteraction(
   sessionId?: string,
   roundMessageId?: string
 ): Promise<MemoryIdsByLayer | null> {
-  const key = getBufferKey(scope, sessionId)
-  const now = Date.now()
+  const msgId = roundMessageId ?? randomUUID()
 
-  let buffer = _sessionBuffers.get(key)
-
-  // 如果存在缓冲区且时间间隔超限，先 flush 旧 buffer
-  if (buffer && buffer.messages.length > 0 && now - buffer.lastTimestamp > BOUNDARY_TIME_GAP_MS) {
-    const oldMessages = buffer.messages
-    _sessionBuffers.delete(key)
-    try {
-      await processBufferedMemCell(oldMessages, scope, sessionId)
-    } catch (e) {
-      log.warn('Failed to flush time-gap boundary buffer:', e)
+  memLog('conv_memory:chat_trigger', {
+    scope,
+    sessionId,
+    detail: {
+      msgCount: messages.length,
+      msgRoles: messages.map((m) => m.role),
+      msgLengths: messages.map((m) => m.content.length),
+      totalChars: messages.reduce((s, m) => s + m.content.length, 0),
+      roundMessageId: msgId
     }
-    buffer = undefined
-  }
+  })
 
-  // 初始化或获取缓冲区
-  if (!buffer) {
-    buffer = { messages: [], lastTimestamp: now, estimatedTokens: 0 }
-    _sessionBuffers.set(key, buffer)
-  }
+  const managers = getScopeManagers(scope)
+  managers.llmProvider.setSessionId(sessionId)
+  const key = accumulatorKey(scope, sessionId)
 
-  // 累积新消息
-  for (const msg of messages) {
-    buffer.messages.push(msg)
-    buffer.estimatedTokens += estimateTokens(msg.content)
-  }
-  buffer.lastTimestamp = now
-
-  // 检查边界条件
-  if (!shouldFlushBuffer(buffer, now)) {
-    // 未到边界，不 flush，返回 null（本轮不产生记忆）
-    return null
-  }
-
-  // 触发边界 → flush
-  const toFlush = buffer.messages
-  _sessionBuffers.delete(key)
-
-  return processBufferedMemCell(toFlush, scope, sessionId, roundMessageId)
-}
-
-/** 将累积的消息列表作为一个 MemCell 提交抽取，返回按层分类的新记忆 ID */
-async function processBufferedMemCell(
-  messages: Array<{ role: string; content: string }>,
-  scope: string,
-  sessionId?: string,
-  roundMessageId?: string
-): Promise<MemoryIdsByLayer | null> {
-  const manager = getScopeManagers(scope).memory
-  _currentDataScope = scope
-  _currentSessionId = sessionId
   try {
-    const routing: MemoryRoutingContext = {
+    // ── Pipeline 1：每轮轻量抽取（event_log / profile / foresight） ──
+    memLog('pipeline:p1_start', {
       scope,
       sessionId,
-      roundMessageId,
-      skipSessionExtraction: true,
+      detail: { roundMessageId: msgId, messageCount: messages.length }
+    })
+
+    const p1Routing: MemoryRoutingContext = {
+      scope,
+      sessionId,
+      roundMessageId: msgId,
       sourceType: MemorySourceType.CONVERSATION
     }
-    const memcell: MemCell = {
+    const p1Memcell: MemCell = {
       original_data: messages,
       timestamp: new Date().toISOString(),
       type: RawDataType.CONVERSATION,
       deleted: false,
       scene: 'assistant'
     }
-    const created = await manager.processMemCell(memcell, routing)
-    if (created.length === 0) return null
 
-    // 按层分类新记忆 ID（基于 MemoryType 推导层级）
+    let p1Lock: { resolve: () => void }
+    const p1Promise = new Promise<void>((resolve) => {
+      p1Lock = { resolve }
+    })
+    _pipelineLocks.set(key, p1Promise)
+
+    let p1Created: Array<{ id: string; type: string; content: string; group_id?: string }> = []
+    try {
+      p1Created = await managers.memory.processPerRound(p1Memcell, p1Routing)
+      memLog('pipeline:p1_done', {
+        scope,
+        sessionId,
+        detail: {
+          roundMessageId: msgId,
+          createdCount: p1Created.length,
+          createdTypes: p1Created.map((c) => c.type),
+          createdIds: p1Created.map((c) => c.id)
+        }
+      })
+    } catch (e) {
+      memLog('pipeline:p1_error', { scope, sessionId, error: e })
+    } finally {
+      p1Lock!.resolve()
+    }
+
+    // ── 累积本轮 ──
+    const tokenEstimate = estimateTokens(messages)
+    const acc = getOrCreateAccumulator(key)
+    acc.rounds.push({
+      roundMessageId: msgId,
+      messages,
+      tokenEstimate,
+      p1MemoryIds: p1Created.map((c) => c.id)
+    })
+    acc.totalTokens += tokenEstimate
+    acc.totalRounds += 1
+
+    memLog('pipeline:accumulator_append', {
+      scope,
+      sessionId,
+      detail: {
+        roundMessageId: msgId,
+        roundTokens: tokenEstimate,
+        totalTokens: acc.totalTokens,
+        totalRounds: acc.totalRounds,
+        p1MemoryCount: p1Created.length
+      }
+    })
+
+    // ── 构建 P1 的返回结果 ──
     const byLayer: MemoryIdsByLayer = { user: [], scope: [], session: [] }
-    for (const c of created) {
+    for (const c of p1Created) {
       const layer = getLayerForType(c.type as MemoryType)
       if (layer === 'user') {
         byLayer.user.push(c.id)
@@ -640,9 +731,10 @@ async function processBufferedMemCell(
       }
     }
 
-    if (sessionId) {
+    // 写入 session memories snapshot
+    if (sessionId && p1Created.length > 0) {
       const sessionGroupPrefix = `${scope}:session:${sessionId}`
-      const sessionMemories = created.filter(
+      const sessionMemories = p1Created.filter(
         (c) => c.group_id === sessionGroupPrefix || c.group_id?.startsWith(sessionGroupPrefix)
       )
       if (sessionMemories.length > 0) {
@@ -655,10 +747,195 @@ async function processBufferedMemCell(
         }
       }
     }
-    return byLayer
+
+    // ── Pipeline 2 阈值检查 ──
+    const shouldTriggerP2 =
+      acc.totalTokens >= NARRATIVE_TOKEN_THRESHOLD || acc.totalRounds >= NARRATIVE_ROUND_THRESHOLD
+
+    memLog('pipeline:p2_threshold_check', {
+      scope,
+      sessionId,
+      detail: {
+        totalTokens: acc.totalTokens,
+        totalRounds: acc.totalRounds,
+        tokenThreshold: NARRATIVE_TOKEN_THRESHOLD,
+        roundThreshold: NARRATIVE_ROUND_THRESHOLD,
+        triggered: shouldTriggerP2
+      }
+    })
+
+    if (shouldTriggerP2) {
+      // Pipeline 2 在后台异步执行，不阻塞当前返回
+      const accSnapshot = { ...acc, rounds: [...acc.rounds] }
+      // 重置累积器
+      _accumulators.set(key, { rounds: [], totalTokens: 0, totalRounds: 0 })
+      memLog('pipeline:accumulator_reset', { scope, sessionId })
+
+      // 后台执行 Pipeline 2（fire-and-forget，但捕获错误以记录日志）
+      executePipeline2(scope, sessionId, key, accSnapshot)
+        .then((p2Result) => {
+          if (p2Result) {
+            // Pipeline 2 的记忆不需要合并到当前返回值（已经返回了 P1 结果）
+            log.info(
+              'Pipeline 2 completed: scope=%s session=%s user=%d scope=%d',
+              scope,
+              sessionId,
+              p2Result.user.length,
+              p2Result.scope.length
+            )
+          }
+        })
+        .catch((e) => {
+          log.error('Pipeline 2 background execution error:', e)
+        })
+    }
+
+    return p1Created.length > 0 ? byLayer : null
   } finally {
-    _currentDataScope = 'default'
-    _currentSessionId = undefined
+    managers.llmProvider.setSessionId(undefined)
+  }
+}
+
+/**
+ * 执行 Pipeline 2：叙述性批量抽取。
+ * 等待 Pipeline 1 lock 释放后执行，收集所有累积轮次的消息和 P1 已提取记忆。
+ */
+async function executePipeline2(
+  scope: string,
+  sessionId: string | undefined,
+  key: string,
+  acc: RoundAccumulator
+): Promise<MemoryIdsByLayer | null> {
+  // 等待 Pipeline 1 完成
+  const currentLock = _pipelineLocks.get(key)
+  if (currentLock) {
+    await currentLock
+  }
+
+  memLog('pipeline:p2_start', {
+    scope,
+    sessionId,
+    detail: {
+      roundCount: acc.rounds.length,
+      totalTokens: acc.totalTokens,
+      roundMessageIds: acc.rounds.map((r) => r.roundMessageId)
+    }
+  })
+
+  const managers = getScopeManagers(scope)
+  managers.llmProvider.setSessionId(sessionId)
+
+  try {
+    // 收集所有累积轮次的消息
+    const allMessages: Array<{ role: string; content: string }> = []
+    const allRoundIds: string[] = []
+    for (const round of acc.rounds) {
+      allMessages.push(...round.messages)
+      allRoundIds.push(round.roundMessageId)
+    }
+
+    // 收集 Pipeline 1 已提取的记忆内容摘要
+    const allP1MemoryIds = acc.rounds.flatMap((r) => r.p1MemoryIds)
+    let alreadyExtractedContext = ''
+    if (allP1MemoryIds.length > 0) {
+      try {
+        const scopeManagers = getScopeManagers(scope)
+        const placeholders = allP1MemoryIds.map(() => '?').join(',')
+        const p1Rows = await scopeManagers.scopeOnlyMemory.storage.relational.query(
+          `SELECT type, content FROM memories WHERE id IN (${placeholders})`,
+          allP1MemoryIds
+        )
+        // 也查 user DB（profile 可能在那里）
+        let userRows: Array<{ type: string; content: string }> = []
+        try {
+          userRows = await getUserManagers().memory.storage.relational.query(
+            `SELECT type, content FROM memories WHERE id IN (${placeholders})`,
+            allP1MemoryIds
+          )
+        } catch {
+          // ignore
+        }
+
+        const allRows = [...p1Rows, ...userRows] as Array<{ type: string; content: string }>
+        if (allRows.length > 0) {
+          const sections: Record<string, string[]> = {}
+          for (const row of allRows) {
+            if (!sections[row.type]) sections[row.type] = []
+            sections[row.type].push(row.content?.slice(0, 200) ?? '')
+          }
+          alreadyExtractedContext = Object.entries(sections)
+            .map(([type, contents]) => `[${type}]\n${contents.map((c) => `- ${c}`).join('\n')}`)
+            .join('\n\n')
+        }
+      } catch (e) {
+        log.warn('Failed to collect P1 memory context for P2:', e)
+      }
+    }
+
+    const p2Routing: MemoryRoutingContext = {
+      scope,
+      sessionId,
+      roundMessageIds: allRoundIds,
+      sourceType: MemorySourceType.CONVERSATION
+    }
+    const p2Memcell: MemCell = {
+      original_data: allMessages,
+      timestamp: new Date().toISOString(),
+      type: RawDataType.CONVERSATION,
+      deleted: false,
+      scene: 'assistant'
+    }
+
+    const p2Created = await managers.memory.processNarrativeBatch(
+      p2Memcell,
+      p2Routing,
+      alreadyExtractedContext || undefined
+    )
+
+    memLog('pipeline:p2_done', {
+      scope,
+      sessionId,
+      detail: {
+        createdCount: p2Created.length,
+        createdTypes: p2Created.map((c: { type: string }) => c.type),
+        createdIds: p2Created.map((c: { id: string }) => c.id),
+        roundMessageIds: allRoundIds
+      }
+    })
+
+    if (p2Created.length === 0) return null
+
+    // 按层分类
+    const byLayer: MemoryIdsByLayer = { user: [], scope: [], session: [] }
+    for (const c of p2Created) {
+      const layer = getLayerForType(c.type as MemoryType)
+      if (layer === 'user') {
+        byLayer.user.push(c.id)
+      } else if (layer === 'session') {
+        byLayer.session.push(c.id)
+      } else {
+        byLayer.scope.push(c.id)
+      }
+    }
+
+    // 写入 session snapshot
+    if (sessionId && p2Created.length > 0) {
+      try {
+        const scopeRoot = scopeStore.getScopeRootPath(scope)
+        const content = p2Created.map((c: { content: string }) => `- [P2] ${c.content}`).join('\n')
+        appendSessionMemories(scopeRoot, sessionId, content)
+      } catch (e) {
+        log.warn('Failed to append P2 session memories snapshot:', sessionId, e)
+      }
+    }
+
+    return byLayer
+  } catch (e) {
+    memLog('pipeline:p2_error', { scope, sessionId, error: e })
+    log.error('Pipeline 2 execution error:', e)
+    return null
+  } finally {
+    managers.llmProvider.setSessionId(undefined)
   }
 }
 
@@ -672,9 +949,16 @@ export async function addSessionMemoryFromRounds(
   sessionId: string
 ): Promise<void> {
   if (!messages.length) return
-  const manager = getScopeManagers(scope).memory
-  _currentDataScope = scope
-  _currentSessionId = sessionId
+  memLog('conv_memory:compression_trigger', {
+    scope,
+    sessionId,
+    detail: {
+      messageCount: messages.length,
+      totalChars: messages.reduce((s, m) => s + m.content.length, 0)
+    }
+  })
+  const managers = getScopeManagers(scope)
+  managers.llmProvider.setSessionId(sessionId)
   try {
     const routing: MemoryRoutingContext = {
       scope,
@@ -689,7 +973,17 @@ export async function addSessionMemoryFromRounds(
       deleted: false,
       scene: 'assistant'
     }
-    const created = await manager.processMemCell(memcell, routing)
+    const created = await managers.memory.processNarrativeBatch(memcell, routing)
+    memLog('conv_memory:flush_result', {
+      scope,
+      sessionId,
+      detail: {
+        source: 'compression',
+        createdCount: created.length,
+        createdTypes: created.map((c) => c.type),
+        createdIds: created.map((c) => c.id)
+      }
+    })
     if (created.length > 0) {
       try {
         const scopeRoot = scopeStore.getScopeRootPath(scope)
@@ -706,8 +1000,7 @@ export async function addSessionMemoryFromRounds(
       messages.length
     )
   } finally {
-    _currentDataScope = 'default'
-    _currentSessionId = undefined
+    managers.llmProvider.setSessionId(undefined)
   }
 }
 
@@ -719,46 +1012,66 @@ export async function addSessionMemoryFromRounds(
  * @param documentId 文档 ID
  */
 export async function addDocumentToMemory(scope: string, documentId: string): Promise<void> {
+  memLog('memory:store', { scope, documentId, detail: { phase: 'addDocumentToMemory:start' } })
   const manager = getScopeManagers(scope).memory
-  _currentDataScope = scope
-  _currentSessionId = undefined
-  try {
-    const data = scopeStore.getScopeData(scope)
-    const doc = data.documents.find((d) => d.id === documentId)
-    if (!doc) {
-      log.warn('Document not found for memory:', documentId, 'scope:', scope)
-      return
-    }
-
-    const content = doc.content?.trim() ?? ''
-    if (!content) {
-      log.info('Document has no content for memory:', documentId)
-      return
-    }
-
-    const title = doc.title ?? documentId
-
-    const routing: MemoryRoutingContext = {
+  const data = scopeStore.getScopeData(scope)
+  const doc = data.documents.find((d) => d.id === documentId)
+  if (!doc) {
+    memLog('memory:store', {
       scope,
-      sourceType: MemorySourceType.DOCUMENT
+      documentId,
+      detail: { phase: 'addDocumentToMemory:skip', reason: 'doc_not_found' }
+    })
+    log.warn('Document not found for memory:', documentId, 'scope:', scope)
+    return
+  }
+
+  const content = doc.content?.trim() ?? ''
+  if (!content) {
+    memLog('memory:store', {
+      scope,
+      documentId,
+      detail: { phase: 'addDocumentToMemory:skip', reason: 'no_content' }
+    })
+    log.info('Document has no content for memory:', documentId)
+    return
+  }
+
+  const title = doc.title ?? documentId
+
+  const routing: MemoryRoutingContext = {
+    scope,
+    sourceType: MemorySourceType.DOCUMENT,
+    sourceDocumentId: documentId
+  }
+  const memcell: MemCell = {
+    original_data: { documentId, title },
+    timestamp: new Date().toISOString(),
+    type: RawDataType.TEXT,
+    text: content.slice(0, 8000),
+    deleted: false,
+    scene: 'document',
+    metadata: {
+      documentId,
+      title
     }
-    const memcell: MemCell = {
-      original_data: { documentId, title },
-      timestamp: new Date().toISOString(),
-      type: RawDataType.TEXT,
-      text: content.slice(0, 8000),
-      deleted: false,
-      scene: 'document',
-      metadata: {
-        documentId,
-        title
-      }
-    }
-    await manager.processMemCell(memcell, routing)
+  }
+  try {
+    await manager.processDocumentMemCell(memcell, routing)
+    memLog('memory:store', {
+      scope,
+      documentId,
+      detail: { phase: 'addDocumentToMemory:done', title, textLen: content.slice(0, 8000).length }
+    })
     log.info('Document memory stored:', documentId, 'scope:', scope)
-  } finally {
-    _currentDataScope = 'default'
-    _currentSessionId = undefined
+  } catch (e) {
+    memLog('manager:error', {
+      scope,
+      documentId,
+      detail: { phase: 'processDocumentMemCell' },
+      error: e
+    })
+    throw e
   }
 }
 
@@ -775,17 +1088,25 @@ export async function deleteDocumentMemories(
   const managers = getScopeManagers(scope)
   let total = 0
 
-  // 使用 type=DOCUMENT + sub_type + documentId 组合查询
-  const allRows = await managers.scopeOnlyMemory.listMemoriesByMetadata(
-    'documentId',
-    documentId,
-    scope,
-    MemoryType.DOCUMENT
+  // 使用 source_document_id 索引查询（优先），回退到 metadata json_extract
+  const allRows = await managers.scopeOnlyMemory.storage.relational.query(
+    `SELECT id, sub_type FROM memories WHERE source_document_id = ? AND type = ?`,
+    [documentId, MemoryType.DOCUMENT]
   )
-  for (const row of allRows) {
-    const r = row as any
-    if (subTypes.includes(r.sub_type)) {
-      await managers.scopeOnlyMemory.deleteMemory(row.id)
+  // 若索引查询为空，回退到 metadata（兼容旧数据）
+  const rows =
+    allRows.length > 0
+      ? allRows
+      : await managers.scopeOnlyMemory.listMemoriesByMetadata(
+          'documentId',
+          documentId,
+          scope,
+          MemoryType.DOCUMENT
+        )
+  for (const row of rows) {
+    const r = row as { id: string; sub_type?: string }
+    if (subTypes.includes(r.sub_type as DocumentSubType)) {
+      await managers.scopeOnlyMemory.deleteMemory(r.id)
       total++
     }
   }
@@ -813,69 +1134,68 @@ export async function addDocumentMigrationMemory(
   changedBy?: { type: string; sessionId?: string; apiSource?: string }
 ): Promise<void> {
   if (!changes.length) return
+  memLog('memory:store', {
+    scope,
+    documentId,
+    detail: { phase: 'addDocumentMigrationMemory', changesCount: changes.length, version }
+  })
 
   const manager = getScopeManagers(scope).memory
   const groupId = scope
   const now = new Date().toISOString()
-  const embeddingProvider = new PrizmLLMAdapter()
+  const embeddingProvider = new PrizmLLMAdapter(scope)
 
-  _currentDataScope = scope
-  _currentSessionId = undefined
-  try {
-    for (const change of changes) {
-      if (!change.trim()) continue
-      const id = randomUUID()
+  for (const change of changes) {
+    if (!change.trim()) continue
+    const id = randomUUID()
 
-      let embedding: number[] | undefined
-      try {
-        embedding = await embeddingProvider.getEmbedding(change)
-      } catch (e) {
-        log.warn('Migration memory embedding failed:', e)
-      }
-
-      const migrationMeta: Record<string, unknown> = {
-        documentId,
-        title,
-        ...(version !== undefined && { version }),
-        ...(changedBy && { changedBy })
-      }
-
-      const contentStr = change.trim()
-
-      await manager.storage.relational.insert('memories', {
-        id,
-        type: MemoryType.DOCUMENT,
-        content: contentStr,
-        user_id: DEFAULT_USER_ID,
-        group_id: groupId,
-        created_at: now,
-        updated_at: now,
-        metadata: JSON.stringify(migrationMeta),
-        source_type: MemorySourceType.DOCUMENT,
-        sub_type: DocumentSubType.MIGRATION
-      })
-      if (embedding?.length) {
-        await manager.storage.vector.add(MemoryType.DOCUMENT, [
-          {
-            id,
-            content: contentStr,
-            user_id: DEFAULT_USER_ID,
-            group_id: groupId,
-            vector: embedding
-          }
-        ])
-      }
+    let embedding: number[] | undefined
+    try {
+      embedding = await embeddingProvider.getEmbedding(change)
+    } catch (e) {
+      log.warn('Migration memory embedding failed:', e)
     }
-    log.info(
-      'Migration memories added: %d changes for doc %s v%s',
-      changes.length,
+
+    const migrationMeta: Record<string, unknown> = {
       documentId,
-      version ?? '?'
-    )
-  } finally {
-    _currentDataScope = 'default'
-    _currentSessionId = undefined
+      title,
+      ...(version !== undefined && { version }),
+      ...(changedBy && { changedBy })
+    }
+
+    const contentStr = change.trim()
+
+    await manager.storage.relational.insert('memories', {
+      id,
+      type: MemoryType.DOCUMENT,
+      content: contentStr,
+      user_id: DEFAULT_USER_ID,
+      group_id: groupId,
+      created_at: now,
+      updated_at: now,
+      metadata: JSON.stringify(migrationMeta),
+      source_type: MemorySourceType.DOCUMENT,
+      source_document_id: documentId,
+      sub_type: DocumentSubType.MIGRATION
+    })
+    if (embedding?.length) {
+      await manager.storage.vector.add(MemoryType.DOCUMENT, [
+        {
+          id,
+          content: contentStr,
+          user_id: DEFAULT_USER_ID,
+          group_id: groupId,
+          vector: embedding
+        }
+      ])
+    }
   }
+  log.info(
+    'Migration memories added: %d changes for doc %s v%s',
+    changes.length,
+    documentId,
+    version ?? '?'
+  )
 }
 
 /**
@@ -889,17 +1209,25 @@ export async function getDocumentOverview(
 ): Promise<string | null> {
   try {
     const managers = getScopeManagers(scope)
-    const rows = await managers.scopeOnlyMemory.listMemoriesByMetadata(
+    // 优先使用 source_document_id 索引查询
+    const rows = await managers.scopeOnlyMemory.storage.relational.query(
+      `SELECT content, sub_type FROM memories WHERE source_document_id = ? AND type = ? AND sub_type = ? LIMIT 1`,
+      [documentId, MemoryType.DOCUMENT, DocumentSubType.OVERVIEW]
+    )
+    if (rows.length > 0) {
+      return (rows[0] as { content?: string }).content || null
+    }
+    // 回退：旧数据可能无 source_document_id
+    const legacyRows = await managers.scopeOnlyMemory.listMemoriesByMetadata(
       'documentId',
       documentId,
       scope,
       MemoryType.DOCUMENT
     )
-    // 找到 sub_type=overview 的那条
-    for (const row of rows) {
-      const r = row as any
+    for (const row of legacyRows) {
+      const r = row as { sub_type?: string; content?: string }
       if (r.sub_type === DocumentSubType.OVERVIEW) {
-        return row.content || null
+        return r.content || null
       }
     }
     return null
@@ -932,6 +1260,37 @@ export async function getDocumentMigrationHistory(
       .map((r) => mapRowToMemoryItem(r as any))
   } catch (e) {
     log.warn('getDocumentMigrationHistory error:', documentId, e)
+    return []
+  }
+}
+
+/**
+ * 获取指定文档的全部记忆（overview + fact + migration），按 source_document_id 索引查询。
+ * 回退兼容：若无 source_document_id 数据，使用 metadata.documentId 查询。
+ */
+export async function getDocumentAllMemories(
+  scope: string,
+  documentId: string
+): Promise<MemoryItem[]> {
+  try {
+    const managers = getScopeManagers(scope)
+    // 优先使用 source_document_id 索引
+    let rows = await managers.scopeOnlyMemory.storage.relational.query(
+      `SELECT * FROM memories WHERE source_document_id = ? AND type = ? ORDER BY created_at DESC`,
+      [documentId, MemoryType.DOCUMENT]
+    )
+    // 回退：旧数据无 source_document_id
+    if (rows.length === 0) {
+      rows = await managers.scopeOnlyMemory.listMemoriesByMetadata(
+        'documentId',
+        documentId,
+        scope,
+        MemoryType.DOCUMENT
+      )
+    }
+    return deduplicateRows(rows).map((r: any) => mapRowToMemoryItem(r))
+  } catch (e) {
+    log.warn('getDocumentAllMemories error:', documentId, e)
     return []
   }
 }
@@ -1170,6 +1529,8 @@ function mapRowToMemoryItem(r: {
   source_type?: string | null
   source_session_id?: string | null
   source_round_id?: string | null
+  source_round_ids?: string | null
+  source_document_id?: string | null
   sub_type?: string | null
 }): MemoryItem {
   let meta: Record<string, unknown> | undefined
@@ -1186,6 +1547,16 @@ function mapRowToMemoryItem(r: {
   const memoryType = r.type as MemoryType | undefined
   const memoryLayer = memoryType ? getLayerForType(memoryType) : undefined
 
+  let sourceRoundIds: string[] | undefined
+  if (r.source_round_ids) {
+    try {
+      const parsed = JSON.parse(r.source_round_ids)
+      if (Array.isArray(parsed)) sourceRoundIds = parsed
+    } catch {
+      // invalid JSON, ignore
+    }
+  }
+
   return {
     id: r.id,
     memory: r.content ?? '',
@@ -1196,6 +1567,8 @@ function mapRowToMemoryItem(r: {
     source_type: r.source_type ?? undefined,
     source_session_id: r.source_session_id ?? undefined,
     source_round_id: r.source_round_id ?? undefined,
+    source_round_ids: sourceRoundIds,
+    source_document_id: r.source_document_id ?? undefined,
     sub_type: r.sub_type ?? undefined,
     created_at: r.created_at,
     updated_at: r.updated_at,
@@ -1220,6 +1593,27 @@ export async function getAllMemories(scope?: string): Promise<MemoryItem[]> {
     }
   }
   return deduplicateRows(rows).map(mapRowToMemoryItem)
+}
+
+/** 按 ID 查询单条记忆（先查 user 库，再查 scope 库） */
+export async function getMemoryById(id: string, scope?: string): Promise<MemoryItem | null> {
+  const userRows = await getUserManagers().memory.storage.relational.query(
+    'SELECT * FROM memories WHERE id = ? LIMIT 1',
+    [id]
+  )
+  if (userRows.length > 0) return mapRowToMemoryItem(userRows[0] as any)
+  if (scope) {
+    try {
+      const scopeRows = await getScopeManagers(scope).scopeOnlyMemory.storage.relational.query(
+        'SELECT * FROM memories WHERE id = ? LIMIT 1',
+        [id]
+      )
+      if (scopeRows.length > 0) return mapRowToMemoryItem(scopeRows[0] as any)
+    } catch {
+      // scope not found
+    }
+  }
+  return null
 }
 
 export async function deleteMemory(id: string, scope?: string): Promise<boolean> {
@@ -1288,26 +1682,81 @@ export async function clearAllMemories(): Promise<number> {
     }
   }
 
+  // 清除缓存，下次访问时重建连接
+  _scopeManagers.clear()
+  memLog('memory:clear', { detail: { totalDeleted: total } })
   log.info(`All memories cleared: ${total} records deleted`)
   return total
 }
 
 /**
- * 获取各层记忆的实际总数（直接 COUNT，不依赖语义搜索）
+ * 强制失效指定 scope 的 MemoryManager 缓存。
+ * 用于 clean-data 后或文件系统级别操作后重建连接。
  */
-export async function getMemoryCounts(
-  scope?: string
-): Promise<{ userCount: number; scopeCount: number }> {
-  const userCount = await getUserManagers().memory.countMemories()
-  let scopeCount = 0
+export function invalidateScopeManagerCache(scope?: string): void {
+  if (scope) {
+    _scopeManagers.delete(scope)
+    memLog('cache:invalidate', { scope, detail: { reason: 'manual_invalidate' } })
+    log.info('Invalidated scope manager cache:', scope)
+  } else {
+    _scopeManagers.clear()
+    memLog('cache:invalidate', { detail: { reason: 'manual_invalidate_all' } })
+    log.info('Invalidated all scope manager caches')
+  }
+}
+
+/** 按类型分组的记忆计数 */
+export interface MemoryCountsByType {
+  /** 总计: User 层 */
+  userCount: number
+  /** 总计: Scope 层（不含 session 记忆） */
+  scopeCount: number
+  /** 总计: Session 层（group_id 匹配 {scope}:session:* 的记忆） */
+  sessionCount: number
+  /** 按类型分组: { profile: N, narrative: N, foresight: N, document: N, event_log: N } */
+  byType: Record<string, number>
+}
+
+/**
+ * 获取各层记忆的实际总数 + 按类型分组计数（直接 COUNT，不依赖语义搜索）。
+ * 将 session 层记忆（group_id 含 :session:）从 scopeCount 中分离出来。
+ */
+export async function getMemoryCounts(scope?: string): Promise<MemoryCountsByType> {
+  const userByType = await getUserManagers().memory.countMemoriesByType()
+  const userCount = Object.values(userByType).reduce((s, n) => s + n, 0)
+
+  let scopeByType: Record<string, number> = {}
+  let scopeTotalCount = 0
+  let sessionCount = 0
   if (scope) {
     try {
-      scopeCount = await getScopeManagers(scope).scopeOnlyMemory.countMemories()
+      const managers = getScopeManagers(scope)
+      scopeByType = await managers.scopeOnlyMemory.countMemoriesByType()
+      scopeTotalCount = Object.values(scopeByType).reduce((s, n) => s + n, 0)
+
+      // 分离 session 记忆：group_id 匹配 {scope}:session:* 模式
+      const sessionPrefix = `${scope}:session:`
+      try {
+        const rows = await managers.scopeOnlyMemory.storage.relational.query(
+          'SELECT COUNT(*) as cnt FROM memories WHERE group_id LIKE ?',
+          [`${sessionPrefix}%`]
+        )
+        sessionCount = (rows[0] as { cnt: number })?.cnt ?? 0
+      } catch {
+        // 查询失败不影响总数
+      }
     } catch {
       // scope not found
     }
   }
-  return { userCount, scopeCount }
+
+  const scopeCount = scopeTotalCount - sessionCount
+
+  const byType: Record<string, number> = {}
+  for (const [t, c] of Object.entries(userByType)) byType[t] = (byType[t] ?? 0) + c
+  for (const [t, c] of Object.entries(scopeByType)) byType[t] = (byType[t] ?? 0) + c
+
+  return { userCount, scopeCount, sessionCount, byType }
 }
 
 /**

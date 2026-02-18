@@ -49,18 +49,37 @@ let mockPipelineFn: Mock
 let mockExtractorFn: Mock
 let mockExtractorDispose: Mock
 
+/**
+ * 基于文本内容生成确定性向量（简单哈希 → 种子随机数）。
+ * 相同文本总是返回相同向量，不同文本返回不同向量。
+ */
+function deterministicVector(text: string, dim = 384): Float32Array {
+  let seed = 0
+  for (let i = 0; i < text.length; i++) {
+    seed = ((seed << 5) - seed + text.charCodeAt(i)) | 0
+  }
+  const pseudoRandom = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff
+    return (seed / 0x7fffffff) * 2 - 1
+  }
+
+  const data = new Float32Array(dim)
+  for (let i = 0; i < dim; i++) data[i] = pseudoRandom()
+
+  // 归一化
+  let norm = 0
+  for (let i = 0; i < dim; i++) norm += data[i] * data[i]
+  norm = Math.sqrt(norm)
+  if (norm > 0) for (let i = 0; i < dim; i++) data[i] /= norm
+
+  return data
+}
+
 // Mock @huggingface/transformers
 vi.mock('@huggingface/transformers', () => {
   mockExtractorDispose = vi.fn()
-  mockExtractorFn = vi.fn().mockImplementation((_text: string) => {
-    const fakeData = new Float32Array(384)
-    for (let i = 0; i < 384; i++) fakeData[i] = Math.random() * 0.1
-    // 归一化
-    let norm = 0
-    for (let i = 0; i < 384; i++) norm += fakeData[i] * fakeData[i]
-    norm = Math.sqrt(norm)
-    for (let i = 0; i < 384; i++) fakeData[i] /= norm
-
+  mockExtractorFn = vi.fn().mockImplementation((text: string) => {
+    const fakeData = deterministicVector(text)
     return Promise.resolve({
       data: fakeData,
       dims: [1, 384]
@@ -184,13 +203,12 @@ describe('LocalEmbeddingService', () => {
     })
 
     it('不同文本应当返回不同向量', async () => {
-      // 因为 mock 使用 random，每次调用都不同
       await service.init()
 
       const vec1 = await service.embed('hello')
       const vec2 = await service.embed('world')
 
-      // 至少有一个维度不同
+      // 确定性 mock：不同文本的向量不同
       let allSame = true
       for (let i = 0; i < vec1.length; i++) {
         if (vec1[i] !== vec2[i]) {
@@ -199,6 +217,17 @@ describe('LocalEmbeddingService', () => {
         }
       }
       expect(allSame).toBe(false)
+    })
+
+    it('相同文本应当返回相同向量（确定性 mock）', async () => {
+      await service.init()
+
+      const vec1 = await service.embed('hello world')
+      const vec2 = await service.embed('hello world')
+
+      for (let i = 0; i < vec1.length; i++) {
+        expect(vec1[i]).toBe(vec2[i])
+      }
     })
   })
 
