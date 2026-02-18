@@ -32,6 +32,7 @@ declare module '../client' {
       userCount: number
       scopeCount: number
       sessionCount: number
+      documentCount: number
       byType: Record<string, number>
     }>
     resolveMemoryIds(
@@ -132,6 +133,7 @@ PrizmClient.prototype.getMemoryCounts = async function (this: PrizmClient, scope
     userCount: number
     scopeCount: number
     sessionCount: number
+    documentCount: number
     byType: Record<string, number>
   }>('/agent/memories/counts', { method: 'GET', scope: scope ?? this.defaultScope })
 }

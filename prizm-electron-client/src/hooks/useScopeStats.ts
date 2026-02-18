@@ -24,6 +24,7 @@ export interface ScopeStats {
   userMemoryCount: number
   scopeMemoryCount: number
   sessionMemoryCount: number
+  documentMemoryCount: number
   memoryEnabled: boolean
   /** 按类型细分的记忆计数 */
   memoryByType: MemoryCountsByType
@@ -72,6 +73,7 @@ export function useScopeStats(): ScopeStatsResult {
       userMemoryCount: memoryCounts.userCount,
       scopeMemoryCount: memoryCounts.scopeCount,
       sessionMemoryCount: memoryCounts.sessionCount,
+      documentMemoryCount: memoryCounts.documentCount,
       memoryEnabled: memoryCounts.enabled,
       memoryByType: parseByType(memoryCounts.byType)
     }),

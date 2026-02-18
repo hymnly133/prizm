@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { Popover, Text } from '@lobehub/ui'
 import { Segmented } from '../ui/Segmented'
-import { Brain, ExternalLink, Layers, MessageSquare, Search, User } from 'lucide-react'
+import { Brain, ExternalLink, FileText, Layers, MessageSquare, Search, User } from 'lucide-react'
 import { usePrizmContext } from '../../context/PrizmContext'
 import { useScope } from '../../hooks/useScope'
 import { useNavigation } from '../../context/NavigationContext'
@@ -21,6 +21,7 @@ const LAYER_CONFIG = {
   all: { label: '全部', icon: Brain },
   user: { label: 'User', icon: User, color: '#faad14' },
   scope: { label: 'Scope', icon: Layers, color: '#1677ff' },
+  document: { label: '文档', icon: FileText, color: '#52c41a' },
   session: { label: 'Session', icon: MessageSquare, color: '#13c2c2' }
 } as const
 
@@ -152,6 +153,7 @@ interface MemorySidebarPanelProps {
   userMemoryCount: number
   scopeMemoryCount: number
   sessionMemoryCount: number
+  documentMemoryCount: number
   memoryByType?: Record<string, number>
   memoryCountsLoading: boolean
   onOpenInspector?: () => void
@@ -162,6 +164,7 @@ export function MemorySidebarPanel({
   userMemoryCount,
   scopeMemoryCount,
   sessionMemoryCount,
+  documentMemoryCount,
   memoryByType,
   memoryCountsLoading,
   onOpenInspector
@@ -222,7 +225,7 @@ export function MemorySidebarPanel({
           记忆
           {!memoryCountsLoading && (
             <span className={styles.countBadge}>
-              {userMemoryCount + scopeMemoryCount + sessionMemoryCount}
+              {userMemoryCount + scopeMemoryCount + documentMemoryCount + sessionMemoryCount}
             </span>
           )}
         </span>
@@ -244,6 +247,7 @@ export function MemorySidebarPanel({
           { label: '全部', value: 'all' },
           { label: `User ${userMemoryCount}`, value: 'user' },
           { label: `Scope ${scopeMemoryCount}`, value: 'scope' },
+          { label: `文档 ${documentMemoryCount}`, value: 'document' },
           { label: `Session ${sessionMemoryCount}`, value: 'session' }
         ]}
       />
