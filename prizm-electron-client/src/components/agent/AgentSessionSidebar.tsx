@@ -2,6 +2,7 @@
  * Agent 右侧边栏 - 会话模式：状态、活动、系统提示词、记忆面板、会话统计
  * 增强版：集成 MemorySidebarPanel + motion 动画
  */
+import { memo } from 'react'
 import { Modal } from '@lobehub/ui'
 import { motion } from 'motion/react'
 import {
@@ -14,7 +15,7 @@ import {
   Activity
 } from 'lucide-react'
 import { useState } from 'react'
-import type { AgentSession, AvailableModel } from '@prizm/client-core'
+import type { EnrichedSession, AvailableModel, ResourceLockInfo } from '@prizm/client-core'
 import type { SessionStats } from './agentSidebarTypes'
 import type { ActivityItem } from './agentSidebarTypes'
 import type { ToolCallRecord } from '@prizm/client-core'
@@ -24,12 +25,13 @@ import { SessionActivityTimeline } from './SessionActivityTimeline'
 import { SessionStatsPanel } from './SessionStatsPanel'
 import { MemorySidebarPanel } from './MemorySidebarPanel'
 import { MemoryInspector } from './MemoryInspector'
+import { EmptyState } from '../ui/EmptyState'
 import { fadeUp, STAGGER_DELAY } from '../../theme/motionPresets'
 
 export interface AgentSessionSidebarProps {
   sending: boolean
   error: string | null
-  currentSession: AgentSession | null
+  currentSession: EnrichedSession | null
   isNewConversationReady: boolean
   models: AvailableModel[]
   defaultModel: string
@@ -51,10 +53,13 @@ export interface AgentSessionSidebarProps {
   memoryEnabled: boolean
   userMemoryCount: number
   scopeMemoryCount: number
+  sessionMemoryCount: number
+  memoryByType?: Record<string, number>
   memoryCountsLoading: boolean
+  sessionLocks?: ResourceLockInfo[]
 }
 
-export function AgentSessionSidebar({
+export const AgentSessionSidebar = memo(function AgentSessionSidebar({
   sending,
   error,
   currentSession,
@@ -76,7 +81,10 @@ export function AgentSessionSidebar({
   memoryEnabled,
   userMemoryCount,
   scopeMemoryCount,
-  memoryCountsLoading
+  sessionMemoryCount,
+  memoryByType,
+  memoryCountsLoading,
+  sessionLocks
 }: AgentSessionSidebarProps) {
   const [memoryInspectorOpen, setMemoryInspectorOpen] = useState(false)
   let idx = 0
@@ -159,7 +167,7 @@ export function AgentSessionSidebar({
                 <span className="agent-context-click-hint">点击查看完整内容</span>
               </>
             ) : (
-              <p className="agent-right-empty">暂无</p>
+              <EmptyState description="暂无" />
             )}
           </div>
           <Modal
@@ -188,6 +196,7 @@ export function AgentSessionSidebar({
             sessionContextLoading={sessionContextLoading}
             latestToolCalls={latestToolCalls}
             provisionsSummary={provisionsSummary}
+            sessionLocks={sessionLocks}
           />
         </motion.section>
       )}
@@ -198,6 +207,8 @@ export function AgentSessionSidebar({
           memoryEnabled={memoryEnabled}
           userMemoryCount={userMemoryCount}
           scopeMemoryCount={scopeMemoryCount}
+          sessionMemoryCount={sessionMemoryCount}
+          memoryByType={memoryByType}
           memoryCountsLoading={memoryCountsLoading}
           onOpenInspector={() => setMemoryInspectorOpen(true)}
         />
@@ -225,4 +236,4 @@ export function AgentSessionSidebar({
       />
     </>
   )
-}
+})

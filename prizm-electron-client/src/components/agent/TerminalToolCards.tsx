@@ -14,7 +14,8 @@ import {
   Type,
   type LucideIcon
 } from 'lucide-react'
-import { useState, memo } from 'react'
+import { memo } from 'react'
+import { useToolCardExpanded, useToolCardExpandedKeyboard } from './useToolCardExpanded'
 import { Button } from 'antd'
 import { createStyles } from 'antd-style'
 import type { ToolCallRecord } from '@prizm/client-core'
@@ -154,11 +155,11 @@ function TerminalToolCardDone({
   isError: boolean
 }) {
   const { styles } = useStyles()
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, toggleExpanded] = useToolCardExpanded(tc.id)
+  const handleKeyDown = useToolCardExpandedKeyboard(toggleExpanded)
   const argsSummary = getArgsSummary(tc.name, tc.arguments)
   const accentColor = isError ? 'var(--ant-color-error)' : ACCENT_COLOR
 
-  // 尝试从结果中提取退出码信息
   const result = tc.result || ''
   const hasExitCode = result.match(/\[退出码:\s*(\d+)\]/)
   const hasTimeout = result.includes('[超时')
@@ -172,13 +173,8 @@ function TerminalToolCardDone({
         className="tool-card__header"
         role="button"
         tabIndex={0}
-        onClick={() => setExpanded((v) => !v)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
-            setExpanded((v) => !v)
-          }
-        }}
+        onClick={toggleExpanded}
+        onKeyDown={handleKeyDown}
       >
         <Flexbox gap={8} horizontal align="center" className={styles.fullWidth}>
           <div className="tool-card__icon-wrap" style={{ '--tc-accent': accentColor } as never}>
@@ -239,7 +235,7 @@ const TerminalToolCard = memo(
   function TerminalToolCard({ tc }: { tc: ToolCallRecord }) {
     const { styles } = useStyles()
     const status = tc.status ?? 'done'
-    const displayName = getToolDisplayName(tc.name)
+    const displayName = getToolDisplayName(tc.name, tc.arguments)
     const CategoryIcon = getIcon(tc.name)
     const isError = !!tc.isError
     const argsSummary = getArgsSummary(tc.name, tc.arguments)

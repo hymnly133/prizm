@@ -1,13 +1,27 @@
 /**
  * Agent 右侧边栏 - 总览模式：Scope 统计、模型、文档、记忆概览、工作区上下文
  */
-import { Modal } from '@lobehub/ui'
-import { BarChart3, Brain, FileText, Layers, Loader2, MessageSquare } from 'lucide-react'
-import type { Document, AvailableModel } from '@prizm/client-core'
+import { memo, useMemo } from 'react'
+import { Modal, Tooltip } from '@lobehub/ui'
+import type { ListItemProps } from '@lobehub/ui'
+import { AccentList } from '../ui/AccentList'
+import {
+  BarChart3,
+  Brain,
+  FileText,
+  Layers,
+  Loader2,
+  Lock,
+  MessageSquare,
+  ExternalLink
+} from 'lucide-react'
+import type { EnrichedDocument, AvailableModel, ResourceLockInfo } from '@prizm/client-core'
+import { useNavigation } from '../../context/NavigationContext'
 import { Select } from '../ui/Select'
 import { MemoryInspector } from './MemoryInspector'
 import { TokenUsagePanel } from './TokenUsagePanel'
 import { MEMORY_LAYER_DESCRIPTIONS } from './agentSidebarTypes'
+import { EmptyState } from '../ui/EmptyState'
 
 export interface AgentOverviewSidebarProps {
   currentScope: string
@@ -20,7 +34,7 @@ export interface AgentOverviewSidebarProps {
   onRefreshScopeContext: () => void
   contextModalOpen: boolean
   onContextModalOpenChange: (open: boolean) => void
-  documents: Document[]
+  documents: EnrichedDocument[]
   documentsLoading: boolean
   onRefreshDocuments: () => void
   sessionsCount: number
@@ -28,10 +42,14 @@ export interface AgentOverviewSidebarProps {
   memoryEnabled: boolean
   userMemoryCount: number
   scopeMemoryCount: number
+  sessionMemoryCount: number
+  memoryByType?: Record<string, number>
   memoryCountsLoading: boolean
+  activeLocks?: ResourceLockInfo[]
+  activeLocksByDoc?: Map<string, ResourceLockInfo>
 }
 
-export function AgentOverviewSidebar({
+export const AgentOverviewSidebar = memo(function AgentOverviewSidebar({
   currentScope,
   models,
   defaultModel,
@@ -50,8 +68,15 @@ export function AgentOverviewSidebar({
   memoryEnabled,
   userMemoryCount,
   scopeMemoryCount,
-  memoryCountsLoading
+  sessionMemoryCount,
+  memoryByType,
+  memoryCountsLoading,
+  activeLocks,
+  activeLocksByDoc
 }: AgentOverviewSidebarProps) {
+  const { chatWith, navigateToDocs } = useNavigation()
+  const docLocks = (activeLocks ?? []).filter((l) => l.resourceType === 'document')
+
   return (
     <>
       {/* Scope 统计概览 */}
@@ -115,41 +140,82 @@ export function AgentOverviewSidebar({
           </div>
         ) : memoryEnabled ? (
           <div className="agent-memory-state">
-            <div className="agent-memory-tier">
-              <span
-                className="agent-memory-tier-label"
-                title={MEMORY_LAYER_DESCRIPTIONS.user}
-              >
-                User 层
-              </span>
+            <div className="agent-memory-tier" title={MEMORY_LAYER_DESCRIPTIONS.user}>
+              <span className="agent-memory-tier-label">User 层</span>
               <span className="agent-memory-tier-count">{userMemoryCount}</span>
             </div>
-            <div className="agent-memory-tier">
-              <span
-                className="agent-memory-tier-label"
-                title={MEMORY_LAYER_DESCRIPTIONS.scope}
+            {memoryByType && (
+              <div
+                className="agent-memory-tier"
+                style={{ paddingLeft: 16, borderTop: 'none', paddingTop: 0 }}
               >
-                Scope 层
-              </span>
+                <span className="agent-memory-tier-label" style={{ fontSize: 11, opacity: 0.7 }}>
+                  画像
+                </span>
+                <span className="agent-memory-tier-count" style={{ fontSize: 12 }}>
+                  {memoryByType.profile ?? 0}
+                </span>
+              </div>
+            )}
+            <div className="agent-memory-tier" title={MEMORY_LAYER_DESCRIPTIONS.scope}>
+              <span className="agent-memory-tier-label">Scope 层</span>
               <span className="agent-memory-tier-count">{scopeMemoryCount}</span>
+            </div>
+            {memoryByType && (
+              <>
+                <div
+                  className="agent-memory-tier"
+                  style={{ paddingLeft: 16, borderTop: 'none', paddingTop: 0 }}
+                >
+                  <span className="agent-memory-tier-label" style={{ fontSize: 11, opacity: 0.7 }}>
+                    叙事
+                  </span>
+                  <span className="agent-memory-tier-count" style={{ fontSize: 12 }}>
+                    {memoryByType.narrative ?? 0}
+                  </span>
+                </div>
+                <div
+                  className="agent-memory-tier"
+                  style={{ paddingLeft: 16, borderTop: 'none', paddingTop: 0 }}
+                >
+                  <span className="agent-memory-tier-label" style={{ fontSize: 11, opacity: 0.7 }}>
+                    前瞻
+                  </span>
+                  <span className="agent-memory-tier-count" style={{ fontSize: 12 }}>
+                    {memoryByType.foresight ?? 0}
+                  </span>
+                </div>
+                <div
+                  className="agent-memory-tier"
+                  style={{ paddingLeft: 16, borderTop: 'none', paddingTop: 0 }}
+                >
+                  <span className="agent-memory-tier-label" style={{ fontSize: 11, opacity: 0.7 }}>
+                    文档
+                  </span>
+                  <span className="agent-memory-tier-count" style={{ fontSize: 12 }}>
+                    {memoryByType.document ?? 0}
+                  </span>
+                </div>
+              </>
+            )}
+            <div className="agent-memory-tier" title={MEMORY_LAYER_DESCRIPTIONS.session}>
+              <span className="agent-memory-tier-label">Session 层</span>
+              <span className="agent-memory-tier-count">{sessionMemoryCount}</span>
             </div>
             <div
               className="agent-memory-tier"
               style={{ borderTop: 'none', paddingTop: 0, marginTop: -2 }}
             >
-              <span
-                className="agent-memory-tier-label"
-                style={{ fontSize: 11, opacity: 0.7 }}
-              >
+              <span className="agent-memory-tier-label" style={{ fontSize: 11, opacity: 0.7 }}>
                 合计
               </span>
               <span className="agent-memory-tier-count" style={{ fontWeight: 600 }}>
-                {userMemoryCount + scopeMemoryCount}
+                {userMemoryCount + scopeMemoryCount + sessionMemoryCount}
               </span>
             </div>
           </div>
         ) : (
-          <p className="agent-right-empty">暂无记忆或未启用</p>
+          <EmptyState description="暂无记忆或未启用" />
         )}
       </section>
 
@@ -189,7 +255,7 @@ export function AgentOverviewSidebar({
               <span className="agent-context-click-hint">点击查看完整预览</span>
             </>
           ) : (
-            <p className="agent-right-empty">当前 scope 无便签/待办/文档</p>
+            <EmptyState description="当前 scope 无便签/待办/文档" />
           )}
         </div>
         <button
@@ -212,6 +278,42 @@ export function AgentOverviewSidebar({
         </Modal>
       </section>
 
+      {/* 已签出文档 */}
+      {docLocks.length > 0 && (
+        <section className="agent-right-section">
+          <h3 className="agent-right-section-title">
+            <Lock size={14} className="agent-right-section-icon" />
+            已签出文档
+          </h3>
+          <AccentList
+            items={docLocks.map((lock) => {
+              const doc = documents.find((d) => d.id === lock.resourceId)
+              return {
+                key: lock.id,
+                avatar: <Lock size={11} style={{ color: 'var(--ant-color-warning)' }} />,
+                title: doc?.title || lock.resourceId.slice(0, 12),
+                addon: (
+                  <Tooltip title={`会话 ${lock.sessionId}`}>
+                    <span
+                      className="agent-lock-session-link"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        chatWith({ sessionId: lock.sessionId })
+                      }}
+                    >
+                      {lock.sessionId.slice(0, 6)}
+                      <ExternalLink size={9} style={{ marginLeft: 1, verticalAlign: -1 }} />
+                    </span>
+                  </Tooltip>
+                ),
+                onClick: () => navigateToDocs(lock.resourceId)
+              }
+            })}
+            styles={{ item: { padding: '6px 8px' } }}
+          />
+        </section>
+      )}
+
       {/* 文档列表（简化：仅标题） */}
       <section className="agent-right-section">
         <h3 className="agent-right-section-title">文档</h3>
@@ -222,18 +324,25 @@ export function AgentOverviewSidebar({
               <span>加载中</span>
             </div>
           ) : documents.length === 0 ? (
-            <p className="agent-right-empty">暂无文档</p>
+            <EmptyState description="暂无文档" />
           ) : (
-            <ul className="agent-documents-ul agent-documents-compact">
-              {documents.map((doc) => (
-                <li key={doc.id} className="agent-document-item-compact">
-                  <FileText size={12} className="agent-doc-icon" />
-                  <span className="agent-document-title" title={doc.title}>
-                    {doc.title || '未命名'}
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <AccentList
+              items={documents.map((doc) => {
+                const lockForDoc = activeLocksByDoc?.get(doc.id)
+                return {
+                  key: doc.id,
+                  avatar: <FileText size={12} />,
+                  title: doc.title || '未命名',
+                  addon: lockForDoc ? (
+                    <Tooltip title={`被会话 ${lockForDoc.sessionId.slice(0, 8)} 签出`}>
+                      <Lock size={10} style={{ color: 'var(--ant-color-warning)' }} />
+                    </Tooltip>
+                  ) : undefined,
+                  onClick: () => navigateToDocs(doc.id)
+                }
+              })}
+              styles={{ item: { padding: '6px 8px' } }}
+            />
           )}
         </div>
         <button
@@ -247,4 +356,4 @@ export function AgentOverviewSidebar({
       </section>
     </>
   )
-}
+})

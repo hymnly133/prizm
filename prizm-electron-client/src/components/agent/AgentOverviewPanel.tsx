@@ -9,15 +9,16 @@ import { Modal } from '@lobehub/ui'
 import { SpotlightCard } from '@lobehub/ui/awesome'
 import { Tag } from 'antd'
 import {
+  Activity,
   BarChart3,
   Brain,
   Coins,
+  Eye,
   FileText,
   Layers,
-  Loader2,
   MessageSquare,
-  RefreshCw,
-  Sparkles
+  Sparkles,
+  User as UserIcon
 } from 'lucide-react'
 import { useAgentOverviewData } from '../../hooks/useAgentOverviewData'
 import { MemoryInspector } from './MemoryInspector'
@@ -25,6 +26,9 @@ import { MemorySidebarPanel } from './MemorySidebarPanel'
 import { TokenDashboard } from './TokenDashboard'
 import { AnimatedCounter } from './AnimatedCounter'
 import { Select } from '../ui/Select'
+import { EmptyState } from '../ui/EmptyState'
+import { RefreshIconButton } from '../ui/RefreshIconButton'
+import { LoadingPlaceholder } from '../ui/LoadingPlaceholder'
 import { fadeUp, STAGGER_DELAY } from '../../theme/motionPresets'
 import type { AvailableModel } from '@prizm/client-core'
 
@@ -47,6 +51,8 @@ export function AgentOverviewPanel({ selectedModel, onModelChange }: AgentOvervi
     memoryEnabled,
     userMemoryCount,
     scopeMemoryCount,
+    sessionMemoryCount,
+    memoryByType,
     memoryCountsLoading,
     loadMemoryCounts,
     sessionsCount,
@@ -90,26 +96,22 @@ export function AgentOverviewPanel({ selectedModel, onModelChange }: AgentOvervi
             </Flexbox>
           </div>
         </Flexbox>
-        <button
-          type="button"
-          className="overview-refresh-btn"
-          onClick={handleRefreshAll}
-          title="刷新所有数据"
-        >
-          <RefreshCw size={14} />
-        </button>
+        <RefreshIconButton onClick={handleRefreshAll} title="刷新所有数据" />
       </motion.div>
 
       {/* Statistics - SpotlightCard grid */}
       <motion.div {...fadeUp(idx++ * STAGGER_DELAY)}>
         <SpotlightCard
           items={[
-            { key: 'sessions' },
-            { key: 'documents' },
-            { key: 'userMem' },
-            { key: 'scopeMem' }
+            { id: 'sessions' },
+            { id: 'documents' },
+            { id: 'profile' },
+            { id: 'narrative' },
+            { id: 'foresight' },
+            { id: 'docMem' },
+            { id: 'eventLog' }
           ]}
-          renderItem={({ key }) => {
+          renderItem={({ id }) => {
             const configs: Record<
               string,
               {
@@ -135,59 +137,73 @@ export function AgentOverviewPanel({ selectedModel, onModelChange }: AgentOvervi
                 loading: documentsLoading,
                 color: 'var(--ant-color-success)'
               },
-              userMem: {
-                icon: <Brain size={20} />,
-                label: 'User 记忆',
-                value: userMemoryCount,
+              profile: {
+                icon: <UserIcon size={20} />,
+                label: '画像',
+                value: memoryByType.profile,
                 loading: memoryCountsLoading,
                 color: 'var(--ant-color-warning)',
-                desc: '画像 / 偏好'
+                desc: 'profile'
               },
-              scopeMem: {
+              narrative: {
                 icon: <Sparkles size={20} />,
-                label: 'Scope 记忆',
-                value: scopeMemoryCount,
+                label: '叙事',
+                value: memoryByType.narrative,
                 loading: memoryCountsLoading,
                 color: 'var(--ant-geekblue-6, #2f54eb)',
-                desc: '叙事 / 文档'
+                desc: 'narrative'
+              },
+              foresight: {
+                icon: <Eye size={20} />,
+                label: '前瞻',
+                value: memoryByType.foresight,
+                loading: memoryCountsLoading,
+                color: '#13c2c2',
+                desc: 'foresight'
+              },
+              docMem: {
+                icon: <Brain size={20} />,
+                label: '文档记忆',
+                value: memoryByType.document,
+                loading: memoryCountsLoading,
+                color: 'var(--ant-color-success)',
+                desc: 'document'
+              },
+              eventLog: {
+                icon: <Activity size={20} />,
+                label: '事件日志',
+                value: memoryByType.event_log,
+                loading: memoryCountsLoading,
+                color: '#eb2f96',
+                desc: 'event_log'
               }
             }
-            const c = configs[key as string]
+            const c = configs[id as string]
             if (!c) return null
             return (
-              <div className="overview-stat-block">
-                <div className="overview-stat-icon" style={{ color: c.color }}>
+              <div className="stat-card">
+                <div className="stat-card__icon" style={{ color: c.color }}>
                   {c.icon}
                 </div>
-                <div className="overview-stat-info">
+                <div className="stat-card__info">
                   {c.loading ? (
-                    <span className="overview-stat-value">...</span>
+                    <span className="stat-card__value">...</span>
                   ) : (
                     <AnimatedCounter
                       value={c.value}
                       format={(n) => String(Math.round(n))}
-                      className="overview-stat-value"
+                      className="stat-card__value"
                     />
                   )}
-                  <span className="overview-stat-label">{c.label}</span>
-                  {c.desc && (
-                    <span
-                      style={{
-                        fontSize: 10,
-                        color: 'var(--ant-color-text-quaternary)',
-                        lineHeight: 1,
-                        marginTop: 1
-                      }}
-                    >
-                      {c.desc}
-                    </span>
-                  )}
+                  <span className="stat-card__label">{c.label}</span>
+                  {c.desc && <span className="stat-card__desc">{c.desc}</span>}
                 </div>
               </div>
             )
           }}
           columns={4}
           gap="12px"
+          size={400}
           borderRadius={12}
         />
       </motion.div>
@@ -195,36 +211,37 @@ export function AgentOverviewPanel({ selectedModel, onModelChange }: AgentOvervi
       {/* Two-column: Token Dashboard + Memory Panel */}
       <div className="overview-grid" style={{ marginTop: 16 }}>
         {/* Token Dashboard */}
-        <motion.div className="overview-card" {...fadeUp(idx++ * STAGGER_DELAY)}>
-          <div className="overview-card-head">
+        <motion.div className="content-card content-card--default content-card--hoverable" {...fadeUp(idx++ * STAGGER_DELAY)}>
+          <div className="content-card__header">
             <Coins size={16} />
             <span>Token 使用</span>
           </div>
-          <div className="overview-card-body overview-card-body-scroll">
+          <div className="content-card__body overview-card-body-scroll">
             <TokenDashboard />
           </div>
         </motion.div>
 
         {/* Memory Panel */}
-        <motion.div className="overview-card" {...fadeUp(idx++ * STAGGER_DELAY)}>
-          <div className="overview-card-head">
+        <motion.div className="content-card content-card--default content-card--hoverable" {...fadeUp(idx++ * STAGGER_DELAY)}>
+          <div className="content-card__header">
             <Brain size={16} />
             <span>记忆系统</span>
-            <button
-              type="button"
-              className="overview-card-action"
-              onClick={() => void loadMemoryCounts()}
-              disabled={memoryCountsLoading}
-              title="刷新记忆"
-            >
-              <RefreshCw size={12} />
-            </button>
+            <span style={{ marginLeft: 'auto' }}>
+              <RefreshIconButton
+                onClick={() => void loadMemoryCounts()}
+                disabled={memoryCountsLoading}
+                title="刷新记忆"
+                size={12}
+              />
+            </span>
           </div>
-          <div className="overview-card-body overview-card-body-scroll">
+          <div className="content-card__body overview-card-body-scroll">
             <MemorySidebarPanel
               memoryEnabled={memoryEnabled}
               userMemoryCount={userMemoryCount}
               scopeMemoryCount={scopeMemoryCount}
+              sessionMemoryCount={sessionMemoryCount}
+              memoryByType={memoryByType}
               memoryCountsLoading={memoryCountsLoading}
               onOpenInspector={() => setMemoryInspectorOpen(true)}
             />
@@ -232,31 +249,22 @@ export function AgentOverviewPanel({ selectedModel, onModelChange }: AgentOvervi
         </motion.div>
 
         {/* Context Preview */}
-        <motion.div className="overview-card" {...fadeUp(idx++ * STAGGER_DELAY)}>
-          <div className="overview-card-head">
+        <motion.div className="content-card content-card--default content-card--hoverable" {...fadeUp(idx++ * STAGGER_DELAY)}>
+          <div className="content-card__header">
             <Layers size={16} />
             <span>工作区上下文</span>
-            <button
-              type="button"
-              className="overview-card-action"
-              onClick={() => void loadScopeContext()}
-              disabled={scopeContextLoading}
-              title="刷新上下文"
-            >
-              <RefreshCw size={12} />
-            </button>
+            <span style={{ marginLeft: 'auto' }}>
+              <RefreshIconButton
+                onClick={() => void loadScopeContext()}
+                disabled={scopeContextLoading}
+                title="刷新上下文"
+                size={12}
+              />
+            </span>
           </div>
-          <div className="overview-card-body">
+          <div className="content-card__body">
             {scopeContextLoading ? (
-              <Flexbox
-                horizontal
-                align="center"
-                gap={6}
-                style={{ color: 'var(--ant-color-text-tertiary)' }}
-              >
-                <Loader2 size={14} className="spinning" />
-                <span>加载中</span>
-              </Flexbox>
+              <LoadingPlaceholder />
             ) : scopeContext ? (
               <div
                 className="overview-context-preview"
@@ -269,42 +277,31 @@ export function AgentOverviewPanel({ selectedModel, onModelChange }: AgentOvervi
                 <span className="overview-context-hint">点击查看完整预览</span>
               </div>
             ) : (
-              <p className="overview-empty-text">当前 scope 无便签/待办/文档</p>
+              <EmptyState description="当前 scope 无便签/待办/文档" />
             )}
           </div>
         </motion.div>
 
         {/* Documents List */}
-        <motion.div className="overview-card" {...fadeUp(idx++ * STAGGER_DELAY)}>
-          <div className="overview-card-head">
+        <motion.div className="content-card content-card--default content-card--hoverable" {...fadeUp(idx++ * STAGGER_DELAY)}>
+          <div className="content-card__header">
             <FileText size={16} />
             <span>文档</span>
             <Tag style={{ marginLeft: 'auto', marginRight: 0 }}>
               {documentsLoading ? '...' : documents.length}
             </Tag>
-            <button
-              type="button"
-              className="overview-card-action"
+            <RefreshIconButton
               onClick={() => void loadDocuments()}
               disabled={documentsLoading}
               title="刷新文档"
-            >
-              <RefreshCw size={12} />
-            </button>
+              size={12}
+            />
           </div>
-          <div className="overview-card-body">
+          <div className="content-card__body">
             {documentsLoading ? (
-              <Flexbox
-                horizontal
-                align="center"
-                gap={6}
-                style={{ color: 'var(--ant-color-text-tertiary)' }}
-              >
-                <Loader2 size={14} className="spinning" />
-                <span>加载中</span>
-              </Flexbox>
+              <LoadingPlaceholder />
             ) : documents.length === 0 ? (
-              <p className="overview-empty-text">暂无文档</p>
+              <EmptyState description="暂无文档" />
             ) : (
               <ul className="overview-doc-list overview-doc-list-horizontal">
                 {documents.map((doc) => (

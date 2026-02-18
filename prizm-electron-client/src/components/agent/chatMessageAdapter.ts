@@ -63,8 +63,9 @@ export function DraftCacheManager({ sessionId }: { sessionId: string }) {
   return null
 }
 
-/** 将 AgentMessage 转为 lobe-ui ChatMessage 格式 */
-export function toChatMessage(m: AgentMessage & { streaming?: boolean }): ChatMessage {
+const _chatMessageCache = new Map<string, ChatMessage>()
+
+function buildChatMessage(m: AgentMessage & { streaming?: boolean }): ChatMessage {
   const ts = m.createdAt
   const title = m.role === 'user' ? '你' : m.role === 'system' ? '命令结果' : 'AI'
   const avatar = m.role === 'user' ? '👤' : m.role === 'system' ? '⚡' : '🤖'
@@ -87,5 +88,22 @@ export function toChatMessage(m: AgentMessage & { streaming?: boolean }): ChatMe
       memoryRefs: m.memoryRefs,
       messageId: m.id
     }
+  }
+}
+
+/** 将 AgentMessage 转为 lobe-ui ChatMessage 格式（带缓存，流式消息跳过缓存） */
+export function toChatMessage(m: AgentMessage & { streaming?: boolean }): ChatMessage {
+  if (m.streaming) return buildChatMessage(m)
+  const cached = _chatMessageCache.get(m.id)
+  if (cached) return cached
+  const result = buildChatMessage(m)
+  _chatMessageCache.set(m.id, result)
+  return result
+}
+
+/** 清理已不存在的消息缓存条目 */
+export function pruneMessageCache(validIds: Set<string>): void {
+  for (const id of _chatMessageCache.keys()) {
+    if (!validIds.has(id)) _chatMessageCache.delete(id)
   }
 }

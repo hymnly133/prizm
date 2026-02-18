@@ -1,4 +1,7 @@
 import './PrizmFileToolCards'
+import './PrizmCompoundToolCards'
 export { ToolCallCard, GrantPathProvider, InteractProvider } from './ToolCallCard'
 export type { GrantPathContextValue, InteractContextValue } from './ToolCallCard'
+export { InteractActionPanel } from './InteractActionPanel'
 export { MemoryRefsTag } from './MemoryRefsTag'
+export { BackgroundTasksPanel } from './BackgroundTasksPanel'

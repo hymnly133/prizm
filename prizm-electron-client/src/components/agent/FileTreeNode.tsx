@@ -45,6 +45,8 @@ export const FileTreeNode = memo<FileTreeNodeProps>(
     const handleDragStart = useCallback(
       (e: React.DragEvent) => {
         e.dataTransfer.setData('text/plain', `@file:${data.id}`)
+        // 标记为应用内部拖拽，供 DropZoneOverlay 在 dragenter 阶段过滤
+        e.dataTransfer.setData('application/x-prizm-internal', '1')
         e.dataTransfer.effectAllowed = 'copy'
       },
       [data.id]

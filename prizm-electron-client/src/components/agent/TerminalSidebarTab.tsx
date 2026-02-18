@@ -13,7 +13,7 @@ import { createClientLogger } from '@prizm/client-core'
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 
 const log = createClientLogger('TerminalUI')
-import { Button, Tooltip, Badge, Empty } from 'antd'
+import { Button, Tooltip, Badge } from 'antd'
 import {
   PlusOutlined,
   CloseOutlined,
@@ -39,6 +39,7 @@ import type {
   ExecRecordInfo,
   ExecWorkspaceType
 } from '@prizm/client-core'
+import { EmptyState } from '../ui/EmptyState'
 
 export interface TerminalSidebarTabProps {
   sessionId: string | undefined
@@ -491,7 +492,7 @@ export const TerminalSidebarTab: React.FC<TerminalSidebarTabProps> = ({ sessionI
     return (
       <div className="term-sidebar">
         <div className="term-sidebar-empty">
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择会话后可使用终端" />
+          <EmptyState description="选择会话后可使用终端" />
         </div>
       </div>
     )
@@ -529,7 +530,7 @@ export const TerminalSidebarTab: React.FC<TerminalSidebarTabProps> = ({ sessionI
       />
 
       {/* Interactive 终端列表 */}
-      <div className="term-sidebar-list">
+      <div className="term-sidebar-list accent-list">
         {terminals.length === 0 ? (
           <div className="term-sidebar-list-empty">
             <span>暂无终端</span>
@@ -538,38 +539,41 @@ export const TerminalSidebarTab: React.FC<TerminalSidebarTabProps> = ({ sessionI
             </Button>
           </div>
         ) : (
-          terminals.map((t) => (
-            <div
-              key={t.id}
-              className={`term-sidebar-item${t.id === activeTerminalId ? ' active' : ''}${
-                t.status === 'exited' ? ' exited' : ''
-              }`}
-              onClick={() => setActiveTerminalId(t.id)}
-            >
-              <Badge
-                status={t.status === 'running' ? 'processing' : 'default'}
-                className="term-sidebar-item-badge"
-              />
-              <div className="term-sidebar-item-info">
-                <span className="term-sidebar-item-name">
-                  {t.title || t.shell.split(/[\\/]/).pop() || 'Terminal'}
-                </span>
-                <span className="term-sidebar-item-meta">
-                  PID {t.pid}
-                  {t.status === 'exited' && ` · exit ${t.exitCode ?? '?'}`}
-                </span>
+          terminals.map((t) => {
+            const isActive = t.id === activeTerminalId
+            return (
+              <div
+                key={t.id}
+                className={`term-sidebar-item${isActive ? ' active accent-list-active' : ''}${
+                  t.status === 'exited' ? ' exited' : ''
+                }`}
+                onClick={() => setActiveTerminalId(t.id)}
+              >
+                <Badge
+                  status={t.status === 'running' ? 'processing' : 'default'}
+                  className="term-sidebar-item-badge"
+                />
+                <div className="term-sidebar-item-info">
+                  <span className="term-sidebar-item-name">
+                    {t.title || t.shell.split(/[\\/]/).pop() || 'Terminal'}
+                  </span>
+                  <span className="term-sidebar-item-meta">
+                    PID {t.pid}
+                    {t.status === 'exited' && ` · exit ${t.exitCode ?? '?'}`}
+                  </span>
+                </div>
+                <Tooltip title="关闭终端">
+                  <button
+                    className="term-sidebar-item-kill"
+                    onClick={(e) => handleKill(t.id, e)}
+                    aria-label="关闭终端"
+                  >
+                    <CloseOutlined style={{ fontSize: 10 }} />
+                  </button>
+                </Tooltip>
               </div>
-              <Tooltip title="关闭终端">
-                <button
-                  className="term-sidebar-item-kill"
-                  onClick={(e) => handleKill(t.id, e)}
-                  aria-label="关闭终端"
-                >
-                  <CloseOutlined style={{ fontSize: 10 }} />
-                </button>
-              </Tooltip>
-            </div>
-          ))
+            )
+          })
         )}
       </div>
 

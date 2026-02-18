@@ -5,13 +5,17 @@
 import { useCallback, useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { Popover, Text } from '@lobehub/ui'
-import { Segmented, Empty } from 'antd'
-import { Brain, Layers, Loader2, MessageSquare, RefreshCw, Search, User } from 'lucide-react'
+import { Segmented } from '../ui/Segmented'
+import { Brain, ExternalLink, Layers, MessageSquare, Search, User } from 'lucide-react'
 import { usePrizmContext } from '../../context/PrizmContext'
 import { useScope } from '../../hooks/useScope'
+import { useNavigation } from '../../context/NavigationContext'
 import type { MemoryItem } from '@prizm/client-core'
 import { createStyles } from 'antd-style'
 import { fadeUp, EASE_SMOOTH } from '../../theme/motionPresets'
+import { RefreshIconButton } from '../ui/RefreshIconButton'
+import { EmptyState } from '../ui/EmptyState'
+import { LoadingPlaceholder } from '../ui/LoadingPlaceholder'
 
 const LAYER_CONFIG = {
   all: { label: '全部', icon: Brain },
@@ -62,24 +66,6 @@ const useStyles = createStyles(({ css, token }) => ({
     display: flex;
     align-items: center;
     gap: 6px;
-  `,
-  refreshBtn: css`
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 22px;
-    height: 22px;
-    border: none;
-    border-radius: 4px;
-    background: transparent;
-    color: ${token.colorTextTertiary};
-    cursor: pointer;
-    transition: all 0.15s;
-
-    &:hover {
-      background: ${token.colorFillSecondary};
-      color: ${token.colorPrimary};
-    }
   `,
   list: css`
     display: flex;
@@ -145,16 +131,6 @@ const useStyles = createStyles(({ css, token }) => ({
       background: ${token.colorPrimaryBg};
     }
   `,
-  empty: css`
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 16px;
-    color: ${token.colorTextQuaternary};
-    font-size: 12px;
-    gap: 4px;
-  `,
   countBadge: css`
     display: inline-flex;
     align-items: center;
@@ -175,6 +151,8 @@ interface MemorySidebarPanelProps {
   memoryEnabled: boolean
   userMemoryCount: number
   scopeMemoryCount: number
+  sessionMemoryCount: number
+  memoryByType?: Record<string, number>
   memoryCountsLoading: boolean
   onOpenInspector?: () => void
 }
@@ -183,12 +161,15 @@ export function MemorySidebarPanel({
   memoryEnabled,
   userMemoryCount,
   scopeMemoryCount,
+  sessionMemoryCount,
+  memoryByType,
   memoryCountsLoading,
   onOpenInspector
 }: MemorySidebarPanelProps) {
   const { styles } = useStyles()
   const { manager } = usePrizmContext()
   const { currentScope } = useScope()
+  const { navigateToAgentMessage } = useNavigation()
   const http = manager?.getHttpClient()
   const [memories, setMemories] = useState<MemoryItemWithLayer[]>([])
   const [loading, setLoading] = useState(false)
@@ -227,10 +208,7 @@ export function MemorySidebarPanel({
             记忆
           </span>
         </div>
-        <div className={styles.empty}>
-          <Brain size={20} style={{ opacity: 0.3 }} />
-          <span>记忆模块未启用</span>
-        </div>
+        <EmptyState description="记忆模块未启用" />
       </div>
     )
   }
@@ -243,21 +221,20 @@ export function MemorySidebarPanel({
           <Brain size={14} />
           记忆
           {!memoryCountsLoading && (
-            <span className={styles.countBadge}>{userMemoryCount + scopeMemoryCount}</span>
+            <span className={styles.countBadge}>
+              {userMemoryCount + scopeMemoryCount + sessionMemoryCount}
+            </span>
           )}
         </span>
-        <button
-          type="button"
-          className={styles.refreshBtn}
+        <RefreshIconButton
           onClick={() => void loadRecentMemories()}
           disabled={loading}
           title="刷新"
-        >
-          <RefreshCw size={11} />
-        </button>
+          size={11}
+        />
       </div>
 
-      {/* Layer filter */}
+      {/* Layer filter + per-type summary */}
       <Segmented
         size="small"
         block
@@ -266,21 +243,94 @@ export function MemorySidebarPanel({
         options={[
           { label: '全部', value: 'all' },
           { label: `User ${userMemoryCount}`, value: 'user' },
-          { label: `Scope ${scopeMemoryCount}`, value: 'scope' }
+          { label: `Scope ${scopeMemoryCount}`, value: 'scope' },
+          { label: `Session ${sessionMemoryCount}`, value: 'session' }
         ]}
       />
+      {memoryByType && !memoryCountsLoading && (
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 6,
+            fontSize: 11,
+            color: 'var(--ant-color-text-tertiary)'
+          }}
+        >
+          {memoryByType.profile > 0 && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+              <span
+                style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: '50%',
+                  background: TYPE_COLORS.profile
+                }}
+              />
+              画像 {memoryByType.profile}
+            </span>
+          )}
+          {memoryByType.narrative > 0 && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+              <span
+                style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: '50%',
+                  background: TYPE_COLORS.narrative
+                }}
+              />
+              叙事 {memoryByType.narrative}
+            </span>
+          )}
+          {memoryByType.foresight > 0 && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+              <span
+                style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: '50%',
+                  background: TYPE_COLORS.foresight
+                }}
+              />
+              前瞻 {memoryByType.foresight}
+            </span>
+          )}
+          {memoryByType.document > 0 && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+              <span
+                style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: '50%',
+                  background: TYPE_COLORS.document
+                }}
+              />
+              文档 {memoryByType.document}
+            </span>
+          )}
+          {memoryByType.event_log > 0 && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+              <span
+                style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: '50%',
+                  background: TYPE_COLORS.event_log
+                }}
+              />
+              事件 {memoryByType.event_log}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Memory list */}
       <div className={styles.list}>
         {loading ? (
-          <div className={styles.empty}>
-            <Loader2 size={14} className="spinning" />
-            <span>加载中</span>
-          </div>
+          <LoadingPlaceholder />
         ) : filtered.length === 0 ? (
-          <div className={styles.empty}>
-            <span>暂无记忆</span>
-          </div>
+          <EmptyState description="暂无记忆" />
         ) : (
           <AnimatePresence mode="popLayout">
             {filtered.slice(0, 8).map((mem, i) => (
@@ -314,6 +364,33 @@ export function MemorySidebarPanel({
                     <span>引用 {mem.ref_count}次</span>
                   )}
                   {mem.created_at && <span>{new Date(mem.created_at).toLocaleDateString()}</span>}
+                  {(mem as any).source_session_id &&
+                    ((mem as any).source_round_id || (mem as any).source_round_ids?.length > 0) && (
+                      <Popover
+                        content={`来源会话: ${(mem as any).source_session_id.slice(0, 8)}...`}
+                      >
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 2,
+                            cursor: 'pointer',
+                            color: 'var(--ant-color-primary)'
+                          }}
+                          onClick={() => {
+                            const sessionId = (mem as any).source_session_id as string
+                            const messageId =
+                              (mem as any).source_round_id ?? (mem as any).source_round_ids?.[0]
+                            if (sessionId && messageId) {
+                              navigateToAgentMessage(sessionId, messageId)
+                            }
+                          }}
+                        >
+                          <ExternalLink size={9} />
+                          来源
+                        </span>
+                      </Popover>
+                    )}
                 </div>
               </motion.div>
             ))}

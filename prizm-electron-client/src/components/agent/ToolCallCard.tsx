@@ -10,6 +10,7 @@ import { Flexbox, Icon, Tag } from '@lobehub/ui'
 const log = createClientLogger('ToolCall')
 import {
   AlertCircle,
+  BookOpen,
   Brain,
   CheckSquare,
   Clipboard,
@@ -18,7 +19,9 @@ import {
   FolderOpen,
   Globe,
   Loader2,
+  Lock,
   Search,
+  Terminal,
   Wrench,
   Bell,
   ChevronDown,
@@ -27,6 +30,7 @@ import {
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react'
 import { useState, memo, createContext, useContext, useCallback } from 'react'
+import { useToolCardExpanded, useToolCardExpandedKeyboard } from './useToolCardExpanded'
 import type { ToolCallRecord, InteractRequestPayload } from '@prizm/client-core'
 import { getToolDisplayName, getToolMetadata, getToolRender, isPrizmTool } from '@prizm/client-core'
 import { createStyles } from 'antd-style'
@@ -78,7 +82,11 @@ const CATEGORY_ICONS: Record<string, LucideIcon> = {
   search: Search,
   notice: Bell,
   memory: Brain,
-  external: Globe
+  knowledge: BookOpen,
+  lock: Lock,
+  terminal: Terminal,
+  external: Globe,
+  other: Wrench
 }
 
 /* ── 工具分类 → 强调色 ── */
@@ -90,7 +98,11 @@ const CATEGORY_COLORS: Record<string, string> = {
   search: '#6366f1',
   notice: '#ec4899',
   memory: '#14b8a6',
-  external: '#f97316'
+  knowledge: '#0891b2',
+  lock: '#d97706',
+  terminal: '#64748b',
+  external: '#f97316',
+  other: '#0d9488'
 }
 
 function getCategoryIcon(toolName: string): LucideIcon {
@@ -110,6 +122,9 @@ function getCategoryColor(toolName: string): string {
 
 /* ── 可打开预览的文件相关工具（document/todo 有 id，file 工具用 path 暂无） ── */
 const FILE_TOOLS = new Set([
+  'prizm_document',
+  'prizm_todo',
+  // 旧工具名兼容
   'prizm_create_document',
   'prizm_get_document_content',
   'prizm_update_document',
@@ -138,19 +153,20 @@ function parseFileRef(argsStr: string, resultStr?: string): { kind: FileKind; id
   return null
 }
 
-/* ── 从参数提取摘要 ── */
+/* ── 从参数提取摘要（支持复合工具 action/mode） ── */
 function parseArgsSummary(argsStr: string): string {
   try {
     const obj = JSON.parse(argsStr || '{}') as Record<string, unknown>
-    if (obj.query) return `搜索: ${String(obj.query).slice(0, 30)}`
-    if (obj.path) return String(obj.path).slice(0, 40)
+    if (obj.query) return `${String(obj.query).slice(0, 40)}`
+    if (obj.command) return `$ ${String(obj.command).slice(0, 50)}`
+    if (obj.path) return String(obj.path).slice(0, 50)
     if (obj.from && obj.to)
       return `${String(obj.from).slice(0, 20)} → ${String(obj.to).slice(0, 20)}`
-    if (obj.title) return String(obj.title).slice(0, 30)
+    if (obj.title) return String(obj.title).slice(0, 40)
     if (obj.content) return String(obj.content).slice(0, 40)
-    if (obj.documentId) return `文档 ${String(obj.documentId).slice(0, 12)}…`
-    if (obj.todoId) return `待办 ${String(obj.todoId).slice(0, 12)}…`
-    if (obj.todoListId) return `待办列表 ${String(obj.todoListId).slice(0, 12)}…`
+    if (obj.documentId) return `文档 ${String(obj.documentId).slice(0, 16)}`
+    if (obj.todoId) return `待办 ${String(obj.todoId).slice(0, 16)}`
+    if (obj.todoListId) return `待办列表 ${String(obj.todoListId).slice(0, 16)}`
     return ''
   } catch {
     return ''
@@ -167,7 +183,7 @@ export const ToolCallCard = memo(function ToolCallCard({ tc }: ToolCallCardProps
   if (status === 'preparing' || status === 'running') {
     log.debug('Render:', status, tc.id, tc.name)
   }
-  const displayName = getToolDisplayName(tc.name)
+  const displayName = getToolDisplayName(tc.name, tc.arguments)
   const CategoryIcon = getCategoryIcon(tc.name)
   const accentColor = getCategoryColor(tc.name)
   const argsSummary = parseArgsSummary(tc.arguments)
@@ -292,7 +308,8 @@ function ToolCardDone({
   onOpenFile: (kind: FileKind, id: string) => void
 }) {
   const { styles } = useStyles()
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, toggleExpanded] = useToolCardExpanded(tc.id)
+  const handleKeyDown = useToolCardExpandedKeyboard(toggleExpanded)
   const [granting, setGranting] = useState(false)
   const [granted, setGranted] = useState(false)
   const grantCtx = useContext(GrantPathContext)
@@ -325,13 +342,8 @@ function ToolCardDone({
         className="tool-card__header"
         role="button"
         tabIndex={0}
-        onClick={() => setExpanded((v) => !v)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
-            setExpanded((v) => !v)
-          }
-        }}
+        onClick={toggleExpanded}
+        onKeyDown={handleKeyDown}
       >
         <Flexbox gap={8} horizontal align="center" className={styles.fullWidth}>
           <div className="tool-card__icon-wrap" style={{ '--tc-accent': accentColor } as never}>
@@ -442,32 +454,30 @@ function ToolCardAwaitingInteract({
   const interactCtx = useContext(InteractContext)
   const [responding, setResponding] = useState(false)
   const warningColor = 'var(--ant-color-warning, #faad14)'
+  const pending = interactCtx?.pendingInteract
+  const isReady = !!pending
 
   const handleApprove = useCallback(async () => {
-    if (!interactCtx?.pendingInteract || responding) return
+    if (!pending || responding) return
     setResponding(true)
     try {
-      await interactCtx.respondToInteract(
-        interactCtx.pendingInteract.requestId,
-        true,
-        interactCtx.pendingInteract.paths
-      )
+      await interactCtx!.respondToInteract(pending.requestId, true, pending.paths)
     } finally {
       setResponding(false)
     }
-  }, [interactCtx, responding])
+  }, [interactCtx, pending, responding])
 
   const handleDeny = useCallback(async () => {
-    if (!interactCtx?.pendingInteract || responding) return
+    if (!pending || responding) return
     setResponding(true)
     try {
-      await interactCtx.respondToInteract(interactCtx.pendingInteract.requestId, false)
+      await interactCtx!.respondToInteract(pending.requestId, false)
     } finally {
       setResponding(false)
     }
-  }, [interactCtx, responding])
+  }, [interactCtx, pending, responding])
 
-  const paths = interactCtx?.pendingInteract?.paths ?? []
+  const paths = pending?.paths ?? extractPathsFromToolArgs(tc.arguments)
 
   return (
     <div className="tool-card tool-card--interact" data-status="awaiting_interact">
@@ -488,10 +498,9 @@ function ToolCardAwaitingInteract({
           </Flexbox>
           <Loader2 size={14} className="tool-card__spinner" />
         </Flexbox>
-        {/* 路径列表和操作按钮 */}
         <div className="tool-card__interact-body">
           <div className="tool-card__interact-message">
-            工具需要访问以下路径，AI 正在等待您的确认：
+            工具需要访问以下路径，请在下方面板中确认：
           </div>
           {paths.length > 0 && (
             <div className="tool-card__interact-paths">
@@ -506,15 +515,15 @@ function ToolCardAwaitingInteract({
             <button
               className="tool-card__interact-btn tool-card__interact-btn--approve"
               onClick={handleApprove}
-              disabled={responding}
+              disabled={responding || !isReady}
             >
               <ShieldCheck size={13} />
-              <span>{responding ? '处理中…' : '允许访问'}</span>
+              <span>{responding ? '处理中…' : !isReady ? '等待中…' : '允许访问'}</span>
             </button>
             <button
               className="tool-card__interact-btn tool-card__interact-btn--deny"
               onClick={handleDeny}
-              disabled={responding}
+              disabled={responding || !isReady}
             >
               <AlertCircle size={13} />
               <span>拒绝</span>
@@ -524,4 +533,18 @@ function ToolCardAwaitingInteract({
       </div>
     </div>
   )
+}
+
+/** 从工具参数 JSON 中提取路径列表（fallback，当 pendingInteract 尚未到达时） */
+function extractPathsFromToolArgs(argsStr: string): string[] {
+  try {
+    const obj = JSON.parse(argsStr || '{}') as Record<string, unknown>
+    const paths: string[] = []
+    if (typeof obj.path === 'string' && obj.path.trim()) paths.push(obj.path.trim())
+    if (typeof obj.from === 'string' && obj.from.trim()) paths.push(obj.from.trim())
+    if (typeof obj.to === 'string' && obj.to.trim()) paths.push(obj.to.trim())
+    return paths
+  } catch {
+    return []
+  }
 }

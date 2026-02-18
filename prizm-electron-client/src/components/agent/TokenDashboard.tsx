@@ -3,55 +3,20 @@
  * 替代旧版 TokenUsagePanel，用于总览面板
  */
 import { motion } from 'motion/react'
-import { Coins, Loader2, RefreshCw, TrendingUp } from 'lucide-react'
+import { Coins, Loader2, TrendingUp } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { usePrizmContext } from '../../context/PrizmContext'
 import { AnimatedCounter } from './AnimatedCounter'
 import { createStyles } from 'antd-style'
 import { fadeUp, STAGGER_DELAY, EASE_SMOOTH } from '../../theme/motionPresets'
 import type { TokenUsageCategory } from '@prizm/client-core'
-
-const CATEGORY_LABELS: Record<TokenUsageCategory, string> = {
-  chat: '对话',
-  conversation_summary: '对话摘要',
-  'memory:conversation_extract': '记忆提取（对话）',
-  'memory:document_extract': '记忆提取（文档）',
-  'memory:document_migration': '文档迁移记忆',
-  'memory:dedup': '记忆去重',
-  'memory:profile_merge': '画像合并',
-  'memory:query_expansion': '查询扩展',
-  document_summary: '文档摘要'
-}
-
-const CATEGORY_COLORS: Record<string, string> = {
-  chat: '#1677ff',
-  conversation_summary: '#722ed1',
-  'memory:conversation_extract': '#13c2c2',
-  'memory:document_extract': '#52c41a',
-  'memory:document_migration': '#fa8c16',
-  'memory:dedup': '#eb2f96',
-  'memory:profile_merge': '#faad14',
-  'memory:query_expansion': '#2f54eb',
-  document_summary: '#389e0d'
-}
-
-const CATEGORY_ORDER: TokenUsageCategory[] = [
-  'chat',
-  'conversation_summary',
-  'memory:conversation_extract',
-  'memory:document_extract',
-  'memory:document_migration',
-  'memory:dedup',
-  'memory:profile_merge',
-  'memory:query_expansion',
-  'document_summary'
-]
-
-function formatToken(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return String(n)
-}
+import {
+  TOKEN_CATEGORY_LABELS as CATEGORY_LABELS,
+  TOKEN_CATEGORY_COLORS as CATEGORY_COLORS,
+  TOKEN_CATEGORY_ORDER as CATEGORY_ORDER,
+  formatTokenCount as formatToken
+} from '@prizm/shared'
+import { RefreshIconButton } from '../ui/RefreshIconButton'
 
 interface SummaryData {
   totalInputTokens: number
@@ -187,28 +152,6 @@ const useStyles = createStyles(({ css, token }) => ({
     justify-content: center;
     padding: 20px 0;
   `,
-  refreshBtn: css`
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 26px;
-    border: 1px solid ${token.colorBorder};
-    border-radius: 6px;
-    background: transparent;
-    color: ${token.colorTextSecondary};
-    cursor: pointer;
-    transition: all 0.15s;
-
-    &:hover {
-      border-color: ${token.colorPrimary};
-      color: ${token.colorPrimary};
-    }
-    &:disabled {
-      opacity: 0.4;
-      cursor: not-allowed;
-    }
-  `,
   error: css`
     font-size: 12px;
     color: ${token.colorError};
@@ -269,14 +212,7 @@ export function TokenDashboard() {
     return (
       <div className={styles.error}>
         {error}
-        <button
-          type="button"
-          className={styles.refreshBtn}
-          onClick={() => void load()}
-          style={{ marginLeft: 8 }}
-        >
-          <RefreshCw size={12} />
-        </button>
+        <RefreshIconButton onClick={() => void load()} title="重试" size={12} />
       </div>
     )
   }
@@ -323,15 +259,12 @@ export function TokenDashboard() {
           <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ant-color-text-secondary)' }}>
             按类别分布
           </span>
-          <button
-            type="button"
-            className={styles.refreshBtn}
+          <RefreshIconButton
             onClick={() => void load()}
             disabled={loading}
             title="刷新"
-          >
-            <RefreshCw size={11} />
-          </button>
+            size={11}
+          />
         </div>
         {CATEGORY_ORDER.map((cat) => {
           const data = summary.byCategory[cat]
@@ -347,8 +280,8 @@ export function TokenDashboard() {
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.3, ease: EASE_SMOOTH }}
             >
-              <span className={styles.barLabel} title={CATEGORY_LABELS[cat]}>
-                {CATEGORY_LABELS[cat]}
+              <span className={styles.barLabel} title={CATEGORY_LABELS[cat] ?? cat}>
+                {CATEGORY_LABELS[cat] ?? cat}
               </span>
               <div className={styles.barTrack}>
                 <motion.div
