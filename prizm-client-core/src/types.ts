@@ -26,6 +26,11 @@ export type {
   MessagePartTool,
   MessageUsage,
   ToolCallStatus,
+  SessionKind,
+  BgTriggerType,
+  BgStatus,
+  BgSessionMeta,
+  SessionMemoryPolicy,
   NotificationPayload,
   ClientInfo,
   ScopeDescription,
@@ -57,7 +62,12 @@ export type {
   MemoryRefs,
   TokenUsageRecord,
   TokenUsageCategory,
-  DedupLogEntry
+  DedupLogEntry,
+  ResourceLockInfo,
+  EnrichedDocument,
+  EnrichedSession,
+  SessionCheckpoint,
+  CheckpointFileChange
 } from '@prizm/shared'
 
 // ============ 客户端配置（仅 client-core） ============

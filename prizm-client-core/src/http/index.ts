@@ -20,6 +20,12 @@ import './mixins/memory'
 import './mixins/settings'
 import './mixins/terminal'
 import './mixins/embedding'
+import './mixins/audit'
+import './mixins/locks'
+import './mixins/checkpoint'
 
 // 重导出类型
 export * from './clientTypes'
+export type { MemoryLogEntry } from './mixins/memory'
+export type { ResourceLockInfo, ResourceStatusInfo } from './mixins/locks'
+export type { RollbackResult } from './mixins/checkpoint'

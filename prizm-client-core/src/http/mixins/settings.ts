@@ -5,7 +5,11 @@ import type {
   TavilySettings,
   AgentToolsSettings,
   AvailableModel,
-  ShellInfo
+  ShellInfo,
+  AgentRule,
+  RuleLevel,
+  CreateAgentRuleInput,
+  UpdateAgentRuleInput
 } from '../clientTypes'
 
 declare module '../client' {
@@ -61,6 +65,16 @@ declare module '../client' {
     discoverMcpConfigs(): Promise<{
       sources: Array<{ source: string; path: string; serverCount: number }>
     }>
+    listAgentRules(level: RuleLevel, scope?: string): Promise<{ rules: AgentRule[] }>
+    getAgentRule(id: string, level: RuleLevel, scope?: string): Promise<AgentRule>
+    createAgentRule(input: CreateAgentRuleInput): Promise<AgentRule>
+    updateAgentRule(
+      id: string,
+      level: RuleLevel,
+      scope: string | undefined,
+      update: UpdateAgentRuleInput
+    ): Promise<AgentRule>
+    deleteAgentRule(id: string, level: RuleLevel, scope?: string): Promise<void>
   }
 }
 
@@ -232,4 +246,65 @@ PrizmClient.prototype.importMcpConfig = async function (
 
 PrizmClient.prototype.discoverMcpConfigs = async function (this: PrizmClient) {
   return this.request('/mcp/discover')
+}
+
+// ============ Agent Rules ============
+
+PrizmClient.prototype.listAgentRules = async function (
+  this: PrizmClient,
+  level: RuleLevel,
+  scope?: string
+) {
+  const params = new URLSearchParams({ level })
+  if (scope) params.set('scope', scope)
+  return this.request<{ rules: AgentRule[] }>(`/agent-rules?${params.toString()}`)
+}
+
+PrizmClient.prototype.getAgentRule = async function (
+  this: PrizmClient,
+  id: string,
+  level: RuleLevel,
+  scope?: string
+) {
+  const params = new URLSearchParams({ level })
+  if (scope) params.set('scope', scope)
+  return this.request<AgentRule>(`/agent-rules/${encodeURIComponent(id)}?${params.toString()}`)
+}
+
+PrizmClient.prototype.createAgentRule = async function (
+  this: PrizmClient,
+  input: CreateAgentRuleInput
+) {
+  return this.request<AgentRule>('/agent-rules', {
+    method: 'POST',
+    body: JSON.stringify(input)
+  })
+}
+
+PrizmClient.prototype.updateAgentRule = async function (
+  this: PrizmClient,
+  id: string,
+  level: RuleLevel,
+  scope: string | undefined,
+  update: UpdateAgentRuleInput
+) {
+  const params = new URLSearchParams({ level })
+  if (scope) params.set('scope', scope)
+  return this.request<AgentRule>(`/agent-rules/${encodeURIComponent(id)}?${params.toString()}`, {
+    method: 'PATCH',
+    body: JSON.stringify(update)
+  })
+}
+
+PrizmClient.prototype.deleteAgentRule = async function (
+  this: PrizmClient,
+  id: string,
+  level: RuleLevel,
+  scope?: string
+) {
+  const params = new URLSearchParams({ level })
+  if (scope) params.set('scope', scope)
+  await this.request<void>(`/agent-rules/${encodeURIComponent(id)}?${params.toString()}`, {
+    method: 'DELETE'
+  })
 }

@@ -1,6 +1,12 @@
 import { createClientLogger } from '../../logger'
 import { PrizmClient } from '../client'
-import type { AgentSession, StreamChatOptions, StreamChatChunk, SessionStats } from '../../types'
+import type {
+  AgentSession,
+  EnrichedSession,
+  StreamChatOptions,
+  StreamChatChunk,
+  SessionStats
+} from '../../types'
 
 const log = createClientLogger('AgentHTTP')
 
@@ -62,9 +68,22 @@ declare module '../client' {
       }[]
     }>
     getAgentSessionStats(sessionId: string, scope?: string): Promise<SessionStats>
-    listAgentSessions(scope?: string): Promise<AgentSession[]>
+    listAgentSessions(scope?: string): Promise<EnrichedSession[]>
     createAgentSession(scope?: string): Promise<AgentSession>
-    getAgentSession(id: string, scope?: string): Promise<AgentSession>
+    getAgentSession(id: string, scope?: string): Promise<EnrichedSession>
+    getSessionMessage(
+      sessionId: string,
+      messageId: string,
+      scope?: string,
+      context?: number
+    ): Promise<{
+      sessionId: string
+      messageId: string
+      messageIndex: number
+      totalMessages: number
+      message: AgentSession['messages'][number]
+      context: AgentSession['messages']
+    }>
     deleteAgentSession(id: string, scope?: string): Promise<void>
     updateAgentSession(
       id: string,
@@ -95,21 +114,45 @@ declare module '../client' {
       skills: unknown[]
       rules: unknown[]
     }>
+
+    // BG Session management
+    triggerBgSession(
+      payload: {
+        prompt: string
+        systemInstructions?: string
+        context?: Record<string, unknown>
+        expectedOutputFormat?: string
+        label?: string
+        model?: string
+        timeoutMs?: number
+        autoCleanup?: boolean
+      },
+      scope?: string
+    ): Promise<{ sessionId: string; status: string }>
+    cancelBgSession(
+      sessionId: string,
+      scope?: string
+    ): Promise<{ sessionId: string; status: string }>
+    getBgSessionResult(
+      sessionId: string,
+      scope?: string
+    ): Promise<{ sessionId: string; status: string; output: string; durationMs: number } | null>
+    getBgSummary(scope?: string): Promise<{
+      active: number
+      completed: number
+      failed: number
+      timeout: number
+      cancelled: number
+    }>
+    batchCancelBgSessions(sessionIds?: string[], scope?: string): Promise<{ cancelled: number }>
   }
 }
 
 PrizmClient.prototype.getAgentScopeContext = async function (this: PrizmClient, scope?: string) {
-  const s = scope ?? this.defaultScope
-  const url = this.buildUrl('/agent/debug/scope-context', { scope: s })
-  const response = await fetch(url, {
+  return this.request<{ summary: string; scope: string }>('/agent/debug/scope-context', {
     method: 'GET',
-    headers: this.buildHeaders()
+    scope: scope ?? this.defaultScope
   })
-  if (!response.ok) {
-    const text = await response.text().catch(() => '')
-    throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
-  }
-  return (await response.json()) as { summary: string; scope: string }
 }
 
 PrizmClient.prototype.getAgentSystemPrompt = async function (
@@ -117,34 +160,19 @@ PrizmClient.prototype.getAgentSystemPrompt = async function (
   scope?: string,
   sessionId?: string
 ) {
-  const s = scope ?? this.defaultScope
-  const params: Record<string, string> = { scope: s }
-  if (sessionId?.trim()) params.sessionId = sessionId.trim()
-  const url = this.buildUrl('/agent/system-prompt', params)
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: this.buildHeaders()
-  })
-  if (!response.ok) {
-    const text = await response.text().catch(() => '')
-    throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
-  }
-  return (await response.json()) as {
+  const sessionParam = sessionId?.trim() ? `?sessionId=${encodeURIComponent(sessionId.trim())}` : ''
+  return this.request<{
     systemPrompt: string
     scope: string
     sessionId: string | null
-  }
+  }>(`/agent/system-prompt${sessionParam}`, {
+    method: 'GET',
+    scope: scope ?? this.defaultScope
+  })
 }
 
 PrizmClient.prototype.getAgentScopeItems = async function (this: PrizmClient, scope?: string) {
-  const s = scope ?? this.defaultScope
-  const url = this.buildUrl('/agent/scope-items', { scope: s })
-  const response = await fetch(url, { method: 'GET', headers: this.buildHeaders() })
-  if (!response.ok) {
-    const text = await response.text().catch(() => '')
-    throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
-  }
-  return (await response.json()) as {
+  return this.request<{
     refTypes: { key: string; label: string; aliases: string[] }[]
     items: {
       id: string
@@ -155,32 +183,17 @@ PrizmClient.prototype.getAgentScopeItems = async function (this: PrizmClient, sc
       updatedAt: number
       groupOrStatus?: string
     }[]
-  }
+  }>('/agent/scope-items', { method: 'GET', scope: scope ?? this.defaultScope })
 }
 
 PrizmClient.prototype.getAgentSlashCommands = async function (this: PrizmClient, scope?: string) {
-  const s = scope ?? this.defaultScope
-  const url = this.buildUrl('/agent/slash-commands', { scope: s })
-  const response = await fetch(url, { method: 'GET', headers: this.buildHeaders() })
-  if (!response.ok) {
-    const text = await response.text().catch(() => '')
-    throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
-  }
-  return (await response.json()) as {
+  return this.request<{
     commands: { name: string; aliases: string[]; description: string }[]
-  }
+  }>('/agent/slash-commands', { method: 'GET', scope: scope ?? this.defaultScope })
 }
 
 PrizmClient.prototype.getAgentToolsMetadata = async function (this: PrizmClient) {
-  const response = await fetch(this.buildUrl('/agent/tools/metadata'), {
-    method: 'GET',
-    headers: this.buildHeaders()
-  })
-  if (!response.ok) {
-    const text = await response.text().catch(() => '')
-    throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
-  }
-  return (await response.json()) as {
+  return this.request<{
     tools: Array<{
       name: string
       displayName: string
@@ -189,7 +202,7 @@ PrizmClient.prototype.getAgentToolsMetadata = async function (this: PrizmClient)
       category?: string
       scopeActivity?: string
     }>
-  }
+  }>('/agent/tools/metadata', { method: 'GET' })
 }
 
 PrizmClient.prototype.getAgentSessionContext = async function (
@@ -197,16 +210,7 @@ PrizmClient.prototype.getAgentSessionContext = async function (
   sessionId: string,
   scope?: string
 ) {
-  const s = scope ?? this.defaultScope
-  const url = this.buildUrl(`/agent/sessions/${encodeURIComponent(sessionId)}/context`, {
-    scope: s
-  })
-  const response = await fetch(url, { method: 'GET', headers: this.buildHeaders() })
-  if (!response.ok) {
-    const text = await response.text().catch(() => '')
-    throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
-  }
-  const json = (await response.json()) as {
+  const json = await this.request<{
     sessionId: string
     scope: string
     provisions: {
@@ -227,7 +231,10 @@ PrizmClient.prototype.getAgentSessionContext = async function (
       title?: string
       timestamp: number
     }[]
-  }
+  }>(`/agent/sessions/${encodeURIComponent(sessionId)}/context`, {
+    method: 'GET',
+    scope: scope ?? this.defaultScope
+  })
   return {
     ...json,
     activities: json.activities ?? []
@@ -239,30 +246,17 @@ PrizmClient.prototype.getAgentSessionStats = async function (
   sessionId: string,
   scope?: string
 ) {
-  const s = scope ?? this.defaultScope
-  const url = this.buildUrl(`/agent/sessions/${encodeURIComponent(sessionId)}/stats`, {
-    scope: s
+  return this.request<SessionStats>(`/agent/sessions/${encodeURIComponent(sessionId)}/stats`, {
+    method: 'GET',
+    scope: scope ?? this.defaultScope
   })
-  const response = await fetch(url, { method: 'GET', headers: this.buildHeaders() })
-  if (!response.ok) {
-    const text = await response.text().catch(() => '')
-    throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
-  }
-  return (await response.json()) as SessionStats
 }
 
 PrizmClient.prototype.listAgentSessions = async function (this: PrizmClient, scope?: string) {
-  const s = scope ?? this.defaultScope
-  const url = this.buildUrl('/agent/sessions', { scope: s })
-  const response = await fetch(url, {
+  const data = await this.request<{ sessions: EnrichedSession[] }>('/agent/sessions', {
     method: 'GET',
-    headers: this.buildHeaders()
+    scope: scope ?? this.defaultScope
   })
-  if (!response.ok) {
-    const text = await response.text().catch(() => '')
-    throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
-  }
-  const data = (await response.json()) as { sessions: AgentSession[] }
   return data.sessions ?? []
 }
 
@@ -280,20 +274,28 @@ PrizmClient.prototype.getAgentSession = async function (
   id: string,
   scope?: string
 ) {
-  const s = scope ?? this.defaultScope
-  const url = this.buildUrl(`/agent/sessions/${encodeURIComponent(id)}`, {
-    scope: s
-  })
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: this.buildHeaders()
-  })
-  if (!response.ok) {
-    const text = await response.text().catch(() => '')
-    throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
-  }
-  const data = (await response.json()) as { session: AgentSession }
+  const data = await this.request<{ session: EnrichedSession }>(
+    `/agent/sessions/${encodeURIComponent(id)}`,
+    { method: 'GET', scope: scope ?? this.defaultScope }
+  )
   return data.session
+}
+
+PrizmClient.prototype.getSessionMessage = async function (
+  this: PrizmClient,
+  sessionId: string,
+  messageId: string,
+  scope?: string,
+  context?: number
+) {
+  const contextParam = context != null ? `?context=${context}` : ''
+  const path = `/agent/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(
+    messageId
+  )}${contextParam}`
+  return this.request(path, {
+    method: 'GET',
+    scope: scope ?? this.defaultScope
+  })
 }
 
 PrizmClient.prototype.deleteAgentSession = async function (
@@ -301,18 +303,10 @@ PrizmClient.prototype.deleteAgentSession = async function (
   id: string,
   scope?: string
 ) {
-  const s = scope ?? this.defaultScope
-  const url = this.buildUrl(`/agent/sessions/${encodeURIComponent(id)}`, {
-    scope: s
-  })
-  const response = await fetch(url, {
+  await this.request<void>(`/agent/sessions/${encodeURIComponent(id)}`, {
     method: 'DELETE',
-    headers: this.buildHeaders()
+    scope: scope ?? this.defaultScope
   })
-  if (!response.ok && response.status !== 204) {
-    const text = await response.text().catch(() => '')
-    throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
-  }
 }
 
 PrizmClient.prototype.updateAgentSession = async function (
@@ -321,20 +315,14 @@ PrizmClient.prototype.updateAgentSession = async function (
   update: { llmSummary?: string },
   scope?: string
 ) {
-  const s = scope ?? this.defaultScope
-  const url = this.buildUrl(`/agent/sessions/${encodeURIComponent(id)}`, {
-    scope: s
-  })
-  const response = await fetch(url, {
-    method: 'PATCH',
-    headers: this.buildHeaders(),
-    body: JSON.stringify(update)
-  })
-  if (!response.ok) {
-    const text = await response.text().catch(() => '')
-    throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
-  }
-  const data = (await response.json()) as { session: AgentSession }
+  const data = await this.request<{ session: AgentSession }>(
+    `/agent/sessions/${encodeURIComponent(id)}`,
+    {
+      method: 'PATCH',
+      scope: scope ?? this.defaultScope,
+      body: JSON.stringify(update)
+    }
+  )
   return data.session
 }
 
@@ -344,21 +332,14 @@ PrizmClient.prototype.grantSessionPaths = async function (
   paths: string[],
   scope?: string
 ) {
-  const s = scope ?? this.defaultScope
-  const url = this.buildUrl(`/agent/sessions/${encodeURIComponent(sessionId)}/grant-paths`, {
-    scope: s
-  })
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: this.buildHeaders(),
-    body: JSON.stringify({ paths })
-  })
-  if (!response.ok) {
-    const text = await response.text().catch(() => '')
-    throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
-  }
-  const data = (await response.json()) as { grantedPaths: string[] }
-  return data
+  return this.request<{ grantedPaths: string[] }>(
+    `/agent/sessions/${encodeURIComponent(sessionId)}/grant-paths`,
+    {
+      method: 'POST',
+      scope: scope ?? this.defaultScope,
+      body: JSON.stringify({ paths })
+    }
+  )
 }
 
 PrizmClient.prototype.respondToInteract = async function (
@@ -368,30 +349,22 @@ PrizmClient.prototype.respondToInteract = async function (
   approved: boolean,
   options?: { paths?: string[]; scope?: string }
 ) {
-  const s = options?.scope ?? this.defaultScope
-  const url = this.buildUrl(`/agent/sessions/${encodeURIComponent(sessionId)}/interact-response`, {
-    scope: s
-  })
-  const response = await fetch(url, {
+  return this.request<{
+    requestId: string
+    approved: boolean
+    grantedPaths: string[]
+  }>(`/agent/sessions/${encodeURIComponent(sessionId)}/interact-response`, {
     method: 'POST',
-    headers: this.buildHeaders(),
+    scope: options?.scope ?? this.defaultScope,
     body: JSON.stringify({
       requestId,
       approved,
       ...(options?.paths && { paths: options.paths })
     })
   })
-  if (!response.ok) {
-    const text = await response.text().catch(() => '')
-    throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
-  }
-  return (await response.json()) as {
-    requestId: string
-    approved: boolean
-    grantedPaths: string[]
-  }
 }
 
+// streamChat must use raw fetch for SSE streaming
 PrizmClient.prototype.streamChat = async function (
   this: PrizmClient,
   sessionId: string,
@@ -493,21 +466,74 @@ PrizmClient.prototype.stopAgentChat = async function (
   sessionId: string,
   scope?: string
 ) {
-  const s = scope ?? this.defaultScope
-  const url = this.buildUrl(`/agent/sessions/${encodeURIComponent(sessionId)}/stop`, {
-    scope: s
-  })
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: this.buildHeaders()
-  })
-  if (!response.ok) {
-    const text = await response.text().catch(() => '')
-    throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
-  }
-  return (await response.json()) as { stopped: boolean }
+  return this.request<{ stopped: boolean }>(
+    `/agent/sessions/${encodeURIComponent(sessionId)}/stop`,
+    { method: 'POST', scope: scope ?? this.defaultScope }
+  )
 }
 
 PrizmClient.prototype.getAgentCapabilities = async function (this: PrizmClient) {
   return this.request('/agent/capabilities')
+}
+
+// ── BG Session 管理 ──
+
+PrizmClient.prototype.triggerBgSession = async function (this: PrizmClient, payload, scope?) {
+  return this.request<{ sessionId: string; status: string }>('/agent/sessions/trigger', {
+    method: 'POST',
+    scope: scope ?? this.defaultScope,
+    body: JSON.stringify(payload)
+  })
+}
+
+PrizmClient.prototype.cancelBgSession = async function (
+  this: PrizmClient,
+  sessionId: string,
+  scope?: string
+) {
+  return this.request<{ sessionId: string; status: string }>(
+    `/agent/sessions/${encodeURIComponent(sessionId)}/cancel`,
+    { method: 'POST', scope: scope ?? this.defaultScope }
+  )
+}
+
+PrizmClient.prototype.getBgSessionResult = async function (
+  this: PrizmClient,
+  sessionId: string,
+  scope?: string
+) {
+  return this.request<{
+    sessionId: string
+    status: string
+    output: string
+    durationMs: number
+  } | null>(`/agent/sessions/${encodeURIComponent(sessionId)}/result`, {
+    method: 'GET',
+    scope: scope ?? this.defaultScope
+  })
+}
+
+PrizmClient.prototype.getBgSummary = async function (this: PrizmClient, scope?: string) {
+  return this.request<{
+    active: number
+    completed: number
+    failed: number
+    timeout: number
+    cancelled: number
+  }>('/agent/background-summary', {
+    method: 'GET',
+    scope: scope ?? this.defaultScope
+  })
+}
+
+PrizmClient.prototype.batchCancelBgSessions = async function (
+  this: PrizmClient,
+  sessionIds?: string[],
+  scope?: string
+) {
+  return this.request<{ cancelled: number }>('/agent/background/batch-cancel', {
+    method: 'POST',
+    scope: scope ?? this.defaultScope,
+    body: JSON.stringify(sessionIds ? { sessionIds } : {})
+  })
 }

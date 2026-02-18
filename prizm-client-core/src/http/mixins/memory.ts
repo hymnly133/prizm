@@ -2,6 +2,17 @@ import { PrizmClient } from '../client'
 import type { MemoryItem, DedupLogEntry, MemoryIdsByLayer } from '@prizm/shared'
 import type { TokenUsageRecord } from '../../types'
 
+/** 记忆系统日志条目（对应服务端 MemoryLogEntry） */
+export interface MemoryLogEntry {
+  ts: string
+  event: string
+  scope?: string
+  documentId?: string
+  sessionId?: string
+  detail?: Record<string, unknown>
+  error?: string
+}
+
 declare module '../client' {
   interface PrizmClient {
     getMemories(scope?: string): Promise<{ enabled: boolean; memories: MemoryItem[] }>
@@ -16,13 +27,25 @@ declare module '../client' {
       }
     ): Promise<{ enabled: boolean; memories: MemoryItem[] }>
     deleteMemory(id: string, scope?: string): Promise<void>
-    getMemoryCounts(
-      scope?: string
-    ): Promise<{ enabled: boolean; userCount: number; scopeCount: number }>
+    getMemoryCounts(scope?: string): Promise<{
+      enabled: boolean
+      userCount: number
+      scopeCount: number
+      sessionCount: number
+      byType: Record<string, number>
+    }>
     resolveMemoryIds(
       byLayer: MemoryIdsByLayer,
       scope?: string
     ): Promise<Record<string, MemoryItem | null>>
+    getDocumentMemories(
+      documentId: string,
+      scope?: string
+    ): Promise<{ enabled: boolean; memories: MemoryItem[]; extracting?: boolean }>
+    extractDocumentMemory(
+      documentId: string,
+      scope?: string
+    ): Promise<{ triggered: boolean; reason?: string }>
     getDedupLog(scope?: string, limit?: number): Promise<{ entries: DedupLogEntry[] }>
     undoDedup(
       dedupLogId: string,
@@ -32,6 +55,8 @@ declare module '../client' {
       scope?: string
       category?: string
       sessionId?: string
+      from?: number
+      to?: number
       limit?: number
       offset?: number
     }): Promise<{
@@ -43,12 +68,14 @@ declare module '../client' {
         count: number
         byCategory: Record<string, { input: number; output: number; total: number; count: number }>
         byDataScope: Record<string, { input: number; output: number; total: number; count: number }>
+        byModel: Record<string, { input: number; output: number; total: number; count: number }>
       }
     }>
     clearAllMemories(
       confirmToken: string,
       scope?: string
     ): Promise<{ deleted: number; vectorsCleared: boolean }>
+    getMemoryLogs(limit?: number): Promise<{ logs: MemoryLogEntry[] }>
   }
 }
 
@@ -100,10 +127,13 @@ PrizmClient.prototype.deleteMemory = async function (
 }
 
 PrizmClient.prototype.getMemoryCounts = async function (this: PrizmClient, scope?: string) {
-  return this.request<{ enabled: boolean; userCount: number; scopeCount: number }>(
-    '/agent/memories/counts',
-    { method: 'GET', scope: scope ?? this.defaultScope }
-  )
+  return this.request<{
+    enabled: boolean
+    userCount: number
+    scopeCount: number
+    sessionCount: number
+    byType: Record<string, number>
+  }>('/agent/memories/counts', { method: 'GET', scope: scope ?? this.defaultScope })
 }
 
 PrizmClient.prototype.resolveMemoryIds = async function (
@@ -119,6 +149,28 @@ PrizmClient.prototype.resolveMemoryIds = async function (
     body: JSON.stringify({ byLayer })
   })
   return res.memories
+}
+
+PrizmClient.prototype.getDocumentMemories = async function (
+  this: PrizmClient,
+  documentId: string,
+  scope?: string
+) {
+  return this.request<{ enabled: boolean; memories: MemoryItem[]; extracting?: boolean }>(
+    `/agent/memories/document/${encodeURIComponent(documentId)}`,
+    { method: 'GET', scope }
+  )
+}
+
+PrizmClient.prototype.extractDocumentMemory = async function (
+  this: PrizmClient,
+  documentId: string,
+  scope?: string
+) {
+  return this.request<{ triggered: boolean; reason?: string }>(
+    `/agent/memories/document/${encodeURIComponent(documentId)}/extract`,
+    { method: 'POST', scope }
+  )
 }
 
 PrizmClient.prototype.getDedupLog = async function (
@@ -149,6 +201,8 @@ PrizmClient.prototype.getTokenUsage = async function (
     scope?: string
     category?: string
     sessionId?: string
+    from?: number
+    to?: number
     limit?: number
     offset?: number
   }
@@ -157,6 +211,8 @@ PrizmClient.prototype.getTokenUsage = async function (
   if (filter?.scope) params.set('scope', filter.scope)
   if (filter?.category) params.set('category', filter.category)
   if (filter?.sessionId) params.set('sessionId', filter.sessionId)
+  if (filter?.from != null) params.set('from', String(filter.from))
+  if (filter?.to != null) params.set('to', String(filter.to))
   if (filter?.limit != null) params.set('limit', String(filter.limit))
   if (filter?.offset != null) params.set('offset', String(filter.offset))
   const qs = params.toString()
@@ -174,4 +230,9 @@ PrizmClient.prototype.clearAllMemories = async function (
     scope,
     body: JSON.stringify({ confirm: confirmToken })
   })
+}
+
+PrizmClient.prototype.getMemoryLogs = async function (this: PrizmClient, limit?: number) {
+  const url = limit != null ? `/agent/memories/logs?limit=${limit}` : '/agent/memories/logs'
+  return this.request<{ logs: MemoryLogEntry[] }>(url, { method: 'GET' })
 }

@@ -173,14 +173,89 @@ export interface EmbeddingStatus {
   upSinceMs: number | null
 }
 
+/** 向量统计信息 */
+export interface VectorStats {
+  mean: number
+  std: number
+  min: number
+  max: number
+  norm: number
+}
+
+/** 相似度等级 */
+export type SimilarityLevel = 'very_high' | 'high' | 'medium' | 'low' | 'very_low'
+
 /** Embedding 测试结果 */
 export interface EmbeddingTestResult {
+  text: string
+  textLength: number
   dimension: number
   latencyMs: number
   vectorPreview: number[]
+  vectorStats: VectorStats
   vectorFull?: number[]
-  similarity?: number
+  /** 以下字段仅在提供 compareWith 时返回 */
+  compareWith?: string
+  compareTextLength?: number
   compareLatencyMs?: number
+  compareVectorPreview?: number[]
+  compareVectorStats?: VectorStats
+  /** 原始余弦相似度 */
+  similarity?: number
+  /** 校准后的相似度（消除模型基线偏移） */
+  calibratedSimilarity?: number
+  similarityLevel?: SimilarityLevel
+  similarityLabel?: string
+}
+
+/** 基准测试期望类型 */
+export type BenchmarkExpected = 'high' | 'low' | 'cross_lang' | 'antonym'
+
+/** 基准测试单对结果 */
+export interface BenchmarkPairResult {
+  textA: string
+  textB: string
+  category: string
+  expected: BenchmarkExpected
+  /** 原始余弦相似度 */
+  similarity: number
+  /** 校准后的相似度 */
+  calibratedSimilarity: number
+  similarityLevel: SimilarityLevel
+  similarityLabel: string
+  /** true=通过, false=未通过, null=反义词对（已知限制，不参与评分） */
+  pass: boolean | null
+}
+
+/** 基准测试汇总统计 */
+export interface BenchmarkSummary {
+  totalPairs: number
+  /** 参与评分的对数（排除 cross_lang + antonym） */
+  scorablePairs: number
+  /** 跨语言对数（小模型已知限制，不参与评分） */
+  crossLangPairs: number
+  /** 反义词对数（不参与评分） */
+  antonymPairs: number
+  passCount: number
+  failCount: number
+  passRate: number
+  /** 统一判定阈值（calibrated） */
+  threshold: number
+  avgHighCalibratedSimilarity: number
+  avgLowCalibratedSimilarity: number
+  /** 跨语言对校准均值（仅供参考） */
+  avgCrossLangCalibratedSimilarity: number
+  /** 区分度 = 高相似对校准均值 - 低相似对校准均值 */
+  discrimination: number
+  totalLatencyMs: number
+  modelName: string
+  dimension: number
+}
+
+/** 基准测试完整结果 */
+export interface EmbeddingBenchmarkResult {
+  pairs: BenchmarkPairResult[]
+  summary: BenchmarkSummary
 }
 
 /** Embedding 重载结果 */
@@ -192,4 +267,46 @@ export interface EmbeddingReloadResult {
   dimension: number
   dtype: string
   loadTimeMs: number
+}
+
+// ============ Agent Rules ============
+
+export type RuleLevel = 'user' | 'scope'
+
+/** Agent 自定义规则 */
+export interface AgentRule {
+  id: string
+  title: string
+  content: string
+  enabled: boolean
+  level: RuleLevel
+  scope?: string
+  alwaysApply: boolean
+  globs?: string[]
+  description?: string
+  createdAt: number
+  updatedAt: number
+}
+
+/** 创建规则的输入 */
+export interface CreateAgentRuleInput {
+  id: string
+  title: string
+  content: string
+  level: RuleLevel
+  scope?: string
+  enabled?: boolean
+  alwaysApply?: boolean
+  globs?: string[]
+  description?: string
+}
+
+/** 更新规则的输入 */
+export interface UpdateAgentRuleInput {
+  title?: string
+  content?: string
+  enabled?: boolean
+  alwaysApply?: boolean
+  globs?: string[]
+  description?: string
 }

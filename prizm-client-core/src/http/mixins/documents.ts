@@ -1,10 +1,10 @@
 import { PrizmClient } from '../client'
-import type { Document } from '../../types'
+import type { Document, EnrichedDocument } from '../../types'
 
 declare module '../client' {
   interface PrizmClient {
-    listDocuments(options?: { scope?: string }): Promise<Document[]>
-    getDocument(id: string, scope?: string): Promise<Document>
+    listDocuments(options?: { scope?: string }): Promise<EnrichedDocument[]>
+    getDocument(id: string, scope?: string): Promise<EnrichedDocument>
     createDocument(payload: { title: string; content?: string }, scope?: string): Promise<Document>
     updateDocument(
       id: string,
@@ -22,6 +22,8 @@ declare module '../client' {
         timestamp: string
         title: string
         contentHash: string
+        changedBy?: { type: 'agent' | 'user' | 'system'; sessionId?: string; source?: string }
+        changeReason?: string
       }>
     }>
     getDocumentVersion(
@@ -55,22 +57,15 @@ PrizmClient.prototype.listDocuments = async function (
   this: PrizmClient,
   options?: { scope?: string }
 ) {
-  const scope = options?.scope ?? this.defaultScope
-  const url = this.buildUrl('/documents', { scope })
-  const response = await fetch(url, {
+  const data = await this.request<{ documents: EnrichedDocument[] }>('/documents', {
     method: 'GET',
-    headers: this.buildHeaders()
+    scope: options?.scope ?? this.defaultScope
   })
-  if (!response.ok) {
-    const text = await response.text().catch(() => '')
-    throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
-  }
-  const data = (await response.json()) as { documents: Document[] }
   return data.documents
 }
 
 PrizmClient.prototype.getDocument = async function (this: PrizmClient, id: string, scope?: string) {
-  const data = await this.request<{ document: Document }>(`/documents/${encodeURIComponent(id)}`, {
+  const data = await this.request<{ document: EnrichedDocument }>(`/documents/${encodeURIComponent(id)}`, {
     method: 'GET',
     scope
   })
@@ -145,25 +140,10 @@ PrizmClient.prototype.getDocumentDiff = async function (
   to: number,
   scope?: string
 ) {
-  const url = this.buildUrl(`/documents/${encodeURIComponent(id)}/diff`, {
-    scope: scope ?? this.defaultScope,
-    from: String(from),
-    to: String(to)
-  })
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: this.buildHeaders()
-  })
-  if (!response.ok) {
-    const text = await response.text().catch(() => '')
-    throw new Error(`HTTP ${response.status}: ${text || 'Failed to get diff'}`)
-  }
-  return (await response.json()) as {
-    documentId: string
-    from: number
-    to: number
-    diff: string
-  }
+  return this.request<{ documentId: string; from: number; to: number; diff: string }>(
+    `/documents/${encodeURIComponent(id)}/diff?from=${from}&to=${to}`,
+    { method: 'GET', scope: scope ?? this.defaultScope }
+  )
 }
 
 PrizmClient.prototype.restoreDocumentVersion = async function (

@@ -1,11 +1,17 @@
 import { PrizmClient } from '../client'
-import type { EmbeddingStatus, EmbeddingTestResult, EmbeddingReloadResult } from '../clientTypes'
+import type {
+  EmbeddingStatus,
+  EmbeddingTestResult,
+  EmbeddingReloadResult,
+  EmbeddingBenchmarkResult
+} from '../clientTypes'
 
 declare module '../client' {
   interface PrizmClient {
     getEmbeddingStatus(): Promise<EmbeddingStatus>
     testEmbedding(text: string, compareWith?: string): Promise<EmbeddingTestResult>
     reloadEmbedding(dtype?: string): Promise<EmbeddingReloadResult>
+    runEmbeddingBenchmark(): Promise<EmbeddingBenchmarkResult>
   }
 }
 
@@ -28,5 +34,11 @@ PrizmClient.prototype.reloadEmbedding = async function (this: PrizmClient, dtype
   return this.request<EmbeddingReloadResult>('/embedding/reload', {
     method: 'POST',
     body: dtype ? JSON.stringify({ dtype }) : undefined
+  })
+}
+
+PrizmClient.prototype.runEmbeddingBenchmark = async function (this: PrizmClient) {
+  return this.request<EmbeddingBenchmarkResult>('/embedding/benchmark', {
+    method: 'POST'
   })
 }

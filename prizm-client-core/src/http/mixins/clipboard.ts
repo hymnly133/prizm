@@ -27,7 +27,9 @@ PrizmClient.prototype.getClipboardHistory = async function (
   this: PrizmClient,
   options?: { limit?: number; scope?: string }
 ) {
-  const query: Record<string, string | undefined> = {}
+  const query: Record<string, string | undefined> = {
+    scope: options?.scope ?? this.defaultScope
+  }
   if (typeof options?.limit === 'number') {
     query.limit = String(options.limit)
   }

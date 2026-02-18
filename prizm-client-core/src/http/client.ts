@@ -98,19 +98,17 @@ export class PrizmClient {
     let url: string
     let body = init.body
     if (scope !== undefined) {
-      if (method === 'GET' || method === 'DELETE') {
-        url = this.buildUrl(normalizedPath, { scope })
-      } else {
-        url = this.buildUrl(normalizedPath)
+      url = this.buildUrl(normalizedPath, { scope })
+      if (method !== 'GET' && method !== 'DELETE') {
         if (body && typeof body === 'string') {
           try {
             const parsed = JSON.parse(body) as Record<string, unknown>
             parsed.scope = scope
             body = JSON.stringify(parsed)
           } catch {
-            // 非 JSON body 不添加 scope
+            // 非 JSON body 忽略
           }
-        } else if (body === undefined || body === null) {
+        } else if (!body) {
           body = JSON.stringify({ scope })
         }
       }
