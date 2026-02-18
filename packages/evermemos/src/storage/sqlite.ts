@@ -26,13 +26,16 @@ export class SQLiteAdapter implements RelationalStoreAdapter {
         source_type TEXT,
         source_session_id TEXT,
         source_round_id TEXT,
-        sub_type TEXT
+        source_round_ids TEXT,
+        sub_type TEXT,
+        source_document_id TEXT
       );
       
       CREATE INDEX IF NOT EXISTS idx_memories_user_id ON memories(user_id);
       CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type);
       CREATE INDEX IF NOT EXISTS idx_memories_source_round ON memories(source_round_id);
       CREATE INDEX IF NOT EXISTS idx_memories_sub_type ON memories(sub_type);
+      CREATE INDEX IF NOT EXISTS idx_memories_source_document ON memories(source_document_id);
 
       CREATE TABLE IF NOT EXISTS search_index (
         scope TEXT PRIMARY KEY,
@@ -60,6 +63,21 @@ export class SQLiteAdapter implements RelationalStoreAdapter {
       CREATE INDEX IF NOT EXISTS idx_dedup_log_kept ON dedup_log(kept_memory_id);
       CREATE INDEX IF NOT EXISTS idx_dedup_log_user ON dedup_log(user_id);
     `)
+
+    // 兼容迁移：已有 DB 可能不含新增列
+    try {
+      this.db.exec(`ALTER TABLE memories ADD COLUMN source_document_id TEXT`)
+      this.db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_memories_source_document ON memories(source_document_id)`
+      )
+    } catch {
+      // 列已存在，忽略
+    }
+    try {
+      this.db.exec(`ALTER TABLE memories ADD COLUMN source_round_ids TEXT`)
+    } catch {
+      // 列已存在，忽略
+    }
   }
 
   /** 读取搜索索引（MiniSearch + byId），供 Prizm 统一搜索使用 */

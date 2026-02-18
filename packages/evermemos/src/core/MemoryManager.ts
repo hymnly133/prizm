@@ -8,6 +8,7 @@ import {
   DocumentSubType,
   RawDataType,
   UnifiedExtractionResult,
+  NarrativeItem,
   ScopeMemoryType,
   UserMemoryType,
   SessionMemoryType,
@@ -17,8 +18,8 @@ import {
 } from '../types.js'
 import { StorageAdapter } from '../storage/interfaces.js'
 import { v4 as uuidv4 } from 'uuid'
+import { createHash } from 'node:crypto'
 
-import { IExtractor } from '../extractors/BaseExtractor.js'
 import type { UnifiedExtractor } from '../extractors/UnifiedExtractor.js'
 import type { ICompletionProvider } from '../utils/llm.js'
 import { DEDUP_CONFIRM_PROMPT } from '../prompts.js'
@@ -82,21 +83,15 @@ function toVectorRow(
 export class MemoryManager {
   /** 存储适配器（SQLite + LanceDB），暴露为 public 以便外部直接写入已抽取的记忆 */
   public readonly storage: StorageAdapter
-  private extractors: Map<MemoryType, IExtractor>
   private unifiedExtractor?: UnifiedExtractor
   private embeddingProvider?: IEmbeddingProvider
   private llmProvider?: ICompletionProvider
 
   constructor(storage: StorageAdapter, options?: MemoryManagerOptions) {
     this.storage = storage
-    this.extractors = new Map()
     this.unifiedExtractor = options?.unifiedExtractor
     this.embeddingProvider = options?.embeddingProvider
     this.llmProvider = options?.llmProvider
-  }
-
-  registerExtractor(type: MemoryType, extractor: IExtractor) {
-    this.extractors.set(type, extractor)
   }
 
   /** 单条创建的记忆，用于按轮次汇总 */
@@ -107,12 +102,36 @@ export class MemoryManager {
     group_id?: string
   }> = []
 
+  /** Content hash 去重缓存：hash → timestamp，防止相同内容短时间内重复提取 */
+  private _recentContentHashes = new Map<string, number>()
+  private static readonly CONTENT_HASH_TTL = 5 * 60 * 1000
+
+  /** 计算 MemCell 的内容摘要 hash（用于幂等性检查） */
+  private computeContentHash(memcell: MemCell): string {
+    let raw: string
+    if (memcell.text) {
+      raw = memcell.text
+    } else if (Array.isArray(memcell.original_data)) {
+      raw = memcell.original_data
+        .map((m: unknown) => {
+          const msg = m as Record<string, unknown>
+          return `${msg.role}:${msg.content}`
+        })
+        .join('\n')
+    } else if (typeof memcell.original_data === 'object' && memcell.original_data) {
+      raw = JSON.stringify(memcell.original_data)
+    } else {
+      raw = String(memcell.original_data ?? '')
+    }
+    return createHash('sha256').update(raw).digest('hex').slice(0, 16)
+  }
+
   /**
-   * 处理 MemCell 并按三层路由写入记忆。
-   * 若配置了 unifiedExtractor，则一次 LLM 调用完成所有抽取；否则走原有分步 extractor。
-   * @returns 本轮新创建的记忆列表（用于 MemoryIdsByLayer）
+   * 处理文档 MemCell：一次 LLM 调用抽取 overview + facts。
+   * 对话场景请使用 processPerRound / processNarrativeBatch。
+   * @returns 本轮新创建的记忆列表
    */
-  async processMemCell(
+  async processDocumentMemCell(
     memcell: MemCell,
     routing?: MemoryRoutingContext
   ): Promise<Array<{ id: string; content: string; type: string; group_id?: string }>> {
@@ -121,36 +140,356 @@ export class MemoryManager {
     if (routing) memcell.user_id = routing.userId ?? DEFAULT_USER_ID
     if (!memcell.user_id) memcell.user_id = DEFAULT_USER_ID
 
-    const isDocument = memcell.scene === 'document'
-    const isAssistant = memcell.scene !== 'group' && memcell.scene !== 'document'
-    const useUnified =
-      (isAssistant || isDocument) && this.unifiedExtractor && this.embeddingProvider
+    const contentHash = this.computeContentHash(memcell)
+    const now = Date.now()
+    for (const [k, t] of this._recentContentHashes) {
+      if (now - t > MemoryManager.CONTENT_HASH_TTL) this._recentContentHashes.delete(k)
+    }
+    if (this._recentContentHashes.has(contentHash)) {
+      console.warn('[MemoryManager] Skipping duplicate content extraction, hash:', contentHash)
+      return []
+    }
+    this._recentContentHashes.set(contentHash, now)
 
-    if (useUnified && this.unifiedExtractor && this.embeddingProvider) {
-      const unified = this.unifiedExtractor
-      try {
-        // 在抽取前获取已有 profile 摘要，传入 LLM 让其只抽取增量
-        let existingProfileSummary: string | undefined
-        if (isAssistant) {
-          try {
-            existingProfileSummary = await this.getExistingProfileSummary(memcell.user_id)
-          } catch {
-            // 查询失败不阻塞抽取
-          }
-        }
-        const result = await unified.extractAll(memcell, existingProfileSummary)
-        if (result) await this.saveFromUnifiedResult(memcell, result, routing)
-      } catch (error) {
-        console.error(
-          'Unified memory extraction failed, falling back to per-type extractors:',
-          error
-        )
-        await this.runPerTypeExtractors(isAssistant, isDocument, memcell, routing)
-      }
-    } else {
-      await this.runPerTypeExtractors(isAssistant, isDocument, memcell, routing)
+    if (!this.unifiedExtractor || !this.embeddingProvider) {
+      console.warn(
+        '[MemoryManager] processDocumentMemCell requires unifiedExtractor + embeddingProvider'
+      )
+      return []
+    }
+
+    try {
+      const result = await this.unifiedExtractor.extractDocument(memcell)
+      if (result) await this.saveFromUnifiedResult(memcell, result, routing)
+    } catch (error) {
+      console.error('Document memory extraction failed:', error)
     }
     return this.createdCollector
+  }
+
+  /**
+   * Pipeline 1：每轮轻量抽取（event_log / profile / foresight）。
+   * 使用 extractPerRound prompt，仅提取轻量记忆，不含 narrative。
+   * @returns 本轮新创建的记忆列表
+   */
+  async processPerRound(
+    memcell: MemCell,
+    routing: MemoryRoutingContext
+  ): Promise<Array<{ id: string; content: string; type: string; group_id?: string }>> {
+    this.createdCollector = []
+    if (!memcell.event_id) memcell.event_id = uuidv4()
+    memcell.user_id = routing.userId ?? DEFAULT_USER_ID
+
+    if (!this.unifiedExtractor || !this.embeddingProvider) {
+      console.warn('[MemoryManager] processPerRound requires unifiedExtractor + embeddingProvider')
+      return []
+    }
+
+    try {
+      let existingProfileSummary: string | undefined
+      try {
+        existingProfileSummary = await this.getExistingProfileSummary(memcell.user_id!)
+      } catch {
+        // 查询失败不阻塞抽取
+      }
+
+      const result = await this.unifiedExtractor.extractPerRound(memcell, existingProfileSummary)
+      if (result) {
+        // Pipeline 1 使用 source_round_id（单轮引用）
+        await this.saveFromUnifiedResult(memcell, result, routing)
+      }
+    } catch (error) {
+      console.error('Pipeline 1 (per-round) extraction failed:', error)
+    }
+
+    return this.createdCollector
+  }
+
+  /**
+   * Pipeline 2：阈值触发的叙述性批量抽取（narrative / foresight / profile）。
+   * @param memcell 多轮累积消息合成的 MemCell
+   * @param routing 路由上下文（roundMessageIds 包含所有累积轮次的 ID）
+   * @param alreadyExtractedContext Pipeline 1 已提取的记忆摘要文本
+   * @returns 本轮新创建的记忆列表
+   */
+  async processNarrativeBatch(
+    memcell: MemCell,
+    routing: MemoryRoutingContext,
+    alreadyExtractedContext?: string
+  ): Promise<Array<{ id: string; content: string; type: string; group_id?: string }>> {
+    this.createdCollector = []
+    if (!memcell.event_id) memcell.event_id = uuidv4()
+    memcell.user_id = routing.userId ?? DEFAULT_USER_ID
+
+    if (!this.unifiedExtractor || !this.embeddingProvider) {
+      console.warn(
+        '[MemoryManager] processNarrativeBatch requires unifiedExtractor + embeddingProvider'
+      )
+      return []
+    }
+
+    const userId = routing.userId ?? memcell.user_id ?? DEFAULT_USER_ID
+    const now = new Date().toISOString()
+    const sourceType = routing.sourceType ?? MemorySourceType.CONVERSATION
+    const sourceSessionId = routing.sessionId
+    const sourceRoundIds = routing.roundMessageIds
+
+    try {
+      let existingProfileSummary: string | undefined
+      try {
+        existingProfileSummary = await this.getExistingProfileSummary(userId)
+      } catch {
+        // 查询失败不阻塞抽取
+      }
+
+      const result = await this.unifiedExtractor.extractNarrativeBatch(
+        memcell,
+        existingProfileSummary,
+        alreadyExtractedContext
+      )
+      if (!result) return []
+
+      // 序列化 source_round_ids 为 JSON 字符串
+      const sourceRoundIdsJson = sourceRoundIds?.length ? JSON.stringify(sourceRoundIds) : null
+
+      // ── 存储多条 narrative ──
+      const narrativeItems: NarrativeItem[] = result.narratives?.length
+        ? result.narratives
+        : result.narrative
+        ? [result.narrative]
+        : []
+
+      for (const narrative of narrativeItems) {
+        if (!narrative.content?.trim()) continue
+        const content = narrative.content
+        const summary = narrative.summary || content.slice(0, 200)
+        const groupId = routing.scope
+
+        let embedding: number[] | undefined
+        try {
+          embedding = await this.embeddingProvider!.getEmbedding(summary || content)
+        } catch (e) {
+          console.warn('Narrative (batch) embedding failed:', e)
+        }
+
+        const narrativeMeta: Record<string, unknown> = {
+          summary: narrative.summary
+        }
+
+        const dedupId = await this.tryDedup(
+          MemoryType.NARRATIVE,
+          embedding,
+          content,
+          groupId,
+          userId,
+          narrativeMeta
+        )
+        if (dedupId) continue
+
+        const id = uuidv4()
+        await this.storage.relational.insert('memories', {
+          id,
+          type: MemoryType.NARRATIVE,
+          content,
+          user_id: userId,
+          group_id: groupId ?? null,
+          created_at: now,
+          updated_at: now,
+          metadata: JSON.stringify(narrativeMeta),
+          source_type: sourceType,
+          source_session_id: sourceSessionId ?? null,
+          source_round_id: null,
+          source_round_ids: sourceRoundIdsJson
+        })
+        if (embedding?.length) {
+          await this.storage.vector.add(MemoryType.NARRATIVE, [
+            toVectorRow(id, content, userId, groupId, embedding)
+          ])
+        }
+        this.pushCreated(id, content, MemoryType.NARRATIVE, groupId)
+      }
+
+      // ── 存储 foresight（Pipeline 2 的更深层前瞻） ──
+      if (result.foresight?.length) {
+        const groupId = routing.scope
+        for (const item of result.foresight.slice(0, 10)) {
+          if (!item.content?.trim()) continue
+          let embedding: number[] | undefined
+          try {
+            embedding = await this.embeddingProvider!.getEmbedding(item.content)
+          } catch (e) {
+            console.warn('Foresight (batch) embedding failed:', e)
+          }
+
+          const foresightMeta: Record<string, unknown> = {
+            evidence: item.evidence
+          }
+
+          const dedupId = await this.tryDedup(
+            MemoryType.FORESIGHT,
+            embedding,
+            item.content,
+            groupId,
+            userId,
+            foresightMeta
+          )
+          if (dedupId) continue
+
+          const id = uuidv4()
+          await this.storage.relational.insert('memories', {
+            id,
+            type: MemoryType.FORESIGHT,
+            content: item.content,
+            user_id: userId,
+            group_id: groupId ?? null,
+            created_at: now,
+            updated_at: now,
+            metadata: JSON.stringify(foresightMeta),
+            source_type: sourceType,
+            source_session_id: sourceSessionId ?? null,
+            source_round_id: null,
+            source_round_ids: sourceRoundIdsJson
+          })
+          if (embedding?.length) {
+            await this.storage.vector.add(MemoryType.FORESIGHT, [
+              toVectorRow(id, item.content, userId, groupId, embedding)
+            ])
+          }
+          this.pushCreated(id, item.content, MemoryType.FORESIGHT, groupId)
+        }
+      }
+
+      // ── 存储 profile（Pipeline 2 的深层画像） ──
+      if (result.profile?.user_profiles?.length) {
+        for (const p of result.profile.user_profiles) {
+          const profileData = p as Record<string, unknown>
+          const incomingContent = this.buildProfileContent(profileData)
+          if (!incomingContent) continue
+
+          const existingRows = await this.storage.relational.query(
+            'SELECT * FROM memories WHERE type = ? AND user_id = ? AND group_id = ? ORDER BY updated_at DESC LIMIT 1',
+            [MemoryType.PROFILE, userId, USER_GROUP_ID]
+          )
+
+          if (existingRows.length > 0) {
+            const existing = existingRows[0]
+            let existingMeta: Record<string, unknown> = {}
+            try {
+              existingMeta =
+                typeof existing.metadata === 'string'
+                  ? JSON.parse(existing.metadata)
+                  : existing.metadata ?? {}
+            } catch {
+              existingMeta = {}
+            }
+
+            const quickCheck = mergeProfilesSimple(existingMeta, profileData)
+            if (!quickCheck.hasChanges) continue
+
+            let mergeResult = quickCheck
+            if (this.llmProvider) {
+              try {
+                mergeResult = await mergeProfilesWithLLM(
+                  existingMeta,
+                  profileData,
+                  this.llmProvider
+                )
+              } catch {
+                // fallback to simple merge
+              }
+            }
+            if (!mergeResult.hasChanges) continue
+
+            const mergedContent = this.buildProfileContent(mergeResult.merged)
+            const finalContent = mergedContent || incomingContent
+
+            let embedding: number[] | undefined
+            try {
+              embedding = await this.embeddingProvider!.getEmbedding(finalContent)
+            } catch (e) {
+              console.warn('Profile (batch) embedding failed:', e)
+            }
+
+            const updatedMeta: Record<string, unknown> = {
+              items: mergeResult.merged.items,
+              merge_history: [
+                ...((existingMeta.merge_history as string[]) ?? []),
+                `${now}: ${mergeResult.changesSummary}`
+              ].slice(-20)
+            }
+
+            await this.storage.relational.update('memories', existing.id, {
+              content: finalContent,
+              updated_at: now,
+              metadata: JSON.stringify(updatedMeta),
+              source_type: sourceType,
+              source_session_id: sourceSessionId ?? null,
+              source_round_ids: sourceRoundIdsJson
+            })
+
+            if (embedding?.length) {
+              try {
+                await this.storage.vector.delete(MemoryType.PROFILE, existing.id)
+              } catch {
+                /* 可能不存在 */
+              }
+              await this.storage.vector.add(MemoryType.PROFILE, [
+                toVectorRow(existing.id, finalContent, userId, null, embedding)
+              ])
+            }
+            this.pushCreated(existing.id, finalContent, MemoryType.PROFILE, null)
+          } else {
+            const id = uuidv4()
+            let embedding: number[] | undefined
+            try {
+              embedding = await this.embeddingProvider!.getEmbedding(incomingContent)
+            } catch (e) {
+              console.warn('Profile (batch) embedding failed:', e)
+            }
+
+            const meta: Record<string, unknown> = { items: profileData.items }
+            await this.storage.relational.insert('memories', {
+              id,
+              type: MemoryType.PROFILE,
+              content: incomingContent,
+              user_id: userId,
+              group_id: USER_GROUP_ID,
+              created_at: now,
+              updated_at: now,
+              metadata: JSON.stringify(meta),
+              source_type: sourceType,
+              source_session_id: sourceSessionId ?? null,
+              source_round_ids: sourceRoundIdsJson
+            })
+            if (embedding?.length) {
+              await this.storage.vector.add(MemoryType.PROFILE, [
+                toVectorRow(id, incomingContent, userId, USER_GROUP_ID, embedding)
+              ])
+            }
+            this.pushCreated(id, incomingContent, MemoryType.PROFILE, USER_GROUP_ID)
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Pipeline 2 (narrative-batch) extraction failed:', error)
+    }
+
+    return this.createdCollector
+  }
+
+  /**
+   * 按 source_round_ids（JSON 数组列）查找关联记忆，用于反向查询（轮次 → 记忆）。
+   * 查询条件：source_round_id = roundId OR source_round_ids LIKE '%"roundId"%'
+   */
+  async listMemoriesByRoundId(
+    roundId: string,
+    userId = DEFAULT_USER_ID,
+    limit = 50
+  ): Promise<any[]> {
+    return this.storage.relational.query(
+      `SELECT * FROM memories WHERE user_id = ? AND (source_round_id = ? OR source_round_ids LIKE ?) ORDER BY created_at DESC LIMIT ?`,
+      [userId, roundId, `%"${roundId}"%`, limit]
+    )
   }
 
   private pushCreated(id: string, content: string, type: string, groupId?: string | null): void {
@@ -545,31 +884,6 @@ export class MemoryManager {
     }
   }
 
-  private async runPerTypeExtractors(
-    isAssistant: boolean,
-    isDocument: boolean,
-    memcell: MemCell,
-    routing?: MemoryRoutingContext
-  ): Promise<void> {
-    const sessionOnly = routing?.sessionOnly === true
-    const skipSession = routing?.skipSessionExtraction === true
-
-    const tasks: Promise<void>[] = []
-    if (!sessionOnly && (isAssistant || isDocument) && this.extractors.has(MemoryType.NARRATIVE)) {
-      tasks.push(this.extractAndSave(MemoryType.NARRATIVE, memcell, routing))
-    }
-    if (!sessionOnly && isAssistant && this.extractors.has(MemoryType.FORESIGHT)) {
-      tasks.push(this.extractAndSave(MemoryType.FORESIGHT, memcell, routing))
-    }
-    if (!skipSession && (isAssistant || isDocument) && this.extractors.has(MemoryType.EVENT_LOG)) {
-      tasks.push(this.extractAndSave(MemoryType.EVENT_LOG, memcell, routing))
-    }
-    if (!sessionOnly && isAssistant && this.extractors.has(MemoryType.PROFILE)) {
-      tasks.push(this.extractAndSave(MemoryType.PROFILE, memcell, routing))
-    }
-    await Promise.all(tasks)
-  }
-
   private async saveFromUnifiedResult(
     memcell: MemCell,
     result: UnifiedExtractionResult,
@@ -586,10 +900,12 @@ export class MemoryManager {
     const sourceType = routing?.sourceType ?? MemorySourceType.CONVERSATION
     const sourceSessionId = routing?.sessionId
     const sourceRoundId = roundMsgId
+    const sourceDocumentId = routing?.sourceDocumentId
 
     if (!sessionOnly && result.narrative?.content) {
       const content = result.narrative.content
       const summary = result.narrative.summary || content.slice(0, 200)
+      const isDocument = memcell.scene === 'document'
       let embedding: number[] | undefined
       try {
         embedding = await this.embeddingProvider!.getEmbedding(summary || content)
@@ -600,14 +916,20 @@ export class MemoryManager {
 
       const id = uuidv4()
 
+      // 文档场景：OVERVIEW → DOCUMENT + sub_type=overview；对话场景：→ NARRATIVE
+      const memType = isDocument ? MemoryType.DOCUMENT : MemoryType.NARRATIVE
+      const subType = isDocument ? DocumentSubType.OVERVIEW : undefined
+
+      // metadata: 文档场景提升 documentId/title 到顶层（与 migration 对齐）
+      const cellMeta = (memcell.metadata ?? {}) as Record<string, unknown>
       const narrativeMeta: Record<string, unknown> = {
         summary: result.narrative.summary,
-        keywords: result.narrative.keywords,
-        original_data: memcell.original_data
+        ...(isDocument && cellMeta.documentId ? { documentId: cellMeta.documentId } : {}),
+        ...(isDocument && cellMeta.title ? { title: cellMeta.title } : {})
       }
 
       const dedupId = await this.tryDedup(
-        MemoryType.NARRATIVE,
+        memType,
         embedding,
         content,
         groupId,
@@ -617,7 +939,7 @@ export class MemoryManager {
       if (!dedupId) {
         await this.storage.relational.insert('memories', {
           id,
-          type: MemoryType.NARRATIVE,
+          type: memType,
           content: content,
           user_id: userId,
           group_id: groupId ?? null,
@@ -626,18 +948,22 @@ export class MemoryManager {
           metadata: JSON.stringify(narrativeMeta),
           source_type: sourceType,
           source_session_id: sourceSessionId ?? null,
-          source_round_id: sourceRoundId ?? null
+          source_round_id: sourceRoundId ?? null,
+          source_document_id: sourceDocumentId ?? null,
+          sub_type: subType ?? null
         })
         if (embedding?.length) {
-          await this.storage.vector.add(MemoryType.NARRATIVE, [
+          await this.storage.vector.add(memType, [
             toVectorRow(id, content, userId, groupId, embedding)
           ])
         }
-        this.pushCreated(id, content, MemoryType.NARRATIVE, groupId)
+        this.pushCreated(id, content, memType, groupId)
       }
     }
 
-    if (!skipSession && result.event_log?.atomic_fact?.length) {
+    // 对话事件日志 — 仅对话场景写入 EVENT_LOG（Session 层）
+    const isDocument = memcell.scene === 'document'
+    if (!skipSession && !isDocument && result.event_log?.atomic_fact?.length) {
       const groupId = routing?.sessionId
         ? `${routing.scope}:session:${routing.sessionId}`
         : routing?.scope
@@ -651,7 +977,6 @@ export class MemoryManager {
           console.warn('EventLog embedding failed:', e)
         }
         const eventLogMeta: Record<string, unknown> = {
-          time: result.event_log.time,
           event_type: 'atomic',
           parent_type: 'memcell',
           parent_id: memcell.event_id
@@ -679,6 +1004,48 @@ export class MemoryManager {
       }
     }
 
+    // 文档原子事实 — DOCUMENT + sub_type=fact（Scope 层）
+    if (!sessionOnly && result.document_facts?.facts?.length) {
+      const groupId = routing?.scope
+      const factCellMeta = (memcell.metadata ?? {}) as Record<string, unknown>
+      const factMeta: Record<string, unknown> = {
+        ...(factCellMeta.documentId ? { documentId: factCellMeta.documentId } : {}),
+        ...(factCellMeta.title ? { title: factCellMeta.title } : {})
+      }
+      for (const fact of result.document_facts.facts) {
+        if (typeof fact !== 'string' || !fact.trim()) continue
+        const id = uuidv4()
+        let embedding: number[] | undefined
+        try {
+          embedding = await this.embeddingProvider!.getEmbedding(fact)
+        } catch (e) {
+          console.warn('DocumentFact embedding failed:', e)
+        }
+
+        await this.storage.relational.insert('memories', {
+          id,
+          type: MemoryType.DOCUMENT,
+          content: fact.trim(),
+          user_id: userId,
+          group_id: groupId ?? null,
+          created_at: now,
+          updated_at: now,
+          metadata: JSON.stringify(factMeta),
+          source_type: sourceType,
+          source_session_id: sourceSessionId ?? null,
+          source_round_id: sourceRoundId ?? null,
+          source_document_id: sourceDocumentId ?? null,
+          sub_type: DocumentSubType.FACT
+        })
+        if (embedding?.length) {
+          await this.storage.vector.add(MemoryType.DOCUMENT, [
+            toVectorRow(id, fact.trim(), userId, groupId, embedding)
+          ])
+        }
+        this.pushCreated(id, fact.trim(), MemoryType.DOCUMENT, groupId)
+      }
+    }
+
     if (!sessionOnly && isAssistantScene && result.foresight?.length) {
       const groupId = routing?.scope
       const limited = result.foresight.slice(0, 10)
@@ -694,10 +1061,7 @@ export class MemoryManager {
         const id = uuidv4()
 
         const foresightMeta: Record<string, unknown> = {
-          valid_start: item.start_time,
-          valid_end: item.end_time,
-          evidence: item.evidence,
-          duration_days: item.duration_days
+          evidence: item.evidence
         }
 
         const dedupId = await this.tryDedup(
@@ -896,93 +1260,6 @@ export class MemoryManager {
     }
   }
 
-  private async extractAndSave(type: MemoryType, memcell: MemCell, routing?: MemoryRoutingContext) {
-    const extractor = this.extractors.get(type)
-    if (!extractor) return
-
-    const groupId = this.resolveGroupId(type, memcell, routing)
-
-    try {
-      const memories = await extractor.extract(memcell)
-      if (memories && memories.length > 0) {
-        for (const memory of memories) {
-          if (!memory) continue
-          memory.id = memory.id || uuidv4()
-          memory.memory_type = type
-          memory.user_id = routing?.userId ?? memory.user_id ?? DEFAULT_USER_ID
-          memory.group_id = groupId ?? undefined
-          if (routing) {
-            memory.source_type = routing.sourceType ?? MemorySourceType.CONVERSATION
-            memory.source_session_id = routing.sessionId
-            memory.source_round_id = routing.roundMessageId
-          }
-
-          const contentStr = this.getMemoryContent(memory)
-
-          // 语义去重（仅对 Episode/Foresight，需要 embedding）
-          if (memory.embedding?.length) {
-            const dedupId = await this.tryDedup(
-              type,
-              memory.embedding,
-              contentStr,
-              memory.group_id,
-              memory.user_id,
-              memory as Record<string, unknown>
-            )
-            if (dedupId) continue
-          }
-
-          const fullObj = memory as Record<string, unknown>
-          const excludeKeys = new Set([
-            'id',
-            'memory_type',
-            'user_id',
-            'group_id',
-            'created_at',
-            'updated_at',
-            'deleted',
-            'content',
-            'embedding',
-            'source_type',
-            'source_session_id',
-            'source_round_id',
-            'sub_type'
-          ])
-          const cleanMeta: Record<string, unknown> = {}
-          for (const [k, v] of Object.entries(fullObj)) {
-            if (!excludeKeys.has(k) && v !== undefined) {
-              cleanMeta[k] = v
-            }
-          }
-
-          await this.storage.relational.insert('memories', {
-            id: memory.id,
-            type: type,
-            content: contentStr,
-            user_id: memory.user_id,
-            group_id: memory.group_id ?? null,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            metadata: JSON.stringify(cleanMeta),
-            source_type: memory.source_type ?? null,
-            source_session_id: memory.source_session_id ?? null,
-            source_round_id: memory.source_round_id ?? null,
-            sub_type: memory.sub_type ?? null
-          })
-
-          if (memory.embedding) {
-            await this.storage.vector.add(type, [
-              toVectorRow(memory.id, contentStr, memory.user_id, memory.group_id, memory.embedding)
-            ])
-          }
-          this.pushCreated(memory.id, contentStr, type, memory.group_id)
-        }
-      }
-    } catch (error) {
-      console.error(`Failed to extract ${type}:`, error)
-    }
-  }
-
   /**
    * 从 profile 的 items 列表生成 content 文本（用于全文搜索和 embedding）。
    * 格式：每条 item 一行，前面加用户称呼（如有）。
@@ -1051,6 +1328,20 @@ export class MemoryManager {
       [user_id]
     )
     return (rows[0] as any)?.cnt ?? 0
+  }
+
+  /** 按 type 分组统计记忆数量 */
+  async countMemoriesByType(user_id = DEFAULT_USER_ID): Promise<Record<string, number>> {
+    const rows = await this.storage.relational.query(
+      'SELECT type, COUNT(*) as cnt FROM memories WHERE user_id = ? GROUP BY type',
+      [user_id]
+    )
+    const result: Record<string, number> = {}
+    for (const row of rows) {
+      const r = row as { type: string; cnt: number }
+      if (r.type) result[r.type] = r.cnt
+    }
+    return result
   }
 
   /** 按来源轮次消息 ID 列出该轮创建的记忆 */

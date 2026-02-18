@@ -47,6 +47,15 @@ export enum MemorySourceType {
   MANUAL = 'manual'
 }
 
+// ── 流水线类型 ──
+
+export enum PipelineType {
+  /** 每轮抽取：event_log / profile / foresight */
+  PER_ROUND = 'per_round',
+  /** 阈值触发的叙述性批量抽取：narrative / profile / foresight */
+  NARRATIVE_BATCH = 'narrative_batch'
+}
+
 /** User 层记忆固定使用的 group_id */
 export const USER_GROUP_ID = 'user'
 
@@ -110,10 +119,14 @@ export const BaseMemorySchema = z.object({
   metadata: z.any().optional(),
   /** 记忆来源类型 */
   source_type: z.nativeEnum(MemorySourceType).optional(),
-  /** 来源会话 ID */
+  /** 来源会话 ID（对话记忆） */
   source_session_id: z.string().optional(),
-  /** 来源轮次消息 ID */
+  /** 来源轮次消息 ID（Pipeline 1 单轮引用） */
   source_round_id: z.string().optional(),
+  /** 来源轮次消息 ID 列表（Pipeline 2 多轮引用，JSON 数组） */
+  source_round_ids: z.array(z.string()).optional(),
+  /** 来源文档 ID（文档记忆） */
+  source_document_id: z.string().optional(),
   /** 文档子类型（仅 DOCUMENT 类型使用） */
   sub_type: z.nativeEnum(DocumentSubType).optional()
 })
@@ -138,14 +151,18 @@ export interface MemoryRoutingContext {
   scope: string
   /** 当前会话 ID；document 场景可不传 */
   sessionId?: string
-  /** 关联的 assistant 消息 ID，用于按轮次查询记忆增长 */
+  /** 关联的 assistant 消息 ID，用于按轮次查询记忆增长（Pipeline 1 单轮引用） */
   roundMessageId?: string
+  /** 关联的多个轮次消息 ID（Pipeline 2 多轮引用） */
+  roundMessageIds?: string[]
   /** 跳过 Session 层抽取（每轮只抽 User/Scope，不抽 Session） */
   skipSessionExtraction?: boolean
   /** 仅抽取 Session 层（批量压缩时用，只抽 EventLog 到 session） */
   sessionOnly?: boolean
   /** 记忆来源类型 */
   sourceType?: MemorySourceType
+  /** 来源文档 ID（文档记忆） */
+  sourceDocumentId?: string
 }
 
 export const MemCellSchema = BaseMemorySchema.extend({
@@ -219,16 +236,25 @@ export const DocumentMemorySchema = BaseMemorySchema.extend({
 
 export type DocumentMemory = z.infer<typeof DocumentMemorySchema>
 
-/** 单次 LLM 调用返回的四类记忆原始结构，供 UnifiedExtractor 使用 */
+/** 单个叙述性记忆条目 */
+export interface NarrativeItem {
+  content?: string
+  summary?: string
+}
+
+/** 单次 LLM 调用返回的记忆原始结构，供 UnifiedExtractor 使用 */
 export interface UnifiedExtractionResult {
-  narrative?: { content?: string; summary?: string; keywords?: string[] } | null
-  event_log?: { time?: string; atomic_fact?: string[] } | null
+  /** 单条叙述（向后兼容） */
+  narrative?: NarrativeItem | null
+  /** 多条叙述（Pipeline 2 批量抽取可产生多个话题段） */
+  narratives?: NarrativeItem[] | null
+  /** 对话事件日志（仅对话场景） */
+  event_log?: { atomic_fact?: string[] } | null
+  /** 文档原子事实（仅文档场景，存储为 DOCUMENT + sub_type=fact） */
+  document_facts?: { facts: string[] } | null
   foresight?: Array<{
     content?: string
     evidence?: string
-    start_time?: string
-    end_time?: string
-    duration_days?: number
   }> | null
   profile?: { user_profiles?: Array<Record<string, unknown>> } | null
 }

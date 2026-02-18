@@ -1,4 +1,4 @@
-import type { UnifiedExtractionResult } from '../types.js'
+import type { UnifiedExtractionResult, NarrativeItem } from '../types.js'
 
 const SECTION_RE = /^##\s*(\w+)\s*$/gm
 
@@ -52,20 +52,32 @@ export function parseUnifiedMemoryText(text: string): UnifiedExtractionResult | 
   const result: UnifiedExtractionResult = {}
 
   // 支持 ## NARRATIVE 或旧格式 ## EPISODE
+  // 支持多个 narrative 块（用 --- 分隔），向后兼容单 narrative
   const narrativeBody = sections.get('NARRATIVE') ?? sections.get('EPISODE')
   if (narrativeBody) {
-    const kv = parseSectionKeyValues(narrativeBody)
-    const content = getFirst(kv, 'CONTENT')
-    if (content) {
-      result.narrative = {
-        content,
-        summary: getFirst(kv, 'SUMMARY') || content.slice(0, 200),
-        keywords: getFirst(kv, 'KEYWORDS')
-          ? getFirst(kv, 'KEYWORDS')!
-              .split(',')
-              .map((s) => s.trim())
-              .filter(Boolean)
-          : undefined
+    const narrativeBlocks = narrativeBody
+      .split(/\s*---\s*/)
+      .map((b) => b.trim())
+      .filter(Boolean)
+
+    const narrativeItems: NarrativeItem[] = []
+    for (const block of narrativeBlocks) {
+      const kv = parseSectionKeyValues(block)
+      const content = getFirst(kv, 'CONTENT')
+      if (content) {
+        narrativeItems.push({
+          content,
+          summary: getFirst(kv, 'SUMMARY') || content.slice(0, 200)
+        })
+      }
+    }
+
+    if (narrativeItems.length > 0) {
+      // 向后兼容：始终填充 narrative（取第一个）
+      result.narrative = narrativeItems[0]
+      // 多 narrative 场景：填充 narratives 数组
+      if (narrativeItems.length > 1) {
+        result.narratives = narrativeItems
       }
     }
   }
@@ -76,7 +88,6 @@ export function parseUnifiedMemoryText(text: string): UnifiedExtractionResult | 
     const facts = getAll(kv, 'FACT').filter(Boolean)
     if (facts.length) {
       result.event_log = {
-        time: getFirst(kv, 'TIME'),
         atomic_fact: facts.slice(0, 10)
       }
     }
@@ -95,8 +106,6 @@ export function parseUnifiedMemoryText(text: string): UnifiedExtractionResult | 
       if (content) {
         items.push({
           content,
-          start_time: getFirst(kv, 'START'),
-          end_time: getFirst(kv, 'END'),
           evidence: getFirst(kv, 'EVIDENCE')
         })
       }
@@ -116,7 +125,7 @@ export function parseUnifiedMemoryText(text: string): UnifiedExtractionResult | 
     }
   }
 
-  // 文档场景：## OVERVIEW 映射到 narrative.content，## FACTS 映射到 event_log.atomic_fact
+  // 文档场景：## OVERVIEW 映射到 narrative.content，## FACTS 映射到 document_facts
   const overviewBody = sections.get('OVERVIEW')
   if (overviewBody && !result.narrative) {
     const kv = parseSectionKeyValues(overviewBody)
@@ -127,20 +136,19 @@ export function parseUnifiedMemoryText(text: string): UnifiedExtractionResult | 
   }
 
   const factsBody = sections.get('FACTS')
-  if (factsBody && !result.event_log) {
+  if (factsBody) {
     const kv = parseSectionKeyValues(factsBody)
     const facts = getAll(kv, 'FACT').filter(Boolean)
     if (facts.length) {
-      result.event_log = {
-        time: new Date().toISOString().slice(0, 10),
-        atomic_fact: facts.slice(0, 20)
-      }
+      result.document_facts = { facts: facts.slice(0, 20) }
     }
   }
 
   if (
     !result.narrative &&
+    !result.narratives?.length &&
     !result.event_log?.atomic_fact?.length &&
+    !result.document_facts?.facts?.length &&
     !result.foresight?.length &&
     !result.profile?.user_profiles?.length
   ) {
