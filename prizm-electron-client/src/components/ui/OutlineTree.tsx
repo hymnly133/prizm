@@ -1,10 +1,10 @@
 /**
  * OutlineTree - Markdown 文档大纲树组件
  * 从 Markdown 内容解析标题层级，生成可点击导航大纲
+ * 紧凑排版，最小化间距
  */
 import { useMemo, useCallback } from 'react'
 import { Tree } from 'antd'
-import { Hash } from 'lucide-react'
 import type { DataNode } from 'antd/es/tree'
 
 export interface HeadingItem {
@@ -50,15 +50,7 @@ function headingsToTreeData(headings: HeadingItem[]): DataNode[] {
   for (const h of headings) {
     const node: DataNode = {
       key: `heading-${h.line}`,
-      title: (
-        <span
-          className="outline-tree-item"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
-        >
-          <Hash size={10} style={{ opacity: 0.4, flexShrink: 0 }} />
-          <span className="outline-tree-text">{h.text}</span>
-        </span>
-      ),
+      title: <span className="outline-tree-text">{h.text}</span>,
       isLeaf: true
     }
 
@@ -111,6 +103,7 @@ export default function OutlineTree({ content, onNavigate, activeHeading }: Outl
       defaultExpandAll
       blockNode
       showIcon={false}
+      showLine={false}
       selectedKeys={activeHeading ? [`heading-${activeHeading}`] : []}
       onSelect={handleSelect}
     />
