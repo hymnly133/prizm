@@ -1709,10 +1709,12 @@ export function invalidateScopeManagerCache(scope?: string): void {
 export interface MemoryCountsByType {
   /** 总计: User 层 */
   userCount: number
-  /** 总计: Scope 层（不含 session 记忆） */
+  /** 总计: Scope 层（不含 session 记忆和文档记忆） */
   scopeCount: number
   /** 总计: Session 层（group_id 匹配 {scope}:session:* 的记忆） */
   sessionCount: number
+  /** 总计: 文档记忆（scope 层中 memory_type='document' 且非 session 的记忆） */
+  documentCount: number
   /** 按类型分组: { profile: N, narrative: N, foresight: N, document: N, event_log: N } */
   byType: Record<string, number>
 }
@@ -1728,13 +1730,13 @@ export async function getMemoryCounts(scope?: string): Promise<MemoryCountsByTyp
   let scopeByType: Record<string, number> = {}
   let scopeTotalCount = 0
   let sessionCount = 0
+  let documentCount = 0
   if (scope) {
     try {
       const managers = getScopeManagers(scope)
       scopeByType = await managers.scopeOnlyMemory.countMemoriesByType()
       scopeTotalCount = Object.values(scopeByType).reduce((s, n) => s + n, 0)
 
-      // 分离 session 记忆：group_id 匹配 {scope}:session:* 模式
       const sessionPrefix = `${scope}:session:`
       try {
         const rows = await managers.scopeOnlyMemory.storage.relational.query(
@@ -1745,18 +1747,28 @@ export async function getMemoryCounts(scope?: string): Promise<MemoryCountsByTyp
       } catch {
         // 查询失败不影响总数
       }
+
+      try {
+        const rows = await managers.scopeOnlyMemory.storage.relational.query(
+          "SELECT COUNT(*) as cnt FROM memories WHERE memory_type = 'document' AND (group_id IS NULL OR group_id NOT LIKE ?)",
+          [`${sessionPrefix}%`]
+        )
+        documentCount = (rows[0] as { cnt: number })?.cnt ?? 0
+      } catch {
+        // fallback: 不影响其他计数
+      }
     } catch {
       // scope not found
     }
   }
 
-  const scopeCount = scopeTotalCount - sessionCount
+  const scopeCount = scopeTotalCount - sessionCount - documentCount
 
   const byType: Record<string, number> = {}
   for (const [t, c] of Object.entries(userByType)) byType[t] = (byType[t] ?? 0) + c
   for (const [t, c] of Object.entries(scopeByType)) byType[t] = (byType[t] ?? 0) + c
 
-  return { userCount, scopeCount, sessionCount, byType }
+  return { userCount, scopeCount, sessionCount, documentCount, byType }
 }
 
 /**

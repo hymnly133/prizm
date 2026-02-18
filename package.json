@@ -23,7 +23,8 @@
     "clean": "yarn workspace @prizm/server clean",
     "start": "yarn workspace @prizm/server start",
     "test": "yarn workspace @prizm/server test",
-    "analyze": "node scripts/analyze.js"
+    "analyze": "node scripts/analyze.js",
+    "kill-port": "yarn workspace @prizm/server kill-port"
   },
   "devDependencies": {
     "patch-package": "^8.0.1",

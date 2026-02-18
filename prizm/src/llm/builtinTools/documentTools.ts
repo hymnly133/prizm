@@ -28,9 +28,9 @@ export async function executeListDocuments(ctx: BuiltinToolContext): Promise<Bui
   const { root: wsRoot, wsType: ws } = resolveWorkspaceType(ctx.wsCtx, ctx.wsArg)
   if (ws === 'session') {
     const docs = mdStore.readDocuments(wsRoot)
-    if (!docs.length) return { text: '当前无文档。 [临时工作区]' }
+    if (!docs.length) return { text: `当前无文档。${wsTypeLabel('session')}` }
     const lines = docs.map((d) => `- ${d.id}: ${d.title} (${d.content?.length ?? 0} 字)`)
-    return { text: lines.join('\n') + ' [临时工作区]' }
+    return { text: lines.join('\n') + wsTypeLabel('session') }
   }
   const items = listRefItems(ctx.scope, 'document')
   if (!items.length) return { text: '当前无文档。' }
@@ -45,14 +45,14 @@ export async function executeGetDocumentContent(
   const { root: wsRoot, wsType: ws } = resolveWorkspaceType(ctx.wsCtx, ctx.wsArg)
   if (ws === 'session') {
     const doc = mdStore.readSingleDocumentById(wsRoot, documentId)
-    if (!doc) return { text: `文档不存在: ${documentId} [临时工作区]`, isError: true }
+    if (!doc) return { text: `文档不存在: ${documentId}${wsTypeLabel('session')}`, isError: true }
     return { text: doc.content || '(无正文)' }
   }
   const detail = getScopeRefItem(ctx.scope, 'document', documentId)
   if (!detail) {
     if (ctx.wsCtx.sessionWorkspaceRoot) {
       const sessionDoc = mdStore.readSingleDocumentById(ctx.wsCtx.sessionWorkspaceRoot, documentId)
-      if (sessionDoc) return { text: (sessionDoc.content || '(无正文)') + ' [临时工作区]' }
+      if (sessionDoc) return { text: (sessionDoc.content || '(无正文)') + wsTypeLabel('session') }
     }
     return { text: `文档不存在: ${documentId}`, isError: true }
   }
@@ -137,13 +137,14 @@ export async function executeUpdateDocument(ctx: BuiltinToolContext): Promise<Bu
   // Session 工作区：直接 mdStore
   if (ws === 'session' && ctx.wsCtx.sessionWorkspaceRoot) {
     const existing = mdStore.readSingleDocumentById(ctx.wsCtx.sessionWorkspaceRoot, documentId)
-    if (!existing) return { text: `文档不存在: ${documentId} [临时工作区]`, isError: true }
+    if (!existing)
+      return { text: `文档不存在: ${documentId}${wsTypeLabel('session')}`, isError: true }
     if (typeof ctx.args.title === 'string') existing.title = ctx.args.title
     if (typeof ctx.args.content === 'string') existing.content = ctx.args.content
     existing.updatedAt = Date.now()
     mdStore.writeSingleDocument(ctx.wsCtx.sessionWorkspaceRoot, existing)
     ctx.record(documentId, 'document', 'update')
-    return { text: `已更新文档 ${documentId} [临时工作区]` }
+    return { text: `已更新文档 ${documentId}${wsTypeLabel('session')}` }
   }
 
   if (!ctx.sessionId) return { text: '需要活跃的会话才能编辑文档。', isError: true }
@@ -158,7 +159,7 @@ export async function executeUpdateDocument(ctx: BuiltinToolContext): Promise<Bu
       sessionDoc.updatedAt = Date.now()
       mdStore.writeSingleDocument(ctx.wsCtx.sessionWorkspaceRoot, sessionDoc)
       ctx.record(documentId, 'document', 'update')
-      return { text: `已更新文档 ${documentId} [临时工作区]` }
+      return { text: `已更新文档 ${documentId}${wsTypeLabel('session')}` }
     }
   }
 
@@ -263,9 +264,9 @@ export async function executeDeleteDocument(ctx: BuiltinToolContext): Promise<Bu
   const { wsType: ws } = resolveWorkspaceType(ctx.wsCtx, ctx.wsArg)
   if (ws === 'session' && ctx.wsCtx.sessionWorkspaceRoot) {
     const ok = mdStore.deleteSingleDocument(ctx.wsCtx.sessionWorkspaceRoot, documentId)
-    if (!ok) return { text: `文档不存在: ${documentId} [临时工作区]`, isError: true }
+    if (!ok) return { text: `文档不存在: ${documentId}${wsTypeLabel('session')}`, isError: true }
     ctx.record(documentId, 'document', 'delete')
-    return { text: `已删除文档 ${documentId} [临时工作区]` }
+    return { text: `已删除文档 ${documentId}${wsTypeLabel('session')}` }
   }
 
   // 自动签出：删除前需持有锁，无锁时自动获取，删除后自动释放

@@ -215,7 +215,7 @@ export async function executeDeleteList(ctx: BuiltinToolContext): Promise<Builti
   if (ws === 'session' && ctx.wsCtx.sessionWorkspaceRoot) {
     const lists = mdStore.readTodoLists(ctx.wsCtx.sessionWorkspaceRoot)
     const idx = lists.findIndex((l) => l.id === listId)
-    if (idx < 0) return { text: `列表不存在: ${listId} [临时工作区]`, isError: true }
+    if (idx < 0) return { text: `列表不存在: ${listId}${wsTypeLabel(ws)}`, isError: true }
     const title = lists[idx].title
     lists.splice(idx, 1)
     mdStore.writeTodoLists(ctx.wsCtx.sessionWorkspaceRoot, lists)
@@ -259,7 +259,7 @@ export async function executeAddItems(ctx: BuiltinToolContext): Promise<BuiltinT
   // Session 工作区
   if (ws === 'session' && ctx.wsCtx.sessionWorkspaceRoot) {
     const existing = mdStore.readSingleTodoListById(ctx.wsCtx.sessionWorkspaceRoot, listId)
-    if (!existing) return { text: `列表不存在: ${listId} [临时工作区]`, isError: true }
+    if (!existing) return { text: `列表不存在: ${listId}${wsTypeLabel(ws)}`, isError: true }
 
     const createdIds: string[] = []
     for (const t of itemTitles) {
@@ -346,7 +346,7 @@ export async function executeUpdateItem(ctx: BuiltinToolContext): Promise<Builti
         return { text: `已更新条目 ${itemId}${wsTypeLabel(ws)}` }
       }
     }
-    return { text: `条目不存在: ${itemId} [临时工作区]`, isError: true }
+    return { text: `条目不存在: ${itemId}${wsTypeLabel(ws)}`, isError: true }
   }
 
   // Scope 主工作区
@@ -403,7 +403,7 @@ export async function executeDeleteItem(ctx: BuiltinToolContext): Promise<Builti
         return { text: `已删除条目 ${itemId}${wsTypeLabel(ws)}` }
       }
     }
-    return { text: `条目不存在: ${itemId} [临时工作区]`, isError: true }
+    return { text: `条目不存在: ${itemId}${wsTypeLabel(ws)}`, isError: true }
   }
 
   // Scope 主工作区

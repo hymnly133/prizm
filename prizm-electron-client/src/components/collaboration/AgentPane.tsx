@@ -50,7 +50,6 @@ export interface AgentPaneProps {
 
 function AgentPane({ onOpenFullPage, sidebarSide = 'left' }: AgentPaneProps) {
   const { currentScope } = useScope()
-  const { manager } = usePrizmContext()
   const { scopeItems, slashCommands } = useAgentScopeData(currentScope)
   const {
     sessions,
