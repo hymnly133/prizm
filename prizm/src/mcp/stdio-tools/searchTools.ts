@@ -1,5 +1,5 @@
 /**
- * MCP stdio tools: Prizm unified search and note search
+ * MCP stdio tools: Prizm unified search
  */
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -29,13 +29,13 @@ export function registerSearchTools(
     'prizm_search',
     {
       description:
-        '统一关键词搜索：在便签、文档、剪贴板、待办中按关键词匹配。默认模糊搜索，支持拼写容错。输入关键词（支持空格/逗号分隔，自动分词），返回按相关性排序的结果。',
+        '统一关键词搜索：在文档、剪贴板、待办中按关键词匹配。默认模糊搜索，支持拼写容错。输入关键词（支持空格/逗号分隔，自动分词），返回按相关性排序的结果。',
       inputSchema: z.object({
         keywords: z
           .union([z.string(), z.array(z.string())])
           .describe('关键词，支持字符串（自动分词）或关键词数组'),
         types: z
-          .array(z.enum(['note', 'document', 'clipboard', 'todoList']))
+          .array(z.enum(['document', 'clipboard', 'todoList']))
           .optional()
           .describe('限定搜索类型，不传则搜索全部'),
         limit: z.number().optional().describe('最大返回数，默认 50'),
@@ -60,7 +60,8 @@ export function registerSearchTools(
           types,
           limit: limit ?? 50,
           mode: mode ?? 'any',
-          fuzzy
+          fuzzy,
+          complete: true
         })
       })
       if (!res.ok) throw new Error(`Prizm search error: ${res.status} ${await res.text()}`)
@@ -86,29 +87,6 @@ export function registerSearchTools(
           {
             type: 'text' as const,
             text: JSON.stringify({ total: data.results.length, results: summary }, null, 2)
-          }
-        ]
-      }
-    }
-  )
-
-  server.registerTool(
-    'prizm_search_notes',
-    {
-      description: '按关键词搜索 Prizm 便签内容（仅便签，建议优先使用 prizm_search 统一搜索）',
-      inputSchema: z.object({
-        query: z.string().describe('搜索关键词')
-      })
-    },
-    async ({ query }) => {
-      const data = (await fetchPrizm(`/notes?q=${encodeURIComponent(query)}`)) as {
-        notes: Array<{ id: string; content: string; createdAt: number }>
-      }
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(data.notes, null, 2)
           }
         ]
       }

@@ -15,6 +15,10 @@
   ],
   "scripts": {
     "kill-port": "powershell -ExecutionPolicy Bypass -File scripts/kill-port.ps1",
+    "clean:data": "node scripts/clean-data.mjs --all",
+    "clean:memory": "node scripts/clean-data.mjs --memory",
+    "clean:token": "node scripts/clean-data.mjs --token",
+    "clean:sessions": "node scripts/clean-data.mjs --sessions",
     "build": "yarn workspace @prizm/shared build && tsup && yarn build:panel",
     "build:panel": "yarn --cwd panel build",
     "dev": "concurrently \"tsup --watch\" \"wait-on dist/cli.js && node dist/cli.js\"",

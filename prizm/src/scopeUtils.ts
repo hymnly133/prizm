@@ -19,9 +19,9 @@ export function ensureStringParam(v: string | string[] | undefined): string {
   return ''
 }
 
-/** 从 query 提取 scope */
+/** 从 query 提取 scope，fallback 到 body（兼容 POST/PATCH 场景） */
 export function getScopeFromQuery(req: Request): string | null {
-  return toStr(req.query.scope)
+  return toStr(req.query.scope) ?? toStr(req.body?.scope)
 }
 
 /** 从 body 提取 scope */

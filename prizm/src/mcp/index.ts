@@ -77,6 +77,16 @@ export function mountMcpRoutes(
       })
       transportRef.t = transport
 
+      // 监听 transport 关闭，清理 Map 防止内存泄漏
+      transport.onclose = (): void => {
+        for (const [sid, t] of transports) {
+          if (t === transport) {
+            transports.delete(sid)
+            break
+          }
+        }
+      }
+
       const scope =
         (typeof req.query.scope === 'string' ? req.query.scope.trim() : null) ||
         getConfig().mcpScope ||

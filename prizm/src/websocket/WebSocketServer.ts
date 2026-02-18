@@ -32,6 +32,7 @@ export class WebSocketServer {
   private eventRegistry: EventRegistry
   private clientRegistry: ClientRegistry
   private options: WebSocketServerOptions
+  private cleanupTimer: ReturnType<typeof setInterval> | null = null
 
   constructor(
     httpServer: http.Server,
@@ -78,7 +79,7 @@ export class WebSocketServer {
     })
 
     // 定期清理断开的连接
-    setInterval(() => {
+    this.cleanupTimer = setInterval(() => {
       this.eventRegistry.cleanup()
     }, 60000)
   }
@@ -301,11 +302,7 @@ export class WebSocketServer {
   /**
    * 处理 HTTP upgrade 请求（noServer 模式下由 server.ts 调用）
    */
-  handleUpgrade(
-    req: http.IncomingMessage,
-    socket: import('stream').Duplex,
-    head: Buffer
-  ): void {
+  handleUpgrade(req: http.IncomingMessage, socket: import('stream').Duplex, head: Buffer): void {
     this.wss.handleUpgrade(req, socket, head, (ws) => {
       this.wss.emit('connection', ws, req)
     })
@@ -316,6 +313,11 @@ export class WebSocketServer {
    */
   destroy(): void {
     log.info('Shutting down...')
+
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer)
+      this.cleanupTimer = null
+    }
 
     // 关闭所有连接
     for (const client of this.wss.clients) {

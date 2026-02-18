@@ -30,7 +30,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createPrizmFetcher } from './stdio-tools/fetcher.js'
-import { registerNoteTools } from './stdio-tools/noteTools.js'
 import { registerTodoTools } from './stdio-tools/todoTools.js'
 import { registerSearchTools } from './stdio-tools/searchTools.js'
 import { registerDocumentTools } from './stdio-tools/documentTools.js'
@@ -50,7 +49,6 @@ export function createStdioServer(): McpServer {
   const server = new McpServer({ name: 'prizm', version: '0.1.0' }, { capabilities: {} })
   const fetchPrizm = createPrizmFetcher(PRIZM_URL, PRIZM_API_KEY, PRIZM_SCOPE)
 
-  registerNoteTools(server, fetchPrizm)
   registerTodoTools(server, fetchPrizm)
   registerSearchTools(server, fetchPrizm, {
     baseUrl: PRIZM_URL,

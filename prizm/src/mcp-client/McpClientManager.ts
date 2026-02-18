@@ -70,6 +70,11 @@ export class McpClientManager {
           await client.connect(transport)
         } catch {
           // Streamable HTTP 失败时回退到 SSE（迁移期兼容），需新建 Client
+          try {
+            client.close()
+          } catch {
+            // ignore close error on failed client
+          }
           log.warn(
             'MCP server',
             config.id,

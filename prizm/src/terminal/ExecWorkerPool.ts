@@ -25,6 +25,17 @@ import { resolveDefaultShell } from './shellDetector'
 
 const logger = createLogger('TerminalManager')
 
+/**
+ * exec worker 专用环境变量 —— 禁用分页器和交互式提示，
+ * 防止 git log / man 等命令阻塞等待用户输入。
+ */
+const NON_INTERACTIVE_ENV: Record<string, string> = {
+  GIT_PAGER: '',
+  PAGER: '',
+  GIT_TERMINAL_PROMPT: '0',
+  NO_COLOR: '1'
+}
+
 /** Exec Worker：每个 agent session + 工作区类型 复用的一次性命令执行器 */
 interface ExecWorker {
   agentSessionId: string
@@ -39,6 +50,18 @@ interface ExecWorker {
   dataDisposable: pty.IDisposable
   exitDisposable: pty.IDisposable
   exited: boolean
+}
+
+/**
+ * 为独立 git 命令自动注入 --no-pager，防止分页器阻塞。
+ * 仅匹配 `git ...` 开头的简单命令，不处理管道/链式命令中的 git 调用。
+ */
+function injectNoPager(command: string): string {
+  const trimmed = command.trimStart()
+  if (/^git\s/i.test(trimmed) && !trimmed.includes('--no-pager')) {
+    return trimmed.replace(/^git\s/i, 'git --no-pager ')
+  }
+  return command
 }
 
 function cleanExecOutput(raw: string, startMarker: string, endMarker: string): string {
@@ -81,12 +104,14 @@ export class ExecWorkerPool {
 
     let ptyProcess: pty.IPty
     try {
+      const env = sanitizeEnv(process.env)
+      Object.assign(env, NON_INTERACTIVE_ENV)
       ptyProcess = pty.spawn(shell, [], {
         name: 'xterm-256color',
         cols: 120,
         rows: 30,
         cwd: resolvedCwd,
-        env: sanitizeEnv(process.env)
+        env
       })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -305,6 +330,7 @@ export class ExecWorkerPool {
 
         const isWin = os.platform() === 'win32'
         const resolvedCwd = path.resolve(cwd)
+        const safeCommand = injectNoPager(opts.command)
         const sSplit = Math.floor(startMarker.length / 2)
         const sA = startMarker.slice(0, sSplit)
         const sB = startMarker.slice(sSplit)
@@ -317,14 +343,14 @@ export class ExecWorkerPool {
           wrappedCmd = [
             `Write-Host ('${sA}' + '${sB}')`,
             `Set-Location -LiteralPath '${resolvedCwd.replace(/'/g, "''")}'`,
-            `${opts.command}`,
+            `${safeCommand}`,
             `Write-Host (('${eA}' + '${eB}') + ':' + $LASTEXITCODE)`
           ].join('; ')
         } else {
           const escapedCwd = resolvedCwd.replace(/'/g, "'\\''")
           wrappedCmd = [
             `echo '${sA}''${sB}'`,
-            `cd '${escapedCwd}' && ${opts.command}`,
+            `cd '${escapedCwd}' && ${safeCommand}`,
             `echo '${eA}''${eB}'":$?"`
           ].join('; ')
         }

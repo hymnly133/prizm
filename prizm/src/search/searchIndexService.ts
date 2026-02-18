@@ -36,7 +36,7 @@ function getIndexFilePath(scope: string): string {
   return getSearchIndexPath(scopeRoot)
 }
 
-export type SearchResultKind = 'note' | 'document' | 'clipboard' | 'todoList'
+export type SearchResultKind = 'document' | 'clipboard' | 'todoList'
 
 interface IndexEntry {
   kind: SearchResultKind
@@ -75,7 +75,7 @@ export interface SearchIndexResultItem {
   matchedKeywords: string[]
   preview: string
   raw: unknown
-  /** 结果来源：'index' 来自 MiniSearch 索引，'fulltext' 来自 ripgrep 文件扫描补充 */
+  /** 结果来源：'index' 来自 MiniSearch 索引，'fulltext' 来自 ripgrep 文件扫描 */
   source?: 'index' | 'fulltext'
 }
 
@@ -158,8 +158,6 @@ function mapPrizmTypeToKind(prizmType: unknown): SearchResultKind | null {
       return 'todoList'
     case 'clipboard_item':
       return 'clipboard'
-    case 'note':
-      return 'note'
     default:
       return null
   }
@@ -181,6 +179,8 @@ export class SearchIndexService {
   private scopes = new Map<string, ScopeIndex>()
   private adapters: PrizmAdapters | null = null
   private store: ISearchIndexStore | null = null
+  /** 防止同一 scope 并发创建索引的 Promise 缓存 */
+  private pendingEnsure = new Map<string, Promise<ScopeIndex>>()
 
   constructor(store?: ISearchIndexStore | null) {
     this.store = store ?? null
@@ -317,10 +317,24 @@ export class SearchIndexService {
   }
 
   private async ensureIndex(scope: string): Promise<ScopeIndex> {
-    let idx: ScopeIndex | undefined | null = this.scopes.get(scope)
-    if (idx) return idx
+    const cached = this.scopes.get(scope)
+    if (cached) return cached
 
-    idx = await this.loadFromDisk(scope)
+    // 使用 Promise 缓存防止并发创建同一 scope 的索引
+    const pending = this.pendingEnsure.get(scope)
+    if (pending) return pending
+
+    const promise = this.buildIndex(scope)
+    this.pendingEnsure.set(scope, promise)
+    try {
+      return await promise
+    } finally {
+      this.pendingEnsure.delete(scope)
+    }
+  }
+
+  private async buildIndex(scope: string): Promise<ScopeIndex> {
+    let idx: ScopeIndex | undefined | null = await this.loadFromDisk(scope)
     if (idx != null) {
       this.scopes.set(scope, idx)
       return idx
@@ -436,8 +450,8 @@ export class SearchIndexService {
     if (terms.length === 0) return []
 
     const types = options.types?.length
-      ? options.types.filter((t) => ['note', 'document', 'clipboard', 'todoList'].includes(t))
-      : (['note', 'document', 'clipboard', 'todoList'] as SearchResultKind[])
+      ? options.types.filter((t) => ['document', 'clipboard', 'todoList'].includes(t))
+      : (['document', 'clipboard', 'todoList'] as SearchResultKind[])
     const limit = typeof options.limit === 'number' ? Math.min(options.limit, 100) : 50
     const mode = options.mode === 'all' ? 'all' : 'any'
     const fuzzy =

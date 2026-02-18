@@ -32,6 +32,7 @@ import { createAgentRoutes } from './routes/agent'
 import { createMcpConfigRoutes } from './routes/mcpConfig'
 import { createCommandsRoutes } from './routes/commands'
 import { createSkillsRoutes } from './routes/skills'
+import { createAgentRulesRoutes } from './routes/agentRules'
 import { createSettingsRoutes } from './routes/settings'
 import { createMemoryRoutes } from './routes/memory'
 import { mountMcpRoutes } from './mcp'
@@ -44,8 +45,18 @@ import { migrateAppLevelStorage } from './core/migrate-scope-v2'
 import { getTerminalManager } from './terminal/TerminalSessionManager'
 import { TerminalWebSocketServer } from './terminal/TerminalWebSocketServer'
 import { createTerminalRoutes } from './routes/terminal'
-import { builtinToolEvents } from './llm/builtinToolEvents'
-import { EVENT_TYPES_OBJ } from '@prizm/shared'
+import { clearAll as clearEventBus } from './core/eventBus'
+import { bgSessionManager } from './core/backgroundSession'
+import {
+  registerAuditHandlers,
+  registerLockHandlers,
+  registerMemoryHandlers,
+  registerWSBridgeHandlers,
+  setWebSocketServer,
+  registerSearchHandlers,
+  setSearchIndex,
+  registerBgSessionHandlers
+} from './core/eventBus/handlers'
 import { createEmbeddingRoutes } from './routes/embedding'
 import { localEmbedding } from './llm/localEmbedding'
 
@@ -164,6 +175,7 @@ export function createPrizmServer(
   createMcpConfigRoutes(router)
   createCommandsRoutes(router)
   createSkillsRoutes(router)
+  createAgentRulesRoutes(router)
   createSettingsRoutes(router)
   createMemoryRoutes(router)
   createEmbeddingRoutes(router)
@@ -242,6 +254,15 @@ export function createPrizmServer(
             } catch (e) {
               log.warn('Audit manager init failed:', e)
             }
+            bgSessionManager.init(adapters.agent)
+
+            // ── EventBus handler 注册（在所有服务初始化之后） ──
+            registerAuditHandlers()
+            registerLockHandlers()
+            registerMemoryHandlers()
+            registerBgSessionHandlers()
+            setSearchIndex(searchIndex)
+            registerSearchHandlers()
 
             if (enableWebSocket && server) {
               const terminalWsPath = '/ws/terminal'
@@ -259,39 +280,9 @@ export function createPrizmServer(
               )
               log.info('Terminal WebSocket:', `ws://${host}:${port}${terminalWsPath}`)
 
-              // 桥接内置工具文件事件到 WebSocket 广播
-              builtinToolEvents.onFileEvent((evt) => {
-                if (!wsServer) return
-                const eventTypeMap: Record<string, string> = {
-                  'file:created': EVENT_TYPES_OBJ.FILE_CREATED,
-                  'file:moved': EVENT_TYPES_OBJ.FILE_MOVED,
-                  'file:deleted': EVENT_TYPES_OBJ.FILE_DELETED
-                }
-                const wsEventType = eventTypeMap[evt.eventType]
-                if (wsEventType) {
-                  wsServer.broadcast(
-                    wsEventType as import('@prizm/shared').EventType,
-                    { relativePath: evt.relativePath, fromPath: evt.fromPath, scope: evt.scope },
-                    evt.scope
-                  )
-                }
-              })
-
-              // 桥接内置工具锁事件到 WebSocket 广播
-              builtinToolEvents.onLockEvent((evt) => {
-                if (!wsServer) return
-                wsServer.broadcast(
-                  evt.eventType as import('@prizm/shared').EventType,
-                  {
-                    resourceType: evt.resourceType,
-                    resourceId: evt.resourceId,
-                    sessionId: evt.sessionId,
-                    reason: evt.reason,
-                    scope: evt.scope
-                  },
-                  evt.scope
-                )
-              })
+              // WebSocket 桥接：注册 EventBus → WebSocket 广播 handler
+              setWebSocketServer(wsServer)
+              registerWSBridgeHandlers()
 
               // 统一 upgrade 路由 — 两个 WSS 均为 noServer 模式，
               // 需手动根据路径分发 upgrade 请求
@@ -339,10 +330,15 @@ export function createPrizmServer(
         wsServer = undefined
       }
 
+      // 清理 EventBus 订阅
+      clearEventBus()
+      setWebSocketServer(undefined)
+
       // 关闭 Token Usage DB
       closeTokenUsageDb()
 
-      // 关闭锁管理器和审计管理器
+      // 关闭后台会话管理器、锁管理器和审计管理器
+      bgSessionManager.shutdown()
       lockManager.shutdown()
       auditManager.shutdown()
 
