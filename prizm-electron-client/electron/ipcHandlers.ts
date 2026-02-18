@@ -1,10 +1,10 @@
-import { app, ipcMain, shell, dialog, clipboard } from 'electron'
+import { app, ipcMain, shell, dialog, clipboard, nativeTheme } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'
 import log from 'electron-log/main'
 import { sharedState } from './config'
-import type { PrizmConfig } from './config'
-import { loadConfigFromDisk, saveConfigToDisk } from './config'
+import type { PrizmConfig, ThemeMode } from './config'
+import { loadConfigFromDisk, saveConfigToDisk, saveThemeMode } from './config'
 import { startClipboardSync, stopClipboardSync } from './clipboardSync'
 import { showNotificationInWindow } from './windowManager'
 
@@ -415,6 +415,27 @@ export function registerIpcHandlers(): void {
       return true
     }
   )
+
+  ipcMain.handle('set_native_theme', async (_event, { mode }: { mode: ThemeMode }) => {
+    const source = mode === 'auto' ? 'system' : mode
+    nativeTheme.themeSource = source
+    log.info('[Electron] nativeTheme.themeSource changed to:', source)
+    await saveThemeMode(mode)
+
+    // 同步更新 Windows 标题栏控件颜色
+    if (
+      process.platform === 'win32' &&
+      sharedState.mainWindow &&
+      !sharedState.mainWindow.isDestroyed()
+    ) {
+      const isDark = nativeTheme.shouldUseDarkColors
+      sharedState.mainWindow.setTitleBarOverlay({
+        color: '#00000000',
+        symbolColor: isDark ? '#CCCCCC' : '#333333'
+      })
+    }
+    return true
+  })
 
   ipcMain.on('quick-panel-action', (_event, payload: { action: string; selectedText: string }) => {
     if (sharedState.quickPanelWindow && !sharedState.quickPanelWindow.isDestroyed()) {

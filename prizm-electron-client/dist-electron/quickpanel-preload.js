@@ -9,6 +9,13 @@ electron_1.contextBridge.exposeInMainWorld('quickPanelApi', {
             electron_1.ipcRenderer.removeListener('show-quick-panel', handler);
         };
     },
+    onSelectionUpdate(callback) {
+        const handler = (_, data) => callback(data);
+        electron_1.ipcRenderer.on('update-quick-panel-selection', handler);
+        return () => {
+            electron_1.ipcRenderer.removeListener('update-quick-panel-selection', handler);
+        };
+    },
     executeAction(action, selectedText) {
         electron_1.ipcRenderer.send('quick-panel-action', { action, selectedText });
     },

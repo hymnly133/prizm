@@ -92,6 +92,10 @@ electron_1.contextBridge.exposeInMainWorld('prizm', {
     },
     setTitleBarOverlay(options) {
         return electron_1.ipcRenderer.invoke('set_titlebar_overlay', options);
+    },
+    /** 设置原生主题模式，同步到 nativeTheme.themeSource 并持久化 */
+    setNativeTheme(mode) {
+        return electron_1.ipcRenderer.invoke('set_native_theme', { mode });
     }
 });
 //# sourceMappingURL=preload.js.map

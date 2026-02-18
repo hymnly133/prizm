@@ -1,11 +1,4 @@
-import {
-  app,
-  BrowserWindow,
-  ipcMain,
-  shell,
-  screen,
-  nativeTheme
-} from 'electron'
+import { app, BrowserWindow, ipcMain, shell, screen, nativeTheme } from 'electron'
 import * as path from 'path'
 import log from 'electron-log/main'
 import { sharedState } from './config'
@@ -183,7 +176,10 @@ export function createNotificationWindow(): BrowserWindow {
   }
 
   ipcMain.once('notification-ready', () => {
-    logNotify('notification-ready 收到，flush 队列, queueLen=', sharedState.notificationQueue.length)
+    logNotify(
+      'notification-ready 收到，flush 队列, queueLen=',
+      sharedState.notificationQueue.length
+    )
     if (sharedState.notificationWindow && !sharedState.notificationWindow.isDestroyed()) {
       flushNotificationQueue(sharedState.notificationWindow)
       sharedState.notificationWindow.show()
@@ -237,16 +233,17 @@ export function createQuickPanelWindow(): BrowserWindow | null {
   }
   const isDev = !app.isPackaged
   sharedState.quickPanelWindow = new BrowserWindow({
-    width: 320,
-    height: 280,
+    width: 280,
+    height: 256,
     frame: false,
-    transparent: true,
-    backgroundColor: '#00000000',
+    thickFrame: false,
     resizable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
     focusable: true,
     show: false,
+    backgroundColor: '#16161c',
+    roundedCorners: true,
     webPreferences: {
       preload: path.join(__dirname, 'quickpanel-preload.js'),
       contextIsolation: true,

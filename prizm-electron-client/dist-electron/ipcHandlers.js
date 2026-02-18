@@ -387,6 +387,23 @@ function registerIpcHandlers() {
         }
         return true;
     });
+    electron_1.ipcMain.handle('set_native_theme', async (_event, { mode }) => {
+        const source = mode === 'auto' ? 'system' : mode;
+        electron_1.nativeTheme.themeSource = source;
+        main_1.default.info('[Electron] nativeTheme.themeSource changed to:', source);
+        await (0, config_2.saveThemeMode)(mode);
+        // 同步更新 Windows 标题栏控件颜色
+        if (process.platform === 'win32' &&
+            config_1.sharedState.mainWindow &&
+            !config_1.sharedState.mainWindow.isDestroyed()) {
+            const isDark = electron_1.nativeTheme.shouldUseDarkColors;
+            config_1.sharedState.mainWindow.setTitleBarOverlay({
+                color: '#00000000',
+                symbolColor: isDark ? '#CCCCCC' : '#333333'
+            });
+        }
+        return true;
+    });
     electron_1.ipcMain.on('quick-panel-action', (_event, payload) => {
         if (config_1.sharedState.quickPanelWindow && !config_1.sharedState.quickPanelWindow.isDestroyed()) {
             config_1.sharedState.quickPanelWindow.hide();

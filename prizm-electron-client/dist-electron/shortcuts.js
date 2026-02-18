@@ -36,20 +36,34 @@ const DOUBLE_TAP_MS = 350;
 let lastCtrlUpAt = 0;
 let ctrlDownWithoutOtherKeys = true;
 let uiohookStarted = false;
-async function getSelectedTextAsync() {
-    const prev = electron_1.clipboard.readText();
-    electron_1.clipboard.writeText('');
-    try {
-        const { uIOhook, UiohookKey } = require('uiohook-napi');
-        uIOhook.keyTap(UiohookKey.C, [UiohookKey.LeftCtrl]);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/**
+ * 保存当前剪贴板内容（文本 + HTML 格式）
+ */
+function saveClipboard() {
+    const text = electron_1.clipboard.readText();
+    const html = electron_1.clipboard.readHTML();
+    const formats = electron_1.clipboard.availableFormats();
+    return { text, html, formats };
+}
+/**
+ * 恢复之前保存的剪贴板内容
+ */
+function restoreClipboard(saved) {
+    if (saved.formats.includes('text/html') && saved.html) {
+        electron_1.clipboard.write({ text: saved.text, html: saved.html });
     }
-    catch (e) {
-        main_1.default.warn('[Electron] uiohook keyTap failed:', e);
+    else if (saved.text) {
+        electron_1.clipboard.writeText(saved.text);
     }
-    await new Promise((r) => setTimeout(r, 150));
-    const text = electron_1.clipboard.readText().trim();
-    electron_1.clipboard.writeText(prev);
-    return text;
+}
+function toggleQuickPanel() {
+    const win = config_1.sharedState.quickPanelWindow;
+    if (win && !win.isDestroyed() && win.isVisible()) {
+        win.hide();
+        return;
+    }
+    showQuickPanel();
 }
 function showQuickPanel() {
     const win = (0, windowManager_1.createQuickPanelWindow)();
@@ -64,43 +78,47 @@ function showQuickPanel() {
     x = Math.max(bounds.x, Math.min(x, bounds.x + bounds.width - w));
     y = Math.max(bounds.y, Math.min(y, bounds.y + bounds.height - h));
     win.setPosition(x, y);
-    getSelectedTextAsync()
-        .then((selectedText) => {
-        if (config_1.sharedState.quickPanelWindow && !config_1.sharedState.quickPanelWindow.isDestroyed()) {
-            config_1.sharedState.quickPanelWindow.webContents.send('show-quick-panel', {
-                selectedText: selectedText || ''
-            });
-            config_1.sharedState.quickPanelWindow.show();
-            config_1.sharedState.quickPanelWindow.focus();
-        }
-    })
-        .catch((err) => {
-        main_1.default.warn('[Electron] getSelectedText failed:', err);
-        if (config_1.sharedState.quickPanelWindow && !config_1.sharedState.quickPanelWindow.isDestroyed()) {
-            config_1.sharedState.quickPanelWindow.webContents.send('show-quick-panel', { selectedText: '' });
-            config_1.sharedState.quickPanelWindow.show();
-            config_1.sharedState.quickPanelWindow.focus();
+    // 读取当前剪贴板内容（同步）
+    const existingClipboard = electron_1.clipboard.readText().trim();
+    // 在目标应用仍有焦点时，立即保存剪贴板并模拟 Ctrl+C
+    const saved = saveClipboard();
+    electron_1.clipboard.writeText('');
+    try {
+        const { uIOhook, UiohookKey } = require('uiohook-napi');
+        uIOhook.keyTap(UiohookKey.C, [UiohookKey.Ctrl]);
+    }
+    catch (e) {
+        main_1.default.warn('[QuickPanel] uiohook keyTap failed:', e);
+    }
+    // 立即弹出面板（此时用已有剪贴板内容）
+    win.webContents.send('show-quick-panel', { clipboardText: existingClipboard });
+    win.show();
+    win.focus();
+    // 等待 Ctrl+C 结果写入剪贴板，增量更新面板
+    sleep(250).then(() => {
+        const selectedText = electron_1.clipboard.readText().trim();
+        restoreClipboard(saved);
+        if (selectedText && !win.isDestroyed()) {
+            win.webContents.send('update-quick-panel-selection', { selectedText });
         }
     });
 }
 function registerQuickPanelDoubleTap() {
     try {
         const { uIOhook, UiohookKey } = require('uiohook-napi');
+        const ctrl = UiohookKey.Ctrl;
+        const rightCtrl = UiohookKey.CtrlRight;
         uIOhook.on('keydown', (e) => {
-            const ctrl = UiohookKey.LeftCtrl ?? 29;
-            const rightCtrl = UiohookKey.RightCtrl ?? 361;
             if (e.keycode !== ctrl && e.keycode !== rightCtrl) {
                 ctrlDownWithoutOtherKeys = false;
             }
         });
         uIOhook.on('keyup', (e) => {
-            const ctrl = UiohookKey.LeftCtrl ?? 29;
-            const rightCtrl = UiohookKey.RightCtrl ?? 361;
             if (e.keycode === ctrl || e.keycode === rightCtrl) {
                 const now = Date.now();
                 if (ctrlDownWithoutOtherKeys && now - lastCtrlUpAt < DOUBLE_TAP_MS) {
                     lastCtrlUpAt = 0;
-                    showQuickPanel();
+                    toggleQuickPanel();
                 }
                 else {
                     lastCtrlUpAt = now;
@@ -110,7 +128,7 @@ function registerQuickPanelDoubleTap() {
         });
         uIOhook.start();
         uiohookStarted = true;
-        main_1.default.info('[Electron] Quick panel double-tap Ctrl registered');
+        main_1.default.info('[Electron] Quick panel double-tap Ctrl registered (Ctrl=%d, CtrlRight=%d)', ctrl, rightCtrl);
     }
     catch (e) {
         main_1.default.warn('[Electron] uiohook-napi not available, quick panel disabled:', e);

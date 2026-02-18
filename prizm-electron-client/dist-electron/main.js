@@ -82,6 +82,13 @@ electron_1.app
     .then(async () => {
     electron_1.Menu.setApplicationMenu(null);
     await (0, config_2.loadTraySettings)();
+    // 在创建窗口前设置 nativeTheme.themeSource，确保：
+    // 1. BrowserWindow.backgroundColor 使用正确主题色
+    // 2. CSS prefers-color-scheme 媒体查询匹配用户选择
+    // 3. 消除窗口预加载时的主题闪烁
+    const themeMode = await (0, config_2.loadThemeMode)();
+    electron_1.nativeTheme.themeSource = themeMode === 'auto' ? 'system' : themeMode;
+    main_1.default.info('[Electron] nativeTheme.themeSource set to:', electron_1.nativeTheme.themeSource);
     (0, ipcHandlers_1.registerIpcHandlers)();
     (0, windowManager_1.createMainWindow)();
     (0, windowManager_1.createQuickPanelWindow)();

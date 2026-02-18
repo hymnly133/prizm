@@ -1,0 +1,27 @@
+X [ERROR] "loader" without extension only applies when reading from stdin
+
+1 error
+node:child_process:921
+    throw err;
+    ^
+
+Error: Command failed: D:\prizm\node_modules\@esbuild\win32-x64\esbuild.exe src/store/agentSessionStore.ts --bundle=false --format=esm --loader=ts
+    at genericNodeError (node:internal/errors:983:15)
+    at wrappedFn (node:internal/errors:537:14)
+    at checkExecSyncError (node:child_process:882:11)
+    at Object.execFileSync (node:child_process:918:15)
+    at Object.<anonymous> (D:\prizm\node_modules\esbuild\bin\esbuild:222:28)
+    at Module._compile (node:internal/modules/cjs/loader:1565:14)
+    at Object..js (node:internal/modules/cjs/loader:1708:10)
+    at Module.load (node:internal/modules/cjs/loader:1318:32)
+    at Function._load (node:internal/modules/cjs/loader:1128:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14) {
+  status: 1,
+  signal: null,
+  output: [ null, null, null ],
+  pid: 24012,
+  stdout: null,
+  stderr: null
+}
+
+Node.js v22.12.0

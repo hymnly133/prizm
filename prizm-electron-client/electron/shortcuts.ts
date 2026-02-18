@@ -29,24 +29,42 @@ let lastCtrlUpAt = 0
 let ctrlDownWithoutOtherKeys = true
 let uiohookStarted = false
 
-async function getSelectedTextAsync(): Promise<string> {
-  const prev = clipboard.readText()
-  clipboard.writeText('')
-  try {
-    const { uIOhook, UiohookKey } = require('uiohook-napi')
-    uIOhook.keyTap(UiohookKey.C, [UiohookKey.LeftCtrl])
-  } catch (e) {
-    log.warn('[Electron] uiohook keyTap failed:', e)
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+/**
+ * 保存当前剪贴板内容（文本 + HTML 格式）
+ */
+function saveClipboard(): { text: string; html: string; formats: string[] } {
+  const text = clipboard.readText()
+  const html = clipboard.readHTML()
+  const formats = clipboard.availableFormats()
+  return { text, html, formats }
+}
+
+/**
+ * 恢复之前保存的剪贴板内容
+ */
+function restoreClipboard(saved: { text: string; html: string; formats: string[] }): void {
+  if (saved.formats.includes('text/html') && saved.html) {
+    clipboard.write({ text: saved.text, html: saved.html })
+  } else if (saved.text) {
+    clipboard.writeText(saved.text)
   }
-  await new Promise((r) => setTimeout(r, 150))
-  const text = clipboard.readText().trim()
-  clipboard.writeText(prev)
-  return text
+}
+
+function toggleQuickPanel(): void {
+  const win = sharedState.quickPanelWindow
+  if (win && !win.isDestroyed() && win.isVisible()) {
+    win.hide()
+    return
+  }
+  showQuickPanel()
 }
 
 function showQuickPanel(): void {
   const win = createQuickPanelWindow()
   if (!win || win.isDestroyed()) return
+
   const cursor = screen.getCursorScreenPoint()
   const display = screen.getDisplayNearestPoint(cursor)
   const bounds = display.bounds
@@ -56,44 +74,51 @@ function showQuickPanel(): void {
   x = Math.max(bounds.x, Math.min(x, bounds.x + bounds.width - w))
   y = Math.max(bounds.y, Math.min(y, bounds.y + bounds.height - h))
   win.setPosition(x, y)
-  getSelectedTextAsync()
-    .then((selectedText) => {
-      if (sharedState.quickPanelWindow && !sharedState.quickPanelWindow.isDestroyed()) {
-        sharedState.quickPanelWindow.webContents.send('show-quick-panel', {
-          selectedText: selectedText || ''
-        })
-        sharedState.quickPanelWindow.show()
-        sharedState.quickPanelWindow.focus()
-      }
-    })
-    .catch((err) => {
-      log.warn('[Electron] getSelectedText failed:', err)
-      if (sharedState.quickPanelWindow && !sharedState.quickPanelWindow.isDestroyed()) {
-        sharedState.quickPanelWindow.webContents.send('show-quick-panel', { selectedText: '' })
-        sharedState.quickPanelWindow.show()
-        sharedState.quickPanelWindow.focus()
-      }
-    })
+
+  // 读取当前剪贴板内容（同步）
+  const existingClipboard = clipboard.readText().trim()
+
+  // 在目标应用仍有焦点时，立即保存剪贴板并模拟 Ctrl+C
+  const saved = saveClipboard()
+  clipboard.writeText('')
+  try {
+    const { uIOhook, UiohookKey } = require('uiohook-napi')
+    uIOhook.keyTap(UiohookKey.C, [UiohookKey.Ctrl])
+  } catch (e) {
+    log.warn('[QuickPanel] uiohook keyTap failed:', e)
+  }
+
+  // 立即弹出面板（此时用已有剪贴板内容）
+  win.webContents.send('show-quick-panel', { clipboardText: existingClipboard })
+  win.show()
+  win.focus()
+
+  // 等待 Ctrl+C 结果写入剪贴板，增量更新面板
+  sleep(250).then(() => {
+    const selectedText = clipboard.readText().trim()
+    restoreClipboard(saved)
+    if (selectedText && !win.isDestroyed()) {
+      win.webContents.send('update-quick-panel-selection', { selectedText })
+    }
+  })
 }
 
 export function registerQuickPanelDoubleTap(): void {
   try {
     const { uIOhook, UiohookKey } = require('uiohook-napi')
+    const ctrl = UiohookKey.Ctrl
+    const rightCtrl = UiohookKey.CtrlRight
     uIOhook.on('keydown', (e: { keycode: number }) => {
-      const ctrl = UiohookKey.LeftCtrl ?? 29
-      const rightCtrl = UiohookKey.RightCtrl ?? 361
       if (e.keycode !== ctrl && e.keycode !== rightCtrl) {
         ctrlDownWithoutOtherKeys = false
       }
     })
     uIOhook.on('keyup', (e: { keycode: number }) => {
-      const ctrl = UiohookKey.LeftCtrl ?? 29
-      const rightCtrl = UiohookKey.RightCtrl ?? 361
       if (e.keycode === ctrl || e.keycode === rightCtrl) {
         const now = Date.now()
         if (ctrlDownWithoutOtherKeys && now - lastCtrlUpAt < DOUBLE_TAP_MS) {
           lastCtrlUpAt = 0
-          showQuickPanel()
+          toggleQuickPanel()
         } else {
           lastCtrlUpAt = now
         }
@@ -102,7 +127,11 @@ export function registerQuickPanelDoubleTap(): void {
     })
     uIOhook.start()
     uiohookStarted = true
-    log.info('[Electron] Quick panel double-tap Ctrl registered')
+    log.info(
+      '[Electron] Quick panel double-tap Ctrl registered (Ctrl=%d, CtrlRight=%d)',
+      ctrl,
+      rightCtrl
+    )
   } catch (e) {
     log.warn('[Electron] uiohook-napi not available, quick panel disabled:', e)
   }

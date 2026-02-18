@@ -1,10 +1,10 @@
-import { app, BrowserWindow, Menu, globalShortcut } from 'electron'
+import { app, BrowserWindow, Menu, globalShortcut, nativeTheme } from 'electron'
 import * as path from 'path'
 import * as util from 'util'
 import log from 'electron-log/main'
 
 import { sharedState } from './config'
-import { loadTraySettings } from './config'
+import { loadTraySettings, loadThemeMode } from './config'
 import { registerIpcHandlers } from './ipcHandlers'
 import { createMainWindow, createQuickPanelWindow } from './windowManager'
 import { createTray } from './trayManager'
@@ -60,6 +60,15 @@ app
     Menu.setApplicationMenu(null)
 
     await loadTraySettings()
+
+    // 在创建窗口前设置 nativeTheme.themeSource，确保：
+    // 1. BrowserWindow.backgroundColor 使用正确主题色
+    // 2. CSS prefers-color-scheme 媒体查询匹配用户选择
+    // 3. 消除窗口预加载时的主题闪烁
+    const themeMode = await loadThemeMode()
+    nativeTheme.themeSource = themeMode === 'auto' ? 'system' : themeMode
+    log.info('[Electron] nativeTheme.themeSource set to:', nativeTheme.themeSource)
+
     registerIpcHandlers()
     createMainWindow()
     createQuickPanelWindow()

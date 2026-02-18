@@ -39,6 +39,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.sharedState = void 0;
 exports.loadConfigFromDisk = loadConfigFromDisk;
 exports.saveConfigToDisk = saveConfigToDisk;
+exports.loadThemeMode = loadThemeMode;
+exports.saveThemeMode = saveThemeMode;
 exports.loadTraySettings = loadTraySettings;
 const electron_1 = require("electron");
 const path = __importStar(require("path"));
@@ -103,6 +105,32 @@ async function saveConfigToDisk(config) {
     await fs.promises.mkdir(configDir, { recursive: true });
     const content = JSON.stringify(config, null, 2);
     await fs.promises.writeFile(configPath, content, 'utf-8');
+}
+/**
+ * 加载持久化的主题模式（供主进程在创建窗口前使用）
+ */
+async function loadThemeMode() {
+    try {
+        const config = await loadConfigFromDisk();
+        const mode = config.themeMode;
+        if (mode === 'light' || mode === 'dark' || mode === 'auto')
+            return mode;
+    }
+    catch { }
+    return 'auto';
+}
+/**
+ * 保存主题模式到配置文件
+ */
+async function saveThemeMode(mode) {
+    try {
+        const config = await loadConfigFromDisk();
+        config.themeMode = mode;
+        await saveConfigToDisk(config);
+    }
+    catch (err) {
+        main_1.default.warn('[Electron] Failed to save theme mode:', err);
+    }
 }
 /**
  * 预加载托盘相关配置

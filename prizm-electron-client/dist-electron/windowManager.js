@@ -230,16 +230,17 @@ function createQuickPanelWindow() {
     }
     const isDev = !electron_1.app.isPackaged;
     config_1.sharedState.quickPanelWindow = new electron_1.BrowserWindow({
-        width: 320,
-        height: 280,
+        width: 280,
+        height: 256,
         frame: false,
-        transparent: true,
-        backgroundColor: '#00000000',
+        thickFrame: false,
         resizable: false,
         skipTaskbar: true,
         alwaysOnTop: true,
         focusable: true,
         show: false,
+        backgroundColor: '#16161c',
+        roundedCorners: true,
         webPreferences: {
             preload: path.join(__dirname, 'quickpanel-preload.js'),
             contextIsolation: true,

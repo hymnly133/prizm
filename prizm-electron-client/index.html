@@ -19,20 +19,31 @@
         min-height: 100vh;
         overflow: hidden;
       }
-      /* 在 React/ThemeProvider 挂载前，根据系统主题预设背景色，防止白色闪屏 */
+      /* 默认跟随系统主题（auto 模式 & nativeTheme.themeSource='system' 时生效） */
       @media (prefers-color-scheme: dark) {
-        html,
-        body {
+        html:not([data-theme]),
+        html:not([data-theme]) body {
           background-color: #000;
           color: #fff;
         }
       }
       @media (prefers-color-scheme: light) {
-        html,
-        body {
+        html:not([data-theme]),
+        html:not([data-theme]) body {
           background-color: #fff;
           color: #000;
         }
+      }
+      /* 手动主题覆盖（由内联脚本设置 data-theme 属性） */
+      html[data-theme='dark'],
+      html[data-theme='dark'] body {
+        background-color: #000;
+        color: #fff;
+      }
+      html[data-theme='light'],
+      html[data-theme='light'] body {
+        background-color: #fff;
+        color: #000;
       }
       #app {
         height: 100%;
@@ -42,6 +53,20 @@
         overflow: hidden;
       }
     </style>
+    <script>
+      // 同步读取用户主题偏好，在首次绘制前应用正确的背景色
+      // 主要由 Electron nativeTheme.themeSource 处理，此处作为兜底
+      ;(function () {
+        try {
+          var mode = localStorage.getItem('prizm.client.themeMode')
+          if (mode === 'dark' || mode === 'light') {
+            document.documentElement.dataset.theme = mode
+            var meta = document.querySelector('meta[name="color-scheme"]')
+            if (meta) meta.content = mode
+          }
+        } catch (e) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="app"></div>

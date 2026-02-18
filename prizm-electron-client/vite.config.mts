@@ -13,8 +13,18 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@prizm/client-core': resolve(__dirname, '../prizm-client-core/src')
-    }
+      '@prizm/client-core': resolve(__dirname, '../prizm-client-core/src'),
+      '@prizm/shared': resolve(__dirname, '../prizm-shared/src')
+    },
+    dedupe: [
+      '@lezer/highlight',
+      '@lezer/common',
+      '@lezer/markdown',
+      '@codemirror/language',
+      '@codemirror/state',
+      '@codemirror/view',
+      'style-mod'
+    ]
   },
   build: {
     target: 'esnext',

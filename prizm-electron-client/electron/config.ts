@@ -4,6 +4,8 @@ import * as path from 'path'
 import * as fs from 'fs'
 import log from 'electron-log/main'
 
+export type ThemeMode = 'auto' | 'light' | 'dark'
+
 export interface PrizmConfig {
   server: { host: string; port: string; is_dev?: string }
   client: { name: string; auto_register: string; requested_scopes: string[] }
@@ -14,6 +16,8 @@ export interface PrizmConfig {
     show_notification: string
   }
   notify_events?: string[]
+  /** 用户手动选择的主题模式，持久化以便主进程启动时读取 */
+  themeMode?: ThemeMode
 }
 
 export interface NotificationQueueItem {
@@ -97,6 +101,31 @@ export async function saveConfigToDisk(config: PrizmConfig): Promise<void> {
   await fs.promises.mkdir(configDir, { recursive: true })
   const content = JSON.stringify(config, null, 2)
   await fs.promises.writeFile(configPath, content, 'utf-8')
+}
+
+/**
+ * 加载持久化的主题模式（供主进程在创建窗口前使用）
+ */
+export async function loadThemeMode(): Promise<ThemeMode> {
+  try {
+    const config = await loadConfigFromDisk()
+    const mode = config.themeMode
+    if (mode === 'light' || mode === 'dark' || mode === 'auto') return mode
+  } catch {}
+  return 'auto'
+}
+
+/**
+ * 保存主题模式到配置文件
+ */
+export async function saveThemeMode(mode: ThemeMode): Promise<void> {
+  try {
+    const config = await loadConfigFromDisk()
+    config.themeMode = mode
+    await saveConfigToDisk(config)
+  } catch (err) {
+    log.warn('[Electron] Failed to save theme mode:', err)
+  }
 }
 
 /**

@@ -121,5 +121,10 @@ contextBridge.exposeInMainWorld('prizm', {
 
   setTitleBarOverlay(options: { color?: string; symbolColor?: string; height?: number }) {
     return ipcRenderer.invoke('set_titlebar_overlay', options)
+  },
+
+  /** 设置原生主题模式，同步到 nativeTheme.themeSource 并持久化 */
+  setNativeTheme(mode: 'auto' | 'light' | 'dark') {
+    return ipcRenderer.invoke('set_native_theme', { mode })
   }
 })
