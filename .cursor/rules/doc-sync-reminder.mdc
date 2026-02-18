@@ -1,0 +1,50 @@
+---
+description: 新增模块、路由、适配器或修改服务器生命周期时，提醒同步更新 CLAUDE.md 文档
+globs: prizm/src/routes/**, prizm/src/core/**, prizm/src/adapters/interfaces.ts, prizm/src/server.ts, prizm/src/terminal/**
+---
+
+# CLAUDE.md 文档同步提醒
+
+当以下任一情况发生时，**必须**同步更新对应的 CLAUDE.md 文件：
+
+## 触发条件
+
+### 1. 新增路由文件
+
+- 在 `prizm/src/routes/` 下新增 `.ts` 文件或子目录
+- **更新内容**：根目录 `CLAUDE.md` 和 `prizm/CLAUDE.md` 的架构树（`<!-- BEGIN:ARCHITECTURE_TREE -->`）和 API 端点列表（`<!-- BEGIN:API_ENDPOINTS -->`）
+
+### 2. 新增核心模块目录
+
+- 在 `prizm/src/core/` 下新增子目录（如新的 Manager / Store / Service）
+- **更新内容**：两份 CLAUDE.md 的架构树，并根据模块重要性在架构描述中新增章节
+
+### 3. 修改适配器接口
+
+- 修改 `prizm/src/adapters/interfaces.ts` 中新增接口或修改 `PrizmAdapters`
+- **更新内容**：两份 CLAUDE.md 的适配器章节（`<!-- BEGIN:ADAPTER_PATTERN -->`）
+
+### 4. 修改服务器生命周期
+
+- 修改 `prizm/src/server.ts` 的启动/停止流程（新增 init / shutdown 步骤）
+- 新增路由挂载（`createXxxRoutes` 调用）
+- **更新内容**：两份 CLAUDE.md 的服务器生命周期章节（`<!-- BEGIN:SERVER_LIFECYCLE -->`）
+
+### 5. 新增领域事件
+
+- 修改 `prizm/src/core/eventBus/types.ts` 中的 `DomainEventMap`
+- **更新内容**：根目录 CLAUDE.md 的事件总线章节（`<!-- BEGIN:EVENT_BUS -->`）
+
+### 6. 新增环境变量
+
+- 新增功能需要新的环境变量配置
+- **更新内容**：两份 CLAUDE.md 的环境变量章节（`<!-- BEGIN:ENVIRONMENT_VARIABLES -->`）
+
+## 定位方式
+
+两份 CLAUDE.md 使用 HTML 注释标记章节边界（如 `<!-- BEGIN:SECTION -->` / `<!-- END:SECTION -->`），可快速定位需要修改的区域。
+
+## 文件位置
+
+- 根目录文档：`CLAUDE.md`（monorepo 全局视角）
+- 服务器文档：`prizm/CLAUDE.md`（服务器包独立视角，子模块开发使用）

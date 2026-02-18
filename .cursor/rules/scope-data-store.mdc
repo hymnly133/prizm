@@ -1,0 +1,85 @@
+# scopeDataStore — Scope 级共享数据唯一入口
+
+## 规则
+
+当客户端组件/hook 需要访问 **当前 scope 的文档列表、会话列表或记忆计数** 时，**必须**从 `scopeDataStore` 读取，**禁止**直接调用以下 API：
+
+- `http.listDocuments()` — 使用 `useScopeDataStore(s => s.documents)`
+- `http.listAgentSessions()` — 使用 `useScopeDataStore(s => s.sessions)`
+- `http.getMemoryCounts()` — 使用 `useScopeDataStore(s => s.memoryCounts)`
+
+刷新数据时调用 store 的 `refreshDocuments()` / `refreshSessions()` / `refreshMemoryCounts()`，不要自行维护 useState + fetch + WS 订阅。
+
+```typescript
+// ✅ 正确
+import { useScopeDataStore } from '../store/scopeDataStore'
+const documents = useScopeDataStore(s => s.documents)
+const refreshDocuments = useScopeDataStore(s => s.refreshDocuments)
+
+// ❌ 错误：绕过 store 独立拉取
+const [documents, setDocuments] = useState([])
+const docs = await http.listDocuments({ scope })
+setDocuments(docs)
+```
+
+## Store 架构
+
+```
+scopeDataStore (Zustand)
+├── documents: EnrichedDocument[]      — 单次 fetch，多处消费
+├── sessions: EnrichedSession[]        — 单次 fetch，多处消费
+├── memoryCounts: MemoryCounts         — 单次 fetch，多处消费
+├── refreshDocuments()                 — WS 事件防抖后统一触发
+├── refreshSessions()
+├── refreshMemoryCounts()
+├── bind(http, scope)                  — 由 useScopeDataBinding 在顶层绑定
+└── subscribeScopeDataEvents()         — 全局 WS 事件订阅（幂等）
+```
+
+## WS 事件自动刷新
+
+`subscribeScopeDataEvents()` 在 AppContent 挂载时调用一次，统一处理：
+
+- 文档事件 (`document:*`, `resource:locked/unlocked`) → 防抖 800ms 刷新 documents
+- 会话事件 (`agent:session.*`, `agent:message.completed`) → 防抖 800ms 刷新 sessions
+- 记忆事件 (`agent:message.completed`, `document:created/deleted`) → 防抖 2s 刷新 memoryCounts
+
+组件**不应**自行注册 WS 订阅来刷新这三类数据。
+
+## 批准的豁免
+
+以下场景允许直接调用 API，因为它们有不同于简单列表展示的特殊需求：
+
+| 文件 | 调用 | 原因 |
+|------|------|------|
+| `useFileList.ts` | `listDocuments` | 聚合 todo+doc 为 FileItem[]，有精密的增量更新机制 |
+| `agentSessionStore.ts` | `listAgentSessions` | 管理流式状态、消息、当前会话等 agent 专有逻辑 |
+
+新增豁免需在此规则文件中记录。
+
+## 消费者示例
+
+### 只需要计数
+
+```typescript
+// useScopeStats 已封装好，从 store 派生
+const { stats } = useScopeStats()
+// stats.documentsCount, stats.sessionsCount, stats.memoryEnabled ...
+```
+
+### 需要完整列表
+
+```typescript
+const documents = useScopeDataStore(s => s.documents)
+const documentsLoading = useScopeDataStore(s => s.documentsLoading)
+```
+
+### 操作后手动刷新
+
+创建/删除文档后：
+
+```typescript
+const refreshDocuments = useScopeDataStore(s => s.refreshDocuments)
+await client.createDocument(...)
+await refreshDocuments()
+```

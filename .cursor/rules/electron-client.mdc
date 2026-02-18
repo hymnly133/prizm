@@ -1,5 +1,5 @@
 ---
-description: Electron 客户端开发规范
+description: Electron 客户端开发规范（UI 组件、样式、状态管理）
 globs: prizm-electron-client/**
 ---
 
@@ -8,9 +8,188 @@ globs: prizm-electron-client/**
 ## 技术栈
 
 - **框架**: Electron 40 + Vite
-- **UI**: React 19 + Ant Design
+- **UI**: React 19 + Ant Design + `@lobehub/ui`（ActionIcon, Icon, Text, Tag, Button, Modal, Popover, SpotlightCard 等）
+- **动画**: `motion/react`（fadeUp, stagger 等预设定义在 `theme/motionPresets.ts`）
+- **样式**: CSS 文件（`styles/`）+ `antd-style` 的 `createStyles`（仅复杂组件内部使用）
 - **状态管理**: Zustand（优先 hooks 模式）
+- **图标**: `lucide-react`
 - **服务端通信**: `@prizm/client-core` 提供的 HTTP/WebSocket 客户端
+
+## 目录结构
+
+```text
+src/
+├── components/         # 共享组件
+│   ├── ui/             # 基础 UI 原子组件（⭐ 必须优先使用）
+│   ├── agent/          # Agent 功能区组件
+│   ├── editor/         # 编辑器组件
+│   ├── import/         # 导入相关组件
+│   ├── layout/         # 布局组件
+│   └── todo/           # 待办相关组件
+├── views/              # 页面级组件
+├── hooks/              # 自定义 hooks
+├── context/            # React Context
+├── store/              # Zustand store
+├── styles/             # CSS 样式文件
+│   ├── shared.css      # ⭐ 共享基础样式（所有统一组件的 CSS 定义）
+│   ├── home.css        # 首页特有样式
+│   ├── agent.css       # Agent 页面特有样式
+│   ├── agent-overview.css
+│   ├── settings.css
+│   ├── document.css
+│   └── work.css
+├── theme/              # 主题和动画预设
+├── features/           # 功能模块
+├── events/             # 事件处理
+└── utils/              # 工具函数
+```
+
+## ⭐ 统一 UI 组件（必须使用，禁止重复实现）
+
+所有通用 UI 模式**必须**使用 `components/ui/` 下的统一组件。禁止在页面中自行实现相同功能。
+
+### EmptyState — 空状态
+
+```tsx
+import { EmptyState } from '../components/ui/EmptyState'
+
+// 基础用法
+<EmptyState description="暂无数据" />
+
+// 带图标和操作按钮
+<EmptyState
+  icon={FileText}
+  description="暂无文档"
+  actions={<Button onClick={onCreate}>新建</Button>}
+/>
+```
+
+**禁止**: 自行编写 `<p className="xxx-empty">` 或使用 `<Empty>` from antd。
+
+### LoadingPlaceholder — 加载占位
+
+```tsx
+import { LoadingPlaceholder } from '../components/ui/LoadingPlaceholder'
+
+<LoadingPlaceholder />                    // 默认 "加载中..."
+<LoadingPlaceholder text="正在获取..." />  // 自定义文案
+```
+
+**禁止**: 自行组合 `<Loader2 className="spinning" /> + <span>加载中</span>` 或使用 `xxx-loading` CSS 类。
+
+### SectionHeader — 区段标题
+
+```tsx
+import { SectionHeader } from '../components/ui/SectionHeader'
+
+<SectionHeader icon={Brain} title="记忆系统" />
+<SectionHeader icon={FileText} title="文档" count={12} extra={<Button>查看全部</Button>} />
+```
+
+**禁止**: 自行定义 `xxx-section-header` / `xxx-title` CSS 类。
+
+### RefreshIconButton — 刷新按钮
+
+```tsx
+import { RefreshIconButton } from '../components/ui/RefreshIconButton'
+
+<RefreshIconButton onClick={handleRefresh} />
+<RefreshIconButton onClick={handleRefresh} disabled={loading} title="刷新文档" size={12} />
+```
+
+**禁止**: 自行编写 `<button><RefreshCw /></button>` 或定义 `xxx-refresh-btn` CSS 类。
+
+### ContentCard — 卡片容器
+
+```tsx
+import { ContentCard, ContentCardHeader, ContentCardBody } from '../components/ui/ContentCard'
+
+// 组件方式
+<ContentCard variant="default">
+  <ContentCardHeader>标题</ContentCardHeader>
+  <ContentCardBody>内容</ContentCardBody>
+</ContentCard>
+
+// CSS 类方式（配合 motion.div 使用时）
+<motion.div className="content-card content-card--default content-card--hoverable" {...fadeUp(0)}>
+  <div className="content-card__header">标题</div>
+  <div className="content-card__body">内容</div>
+</motion.div>
+```
+
+三种变体：
+
+- `default` — `bg-container`，常规卡片
+- `elevated` — `bg-elevated`，突出卡片（如设置页）
+- `subtle` — `fill-quaternary`，低调卡片
+
+**禁止**: 自行定义 `home-card` / `overview-card` / `settings-card` 等重复卡片样式。
+
+### StatCard — 统计卡片
+
+```tsx
+import { StatCard } from '../components/ui/StatCard'
+
+// 正常尺寸 — 用于 SpotlightCard 内部
+<StatCard icon={<MessageSquare size={20} />} iconColor="var(--ant-color-primary)" label="会话数" value="128" />
+
+// 紧凑尺寸 — 用于侧边栏 / 诊断面板
+<StatCard size="compact" icon={<Cpu size={16} />} label="延迟" value="42ms" />
+```
+
+### 其他 ui/ 组件
+
+| 组件               | 用途                             |
+| ------------------ | -------------------------------- |
+| `SearchInput`      | 带 debounce 的搜索输入框        |
+| `AccentList`       | 基于 LobeUI List 的带强调色列表 |
+| `Select`           | 统一下拉选择器                   |
+| `Segmented`        | 统一分段控制器                   |
+| `TagSelector`      | 标签选择器                       |
+| `ModalSidebar`     | 侧边栏弹窗                       |
+| `ScopeSidebar`     | Scope 选择侧边栏                 |
+| `OutlineTree`      | 大纲树                           |
+| `SettingsListItem` | 设置项列表行                     |
+
+## 样式规范
+
+### 样式方案选择
+
+1. **新组件优先使用 CSS 文件 + `shared.css` 中的统一类名**
+2. 仅在组件内部有大量动态 token 引用时使用 `createStyles`（如图表、仪表盘）
+3. **禁止**在组件中使用大量 inline `style` 对象（少量定位/颜色覆盖可以）
+
+### CSS 变量
+
+始终使用 Ant Design CSS 变量而非硬编码颜色：
+
+```css
+/* ✅ 正确 */
+color: var(--ant-color-text-secondary);
+background: var(--ant-color-fill-quaternary);
+border: 1px solid var(--ant-color-border-secondary);
+
+/* ❌ 错误 */
+color: #666;
+background: #f5f5f5;
+border: 1px solid #e8e8e8;
+```
+
+### CSS 类命名
+
+- 采用 BEM-like 命名：`.component__element--modifier`
+- 页面特有样式放在对应的 CSS 文件中（`home.css`、`agent.css` 等）
+- 跨页面共享的样式放在 `shared.css` 中
+
+### 新增 CSS 类前检查
+
+新增样式前**必须**检查 `shared.css` 是否已有相同功能的类。已有的共享类：
+
+- `.empty-state` / `.empty-state__actions`
+- `.loading-placeholder`
+- `.section-header` / `.section-header__title` / `.section-header__extra`
+- `.content-card` / `.content-card__header` / `.content-card__body`（含 `--default` / `--elevated` / `--subtle` / `--hoverable` / `--clickable` 修饰符）
+- `.stat-card` / `.stat-card__icon` / `.stat-card__info` / `.stat-card__value` / `.stat-card__label` / `.stat-card__desc`（含 `--normal` / `--compact` / `--clickable` 修饰符）
 
 ## 组件规范
 
@@ -18,24 +197,49 @@ globs: prizm-electron-client/**
 - 组件文件名：`PascalCase.tsx`
 - 大型组件拆分到 `components/` 子目录（如 `components/agent/`）
 - 自定义 hooks 放在 `hooks/` 目录，命名 `useXxx.ts`
+- 导出时优先使用**命名导出**（`export function Foo`），仅页面级组件使用 `export default`
 
 ## 主进程/渲染进程分离
 
 - 主进程代码在 `electron/` 目录
 - 渲染进程代码在 `src/` 目录
 - 通过 `preload` 脚本暴露 IPC API
-- 渲染进程通过 `window.electronAPI` 或 `global.d.ts` 中声明的接口调用主进程
+- 渲染进程通过 `window.prizm` 接口调用主进程功能（类型声明在 `global.d.ts`）
 - 禁止在渲染进程直接使用 Node.js API
 
 ## 状态管理
 
-- 全局状态使用 Zustand store
+- 全局状态使用 Zustand store（`store/` 目录）
 - 组件内局部状态使用 `useState` / `useReducer`
-- 服务端数据使用自定义 hooks 封装（如 `useAgentOverviewData`、`useFileList`）
+- 服务端数据使用自定义 hooks 封装（如 `useAgentOverviewData`、`useFileList`、`useScope`）
 - 避免 prop drilling，复杂数据流用 Zustand 或 Context
+- WebSocket 事件使用 `subscribeSyncEvents` 做实时同步
 
-## 样式
+## 动画
 
-- 优先使用 Ant Design 组件和其内置样式
-- 自定义样式使用 CSS Modules 或内联样式对象
-- 响应式布局使用 Ant Design Grid 系统
+- 使用 `theme/motionPresets.ts` 中的预设函数（`fadeUp`、`fadeUpStagger`、`STAGGER_DELAY`、`EASE_SMOOTH`）
+- 列表动画使用 `AnimatePresence` + `mode="popLayout"`
+- 避免自行定义重复的 `initial` / `animate` / `transition` 对象
+
+## 导入顺序
+
+```tsx
+// 1. React
+import { useState, useCallback } from 'react'
+// 2. 第三方 UI 库
+import { motion } from 'motion/react'
+import { Button, Icon, Tag } from '@lobehub/ui'
+import { Brain, FileText } from 'lucide-react'
+// 3. workspace 包
+import type { AgentSession } from '@prizm/client-core'
+// 4. 项目内 context / hooks
+import { usePrizmContext } from '../../context/PrizmContext'
+import { useScope } from '../../hooks/useScope'
+// 5. 项目内 ui 组件
+import { EmptyState } from '../ui/EmptyState'
+import { SectionHeader } from '../ui/SectionHeader'
+// 6. 项目内业务组件
+import { MemoryInspector } from './MemoryInspector'
+// 7. 样式 / 类型
+import type { SessionStats } from './agentSidebarTypes'
+```
