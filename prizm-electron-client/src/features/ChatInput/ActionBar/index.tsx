@@ -4,6 +4,8 @@ import { memo } from "react";
 import type { ActionKeys } from "./config";
 import Clear from "./Clear";
 import Upload from "./Upload";
+import ThinkingToggle from "./ThinkingToggle";
+import ToolCompactToggle from "./ToolCompactToggle";
 
 interface ActionBarProps {
 	leftActions?: ActionKeys[];
@@ -16,6 +18,8 @@ const actionMap: Record<
 > = {
 	fileUpload: Upload,
 	clear: Clear,
+	thinking: ThinkingToggle,
+	toolCompact: ToolCompactToggle,
 };
 
 const ActionBar = memo<ActionBarProps>(({ leftActions = [], onClear }) => {

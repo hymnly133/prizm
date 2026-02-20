@@ -10,6 +10,7 @@ interface MessageUsageType {
 	totalTokens?: number;
 	totalInputTokens?: number;
 	totalOutputTokens?: number;
+	cachedInputTokens?: number;
 }
 
 interface MessageUsageProps {
@@ -29,6 +30,12 @@ export function MessageUsage({ model, usage }: MessageUsageProps) {
 		!!usage?.totalTokens ||
 		usage?.totalInputTokens != null ||
 		usage?.totalOutputTokens != null;
+
+	const cached = usage?.cachedInputTokens ?? 0;
+	const cacheHitPct =
+		cached > 0 && usage?.totalInputTokens
+			? Math.round((cached / usage.totalInputTokens) * 100)
+			: 0;
 
 	return (
 		<Flexbox
@@ -53,25 +60,40 @@ export function MessageUsage({ model, usage }: MessageUsageProps) {
 			)}
 			<Flexbox horizontal align="center" gap={4}>
 				<Coins size={12} />
-				{hasUsage ? (
-					usage.totalInputTokens != null && usage.totalOutputTokens != null ? (
-						<span>
-							{formatToken(usage.totalInputTokens)} in /{" "}
-							{formatToken(usage.totalOutputTokens)} out
+			{hasUsage ? (
+				usage.totalInputTokens != null && usage.totalOutputTokens != null ? (
+					<span>
+						{formatToken(usage.totalInputTokens)} in
+					{cacheHitPct > 0 && (
+						<span
+							style={{
+								color: "var(--ant-color-text-quaternary)",
+								marginLeft: 3,
+								fontWeight: 400,
+								fontSize: 11,
+								fontVariantNumeric: "tabular-nums",
+							}}
+							title={`${formatToken(cached)} cached tokens`}
+						>
+							({cacheHitPct}% cached)
 						</span>
-					) : (
-						<span>
-							{formatToken(
-								usage?.totalTokens ??
-									(usage?.totalInputTokens ?? 0) +
-										(usage?.totalOutputTokens ?? 0)
-							)}{" "}
-							tokens
-						</span>
-					)
+					)}
+						{" / "}
+						{formatToken(usage.totalOutputTokens)} out
+					</span>
 				) : (
-					<span>—</span>
-				)}
+					<span>
+						{formatToken(
+							usage?.totalTokens ??
+								(usage?.totalInputTokens ?? 0) +
+									(usage?.totalOutputTokens ?? 0)
+						)}{" "}
+						tokens
+					</span>
+				)
+			) : (
+				<span>—</span>
+			)}
 			</Flexbox>
 		</Flexbox>
 	);

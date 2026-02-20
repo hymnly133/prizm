@@ -1,4 +1,4 @@
-import { ActionIcon } from "@lobehub/ui";
+import { ActionIcon, toast } from "@lobehub/ui";
 import { Paperclip } from "lucide-react";
 import { memo } from "react";
 
@@ -7,14 +7,10 @@ const Upload = memo(() => {
 	return (
 		<ActionIcon
 			icon={Paperclip}
-			title="文件上传（服务端待实现）"
+			title="文件上传（开发中）"
 			size={{ blockSize: 36, size: 20 }}
 			onClick={() => {
-				// TODO: 服务端实现后接入
-				// eslint-disable-next-line no-console
-				console.info(
-					"[ChatInput] 文件上传：服务端待实现，参见 docs/CHATINPUT_SERVER_TODO.md"
-				);
+				toast.info('文件上传功能开发中，敬请期待')
 			}}
 		/>
 	);

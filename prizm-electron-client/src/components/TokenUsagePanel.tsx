@@ -5,7 +5,7 @@
 import { Button, toast } from '@lobehub/ui'
 import { Segmented } from './ui/Segmented'
 import { createStaticStyles } from 'antd-style'
-import { Activity, BarChart3, Clock, Cpu, Database, Layers, RefreshCw, Zap } from 'lucide-react'
+import { Activity, BarChart3, Clock, Cpu, Database, Layers, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import type { PrizmClient, TokenUsageRecord } from '@prizm/client-core'
 
@@ -15,6 +15,7 @@ interface BucketStat {
   input: number
   output: number
   total: number
+  cached: number
   count: number
 }
 
@@ -22,6 +23,7 @@ interface TokenUsageSummary {
   totalInputTokens: number
   totalOutputTokens: number
   totalTokens: number
+  totalCachedInputTokens: number
   count: number
   byCategory: Record<string, BucketStat>
   byDataScope: Record<string, BucketStat>
@@ -61,6 +63,12 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
     border-radius: ${cssVar.borderRadiusSM};
     background: ${cssVar.colorBgContainer};
     border: 1px solid ${cssVar.colorBorderSecondary};
+    transition: border-color 0.2s, box-shadow 0.2s;
+
+    &:hover {
+      border-color: ${cssVar.colorBorder};
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+    }
   `,
   statLabel: css`
     font-size: 11px;
@@ -197,6 +205,55 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   `,
   statValueSmall: css`
     font-size: 14px;
+  `,
+  statValueCache: css`
+    font-size: 18px;
+    font-weight: 600;
+    color: ${cssVar.colorTextTertiary};
+    font-variant-numeric: tabular-nums;
+  `,
+  cacheBarMini: css`
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+  `,
+  cacheBarMiniTrack: css`
+    flex: 1;
+    height: 4px;
+    border-radius: 2px;
+    background: ${cssVar.colorFillQuaternary};
+    overflow: hidden;
+  `,
+  cacheBarMiniFill: css`
+    height: 100%;
+    border-radius: 2px;
+    background: ${cssVar.colorPrimary};
+    background-image: repeating-linear-gradient(
+      -45deg,
+      transparent 0px,
+      transparent 1.5px,
+      ${cssVar.colorBgContainer} 1.5px,
+      ${cssVar.colorBgContainer} 3px
+    );
+    transition: width 0.4s cubic-bezier(0.33, 1, 0.68, 1);
+  `,
+  cacheBarMiniPct: css`
+    font-size: 11px;
+    color: ${cssVar.colorTextQuaternary};
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    min-width: 28px;
+    text-align: right;
+  `,
+  tdCache: css`
+    padding: 6px 10px;
+    border-bottom: 1px solid ${cssVar.colorBorderSecondary};
+    color: ${cssVar.colorTextQuaternary};
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 11px;
   `
 }))
 
@@ -273,6 +330,7 @@ function DistributionTable({
   maxTotal: number
 }) {
   const entries = Object.entries(data).sort((a, b) => b[1].total - a[1].total)
+  const showCache = entries.some(([, stat]) => (stat.cached ?? 0) > 0)
 
   if (entries.length === 0) {
     return <div className={styles.emptyHint}>暂无数据</div>
@@ -285,6 +343,8 @@ function DistributionTable({
           <tr>
             <th className={styles.th}>{labelHeader}</th>
             <th className={styles.thRight}>输入</th>
+            {showCache && <th className={styles.thRight}>缓存</th>}
+            {showCache && <th className={styles.thRight}>缓存率</th>}
             <th className={styles.thRight}>输出</th>
             <th className={styles.thRight}>合计</th>
             <th className={styles.thRight}>请求数</th>
@@ -296,6 +356,10 @@ function DistributionTable({
         <tbody>
           {entries.map(([key, stat]) => {
             const pct = maxTotal > 0 ? (stat.total / maxTotal) * 100 : 0
+            const cacheRate =
+              stat.input > 0 && (stat.cached ?? 0) > 0
+                ? (((stat.cached ?? 0) / stat.input) * 100).toFixed(0)
+                : null
             return (
               <tr key={key}>
                 <td className={styles.td}>
@@ -304,6 +368,14 @@ function DistributionTable({
                   </span>
                 </td>
                 <td className={styles.tdRight}>{formatTokens(stat.input)}</td>
+                {showCache && (
+                  <td className={styles.tdCache}>
+                    {(stat.cached ?? 0) > 0 ? formatTokens(stat.cached) : '-'}
+                  </td>
+                )}
+                {showCache && (
+                  <td className={styles.tdCache}>{cacheRate != null ? `${cacheRate}%` : '-'}</td>
+                )}
                 <td className={styles.tdRight}>{formatTokens(stat.output)}</td>
                 <td className={styles.tdRight}>{formatTokens(stat.total)}</td>
                 <td className={styles.tdRight}>{formatNumber(stat.count)}</td>
@@ -343,6 +415,7 @@ function RecentRecordsTable({
   loading: boolean
 }) {
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
+  const showCacheCol = records.some((r) => (r.cachedInputTokens ?? 0) > 0)
 
   if (records.length === 0 && !loading) {
     return <div className={styles.emptyHint}>暂无记录</div>
@@ -358,31 +431,51 @@ function RecentRecordsTable({
               <th className={styles.th}>类别</th>
               <th className={styles.th}>模型</th>
               <th className={styles.thRight}>输入</th>
+              {showCacheCol && <th className={styles.thRight}>缓存</th>}
               <th className={styles.thRight}>输出</th>
               <th className={styles.thRight}>合计</th>
             </tr>
           </thead>
           <tbody>
-            {records.map((r) => (
-              <tr key={r.id}>
-                <td className={styles.tdMono}>
-                  {new Date(r.timestamp).toLocaleString('zh-CN', {
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit'
-                  })}
-                </td>
-                <td className={styles.td}>
-                  <span className={styles.categoryBadge}>{getCategoryLabel(r.category)}</span>
-                </td>
-                <td className={styles.tdMono}>{r.model || '-'}</td>
-                <td className={styles.tdRight}>{formatNumber(r.inputTokens)}</td>
-                <td className={styles.tdRight}>{formatNumber(r.outputTokens)}</td>
-                <td className={styles.tdRight}>{formatNumber(r.totalTokens)}</td>
-              </tr>
-            ))}
+            {records.map((r) => {
+              const rCached = r.cachedInputTokens ?? 0
+              const rCachePct =
+                rCached > 0 && r.inputTokens > 0 ? Math.round((rCached / r.inputTokens) * 100) : 0
+              return (
+                <tr key={r.id}>
+                  <td className={styles.tdMono}>
+                    {new Date(r.timestamp).toLocaleString('zh-CN', {
+                      month: '2-digit',
+                      day: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit'
+                    })}
+                  </td>
+                  <td className={styles.td}>
+                    <span className={styles.categoryBadge}>{getCategoryLabel(r.category)}</span>
+                  </td>
+                  <td className={styles.tdMono}>{r.model || '-'}</td>
+                  <td className={styles.tdRight}>{formatNumber(r.inputTokens)}</td>
+                  {showCacheCol && (
+                    <td className={styles.tdCache}>
+                      {rCached > 0 ? (
+                        <span>
+                          {formatNumber(rCached)}
+                          <span style={{ fontSize: 10, marginLeft: 2, opacity: 0.8 }}>
+                            ({rCachePct}%)
+                          </span>
+                        </span>
+                      ) : (
+                        '-'
+                      )}
+                    </td>
+                  )}
+                  <td className={styles.tdRight}>{formatNumber(r.outputTokens)}</td>
+                  <td className={styles.tdRight}>{formatNumber(r.totalTokens)}</td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -496,46 +589,70 @@ export function TokenUsagePanel({ http, onLog }: Props) {
       </div>
 
       {/* 汇总统计卡片 */}
-      {s && (
-        <div className="settings-card">
-          <div className={styles.sectionTitle}>
-            <Activity size={16} />
-            汇总
-          </div>
-          <div className={styles.statGrid}>
-            <div className={styles.statItem}>
-              <span className={styles.statLabel}>总 Token</span>
-              <span className={styles.statValue}>{formatTokens(s.totalTokens)}</span>
+      {s &&
+        (() => {
+          const totalCached = s.totalCachedInputTokens ?? 0
+          const hasCacheData = totalCached > 0
+          const cacheRate =
+            s.totalInputTokens > 0 ? ((totalCached / s.totalInputTokens) * 100).toFixed(1) : null
+          const freshInput = Math.max(0, s.totalInputTokens - totalCached)
+
+          return (
+            <div className="settings-card">
+              <div className={styles.sectionTitle}>
+                <Activity size={16} />
+                汇总
+              </div>
+              <div className={styles.statGrid}>
+                <div className={styles.statItem}>
+                  <span className={styles.statLabel}>总 Token</span>
+                  <span className={styles.statValue}>{formatTokens(s.totalTokens)}</span>
+                </div>
+                <div className={styles.statItem}>
+                  <span className={styles.statLabel}>输入 Token</span>
+                  <span className={styles.statValue}>{formatTokens(s.totalInputTokens)}</span>
+                </div>
+                {hasCacheData && (
+                  <div className={styles.statItem}>
+                    <span className={styles.statLabel}>实际输入</span>
+                    <span className={styles.statValue}>{formatTokens(freshInput)}</span>
+                  </div>
+                )}
+                <div className={styles.statItem}>
+                  <span className={styles.statLabel}>输出 Token</span>
+                  <span className={styles.statValue}>{formatTokens(s.totalOutputTokens)}</span>
+                </div>
+                <div className={styles.statItem}>
+                  <span className={styles.statLabel}>请求数</span>
+                  <span className={styles.statValue}>{formatNumber(s.count)}</span>
+                </div>
+                {hasCacheData && (
+                  <div className={styles.statItem}>
+                    <span className={styles.statLabel}>缓存命中</span>
+                    <span className={styles.statValueCache}>{formatTokens(totalCached)}</span>
+                    <div className={styles.cacheBarMini}>
+                      <div className={styles.cacheBarMiniTrack}>
+                        <div
+                          className={styles.cacheBarMiniFill}
+                          style={{ width: `${cacheRate ?? 0}%` }}
+                        />
+                      </div>
+                      <span className={styles.cacheBarMiniPct}>
+                        {cacheRate != null ? `${cacheRate}%` : '-'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                <div className={styles.statItem}>
+                  <span className={styles.statLabel}>平均 Token/请求</span>
+                  <span className={`${styles.statValue} ${styles.statValueSmall}`}>
+                    {s.count > 0 ? Math.round(s.totalTokens / s.count).toLocaleString() : '-'}
+                  </span>
+                </div>
+              </div>
             </div>
-            <div className={styles.statItem}>
-              <span className={styles.statLabel}>输入 Token</span>
-              <span className={styles.statValue}>{formatTokens(s.totalInputTokens)}</span>
-            </div>
-            <div className={styles.statItem}>
-              <span className={styles.statLabel}>输出 Token</span>
-              <span className={styles.statValue}>{formatTokens(s.totalOutputTokens)}</span>
-            </div>
-            <div className={styles.statItem}>
-              <span className={styles.statLabel}>请求数</span>
-              <span className={styles.statValue}>{formatNumber(s.count)}</span>
-            </div>
-            <div className={styles.statItem}>
-              <span className={styles.statLabel}>输入/输出比</span>
-              <span className={`${styles.statValue} ${styles.statValueSmall}`}>
-                {s.totalOutputTokens > 0
-                  ? (s.totalInputTokens / s.totalOutputTokens).toFixed(2)
-                  : '-'}
-              </span>
-            </div>
-            <div className={styles.statItem}>
-              <span className={styles.statLabel}>平均 Token/请求</span>
-              <span className={`${styles.statValue} ${styles.statValueSmall}`}>
-                {s.count > 0 ? Math.round(s.totalTokens / s.count).toLocaleString() : '-'}
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
+          )
+        })()}
 
       {/* 按类别分布 */}
       {s && Object.keys(s.byCategory).length > 0 && (

@@ -8,19 +8,15 @@ import {
   Home,
   LayoutDashboard,
   Bot,
-  Columns2,
-  User,
   Settings,
   FlaskConical,
   Plus,
   FileText,
-  Brain,
-  RefreshCw,
   ScrollText
 } from 'lucide-react'
 import { createStyles } from 'antd-style'
 
-type PageKey = 'home' | 'work' | 'docs' | 'agent' | 'collaboration' | 'user' | 'settings' | 'test'
+type PageKey = 'home' | 'work' | 'docs' | 'agent' | 'settings' | 'test'
 
 interface CommandItem {
   id: string
@@ -133,44 +129,27 @@ export function CommandPalette({ onNavigate, onNewChat, onOpenLogs }: CommandPal
     () => [
       {
         id: 'nav-home',
-        label: '主页',
-        description: '回到主页仪表板',
+        label: '仪表盘',
+        description: '总览、统计、记忆、Token 用量',
         icon: <Home size={16} />,
         action: () => onNavigate('home'),
-        keywords: ['home', 'dashboard']
+        keywords: ['home', 'dashboard', '仪表盘', 'user', 'token', 'memory']
       },
       {
         id: 'nav-work',
-        label: '工作',
-        description: '文档和待办管理',
+        label: '工作台',
+        description: '文档、待办、日程管理',
         icon: <LayoutDashboard size={16} />,
         action: () => onNavigate('work'),
-        keywords: ['work', 'todo', 'document']
+        keywords: ['work', 'todo', 'document', 'schedule', '日程', '工作台']
       },
-
       {
         id: 'nav-agent',
         label: 'Agent',
         description: 'AI 对话',
         icon: <Bot size={16} />,
         action: () => onNavigate('agent'),
-        keywords: ['agent', 'chat', 'ai']
-      },
-      {
-        id: 'nav-collaboration',
-        label: '协作',
-        description: 'Agent + 文档分屏协作',
-        icon: <Columns2 size={16} />,
-        action: () => onNavigate('collaboration'),
-        keywords: ['collaboration', 'split', '协作', '分屏']
-      },
-      {
-        id: 'nav-user',
-        label: '用户',
-        description: 'Token 用量与记忆管理',
-        icon: <User size={16} />,
-        action: () => onNavigate('user'),
-        keywords: ['user', 'token', 'memory']
+        keywords: ['agent', 'chat', 'ai', 'collaboration', '协作', '分屏']
       },
       {
         id: 'nav-settings',

@@ -1,12 +1,10 @@
 /**
  * AgentPane — 协作页 Agent 半屏面板
  *
- * 使用与 AgentPage 相同的 SessionChatProvider + SessionChatPanel 渲染聊天，
- * 包含 KeepAlive 池实现 O(1) 会话切换，功能完全对齐（编辑重发、回退、交互确认等）。
- * 共享 AgentSessionList 和 useAgentChatActions，消除重复代码。
+ * 使用与 AgentPage 相同的共享组件：AgentChatZone、AgentSessionList、
+ * AgentDetailSidebar、useKeepAlivePool、useAgentChatActions。
  */
 import { ActionIcon, Flexbox } from '@lobehub/ui'
-import { AnimatePresence, motion } from 'motion/react'
 import {
   Plus,
   PanelLeftClose,
@@ -17,31 +15,31 @@ import {
   PanelRightDashed,
   Maximize2
 } from 'lucide-react'
-import { useRef, useState, useMemo, useCallback, memo } from 'react'
+import { useState, useCallback, memo } from 'react'
 import { useAgent } from '../../hooks/useAgent'
 import { useAgentScopeData } from '../../hooks/useAgentScopeData'
 import { useAgentChatActions } from '../../hooks/useAgentChatActions'
+import { useKeepAlivePool } from '../../hooks/useKeepAlivePool'
 import { useScope } from '../../hooks/useScope'
 import { usePendingInteractSessionIds } from '../../events/agentBackgroundStore'
-import { SessionChatProvider } from '../../context/SessionChatContext'
-import { SessionChatPanel } from '../agent/SessionChatPanel'
 import { AgentSessionList } from '../agent/AgentSessionList'
 import { AgentDetailSidebar } from '../agent/AgentDetailSidebar'
-import { EmptyConversation } from '../agent/EmptyConversation'
+import { AgentChatZone } from '../agent/AgentChatZone'
 import { ResizableSidebar } from '../layout'
 import {
   ChatInputProvider,
-  DesktopChatInput,
-  PendingChatPayloadApplicator,
   type ActionKeys
 } from '../../features/ChatInput'
-import { DRAFT_KEY_NEW, DraftCacheManager } from '../agent/chatMessageAdapter'
-import { EASE_OUT_EXPO } from '../../theme/motionPresets'
 import '../../components/agent/TerminalToolCards'
 
-const MAX_KEPT_ALIVE = 2
-const LEFT_ACTIONS: ActionKeys[] = ['fileUpload', 'clear']
+const LEFT_ACTIONS: ActionKeys[] = ['fileUpload', 'thinking', 'toolCompact', 'clear']
 const RIGHT_ACTIONS: ActionKeys[] = []
+
+const COMPACT_INPUT_STYLE = {
+  minHeight: 72,
+  borderRadius: 16,
+  boxShadow: '0 8px 24px rgba(0,0,0,.03)'
+}
 
 export interface AgentPaneProps {
   onOpenFullPage?: () => void
@@ -72,22 +70,8 @@ function AgentPane({ onOpenFullPage, sidebarSide = 'left' }: AgentPaneProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [detailCollapsed, setDetailCollapsed] = useState(true)
 
-  // --- KeepAlive 池（与 AgentPage 相同的 LRU 策略）---
-  const alivePoolRef = useRef<string[]>([])
-  const aliveSessionIds = useMemo(() => {
-    const validIds = new Set(sessions.map((s) => s.id))
-    let pool = alivePoolRef.current.filter((id) => validIds.has(id))
-    const currentId = currentSession?.id
-    if (currentId && validIds.has(currentId)) {
-      if (pool[0] !== currentId) {
-        pool = [currentId, ...pool.filter((id) => id !== currentId)].slice(0, MAX_KEPT_ALIVE)
-      }
-    }
-    alivePoolRef.current = pool
-    return pool
-  }, [currentSession?.id, sessions])
+  const aliveSessionIds = useKeepAlivePool(currentSession?.id, sessions, 2)
 
-  // --- 共享聊天操作 ---
   const { handleSend, handleClear, handleQuickPrompt, handleMarkdownContentChange, sendButtonProps } =
     useAgentChatActions({
       currentSession,
@@ -109,7 +93,7 @@ function AgentPane({ onOpenFullPage, sidebarSide = 'left' }: AgentPaneProps) {
 
   return (
     <section className="collab-agent-pane">
-      {/* 面板头部 */}
+      {/* Panel header */}
       <div className="collab-pane-header">
         <Flexbox horizontal align="center" gap={4}>
           {sidebarSide === 'left' && (
@@ -156,7 +140,7 @@ function AgentPane({ onOpenFullPage, sidebarSide = 'left' }: AgentPaneProps) {
       </div>
 
       <div className="collab-pane-body">
-        {/* 会话列表侧边栏 */}
+        {/* Session list sidebar */}
         <ResizableSidebar
           side={sidebarSide}
           storageKey={`collab-agent-sessions-${sidebarSide}`}
@@ -178,7 +162,7 @@ function AgentPane({ onOpenFullPage, sidebarSide = 'left' }: AgentPaneProps) {
           />
         </ResizableSidebar>
 
-        {/* 聊天区域 */}
+        {/* Chat area */}
         <div style={{ order: 1, flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <ChatInputProvider
             leftActions={LEFT_ACTIONS}
@@ -191,85 +175,21 @@ function AgentPane({ onOpenFullPage, sidebarSide = 'left' }: AgentPaneProps) {
             allowExpand
           >
             <div className="collab-agent-chat-area">
-              {/* KeepAlive 池：多个会话面板同时挂载，CSS display 切换 */}
-              <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-                {aliveSessionIds.map((id) => (
-                  <div
-                    key={id}
-                    style={{
-                      position: 'absolute',
-                      inset: 0,
-                      display: id === currentSession?.id ? 'flex' : 'none',
-                      flexDirection: 'column'
-                    }}
-                  >
-                    <SessionChatProvider
-                      sessionId={id}
-                      scope={currentScope}
-                      active={id === currentSession?.id}
-                    >
-                      <SessionChatPanel />
-                    </SessionChatProvider>
-                  </div>
-                ))}
-                {!currentSession && (
-                  <motion.div
-                    key="new"
-                    style={{
-                      position: 'absolute',
-                      inset: 0,
-                      display: 'flex',
-                      flexDirection: 'column'
-                    }}
-                    initial={{ opacity: 0, y: 16 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -24, scale: 0.97 }}
-                    transition={{ duration: 0.25, ease: EASE_OUT_EXPO }}
-                  >
-                    <EmptyConversation
-                      onSendPrompt={handleQuickPrompt}
-                      loading={loading}
-                    />
-                  </motion.div>
-                )}
-              </div>
-
-              {/* Error banner */}
-              <AnimatePresence>
-                {error && (
-                  <motion.div
-                    className="agent-error-banner"
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.2 }}
-                  >
-                    {error}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* Input area */}
-              <div className="agent-input-wrap agent-input-floating">
-                <DraftCacheManager sessionId={currentSession?.id ?? DRAFT_KEY_NEW} />
-                <PendingChatPayloadApplicator />
-                <DesktopChatInput
-                  onClear={handleClear}
-                  inputContainerProps={{
-                    minHeight: 72,
-                    style: {
-                      borderRadius: 16,
-                      boxShadow: '0 8px 24px rgba(0,0,0,.03)',
-                      transition: 'box-shadow 0.3s, border-color 0.3s'
-                    }
-                  }}
-                />
-              </div>
+              <AgentChatZone
+                scope={currentScope}
+                currentSession={currentSession}
+                aliveSessionIds={aliveSessionIds}
+                error={error}
+                loading={loading}
+                onQuickPrompt={handleQuickPrompt}
+                onClear={handleClear}
+                inputStyle={COMPACT_INPUT_STYLE}
+              />
             </div>
           </ChatInputProvider>
         </div>
 
-        {/* 详情面板：与 AgentPage 右侧面板完全对齐（上下文/文件/终端 三标签） */}
+        {/* Detail sidebar */}
         <ResizableSidebar
           side="right"
           storageKey="collab-agent-detail"

@@ -5,7 +5,7 @@
 import { memo } from 'react'
 import { ActionIcon, Checkbox } from '@lobehub/ui'
 import SearchSection from './SearchSection'
-import { FileText, FolderTree, Import, LayoutGrid, ListTodo } from 'lucide-react'
+import { Calendar, FileText, FolderTree, Import, LayoutGrid, ListTodo } from 'lucide-react'
 import type { FileKind } from '../hooks/useFileList'
 
 export interface WorkPageToolbarProps {
@@ -70,18 +70,37 @@ function WorkPageToolbar({
         <ActionIcon icon={Import} title="导入文件" onClick={onImport} size="large" />
         <span className="work-page__toolbar-divider" />
         <ActionIcon
+          icon={Calendar}
+          title="日程管理"
+          size="large"
+          className={activeTab === 'schedule' ? 'work-page__view-toggle--active' : ''}
+          onClick={() => onActiveTabChange(activeTab === 'schedule' ? 'files' : 'schedule')}
+        />
+        <ActionIcon
           icon={LayoutGrid}
           title="平铺视图"
           size="large"
-          className={viewMode === 'flat' ? 'work-page__view-toggle--active' : ''}
-          onClick={() => onViewModeChange('flat')}
+          className={
+            activeTab !== 'schedule' && viewMode === 'flat' ? 'work-page__view-toggle--active' : ''
+          }
+          onClick={() => {
+            onActiveTabChange('files')
+            onViewModeChange('flat')
+          }}
         />
         <ActionIcon
           icon={FolderTree}
           title="文件夹视图"
           size="large"
-          className={viewMode === 'folder' ? 'work-page__view-toggle--active' : ''}
-          onClick={() => onViewModeChange('folder')}
+          className={
+            activeTab !== 'schedule' && viewMode === 'folder'
+              ? 'work-page__view-toggle--active'
+              : ''
+          }
+          onClick={() => {
+            onActiveTabChange('files')
+            onViewModeChange('folder')
+          }}
         />
       </div>
     </div>

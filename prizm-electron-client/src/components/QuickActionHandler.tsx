@@ -8,7 +8,7 @@ import { useLogsContext } from '../context/LogsContext'
 export function QuickActionHandler({
   setActivePage
 }: {
-  setActivePage: (page: 'home' | 'work' | 'docs' | 'agent' | 'collaboration' | 'settings' | 'test' | 'user') => void
+  setActivePage: (page: 'home' | 'work' | 'docs' | 'agent' | 'settings' | 'test') => void
 }) {
   const { manager } = usePrizmContext()
   const { currentScope } = useScope()

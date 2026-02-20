@@ -3,10 +3,12 @@
  * 精简版文档编辑器：文档列表侧边栏 + 现代化编辑器主区 + 可折叠详情面板
  * 通过 DocumentDetailProvider 提供文档数据，子组件自动从 Context 读取。
  * 模式切换（Live/源码/预览/分栏）集成在面板标题栏内
+ *
+ * CRUD 操作由 useDocumentActions 提供，编辑器模式由 useEditorMode 管理，
+ * 编辑器主区渲染由 DocumentEditorZone 封装。
  */
-import { useState, useCallback, useEffect, useMemo, memo } from 'react'
-import { App } from 'antd'
-import { ActionIcon, Alert, Button, Flexbox, Markdown, Skeleton, toast } from '@lobehub/ui'
+import { useState, useCallback, useEffect, memo } from 'react'
+import { ActionIcon, Flexbox } from '@lobehub/ui'
 import {
   PanelLeftClose,
   PanelLeftOpen,
@@ -25,21 +27,18 @@ import {
 } from 'lucide-react'
 import { createStyles } from 'antd-style'
 import { motion } from 'motion/react'
-import type { EnrichedDocument } from '@prizm/client-core'
-import { MarkdownEditor, SplitEditor, EditorStatusBar } from '../editor'
+import { DocumentEditorZone } from '../editor'
 import type { EditorMode } from '../editor'
 import { Segmented } from '../ui/Segmented'
 import DocumentSidebar from '../DocumentSidebar'
-import DocumentHeader from '../DocumentHeader'
 import DocumentOutlinePanel from '../DocumentOutlinePanel'
 import VersionHistoryDrawer from '../VersionHistoryDrawer'
 import { ResizableSidebar } from '../layout'
 import { DocumentDetailProvider, useDocumentDetail } from '../../context/DocumentDetailContext'
-import { usePrizmContext } from '../../context/PrizmContext'
 import { useScope } from '../../hooks/useScope'
+import { useDocumentActions } from '../../hooks/useDocumentActions'
+import { useEditorMode } from '../../hooks/useEditorMode'
 import { useScopeDataStore } from '../../store/scopeDataStore'
-
-const EDITOR_MODE_KEY = 'prizm-collab-doc-editor-mode'
 
 const MODE_OPTIONS: Array<{ label: React.ReactNode; value: EditorMode }> = [
   {
@@ -77,13 +76,6 @@ const MODE_OPTIONS: Array<{ label: React.ReactNode; value: EditorMode }> = [
 ]
 
 const useStyles = createStyles(({ css, token }) => ({
-  editorMain: css`
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  `,
   modeSegmented: css`
     &.ant-segmented {
       background-color: ${token.colorFillQuaternary};
@@ -100,19 +92,6 @@ const useStyles = createStyles(({ css, token }) => ({
       line-height: 22px;
       padding: 0 2px;
     }
-  `,
-  editorScrollArea: css`
-    flex: 1;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  `,
-  centeredContent: css`
-    max-width: 680px;
-    width: 100%;
-    margin: 0 auto;
-    padding: 0 32px;
-    flex-shrink: 0;
   `,
   emptyState: css`
     flex: 1;
@@ -226,8 +205,6 @@ function DocumentPaneInner({
   dirtyRef,
   sidebarSide
 }: DocumentPaneInnerProps) {
-  const { modal } = App.useApp()
-  const { manager } = usePrizmContext()
   const { currentScope } = useScope()
   const { styles } = useStyles()
   const ctx = useDocumentDetail()
@@ -239,98 +216,17 @@ function DocumentPaneInner({
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [detailCollapsed, setDetailCollapsed] = useState(true)
 
-  const [editorMode, setEditorMode] = useState<EditorMode>(() => {
-    try {
-      const stored = localStorage.getItem(EDITOR_MODE_KEY) as EditorMode | null
-      if (stored === 'source' || stored === 'preview' || stored === 'split' || stored === 'live')
-        return stored
-      return 'live'
-    } catch {
-      return 'live'
-    }
+  const { editorMode, handleModeChange } = useEditorMode('prizm-collab-doc-editor-mode')
+  const actions = useDocumentActions({
+    scope: currentScope,
+    activeDocId,
+    setActiveDocId,
+    ctx
   })
 
   useEffect(() => {
     if (dirtyRef) dirtyRef.current = ctx.dirty
   }, [ctx.dirty, dirtyRef])
-
-  const handleSelectDoc = useCallback(
-    (doc: EnrichedDocument) => {
-      if (doc.id === activeDocId) return
-      setActiveDocId(doc.id)
-      void ctx.loadDocument(doc.id)
-    },
-    [activeDocId, setActiveDocId, ctx.loadDocument]
-  )
-
-  const handleCreateDoc = useCallback(async () => {
-    if (!manager) return
-    try {
-      const client = manager.getHttpClient()
-      const doc = await client.createDocument({ title: '新文档', content: '' }, currentScope)
-      useScopeDataStore.getState().upsertDocument(doc)
-      setActiveDocId(doc.id)
-      void ctx.loadDocument(doc.id)
-      toast.success('文档已创建')
-    } catch (e) {
-      toast.error(`创建文档失败: ${String(e)}`)
-    }
-  }, [manager, currentScope, setActiveDocId, ctx.loadDocument])
-
-  const handleSave = useCallback(async () => {
-    const ok = await ctx.save()
-    if (ok) {
-      toast.success('已保存')
-    } else {
-      toast.error('保存失败，请重试')
-    }
-  }, [ctx.save])
-
-  const handleDelete = useCallback(() => {
-    if (!ctx.document || !manager) return
-    modal.confirm({
-      title: '确认删除',
-      content: `确定要删除文档「${ctx.document.title}」吗？此操作不可撤销。`,
-      okText: '删除',
-      okType: 'danger',
-      cancelText: '取消',
-      onOk: async () => {
-        try {
-          const client = manager.getHttpClient()
-          await client.deleteDocument(ctx.document!.id, currentScope)
-          setActiveDocId(null)
-          useScopeDataStore.getState().removeDocument(ctx.document!.id)
-          toast.success('文档已删除')
-        } catch (e) {
-          toast.error(`删除失败: ${String(e)}`)
-        }
-      }
-    })
-  }, [ctx.document, manager, currentScope, modal, setActiveDocId])
-
-  const handleModeChange = useCallback((mode: EditorMode) => {
-    setEditorMode(mode)
-    try {
-      localStorage.setItem(EDITOR_MODE_KEY, mode)
-    } catch {
-      /* ignore */
-    }
-  }, [])
-
-  const handleReloadExternal = useCallback(() => {
-    ctx.clearExternalUpdate()
-    void ctx.reload()
-  }, [ctx.clearExternalUpdate, ctx.reload])
-
-  const handleOverrideExternal = useCallback(() => {
-    ctx.clearExternalUpdate()
-  }, [ctx.clearExternalUpdate])
-
-  const headerElement = ctx.document ? (
-    <div className={styles.centeredContent}>
-      <DocumentHeader onSave={handleSave} onDelete={handleDelete} />
-    </div>
-  ) : null
 
   return (
     <section className="collab-doc-pane">
@@ -359,7 +255,7 @@ function DocumentPaneInner({
         )}
 
         <Flexbox horizontal align="center" gap={2}>
-          <ActionIcon icon={Plus} title="新建文档" size="small" onClick={handleCreateDoc} />
+          <ActionIcon icon={Plus} title="新建文档" size="small" onClick={actions.handleCreateDoc} />
           <ActionIcon
             icon={detailCollapsed ? PanelRightDashed : PanelRight}
             size="small"
@@ -402,100 +298,28 @@ function DocumentPaneInner({
             loading={docListLoading}
             activeDocId={activeDocId}
             scope={currentScope}
-            onSelectDoc={handleSelectDoc}
-            onCreateDoc={handleCreateDoc}
+            onSelectDoc={actions.handleSelectDoc}
+            onCreateDoc={actions.handleCreateDoc}
             onRefresh={refreshDocuments}
-            onDeleteDoc={(doc) => {
-              modal.confirm({
-                title: '确认删除',
-                content: `确定要删除文档「${doc.title}」吗？`,
-                okText: '删除',
-                okType: 'danger',
-                cancelText: '取消',
-                onOk: async () => {
-                  try {
-                    const client = manager!.getHttpClient()
-                    await client.deleteDocument(doc.id, currentScope)
-                    if (activeDocId === doc.id) setActiveDocId(null)
-                    useScopeDataStore.getState().removeDocument(doc.id)
-                    toast.success('文档已删除')
-                  } catch (e) {
-                    toast.error(`删除失败: ${String(e)}`)
-                  }
-                }
-              })
-            }}
+            onDeleteDoc={actions.handleSidebarDeleteDoc}
           />
         </ResizableSidebar>
 
         {/* Editor main area */}
         <Flexbox flex={1} style={{ order: 1, minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
-          {activeDocId && ctx.loading ? (
-            <div style={{ padding: '32px 48px' }}>
-              <Skeleton active paragraph={{ rows: 8 }} />
-            </div>
-          ) : activeDocId && ctx.document ? (
-            <div className={styles.editorMain}>
-              {ctx.externalUpdate && (
-                <Alert
-                  type="warning"
-                  banner
-                  showIcon
-                  message="文档已被外部修改"
-                  description="其他客户端修改了此文档。"
-                  extra={
-                    <Flexbox horizontal gap={8} style={{ marginTop: 4 }}>
-                      <Button size="small" onClick={handleReloadExternal}>
-                        重新加载
-                      </Button>
-                      <Button size="small" onClick={handleOverrideExternal}>
-                        忽略
-                      </Button>
-                    </Flexbox>
-                  }
-                />
-              )}
-
-              {ctx.error && <Alert type="error" banner showIcon closable message={ctx.error} />}
-
-              <div className={styles.editorScrollArea}>
-                {editorMode === 'preview' ? (
-                  <div className="doc-preview-pane">
-                    <div className={styles.centeredContent}>
-                      {headerElement}
-                      <Markdown>{ctx.content || ' '}</Markdown>
-                    </div>
-                  </div>
-                ) : editorMode === 'split' ? (
-                  <SplitEditor
-                    value={ctx.content}
-                    onChange={ctx.setContent}
-                    onSave={handleSave}
-                    editorRef={ctx.editorRef}
-                    header={headerElement}
-                  />
-                ) : (
-                  <div className="doc-page-editor">
-                    {headerElement}
-                    <MarkdownEditor
-                      value={ctx.content}
-                      onChange={ctx.setContent}
-                      mode={editorMode}
-                      onSave={handleSave}
-                      editorRef={ctx.editorRef}
-                    />
-                  </div>
-                )}
-              </div>
-
-              <EditorStatusBar
-                dirty={ctx.dirty}
-                saving={ctx.saving}
-                charCount={ctx.charCount}
-                wordCount={ctx.wordCount}
-                editorRef={ctx.editorRef}
-              />
-            </div>
+          {activeDocId && (ctx.loading || ctx.document) ? (
+            <DocumentEditorZone
+              editorMode={editorMode}
+              onModeChange={handleModeChange}
+              onSave={actions.handleSave}
+              onDelete={actions.handleDelete}
+              onReloadExternal={actions.handleReloadExternal}
+              onOverrideExternal={actions.handleOverrideExternal}
+              contentMaxWidth={680}
+              contentPadding="0 32px"
+              externalUpdateDesc="其他客户端修改了此文档。"
+              loadingPadding="32px 48px"
+            />
           ) : (
             <div className={styles.emptyState}>
               <motion.div
@@ -509,7 +333,7 @@ function DocumentPaneInner({
                   </div>
                   <span className={styles.emptyTitle}>选择或创建文档</span>
                   <span className={styles.emptyDesc}>从侧栏选择文档开始编辑</span>
-                  <button type="button" className={styles.emptyActionBtn} onClick={handleCreateDoc}>
+                  <button type="button" className={styles.emptyActionBtn} onClick={actions.handleCreateDoc}>
                     <FilePlus size={13} />
                     新建文档
                   </button>
