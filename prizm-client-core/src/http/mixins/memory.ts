@@ -31,8 +31,9 @@ declare module '../client' {
       enabled: boolean
       userCount: number
       scopeCount: number
+      scopeChatCount: number
+      scopeDocumentCount: number
       sessionCount: number
-      documentCount: number
       byType: Record<string, number>
     }>
     resolveMemoryIds(
@@ -66,10 +67,20 @@ declare module '../client' {
         totalInputTokens: number
         totalOutputTokens: number
         totalTokens: number
+        totalCachedInputTokens: number
         count: number
-        byCategory: Record<string, { input: number; output: number; total: number; count: number }>
-        byDataScope: Record<string, { input: number; output: number; total: number; count: number }>
-        byModel: Record<string, { input: number; output: number; total: number; count: number }>
+        byCategory: Record<
+          string,
+          { input: number; output: number; total: number; cached: number; count: number }
+        >
+        byDataScope: Record<
+          string,
+          { input: number; output: number; total: number; cached: number; count: number }
+        >
+        byModel: Record<
+          string,
+          { input: number; output: number; total: number; cached: number; count: number }
+        >
       }
     }>
     clearAllMemories(
@@ -132,8 +143,9 @@ PrizmClient.prototype.getMemoryCounts = async function (this: PrizmClient, scope
     enabled: boolean
     userCount: number
     scopeCount: number
+    scopeChatCount: number
+    scopeDocumentCount: number
     sessionCount: number
-    documentCount: number
     byType: Record<string, number>
   }>('/agent/memories/counts', { method: 'GET', scope: scope ?? this.defaultScope })
 }

@@ -5,6 +5,7 @@ import type {
   EnrichedSession,
   StreamChatOptions,
   StreamChatChunk,
+  ObserveBgOptions,
   SessionStats
 } from '../../types'
 
@@ -106,6 +107,10 @@ declare module '../client' {
       content: string,
       options?: StreamChatOptions & { scope?: string }
     ): Promise<string>
+    observeBgSession(
+      sessionId: string,
+      options?: ObserveBgOptions & { scope?: string }
+    ): Promise<void>
     stopAgentChat(sessionId: string, scope?: string): Promise<{ stopped: boolean }>
     getAgentCapabilities(): Promise<{
       builtinTools: unknown[]
@@ -114,37 +119,6 @@ declare module '../client' {
       skills: unknown[]
       rules: unknown[]
     }>
-
-    // BG Session management
-    triggerBgSession(
-      payload: {
-        prompt: string
-        systemInstructions?: string
-        context?: Record<string, unknown>
-        expectedOutputFormat?: string
-        label?: string
-        model?: string
-        timeoutMs?: number
-        autoCleanup?: boolean
-      },
-      scope?: string
-    ): Promise<{ sessionId: string; status: string }>
-    cancelBgSession(
-      sessionId: string,
-      scope?: string
-    ): Promise<{ sessionId: string; status: string }>
-    getBgSessionResult(
-      sessionId: string,
-      scope?: string
-    ): Promise<{ sessionId: string; status: string; output: string; durationMs: number } | null>
-    getBgSummary(scope?: string): Promise<{
-      active: number
-      completed: number
-      failed: number
-      timeout: number
-      cancelled: number
-    }>
-    batchCancelBgSessions(sessionIds?: string[], scope?: string): Promise<{ cancelled: number }>
   }
 }
 
@@ -386,7 +360,8 @@ PrizmClient.prototype.streamChat = async function (
       includeScopeContext: options?.includeScopeContext,
       fullContextTurns: options?.fullContextTurns,
       cachedContextTurns: options?.cachedContextTurns,
-      fileRefs: options?.fileRefs
+      fileRefs: options?.fileRefs,
+      thinking: options?.thinking
     }),
     signal: options?.signal
   })
@@ -461,6 +436,73 @@ PrizmClient.prototype.streamChat = async function (
   return fullContent
 }
 
+PrizmClient.prototype.observeBgSession = async function (
+  this: PrizmClient,
+  sessionId: string,
+  options?: ObserveBgOptions & { scope?: string }
+) {
+  const scope = options?.scope ?? this.defaultScope
+  log.info('Starting BG session observe, sessionId:', sessionId)
+  const url = this.buildUrl(`/agent/sessions/${encodeURIComponent(sessionId)}/observe`, { scope })
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: this.buildHeaders(),
+    signal: options?.signal
+  })
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Observe failed'}`)
+  }
+
+  const reader = response.body?.getReader()
+  if (!reader) throw new Error('No response body')
+
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  try {
+    while (true) {
+      if (options?.signal?.aborted) break
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+
+      for (const line of lines) {
+        if (line.startsWith(': heartbeat')) {
+          try {
+            options?.onChunk?.({ type: 'heartbeat' })
+          } catch {
+            /* ignore */
+          }
+          continue
+        }
+        if (line.startsWith('data: ')) {
+          try {
+            const parsed = JSON.parse(line.slice(6)) as StreamChatChunk
+            if (parsed.type === 'error') {
+              options?.onError?.(typeof parsed.value === 'string' ? parsed.value : 'Unknown error')
+            }
+            try {
+              options?.onChunk?.(parsed)
+            } catch (e) {
+              log.error('observe onChunk error:', e)
+            }
+          } catch {
+            log.warn('Failed to parse observe SSE data:', line.slice(0, 100))
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
+
 PrizmClient.prototype.stopAgentChat = async function (
   this: PrizmClient,
   sessionId: string,
@@ -474,66 +516,4 @@ PrizmClient.prototype.stopAgentChat = async function (
 
 PrizmClient.prototype.getAgentCapabilities = async function (this: PrizmClient) {
   return this.request('/agent/capabilities')
-}
-
-// ── BG Session 管理 ──
-
-PrizmClient.prototype.triggerBgSession = async function (this: PrizmClient, payload, scope?) {
-  return this.request<{ sessionId: string; status: string }>('/agent/sessions/trigger', {
-    method: 'POST',
-    scope: scope ?? this.defaultScope,
-    body: JSON.stringify(payload)
-  })
-}
-
-PrizmClient.prototype.cancelBgSession = async function (
-  this: PrizmClient,
-  sessionId: string,
-  scope?: string
-) {
-  return this.request<{ sessionId: string; status: string }>(
-    `/agent/sessions/${encodeURIComponent(sessionId)}/cancel`,
-    { method: 'POST', scope: scope ?? this.defaultScope }
-  )
-}
-
-PrizmClient.prototype.getBgSessionResult = async function (
-  this: PrizmClient,
-  sessionId: string,
-  scope?: string
-) {
-  return this.request<{
-    sessionId: string
-    status: string
-    output: string
-    durationMs: number
-  } | null>(`/agent/sessions/${encodeURIComponent(sessionId)}/result`, {
-    method: 'GET',
-    scope: scope ?? this.defaultScope
-  })
-}
-
-PrizmClient.prototype.getBgSummary = async function (this: PrizmClient, scope?: string) {
-  return this.request<{
-    active: number
-    completed: number
-    failed: number
-    timeout: number
-    cancelled: number
-  }>('/agent/background-summary', {
-    method: 'GET',
-    scope: scope ?? this.defaultScope
-  })
-}
-
-PrizmClient.prototype.batchCancelBgSessions = async function (
-  this: PrizmClient,
-  sessionIds?: string[],
-  scope?: string
-) {
-  return this.request<{ cancelled: number }>('/agent/background/batch-cancel', {
-    method: 'POST',
-    scope: scope ?? this.defaultScope,
-    body: JSON.stringify(sessionIds ? { sessionIds } : {})
-  })
 }

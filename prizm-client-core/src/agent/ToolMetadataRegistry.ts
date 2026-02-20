@@ -89,6 +89,33 @@ const COMPOUND_TOOLS: Record<
       release: '释放待办列表',
       status: '查询锁状态'
     }
+  },
+  prizm_schedule: {
+    displayName: '日程管理',
+    category: 'other',
+    actionLabels: {
+      list: '列出日程',
+      read: '查看日程',
+      create: '创建日程',
+      update: '更新日程',
+      delete: '删除日程',
+      link: '关联资源',
+      unlink: '解除关联'
+    }
+  },
+  prizm_cron: {
+    displayName: '定时任务',
+    category: 'other',
+    actionLabels: {
+      list: '列出定时任务',
+      create: '创建定时任务',
+      update: '更新定时任务',
+      delete: '删除定时任务',
+      pause: '暂停定时任务',
+      resume: '恢复定时任务',
+      trigger: '手动触发',
+      logs: '执行日志'
+    }
   }
 }
 
@@ -121,9 +148,8 @@ const FALLBACK_METADATA: Record<string, ToolMetadata> = {
     displayName: '终端输入',
     category: 'terminal'
   },
-  prizm_tool_guide: { name: 'prizm_tool_guide', displayName: '工具指南', category: 'other' },
-
   // 旧工具名兼容（历史 session 中可能存在的 tool call）
+  prizm_tool_guide: { name: 'prizm_tool_guide', displayName: '工具指南', category: 'other' },
   prizm_file_list: { name: 'prizm_file_list', displayName: '列出文件', category: 'file' },
   prizm_file_read: { name: 'prizm_file_read', displayName: '读取文件', category: 'file' },
   prizm_file_write: { name: 'prizm_file_write', displayName: '写入文件', category: 'file' },
@@ -199,12 +225,27 @@ const FALLBACK_METADATA: Record<string, ToolMetadata> = {
     category: 'memory'
   },
   prizm_notice: { name: 'prizm_notice', displayName: '发送通知', category: 'notice' },
+  prizm_spawn_task: { name: 'prizm_spawn_task', displayName: '派发子任务', category: 'other' },
+  prizm_task_status: { name: 'prizm_task_status', displayName: '查询任务状态', category: 'other' },
+  prizm_set_result: { name: 'prizm_set_result', displayName: '提交任务结果', category: 'other' },
+  prizm_workflow: { name: 'prizm_workflow', displayName: '工作流', category: 'other' },
+  prizm_web_search: {
+    name: 'prizm_web_search',
+    displayName: '联网搜索',
+    description: '在互联网上搜索实时信息',
+    category: 'external'
+  },
+  prizm_web_fetch: {
+    name: 'prizm_web_fetch',
+    displayName: '网页抓取',
+    description: '抓取指定 URL 的网页内容',
+    category: 'external'
+  },
   tavily_web_search: {
     name: 'tavily_web_search',
     displayName: '联网搜索',
     description: '在互联网上搜索实时信息',
-    category: 'external',
-    docUrl: 'https://tavily.com'
+    category: 'external'
   }
 }
 
@@ -245,6 +286,11 @@ export function isPrizmTool(name: string): boolean {
   return name.startsWith('prizm_')
 }
 
+export function isWebSearchTool(name: string): boolean {
+  return name === 'prizm_web_search' || name === 'prizm_web_fetch' || name === 'tavily_web_search'
+}
+
+/** @deprecated Use isWebSearchTool instead */
 export function isTavilyTool(name: string): boolean {
-  return name === 'tavily_web_search'
+  return isWebSearchTool(name)
 }

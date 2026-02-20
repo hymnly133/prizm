@@ -194,13 +194,22 @@ export interface InteractRequestPayload {
   paths: string[]
 }
 
-/** SSE 流式 chunk：memory_injected / text / tool_result_chunk / tool_call / interact_request / done / error */
+/** 工具调用参数增量载荷 */
+export interface ToolCallArgsDeltaValue {
+  id: string
+  name: string
+  argumentsDelta: string
+  argumentsSoFar: string
+}
+
+/** SSE 流式 chunk：memory_injected / text / tool_result_chunk / tool_call / tool_call_args_delta / interact_request / done / error */
 export interface StreamChatChunk {
   type: string
   value?:
     | string
     | import('@prizm/shared').MessagePartTool
     | ToolResultChunkValue
+    | ToolCallArgsDeltaValue
     | MemoryInjectedPayload
     | InteractRequestPayload
   model?: string
@@ -223,10 +232,18 @@ export interface StreamChatOptions {
   cachedContextTurns?: number
   /** 文件路径引用，通过路径引用文件以便 agent 访问 */
   fileRefs?: import('@prizm/shared').FilePathRef[]
+  /** 启用深度思考（reasoning / thinking chain） */
+  thinking?: boolean
   onChunk?: (chunk: StreamChatChunk) => void
   /** 流式错误回调 */
   onError?: (message: string) => void
   /** AbortSignal，用于前端主动取消流式请求 */
+  signal?: AbortSignal
+}
+
+export interface ObserveBgOptions {
+  onChunk?: (chunk: StreamChatChunk) => void
+  onError?: (message: string) => void
   signal?: AbortSignal
 }
 
@@ -237,13 +254,15 @@ export interface SessionTokenSummary {
   totalInputTokens: number
   totalOutputTokens: number
   totalTokens: number
+  /** API 前缀缓存命中的输入 token 总数 */
+  totalCachedInputTokens?: number
   /** 对话轮次数 */
   rounds: number
   /** 按模型分组统计 */
-  byModel: Record<string, { input: number; output: number; total: number; count: number }>
+  byModel: Record<string, { input: number; output: number; total: number; cached?: number; count: number }>
   /** 按功能类别统计 */
   byCategory?: Partial<
-    Record<TokenUsageCategory, { input: number; output: number; total: number; count: number }>
+    Record<TokenUsageCategory, { input: number; output: number; total: number; cached?: number; count: number }>
   >
 }
 
