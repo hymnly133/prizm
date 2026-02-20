@@ -18,7 +18,9 @@ import * as terminalTools from './terminalTools'
 import * as knowledgeTools from './knowledgeTools'
 import * as lockTools from './lockTools'
 import * as taskTools from './taskTools'
-import { lookupToolGuide, listToolGuides } from '../toolInstructions'
+import * as scheduleTools from './scheduleTools'
+import * as cronTools from './cronTools'
+import * as workflowTools from './workflowTools'
 
 /**
  * 执行内置工具；sessionId 可选，用于记录修改到 ContextTracker
@@ -35,7 +37,9 @@ export async function executeBuiltinTool(
 ): Promise<BuiltinToolResult> {
   const data = scopeStore.getScopeData(scope)
   const scopeRoot = scopeStore.getScopeRootPath(scope)
-  const wsCtx = createWorkspaceContext(scopeRoot, sessionId)
+  const session = sessionId ? data.agentSessions.find((s) => s.id === sessionId) : undefined
+  const workflowWsDir = session?.bgMeta?.workspaceDir
+  const wsCtx = createWorkspaceContext(scopeRoot, sessionId, workflowWsDir)
 
   const record = (itemId: string, itemKind: ScopeActivityItemKind, action: ScopeActivityAction) => {
     if (sessionId)
@@ -105,8 +109,12 @@ export async function executeBuiltinTool(
         return taskTools.executeSpawnTask(ctx)
       case 'prizm_task_status':
         return taskTools.executeTaskStatus(ctx)
-      case 'prizm_tool_guide':
-        return executeToolGuide(ctx)
+      case 'prizm_schedule':
+        return dispatchSchedule(ctx)
+      case 'prizm_cron':
+        return dispatchCron(ctx)
+      case 'prizm_workflow':
+        return workflowTools.dispatchWorkflow(ctx)
       default:
         return { text: `未知内置工具: ${toolName}`, isError: true }
     }
@@ -177,14 +185,17 @@ function dispatchDocument(ctx: BuiltinToolContext): Promise<BuiltinToolResult> |
 }
 
 function dispatchSearch(ctx: BuiltinToolContext): Promise<BuiltinToolResult> | BuiltinToolResult {
-  const mode = getAction(ctx)
-  switch (mode) {
+  const action = getAction(ctx)
+  switch (action) {
     case 'keyword':
       return searchTools.executeSearch(ctx)
     case 'stats':
       return searchTools.executeScopeStats(ctx)
     default:
-      return { text: `prizm_search: 未知 mode "${mode}"。语义/记忆搜索请用 prizm_knowledge(action:search)。`, isError: true }
+      return {
+        text: `prizm_search: 未知 action "${action}"。语义/记忆搜索请用 prizm_knowledge(action:search)。`,
+        isError: true
+      }
   }
 }
 
@@ -226,26 +237,46 @@ function dispatchLock(ctx: BuiltinToolContext): Promise<BuiltinToolResult> | Bui
   }
 }
 
-function executeToolGuide(ctx: BuiltinToolContext): BuiltinToolResult {
-  const toolArg = typeof ctx.args.tool === 'string' ? ctx.args.tool.trim() : ''
-
-  if (!toolArg) {
-    const guides = listToolGuides()
-    const lines = guides.map(
-      (g) => `- **${g.category}**: ${g.label}\n  工具: ${g.tools.join(', ')}`
-    )
-    return {
-      text:
-        '可用的工具使用指南：\n\n' +
-        lines.join('\n') +
-        '\n\n调用 `prizm_tool_guide({ tool: "类别名或工具名" })` 查看详细说明。'
-    }
+function dispatchSchedule(ctx: BuiltinToolContext): Promise<BuiltinToolResult> | BuiltinToolResult {
+  switch (getAction(ctx)) {
+    case 'list':
+      return scheduleTools.executeList(ctx)
+    case 'read':
+      return scheduleTools.executeRead(ctx)
+    case 'create':
+      return scheduleTools.executeCreate(ctx)
+    case 'update':
+      return scheduleTools.executeUpdate(ctx)
+    case 'delete':
+      return scheduleTools.executeDelete(ctx)
+    case 'link':
+      return scheduleTools.executeLink(ctx)
+    case 'unlink':
+      return scheduleTools.executeUnlink(ctx)
+    default:
+      return { text: `prizm_schedule: 未知 action "${getAction(ctx)}"`, isError: true }
   }
+}
 
-  const result = lookupToolGuide(toolArg)
-  if (!result) {
-    return { text: `没有找到 "${toolArg}" 的使用指南。调用 prizm_tool_guide() 查看所有可用指南。` }
+function dispatchCron(ctx: BuiltinToolContext): Promise<BuiltinToolResult> | BuiltinToolResult {
+  switch (getAction(ctx)) {
+    case 'list':
+      return cronTools.executeList(ctx)
+    case 'create':
+      return cronTools.executeCreate(ctx)
+    case 'update':
+      return cronTools.executeUpdate(ctx)
+    case 'delete':
+      return cronTools.executeDelete(ctx)
+    case 'pause':
+      return cronTools.executePause(ctx)
+    case 'resume':
+      return cronTools.executeResume(ctx)
+    case 'trigger':
+      return cronTools.executeTrigger(ctx)
+    case 'logs':
+      return cronTools.executeLogs(ctx)
+    default:
+      return { text: `prizm_cron: 未知 action "${getAction(ctx)}"`, isError: true }
   }
-
-  return { text: result.content }
 }

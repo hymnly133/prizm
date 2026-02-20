@@ -10,6 +10,7 @@
  */
 
 import { scopeStore } from '../core/ScopeStore'
+import { emit } from '../core/eventBus'
 import { createLogger } from '../logger'
 import { getDocumentMemorySettings } from '../settings/agentToolsStore'
 import { DocumentSubType } from '@prizm/evermemos'
@@ -27,44 +28,13 @@ import {
   computeContentHash
 } from '../core/documentVersionStore'
 import { UnifiedExtractor } from '@prizm/evermemos'
-import { getLLMProvider, getLLMProviderName } from './index'
-import { ICompletionProvider, CompletionRequest } from '@prizm/evermemos'
-import { recordTokenUsage } from './tokenUsage'
+import { BasePrizmLLMAdapter } from './prizmLLMAdapter'
 import { memLog } from './memoryLogger'
 
 const log = createLogger('DocumentMemory')
 
 const DEFAULT_MIN_LEN = parseInt(process.env.PRIZM_DOC_SUMMARY_MIN_LEN ?? '500', 10) || 500
 const ENV_DISABLED = process.env.PRIZM_DOC_SUMMARY_ENABLED === '0'
-
-/** LLM adapter for migration extraction (reuses Prizm provider) */
-class MigrationLLMAdapter implements ICompletionProvider {
-  private _lastUsage: {
-    totalInputTokens?: number
-    totalOutputTokens?: number
-    totalTokens?: number
-  } | null = null
-
-  get lastUsage() {
-    return this._lastUsage
-  }
-
-  async generate(request: CompletionRequest): Promise<string> {
-    const provider = getLLMProvider()
-    const messages = [{ role: 'user', content: request.prompt }]
-    const stream = provider.chat(messages, { temperature: request.temperature })
-    let fullText = ''
-    for await (const chunk of stream) {
-      if (chunk.text) fullText += chunk.text
-      if (chunk.usage) this._lastUsage = chunk.usage
-    }
-    return fullText
-  }
-
-  async getEmbedding(_text: string): Promise<number[]> {
-    return []
-  }
-}
 
 import type { VersionChangedBy } from '@prizm/shared'
 
@@ -283,7 +253,10 @@ export function scheduleDocumentMemory(
         try {
           const diff = computeDiff(prevVersion.content, content)
           if (diff && !diff.includes('（无显著变更）')) {
-            const migrationAdapter = new MigrationLLMAdapter()
+            const migrationAdapter = new BasePrizmLLMAdapter({
+              scope,
+              defaultCategory: 'memory:document_migration'
+            })
             const extractor = new UnifiedExtractor(migrationAdapter)
             const changes = await extractor.extractMigration(title, diff, oldOverview ?? undefined)
             if (changes.length > 0) {
@@ -307,14 +280,7 @@ export function scheduleDocumentMemory(
                 detail: { reason: 'no_changes_extracted' }
               })
             }
-            if (migrationAdapter.lastUsage) {
-              recordTokenUsage(
-                'memory:document_migration',
-                scope,
-                migrationAdapter.lastUsage,
-                getLLMProviderName()
-              )
-            }
+            // token usage 已由 BasePrizmLLMAdapter.generate() 内部自动记录
           } else {
             memLog('doc_memory:migration_skip', {
               scope,
@@ -338,6 +304,16 @@ export function scheduleDocumentMemory(
           detail: { reason: contentChanged ? 'no_prev_version' : 'content_unchanged' }
         })
       }
+
+      // ── 文档记忆更新通知 ──
+      const updatedSubTypes = ['overview', 'fact']
+      if (contentChanged && prevVersion) updatedSubTypes.push('migration')
+      void emit('document:memory.updated', {
+        scope,
+        documentId,
+        title,
+        updatedSubTypes
+      })
 
       memLog('doc_memory:complete', {
         scope,

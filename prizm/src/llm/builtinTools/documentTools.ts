@@ -364,8 +364,12 @@ export async function executeDeleteDocument(ctx: BuiltinToolContext): Promise<Bu
 }
 
 export async function executePromoteFile(ctx: BuiltinToolContext): Promise<BuiltinToolResult> {
-  if (!ctx.wsCtx.sessionWorkspaceRoot || !ctx.wsCtx.sessionId)
-    return { text: '当前没有活跃的临时工作区，无法执行提升操作。', isError: true }
+  const hasSession = ctx.wsCtx.sessionWorkspaceRoot && ctx.wsCtx.sessionId
+  const hasWorkflow = !!ctx.wsCtx.workflowWorkspaceRoot
+  if (!hasSession && !hasWorkflow) {
+    return { text: '当前没有活跃的临时工作区或工作流工作区，无法执行提升操作。', isError: true }
+  }
+
   const fileId = typeof ctx.args.fileId === 'string' ? ctx.args.fileId : ''
   if (!fileId) return { text: '必须指定 fileId', isError: true }
   const targetFolder = typeof ctx.args.folder === 'string' ? ctx.args.folder.trim() : ''
@@ -377,49 +381,63 @@ export async function executePromoteFile(ctx: BuiltinToolContext): Promise<Built
   }
   const opCtx = { scope: ctx.scope, actor }
 
-  const doc = mdStore.readSingleDocumentById(ctx.wsCtx.sessionWorkspaceRoot, fileId)
-  if (doc) {
-    if (targetFolder) {
-      const sanitized = mdStore.sanitizeFileName(doc.title) + '.md'
-      doc.relativePath = `${targetFolder}/${sanitized}`
-    } else {
-      doc.relativePath = ''
+  // 依次在 workflow 工作区和 session 工作区中查找
+  const searchRoots: Array<{ root: string; label: string }> = []
+  if (hasWorkflow)
+    searchRoots.push({ root: ctx.wsCtx.workflowWorkspaceRoot!, label: '工作流工作区' })
+  if (hasSession) searchRoots.push({ root: ctx.wsCtx.sessionWorkspaceRoot!, label: '临时工作区' })
+
+  for (const { root, label } of searchRoots) {
+    const doc = mdStore.readSingleDocumentById(root, fileId)
+    if (doc) {
+      if (targetFolder) {
+        const sanitized = mdStore.sanitizeFileName(doc.title) + '.md'
+        doc.relativePath = `${targetFolder}/${sanitized}`
+      } else {
+        doc.relativePath = ''
+      }
+      await documentService.importDocument(opCtx, doc)
+      mdStore.deleteSingleDocument(root, fileId)
+      ctx.record(doc.id, 'document', 'create')
+      ctx.emitAudit({
+        toolName: ctx.toolName,
+        action: 'create',
+        resourceType: 'document',
+        resourceId: doc.id,
+        result: 'success'
+      })
+      return { text: `已将文档「${doc.title}」(${doc.id}) 从${label}提升到主工作区。` }
     }
-    await documentService.importDocument(opCtx, doc)
-    mdStore.deleteSingleDocument(ctx.wsCtx.sessionWorkspaceRoot, fileId)
-    ctx.record(doc.id, 'document', 'create')
-    ctx.emitAudit({
-      toolName: ctx.toolName,
-      action: 'create',
-      resourceType: 'document',
-      resourceId: doc.id,
-      result: 'success'
-    })
-    return { text: `已将文档「${doc.title}」(${doc.id}) 从临时工作区提升到主工作区。` }
+
+    const todoList = mdStore.readSingleTodoListById(root, fileId)
+    if (todoList) {
+      if (targetFolder) {
+        const sanitized = mdStore.sanitizeFileName(todoList.title) + '.md'
+        todoList.relativePath = `${targetFolder}/${sanitized}`
+      } else {
+        todoList.relativePath = ''
+      }
+      await todoService.importTodoList(opCtx, todoList)
+      mdStore.deleteSingleTodoList(root, fileId)
+      ctx.record(todoList.id, 'todo', 'create')
+      ctx.emitAudit({
+        toolName: ctx.toolName,
+        action: 'create',
+        resourceType: 'todo',
+        resourceId: todoList.id,
+        result: 'success'
+      })
+      return {
+        text: `已将待办列表「${todoList.title}」(${todoList.id}) 从${label}提升到主工作区。`
+      }
+    }
   }
 
-  const todoList = mdStore.readSingleTodoListById(ctx.wsCtx.sessionWorkspaceRoot, fileId)
-  if (todoList) {
-    if (targetFolder) {
-      const sanitized = mdStore.sanitizeFileName(todoList.title) + '.md'
-      todoList.relativePath = `${targetFolder}/${sanitized}`
-    } else {
-      todoList.relativePath = ''
-    }
-    await todoService.importTodoList(opCtx, todoList)
-    mdStore.deleteSingleTodoList(ctx.wsCtx.sessionWorkspaceRoot, fileId)
-    ctx.record(todoList.id, 'todo', 'create')
-    ctx.emitAudit({
-      toolName: ctx.toolName,
-      action: 'create',
-      resourceType: 'todo',
-      resourceId: todoList.id,
-      result: 'success'
-    })
-    return {
-      text: `已将待办列表「${todoList.title}」(${todoList.id}) 从临时工作区提升到主工作区。`
-    }
+  return {
+    text:
+      `未找到 ID 为 ${fileId} 的文档或待办列表。` +
+      'prizm_promote_file 仅能提升 workspace="session" 或 workspace="workflow" 创建的文件；' +
+      '如果文件已在主工作区（默认 workspace="main"），则无需提升。',
+    isError: true
   }
-
-  return { text: `在临时工作区中未找到 ID 为 ${fileId} 的文档或待办列表。`, isError: true }
 }

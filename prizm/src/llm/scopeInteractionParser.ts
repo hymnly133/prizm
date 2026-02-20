@@ -18,9 +18,10 @@ export interface ToolCallInput {
 /** 不产生 scope 交互的工具 */
 const NO_SCOPE_TOOLS = new Set([
   'prizm_notice',
+  'prizm_web_search',
+  'prizm_web_fetch',
   'tavily_web_search',
-  'prizm_scope_stats',
-  'prizm_tool_guide'
+  'prizm_scope_stats'
 ])
 
 /** 从 result 提取 ID 的正则：已创建/更新/删除 xxx {id} */

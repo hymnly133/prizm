@@ -1,14 +1,15 @@
 /**
- * 工具使用指南注册表（Tool Guide Registry）
+ * 工具使用注意事项注册表（Tool Hint Registry）
  *
- * "类 Skill" 机制：通过 `prizm_tool_guide` 工具让 LLM 按需查询工具使用说明。
+ * 分层描述模式：
+ * - 第 1 层：工具 schema description —— 精简场景引导 + 核心用法（每轮必传）
+ * - 第 2 层：首次调用注入 —— 关键注意事项（仅首次执行时内联到结果中）
  *
- * 守卫以**工具组**为单位：
+ * 以**工具组**为单位管理：
  * - 每个 Guide 对应一个工具组（如 terminal 组、lock 组）
- * - `guarded: true` 的组，其内任意工具首次调用均触发拦截
- * - 首次拦截 → 返回完整指南 + 错误，标记组已查阅，LLM 重试
- * - 同一 session 内已查阅 → 放行，执行结果末尾附带精简提示（tips）
- * - 查阅状态以 session 为单位持久化（跨 chat 轮次有效，session 删除时清除）
+ * - 首次调用组内任意工具 → 正常执行，结果末尾附带注意事项
+ * - 同一 session 内后续调用 → 纯结果，不追加任何额外内容
+ * - 查阅状态以 session 为单位（跨 chat 轮次有效，session 删除时清除）
  */
 
 /* ------------------------------------------------------------------ */
@@ -18,77 +19,67 @@
 export interface ToolGuide {
   /** 工具组标识 */
   category: string
-  /** 组简述（列表展示用） */
-  label: string
   /** 组内所有工具名 */
   toolNames: string[]
-  /** 是否整组守卫（true = 组内任意工具首次调用都触发） */
-  guarded: boolean
-  /** 指南完整正文（首次拦截时返回） */
-  content: string
-  /** 精简提示（已放行后附带到工具结果末尾） */
-  tips: string
+  /** 首次调用时注入的注意事项（精简，3-5 行） */
+  firstCallHint: string
 }
 
 const GUIDES: ToolGuide[] = [
   {
+    category: 'workspace_io',
+    toolNames: ['prizm_file', 'prizm_document', 'prizm_todo', 'prizm_promote_file'],
+    firstCallHint: [
+      '[工作区注意事项]',
+      '· workspace 参数: "main"（默认主工作区）/ "session"（临时工作区）/ "workflow"（工作流工作区）',
+      '· 工作流上下文中默认操作在工作流工作区，需访问主工作区请显式传 workspace:"main"',
+      '· 使用 prizm_promote_file 可将临时/工作流工作区的文件提升到主工作区'
+    ].join('\n')
+  },
+  {
     category: 'terminal',
-    label: '终端工具组（execute / spawn / send_keys）',
     toolNames: ['prizm_terminal_execute', 'prizm_terminal_spawn', 'prizm_terminal_send_keys'],
-    guarded: true,
-    content: [
-      '# 终端工具使用指南',
-      '',
-      '## 工具选择',
-      '- 一次性命令（ls/git/npm/pip 等）→ `prizm_terminal_execute`',
-      '- 交互/长时间运行（dev server、watch、REPL）→ `prizm_terminal_spawn` 创建 + `prizm_terminal_send_keys` 交互',
-      '',
-      '## prizm_terminal_send_keys 用法',
-      '`pressEnter` 控制是否在 input 后自动按回车（\\r）。**不要**在 input 中手动添加 \\n 或 \\r。',
-      '',
-      '| 场景 | 调用方式 |',
-      '|------|---------|',
-      '| 执行命令（最常用） | `{ input: "npm install", pressEnter: true }` (默认 true 可省略) |',
-      '| 分步输入再执行 | 步骤1: `{ input: "git commit -m \\"msg\\"", pressEnter: false }` → 步骤2: `{ input: "", pressEnter: true }` |',
-      '| 交互式输入（密码/确认） | `{ input: "y", pressEnter: true }` |',
-      '| 仅键入不执行（Tab 补全） | `{ input: "cd /usr/lo", pressEnter: false }` |',
-      '',
-      '## workspace 参数',
-      '- `"main"`（默认）→ 全局工作目录（项目构建/依赖安装）',
-      '- `"session"` → 会话临时目录（临时脚本/测试）',
-      '',
-      '## 安全',
-      '⚠️ 禁止执行：删除系统文件、修改系统配置、rm -rf / 等危险操作'
-    ].join('\n'),
-    tips:
-      '[提示] 一次性命令用 execute；交互用 spawn+send_keys。' +
-      'send_keys: pressEnter 控制回车，不要在 input 中加 \\n/\\r。' +
-      '⚠️ 禁止 rm -rf 等危险操作。'
+    firstCallHint: [
+      '[注意事项]',
+      '· send_keys: pressEnter 控制回车，不要在 input 中手动添加 \\n 或 \\r',
+      '· workspace: "main"（默认，项目根目录）/ "session"（临时目录）/ "workflow"（工作流目录）',
+      '· 禁止执行 rm -rf /、删除系统文件等危险操作'
+    ].join('\n')
   },
   {
     category: 'lock',
-    label: '资源锁工具（prizm_lock）',
     toolNames: ['prizm_lock'],
-    guarded: true,
-    content: [
-      '# 资源锁使用指南（prizm_lock）',
-      '',
-      '## 文档编辑流程',
-      '1. `prizm_lock({ action: "checkout", documentId })` — 获取编辑锁 + 返回文档内容和 fenceToken',
-      '2. 使用 `prizm_document({ action: "update", ... })` 修改内容（系统自动验证锁）',
-      '3. `prizm_lock({ action: "checkin", documentId })` — 释放锁',
-      '',
-      '⚠️ 同一文档同时只有一个会话可持有锁。编辑完成后**务必签入**，否则其他会话无法编辑。',
-      '',
-      '## 待办列表领取流程',
-      '1. `prizm_lock({ action: "claim", todoListId })` — 领取列表',
-      '2. 使用 `prizm_todo({ action: "update_item", itemId, ... })` / `prizm_lock({ action: "set_active", todoId })` 修改条目',
-      '3. `prizm_lock({ action: "release", todoListId })` — 释放',
-      '',
-      '## 查询资源状态',
-      '`prizm_lock({ action: "status", resourceType, resourceId })` — 查看锁定状态、持有者、读取历史'
-    ].join('\n'),
-    tips: '[提示] 编辑完成后务必 checkin/release 释放锁，否则其他会话无法操作该资源。'
+    firstCallHint: [
+      '[注意事项]',
+      '· 同一文档同时只有一个会话可持有锁',
+      '· 编辑完成后务必 checkin/release 释放锁，否则其他会话无法操作',
+      '· checkout 返回文档内容和 fenceToken，后续 update 自动验证'
+    ].join('\n')
+  },
+  {
+    category: 'workflow',
+    toolNames: ['prizm_workflow'],
+    firstCallHint: [
+      '[注意事项]',
+      '· run 是异步启动，立即返回 runId，后续用 status action 轮询进度',
+      '· 调用已注册工作流前，先用 get_def 查看定义和所需参数（argsSchema）',
+      '· step.type 仅限 agent/approve/transform，不要编造其他类型',
+      '· id 可省略（自动生成）',
+      '· 步骤间数据传递: input 省略时自动继承上一步输出（隐式管道），也可显式引用 $prev.output 或 $stepId.output',
+      '· agent 需 prompt，approve 需 approvePrompt，transform 需 transform 表达式',
+      '· step 可选: description, input, condition, model, timeoutMs, sessionConfig, retryConfig, linkedActions',
+      '· 顶层 config 可配置: errorStrategy(fail_fast/continue), workspaceMode(dual/shared/isolated), maxTotalTimeoutMs, notifyOnComplete/notifyOnFail'
+    ].join('\n')
+  },
+  {
+    category: 'web_search',
+    toolNames: ['prizm_web_search', 'prizm_web_fetch'],
+    firstCallHint: [
+      '[注意事项]',
+      '· 先用 prizm_web_search 搜索，再用 prizm_web_fetch 深入阅读感兴趣的页面',
+      '· include_domains/exclude_domains 可缩小搜索范围（如仅搜索官方文档站）',
+      '· search_depth: "advanced" 可获得更多高质量结果，但速度较慢'
+    ].join('\n')
   }
 ]
 
@@ -100,23 +91,20 @@ const GUIDES: ToolGuide[] = [
 const toolToCategoryMap = new Map<string, string>()
 /** category → GuideEntry */
 const categoryMap = new Map<string, ToolGuide>()
-/** 被守卫的组集合 */
-const guardedCategories = new Set<string>()
 
 for (const g of GUIDES) {
   categoryMap.set(g.category, g)
   for (const t of g.toolNames) toolToCategoryMap.set(t, g.category)
-  if (g.guarded) guardedCategories.add(g.category)
 }
 
 /* ------------------------------------------------------------------ */
 /*  Session 级查阅状态追踪                                               */
 /* ------------------------------------------------------------------ */
 
-/** sessionId → 已查阅的 category 集合 */
+/** sessionId → 已注入过注意事项的 category 集合 */
 const sessionConsulted = new Map<string, Set<string>>()
 
-/** 标记某 session 已查阅某 category 指南 */
+/** 标记某 session 已注入某 category 注意事项 */
 export function markGuideConsulted(sessionId: string, category: string): void {
   let cats = sessionConsulted.get(sessionId)
   if (!cats) {
@@ -126,12 +114,12 @@ export function markGuideConsulted(sessionId: string, category: string): void {
   cats.add(category)
 }
 
-/** 检查某 session 是否已查阅某 category */
+/** 检查某 session 是否已注入某 category */
 export function isGuideConsulted(sessionId: string, category: string): boolean {
   return sessionConsulted.get(sessionId)?.has(category) ?? false
 }
 
-/** Session 删除时清除查阅记录（防止内存泄漏） */
+/** Session 删除时清除记录（防止内存泄漏） */
 export function clearSessionGuides(sessionId: string): void {
   sessionConsulted.delete(sessionId)
 }
@@ -141,61 +129,19 @@ export function clearSessionGuides(sessionId: string): void {
 /* ------------------------------------------------------------------ */
 
 /**
- * 查询工具使用指南（支持工具名或类别名）
- * @returns 指南内容，不存在时返回 null
- */
-export function lookupToolGuide(
-  toolNameOrCategory: string
-): { category: string; content: string } | null {
-  const cat = categoryMap.get(toolNameOrCategory)
-  if (cat) return { category: cat.category, content: cat.content }
-
-  const mapped = toolToCategoryMap.get(toolNameOrCategory)
-  if (mapped) {
-    const g = categoryMap.get(mapped)!
-    return { category: g.category, content: g.content }
-  }
-
-  return null
-}
-
-/**
- * 列出所有可用的指南摘要
- */
-export function listToolGuides(): Array<{ category: string; label: string; tools: string[] }> {
-  return GUIDES.map((g) => ({
-    category: g.category,
-    label: g.label,
-    tools: g.toolNames
-  }))
-}
-
-/**
- * 检查工具是否属于被守卫的组
- * @returns 所属 category（用于追踪），不在守卫组内时返回 null
+ * 获取工具所属的 guard category（用于首次注入追踪）
+ * @returns 所属 category，不在任何组内时返回 null
  */
 export function getGuardCategory(toolName: string): string | null {
+  return toolToCategoryMap.get(toolName) ?? null
+}
+
+/**
+ * 获取工具组的首次调用注意事项
+ * @returns 注意事项文本，不存在时返回 null
+ */
+export function getFirstCallHint(toolName: string): string | null {
   const cat = toolToCategoryMap.get(toolName)
   if (!cat) return null
-  return guardedCategories.has(cat) ? cat : null
+  return categoryMap.get(cat)?.firstCallHint ?? null
 }
-
-/**
- * 获取工具的精简提示（已放行后附带到执行结果末尾）
- * 仅守卫组内的工具返回 tips
- */
-export function getToolTips(toolName: string): string | null {
-  const cat = toolToCategoryMap.get(toolName)
-  if (!cat || !guardedCategories.has(cat)) return null
-  return categoryMap.get(cat)?.tips ?? null
-}
-
-/**
- * 获取所有被守卫的工具组名（用于 prizm_tool_guide 工具描述）
- */
-export function getGuardedGroupNames(): string[] {
-  return [...guardedCategories]
-}
-
-/** 守卫拦截时的错误码，便于前端/日志识别 */
-export const GUIDE_NOT_CONSULTED_CODE = 'GUIDE_NOT_CONSULTED'

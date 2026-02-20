@@ -7,7 +7,7 @@ import path from 'path'
 import * as mdStore from '../core/mdStore'
 import { getSessionWorkspaceDir } from '../core/PathProviderCore'
 
-export type WorkspaceType = 'main' | 'session' | 'granted'
+export type WorkspaceType = 'main' | 'session' | 'workflow' | 'granted'
 
 /** 解析后的路径结果 */
 export interface ResolvedPath {
@@ -16,20 +16,26 @@ export interface ResolvedPath {
   wsType: WorkspaceType
 }
 
-/** 工作区上下文（由 scope + sessionId 构建） */
+/** 工作区上下文（由 scope + sessionId + 可选 workflowWorkspace 构建） */
 export interface WorkspaceContext {
   scopeRoot: string
   sessionWorkspaceRoot: string | null
+  workflowWorkspaceRoot: string | null
   sessionId: string | null
 }
 
 /**
  * 构建工作区上下文
  */
-export function createWorkspaceContext(scopeRoot: string, sessionId?: string): WorkspaceContext {
+export function createWorkspaceContext(
+  scopeRoot: string,
+  sessionId?: string,
+  workflowWorkspaceDir?: string
+): WorkspaceContext {
   return {
     scopeRoot,
     sessionWorkspaceRoot: sessionId ? getSessionWorkspaceDir(scopeRoot, sessionId) : null,
+    workflowWorkspaceRoot: workflowWorkspaceDir ?? null,
     sessionId: sessionId ?? null
   }
 }
@@ -49,7 +55,15 @@ export function resolvePath(
 ): ResolvedPath | null {
   if (path.isAbsolute(rawPath)) {
     const normalized = path.resolve(rawPath)
-    // 优先匹配临时工作区（更精确的路径）
+    // 优先匹配 workflow 工作区（最精确）
+    if (ctx.workflowWorkspaceRoot) {
+      const normalizedWf = path.resolve(ctx.workflowWorkspaceRoot)
+      if (normalized === normalizedWf || normalized.startsWith(normalizedWf + path.sep)) {
+        const rel = normalized === normalizedWf ? '' : path.relative(normalizedWf, normalized)
+        return { fileRoot: ctx.workflowWorkspaceRoot, relativePath: rel, wsType: 'workflow' }
+      }
+    }
+    // 再匹配 session 临时工作区
     if (ctx.sessionWorkspaceRoot) {
       const normalizedSession = path.resolve(ctx.sessionWorkspaceRoot)
       if (normalized === normalizedSession || normalized.startsWith(normalizedSession + path.sep)) {
@@ -83,9 +97,16 @@ export function resolvePath(
   }
 
   // 相对路径：根据 wsArg 决定根目录
+  if (wsArg === 'workflow' && ctx.workflowWorkspaceRoot) {
+    return { fileRoot: ctx.workflowWorkspaceRoot, relativePath: rawPath, wsType: 'workflow' }
+  }
   if (wsArg === 'session' && ctx.sessionId && ctx.sessionWorkspaceRoot) {
     mdStore.ensureSessionWorkspace(ctx.scopeRoot, ctx.sessionId)
     return { fileRoot: ctx.sessionWorkspaceRoot, relativePath: rawPath, wsType: 'session' }
+  }
+  // 有 workflow 工作区时默认使用它（BG Session 在 workflow 上下文中）
+  if (ctx.workflowWorkspaceRoot && !wsArg) {
+    return { fileRoot: ctx.workflowWorkspaceRoot, relativePath: rawPath, wsType: 'workflow' }
   }
   return { fileRoot: ctx.scopeRoot, relativePath: rawPath, wsType: 'main' }
 }
@@ -102,9 +123,7 @@ export function resolveFolder(
   grantedPaths?: string[]
 ): { folder: string; wsType: WorkspaceType } | null {
   if (typeof rawFolder !== 'string' || !rawFolder.trim()) {
-    // 无 folder 时根据 wsArg 确定工作区
-    const wsType: WorkspaceType =
-      wsArg === 'session' && ctx.sessionId && ctx.sessionWorkspaceRoot ? 'session' : 'main'
+    const wsType = resolveDefaultWsType(ctx, wsArg)
     if (wsType === 'session') {
       mdStore.ensureSessionWorkspace(ctx.scopeRoot, ctx.sessionId!)
     }
@@ -120,8 +139,7 @@ export function resolveFolder(
 
   // 相对路径
   if (!mdStore.validateRelativePath(folder)) return null
-  const wsType: WorkspaceType =
-    wsArg === 'session' && ctx.sessionId && ctx.sessionWorkspaceRoot ? 'session' : 'main'
+  const wsType = resolveDefaultWsType(ctx, wsArg)
   if (wsType === 'session') {
     mdStore.ensureSessionWorkspace(ctx.scopeRoot, ctx.sessionId!)
   }
@@ -136,23 +154,38 @@ export function resolveWorkspaceType(
   ctx: WorkspaceContext,
   wsArg: unknown
 ): { root: string; wsType: WorkspaceType } {
+  if (wsArg === 'workflow' && ctx.workflowWorkspaceRoot) {
+    return { root: ctx.workflowWorkspaceRoot, wsType: 'workflow' }
+  }
   if (wsArg === 'session' && ctx.sessionId && ctx.sessionWorkspaceRoot) {
     mdStore.ensureSessionWorkspace(ctx.scopeRoot, ctx.sessionId)
     return { root: ctx.sessionWorkspaceRoot, wsType: 'session' }
+  }
+  if (ctx.workflowWorkspaceRoot && !wsArg) {
+    return { root: ctx.workflowWorkspaceRoot, wsType: 'workflow' }
   }
   return { root: ctx.scopeRoot, wsType: 'main' }
 }
 
 /** 返回 workspace 标签（用于结果提示），独占一行避免与内容混淆 */
 export function wsTypeLabel(wsType: WorkspaceType): string {
+  if (wsType === 'workflow') return '\n(工作流工作区)'
   if (wsType === 'session') return '\n(临时工作区)'
   if (wsType === 'granted') return '\n(授权路径)'
   return ''
 }
 
+/** 根据 wsArg 和上下文确定默认工作区类型 */
+function resolveDefaultWsType(ctx: WorkspaceContext, wsArg?: string): WorkspaceType {
+  if (wsArg === 'workflow' && ctx.workflowWorkspaceRoot) return 'workflow'
+  if (wsArg === 'session' && ctx.sessionId && ctx.sessionWorkspaceRoot) return 'session'
+  if (ctx.workflowWorkspaceRoot && !wsArg) return 'workflow'
+  return 'main'
+}
+
 /** 路径越界的统一错误提示 */
 export const OUT_OF_BOUNDS_MSG =
-  '路径不在允许的工作区范围内。只能操作主工作区、会话临时工作区或用户授权的路径内的文件。'
+  '路径不在允许的工作区范围内。只能操作主工作区、工作流工作区、会话临时工作区或用户授权的路径内的文件。'
 
 /** 路径越界错误标识符，客户端可据此识别需要授权的情况 */
 export const OUT_OF_BOUNDS_ERROR_CODE = 'OUT_OF_BOUNDS'

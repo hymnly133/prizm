@@ -10,6 +10,9 @@ interface OpenAIUsageChunk {
     prompt_tokens?: number
     completion_tokens?: number
     total_tokens?: number
+    prompt_tokens_details?: {
+      cached_tokens?: number
+    }
   }
 }
 
@@ -21,6 +24,7 @@ export function parseUsageFromChunk(parsed: OpenAIUsageChunk): MessageUsage | un
   return {
     totalInputTokens: u.prompt_tokens,
     totalOutputTokens: u.completion_tokens,
-    totalTokens: u.total_tokens
+    totalTokens: u.total_tokens,
+    cachedInputTokens: u.prompt_tokens_details?.cached_tokens
   }
 }

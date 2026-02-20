@@ -41,6 +41,8 @@ export class ZhipuLLMProvider implements ILLMProvider {
       temperature?: number
       signal?: AbortSignal
       tools?: LLMTool[]
+      thinking?: boolean
+      promptCacheKey?: string
     }
   ): AsyncIterable<LLMStreamChunk> {
     const apiKey = getApiKey()
@@ -57,11 +59,18 @@ export class ZhipuLLMProvider implements ILLMProvider {
       model,
       messages: messages.map(mapMessageToApi),
       stream: true,
+      stream_options: { include_usage: true },
       temperature: options?.temperature ?? 0.7
     }
     if (options?.tools?.length) {
       body.tools = options.tools
       body.tool_choice = 'auto'
+      if (model.startsWith('glm-5')) {
+        body.tool_stream = true
+      }
+    }
+    if (options?.promptCacheKey) {
+      body.prompt_cache_key = options.promptCacheKey
     }
 
     const response = await fetch(url, {
@@ -157,13 +166,27 @@ export class ZhipuLLMProvider implements ILLMProvider {
                     yield { toolCallPreparing: { id: tc.id, name: tc.name } }
                   }
                 }
+                if (delta.tool_calls) {
+                  for (const d of delta.tool_calls) {
+                    if (d.function?.arguments) {
+                      const idx = d.index ?? 0
+                      const tc = accumulated.toolCalls[idx]
+                      if (tc?.id && tc?.name) {
+                        yield {
+                          toolCallArgsDelta: {
+                            id: tc.id,
+                            name: tc.name,
+                            argumentsDelta: d.function.arguments,
+                            argumentsSoFar: tc.arguments
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
               }
-              if (choice?.finish_reason) {
-                const usage = lastUsage ?? parseUsageFromChunk(parsed)
-                const toolCalls = accumulated.toolCalls.filter((tc) => tc.id && tc.name)
-                yield toolCalls.length ? { done: true, usage, toolCalls } : { done: true, usage }
-                return
-              }
+              // 部分 API 在 finish_reason 之后还有单独的 usage chunk（含 cached_tokens），
+              // 因此不在此处 return，由 [DONE] 统一终结以确保捕获完整 usage。
             } catch {
               // 忽略解析错误
             }
@@ -175,10 +198,13 @@ export class ZhipuLLMProvider implements ILLMProvider {
         const line = buffer.trim()
         if (line.startsWith('data: ') && line !== 'data: [DONE]') {
           try {
-            const parsed = JSON.parse(line.slice(6)) as {
-              choices?: Array<{ delta?: { content?: string } }>
-            }
-            const delta = parsed.choices?.[0]?.delta?.content
+            const parsed = JSON.parse(line.slice(6)) as Record<string, unknown>
+            const usageFromBuf = parseUsageFromChunk(
+              parsed as Parameters<typeof parseUsageFromChunk>[0]
+            )
+            if (usageFromBuf) lastUsage = usageFromBuf
+            const delta = (parsed as { choices?: Array<{ delta?: { content?: string } }> })
+              .choices?.[0]?.delta?.content
             if (delta) yield { text: delta }
           } catch {
             // ignore

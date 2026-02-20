@@ -54,6 +54,8 @@ export type MemoryLogEvent =
   | 'pipeline:accumulator_append'
   | 'pipeline:accumulator_reset'
   | 'pipeline:accumulator_rollback_reset'
+  | 'pipeline:flush_skip'
+  | 'pipeline:flush_start'
   | 'pipeline:session_flush'
   // EverMemService 记忆操作
   | 'memory:store'

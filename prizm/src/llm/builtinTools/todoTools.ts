@@ -158,7 +158,7 @@ export async function executeCreateList(ctx: BuiltinToolContext): Promise<Builti
     }
 
     mdStore.writeSingleTodoList(ctx.wsCtx.sessionWorkspaceRoot, list)
-    return { text: fmtCreateList(list.id, listTitle, list.items.length, todoWsType) }
+    return { text: fmtCreateList(list.id, listTitle, list.items.map((i) => i.id), todoWsType) }
   }
 
   // Scope 主工作区
@@ -169,6 +169,7 @@ export async function executeCreateList(ctx: BuiltinToolContext): Promise<Builti
     const newList = await todoService.createTodoList(opCtx, { title: listTitle, relativePath })
     captureTodoListSnapshot(ctx.sessionId, newList.id, null)
 
+    const createdItemIds: string[] = []
     for (const t of itemTitles) {
       const { item } = await todoService.createTodoItem(
         opCtx,
@@ -176,6 +177,7 @@ export async function executeCreateList(ctx: BuiltinToolContext): Promise<Builti
         { title: t, status },
         lockOpts(ctx)
       )
+      createdItemIds.push(item.id)
       ctx.record(item.id, 'todo', 'create')
       ctx.emitAudit({
         toolName: ctx.toolName,
@@ -186,7 +188,7 @@ export async function executeCreateList(ctx: BuiltinToolContext): Promise<Builti
       })
     }
 
-    return { text: fmtCreateList(newList.id, listTitle, itemTitles.length) }
+    return { text: fmtCreateList(newList.id, listTitle, createdItemIds) }
   } catch (err) {
     return handleTodoError(ctx, err, 'create')
   }
@@ -195,12 +197,13 @@ export async function executeCreateList(ctx: BuiltinToolContext): Promise<Builti
 function fmtCreateList(
   listId: string,
   title: string,
-  itemCount: number,
+  itemIds: string[],
   wsType?: WorkspaceType
 ): string {
   const suffix = wsType ? wsTypeLabel(wsType) : ''
-  if (itemCount === 0) return `已创建空列表「${title}」（listId: ${listId}）${suffix}`
-  return `已创建列表「${title}」，含 ${itemCount} 项待办（listId: ${listId}）${suffix}`
+  if (!itemIds.length) return `已创建空列表「${title}」（listId: ${listId}）${suffix}`
+  const idsLine = itemIds.map((id) => `itemId: ${id}`).join(', ')
+  return `已创建列表「${title}」，含 ${itemIds.length} 项待办（listId: ${listId}）\n条目：${idsLine}${suffix}`
 }
 
 /* ── 列表级：delete_list ── */
@@ -313,10 +316,8 @@ export async function executeAddItems(ctx: BuiltinToolContext): Promise<BuiltinT
 
 function fmtAddItems(listId: string, itemIds: string[], wsType?: WorkspaceType): string {
   const suffix = wsType ? wsTypeLabel(wsType) : ''
-  if (itemIds.length === 1) {
-    return `已添加 1 项待办到列表 ${listId}（itemId: ${itemIds[0]}）${suffix}`
-  }
-  return `已添加 ${itemIds.length} 项待办到列表 ${listId}${suffix}`
+  const idsLine = itemIds.map((id) => `itemId: ${id}`).join(', ')
+  return `已添加 ${itemIds.length} 项待办到列表 ${listId}（${idsLine}）${suffix}`
 }
 
 /* ── 条目级：update_item ── */
@@ -346,7 +347,10 @@ export async function executeUpdateItem(ctx: BuiltinToolContext): Promise<Builti
         return { text: `已更新条目 ${itemId}${wsTypeLabel(ws)}` }
       }
     }
-    return { text: `条目不存在: ${itemId}${wsTypeLabel(ws)}`, isError: true }
+    return {
+      text: `待办项不存在: ${itemId}。itemId 应为 UUID 格式，请先用 prizm_todo({ action: "list", listId }) 查看正确的 itemId${wsTypeLabel(ws)}`,
+      isError: true
+    }
   }
 
   // Scope 主工作区

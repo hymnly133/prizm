@@ -11,6 +11,7 @@ import { createLogger } from '../logger'
 import { getConversationSummarySettings } from '../settings/agentToolsStore'
 import { recordTokenUsage } from './tokenUsage'
 import { getTextContent } from '@prizm/shared'
+import { logLLMCall, buildMessagesSummary, formatUsage } from './llmCallLogger'
 
 const log = createLogger('ConversationSummary')
 
@@ -32,28 +33,22 @@ function getRecentUserTexts(
   return userTexts
 }
 
-/** 构建摘要 prompt：单条消息使用简单 prompt，两条消息让 LLM 判断话题一致性 */
-function buildSummaryPrompt(userTexts: string[]): string {
+const SUMMARY_SYSTEM_PROMPT =
+  '你是对话摘要生成器。根据用户消息用「动宾短语」概括其意图或主题。\n' +
+  '规则：只输出一个短语，不要完整句子、不要句号或引号。10 字以内。\n' +
+  '示例：查询天气、创建待办、总结文档、询问用法。\n' +
+  '如果给出两条消息：话题一致则综合概括，话题不同则仅根据较新的那条概括。'
+
+/** 构建摘要 user prompt：仅包含动态的用户消息内容 */
+function buildSummaryUserPrompt(userTexts: string[]): string {
   if (userTexts.length <= 1) {
     const text = (userTexts[0] ?? '').slice(0, 2000)
-    return (
-      '根据用户下面这条输入，用「动宾短语」概括其意图或主题。' +
-      '只输出一个短语，不要完整句子、不要句号或引号。' +
-      '示例：查询天气、创建待办、总结文档、询问用法。10 字以内。\n\n' +
-      `用户输入：\n${text}`
-    )
+    return `用户输入：\n${text}`
   }
 
   const older = userTexts[0].slice(0, 1000)
   const newer = userTexts[1].slice(0, 1500)
-  return (
-    '下面给出同一个对话中最近两条用户消息（按时间顺序）。\n' +
-    '请判断它们的话题是否基本一致：\n' +
-    '- 如果一致，综合两条消息用「动宾短语」概括整体意图；\n' +
-    '- 如果话题不同，仅根据较新的那条消息概括。\n' +
-    '只输出一个短语，不要完整句子、不要句号或引号。10 字以内。\n\n' +
-    `[较早消息]\n${older}\n\n[较新消息]\n${newer}`
-  )
+  return `[较早消息]\n${older}\n\n[较新消息]\n${newer}`
 }
 
 /**
@@ -80,6 +75,8 @@ export function scheduleTurnSummary(scope: string, sessionId: string, userConten
     let lastUsage:
       | { totalInputTokens?: number; totalOutputTokens?: number; totalTokens?: number }
       | undefined
+    let summaryMessages: Array<{ role: string; content: string }> = []
+    let summaryStartTime = Date.now()
     try {
       if (ac.signal.aborted) return
 
@@ -103,14 +100,20 @@ export function scheduleTurnSummary(scope: string, sessionId: string, userConten
         return
       }
 
-      const prompt = buildSummaryPrompt(userTexts)
+      const userPrompt = buildSummaryUserPrompt(userTexts)
       const provider = getLLMProvider()
+      summaryMessages = [
+        { role: 'system', content: SUMMARY_SYSTEM_PROMPT },
+        { role: 'user', content: userPrompt }
+      ]
+      summaryStartTime = Date.now()
 
       let llmContent = ''
-      for await (const chunk of provider.chat([{ role: 'user', content: prompt }], {
+      for await (const chunk of provider.chat(summaryMessages, {
         temperature: 0.2,
         model,
-        signal: ac.signal
+        signal: ac.signal,
+        promptCacheKey: 'prizm:conv_summary'
       })) {
         if (ac.signal.aborted) break
         if (chunk.text) llmContent += chunk.text
@@ -148,6 +151,17 @@ export function scheduleTurnSummary(scope: string, sessionId: string, userConten
           model ?? getLLMProviderName(),
           sessionId
         )
+        logLLMCall({
+          ts: new Date().toISOString(),
+          category: 'conversation_summary',
+          sessionId,
+          scope,
+          model: model ?? getLLMProviderName(),
+          promptCacheKey: 'prizm:conv_summary',
+          messages: buildMessagesSummary(summaryMessages),
+          usage: formatUsage(lastUsage),
+          durationMs: Date.now() - summaryStartTime
+        })
       }
     }
   })()

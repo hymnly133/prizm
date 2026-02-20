@@ -10,6 +10,7 @@ export interface TokenUsageInput {
   totalInputTokens?: number
   totalOutputTokens?: number
   totalTokens?: number
+  cachedInputTokens?: number
 }
 
 /**
@@ -40,7 +41,8 @@ export function recordTokenUsage(
     model: model ?? '',
     inputTokens,
     outputTokens,
-    totalTokens
+    totalTokens,
+    cachedInputTokens: usage.cachedInputTokens ?? 0
   }
   insertTokenUsage(record)
 }

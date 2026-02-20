@@ -15,7 +15,7 @@ import {
 } from '../EverMemService'
 import type { MemorySearchOptions } from '../EverMemService'
 import type { MemoryItem, AgentMessage } from '@prizm/shared'
-import { getTextContent } from '@prizm/shared'
+import { getTextContent, getMessageContent } from '@prizm/shared'
 import { getVersionHistory } from '../../core/documentVersionStore'
 import { lockManager } from '../../core/resourceLockManager'
 import type { BuiltinToolContext, BuiltinToolResult } from './types'
@@ -401,27 +401,27 @@ export async function executeRoundLookup(ctx: BuiltinToolContext): Promise<Built
         continue
       }
       const msg = session.messages[idx]
-      const text = getTextContent(msg)
+      const withToolOpts = { includeToolSummary: true }
+      const text = getMessageContent(msg, withToolOpts)
       const truncated = text.length > 500 ? text.slice(0, 500) + '...' : text
       lines.push(
         `--- 消息 #${idx + 1} [${msg.role}] ${shortDate(msg.createdAt as unknown as string)} ---`
       )
       lines.push(truncated)
 
-      // 显示前后各 1 条上下文
       const before = idx > 0 ? session.messages[idx - 1] : null
       const after = idx < session.messages.length - 1 ? session.messages[idx + 1] : null
       if (before || after) {
         lines.push('')
         lines.push('上下文:')
         if (before) {
-          const bt = getTextContent(before)
+          const bt = getMessageContent(before, withToolOpts)
           lines.push(
             `  ↑ #${idx} [${before.role}] ${bt.slice(0, 100)}${bt.length > 100 ? '...' : ''}`
           )
         }
         if (after) {
-          const at = getTextContent(after)
+          const at = getMessageContent(after, withToolOpts)
           lines.push(
             `  ↓ #${idx + 2} [${after.role}] ${at.slice(0, 100)}${at.length > 100 ? '...' : ''}`
           )
@@ -469,7 +469,8 @@ export async function executeRoundLookup(ctx: BuiltinToolContext): Promise<Built
     }
 
     const msg = session.messages[msgIndex]
-    const text = getTextContent(msg)
+    const lookupToolOpts = { includeToolSummary: true }
+    const text = getMessageContent(msg, lookupToolOpts)
     const truncated = text.length > 500 ? text.slice(0, 500) + '...' : text
     lines.push(
       `=== 消息 ${messageId} (${msg.role}, #${msgIndex + 1}/${session.messages.length}) ===`
@@ -500,7 +501,7 @@ export async function executeRoundLookup(ctx: BuiltinToolContext): Promise<Built
       lines.push('--- 上下文 ---')
       for (let i = ctxStart; i < ctxEnd; i++) {
         const cm = session.messages[i]
-        const ct = getTextContent(cm)
+        const ct = getMessageContent(cm, lookupToolOpts)
         const marker = i === msgIndex ? '>>>' : '   '
         lines.push(
           `${marker} #${i + 1} [${cm.role}] ${ct.slice(0, 80)}${ct.length > 80 ? '...' : ''}`
@@ -518,7 +519,7 @@ export async function executeRoundLookup(ctx: BuiltinToolContext): Promise<Built
     const startIdx = session.messages.length - recentMessages.length
     for (let i = 0; i < recentMessages.length; i++) {
       const m = recentMessages[i]
-      const text = getTextContent(m)
+      const text = getMessageContent(m, { includeToolSummary: true })
       const truncated = text.slice(0, 100) + (text.length > 100 ? '...' : '')
       const memInfo = m.memoryRefs ? ' [有记忆引用]' : ''
       lines.push(`#${startIdx + i + 1} [${m.role}] id:${m.id.slice(0, 8)} ${truncated}${memInfo}`)

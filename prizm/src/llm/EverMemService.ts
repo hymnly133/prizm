@@ -23,6 +23,7 @@ import { randomUUID } from 'node:crypto'
 // DEFAULT_USER_ID 已迁移到 @prizm/evermemos 的 DEFAULT_USER_ID
 import { createLogger } from '../logger'
 import { memLog } from './memoryLogger'
+import { executePostMemoryExtractHooks } from '../core/agentHooks'
 import {
   ensureMemoryDir,
   getUserMemoryDbPath,
@@ -38,6 +39,8 @@ import { createCompositeStorageAdapter } from './CompositeStorageAdapter'
 import { getLLMProvider, getLLMProviderName } from '../llm/index'
 import { CompletionRequest, ICompletionProvider } from '@prizm/evermemos'
 import { recordTokenUsage } from './tokenUsage'
+import { BasePrizmLLMAdapter } from './prizmLLMAdapter'
+import type { LocalEmbeddingFn } from './prizmLLMAdapter'
 import type { MemoryItem, MemoryIdsByLayer } from '@prizm/shared'
 import type { DedupLogEntry } from '@prizm/evermemos'
 
@@ -64,99 +67,24 @@ const _scopeManagers = new Map<string, ScopeManagerSet>()
 let _testRetrievalOverride: RetrievalManager | null = null
 
 /**
- * Adapter for Prizm LLM Provider to EverMemOS LLM Provider.
- *
- * 每个实例绑定固定的 scope（不可变）和可变的 sessionId，
- * 避免模块级全局变量在并发 async 操作中互相覆盖。
+ * Prizm LLM Adapter — 继承共享基类，增加 _localEmbeddingProvider 访问。
  */
-class PrizmLLMAdapter implements ICompletionProvider {
-  private _sessionId: string | undefined
-
-  constructor(private readonly _scope: string = 'default') {}
-
-  /** 设置当前会话 ID（在每次记忆抽取前调用） */
-  setSessionId(sessionId: string | undefined): void {
-    this._sessionId = sessionId
-  }
-
-  async generate(request: CompletionRequest): Promise<string> {
-    const provider = getLLMProvider()
-    const messages = [{ role: 'user', content: request.prompt }]
-
-    const model = getLLMProviderName()
-    const category = (request.operationTag ??
-      'memory:conversation_extract') as import('../types').TokenUsageCategory
-
-    const stream = provider.chat(messages, {
-      temperature: request.temperature
+class PrizmLLMAdapter extends BasePrizmLLMAdapter {
+  constructor(scope: string = 'default') {
+    super({
+      scope,
+      defaultCategory: 'memory:conversation_extract',
+      localEmbeddingProvider: () => _localEmbeddingProvider
     })
-
-    let fullText = ''
-    let usage: {
-      totalInputTokens?: number
-      totalOutputTokens?: number
-      totalTokens?: number
-    } | null = null
-    let recordedInCatch = false
-
-    try {
-      for await (const chunk of stream) {
-        if (chunk.text) fullText += chunk.text
-        if (chunk.usage) usage = chunk.usage
-      }
-    } catch (err) {
-      recordTokenUsage(
-        category,
-        this._scope,
-        usage ?? { totalInputTokens: 0, totalOutputTokens: 0, totalTokens: 0 },
-        model,
-        this._sessionId,
-        !usage
-      )
-      recordedInCatch = true
-      throw err
-    } finally {
-      if (usage && !recordedInCatch) {
-        recordTokenUsage(category, this._scope, usage, model, this._sessionId)
-      }
-    }
-
-    return fullText
-  }
-
-  async getEmbedding(text: string): Promise<number[]> {
-    if (_localEmbeddingProvider) {
-      return _localEmbeddingProvider(text)
-    }
-
-    const provider = getLLMProvider()
-    if ('embed' in provider) {
-      // @ts-ignore
-      const resp = await provider.embed([text])
-      return resp[0]
-    }
-
-    if (!_mockEmbeddingWarned) {
-      log.warn(
-        'No embedding provider available — memories will be saved without vectors. ' +
-          'Vector search will be unavailable until the local embedding model is ready. ' +
-          'Text-based dedup (jieba) still works.'
-      )
-      _mockEmbeddingWarned = true
-    }
-    return []
   }
 }
 
 // ==================== 本地 Embedding 接口 ====================
 
-/** 本地 embedding 函数签名 */
-export type LocalEmbeddingFn = (text: string) => Promise<number[]>
+export type { LocalEmbeddingFn }
 
 /** 已注册的本地 embedding provider（由外部模块注入） */
 let _localEmbeddingProvider: LocalEmbeddingFn | null = null
-
-/** mock embedding 警告是否已打印（避免重复日志） */
 let _mockEmbeddingWarned = false
 
 /**
@@ -688,6 +616,19 @@ export async function addMemoryInteraction(
           createdIds: p1Created.map((c) => c.id)
         }
       })
+
+      // ── PostMemoryExtract hook (P1) ──
+      if (p1Created.length > 0) {
+        const hookResult = await executePostMemoryExtractHooks({
+          scope,
+          sessionId: sessionId ?? '',
+          pipeline: 'P1',
+          created: p1Created.map((c) => ({ id: c.id, type: c.type, content: c.content }))
+        })
+        if (hookResult.excludeIds?.length) {
+          p1Created = p1Created.filter((c) => !hookResult.excludeIds!.includes(c.id))
+        }
+      }
     } catch (e) {
       memLog('pipeline:p1_error', { scope, sessionId, error: e })
     } finally {
@@ -886,7 +827,7 @@ async function executePipeline2(
       scene: 'assistant'
     }
 
-    const p2Created = await managers.memory.processNarrativeBatch(
+    let p2Created = await managers.memory.processNarrativeBatch(
       p2Memcell,
       p2Routing,
       alreadyExtractedContext || undefined
@@ -902,6 +843,29 @@ async function executePipeline2(
         roundMessageIds: allRoundIds
       }
     })
+
+    // ── PostMemoryExtract hook (P2) ──
+    if (p2Created.length > 0) {
+      try {
+        const hookResult = await executePostMemoryExtractHooks({
+          scope,
+          sessionId: sessionId ?? '',
+          pipeline: 'P2',
+          created: p2Created.map((c: { id: string; type: string; content: string }) => ({
+            id: c.id,
+            type: c.type,
+            content: c.content
+          }))
+        })
+        if (hookResult.excludeIds?.length) {
+          p2Created = p2Created.filter(
+            (c: { id: string }) => !hookResult.excludeIds!.includes(c.id)
+          )
+        }
+      } catch (hookErr) {
+        log.warn('PostMemoryExtract hook error (P2):', hookErr)
+      }
+    }
 
     if (p2Created.length === 0) return null
 
@@ -1709,12 +1673,14 @@ export function invalidateScopeManagerCache(scope?: string): void {
 export interface MemoryCountsByType {
   /** 总计: User 层 */
   userCount: number
-  /** 总计: Scope 层（不含 session 记忆和文档记忆） */
+  /** 总计: Scope 层（不含 session 记忆） */
   scopeCount: number
+  /** Scope 中对话记忆（scopeCount - scopeDocumentCount） */
+  scopeChatCount: number
+  /** Scope 中文档记忆（memory_type='document' 且非 session 的记忆） */
+  scopeDocumentCount: number
   /** 总计: Session 层（group_id 匹配 {scope}:session:* 的记忆） */
   sessionCount: number
-  /** 总计: 文档记忆（scope 层中 memory_type='document' 且非 session 的记忆） */
-  documentCount: number
   /** 按类型分组: { profile: N, narrative: N, foresight: N, document: N, event_log: N } */
   byType: Record<string, number>
 }
@@ -1730,7 +1696,7 @@ export async function getMemoryCounts(scope?: string): Promise<MemoryCountsByTyp
   let scopeByType: Record<string, number> = {}
   let scopeTotalCount = 0
   let sessionCount = 0
-  let documentCount = 0
+  let scopeDocumentCount = 0
   if (scope) {
     try {
       const managers = getScopeManagers(scope)
@@ -1753,7 +1719,7 @@ export async function getMemoryCounts(scope?: string): Promise<MemoryCountsByTyp
           "SELECT COUNT(*) as cnt FROM memories WHERE memory_type = 'document' AND (group_id IS NULL OR group_id NOT LIKE ?)",
           [`${sessionPrefix}%`]
         )
-        documentCount = (rows[0] as { cnt: number })?.cnt ?? 0
+        scopeDocumentCount = (rows[0] as { cnt: number })?.cnt ?? 0
       } catch {
         // fallback: 不影响其他计数
       }
@@ -1762,13 +1728,14 @@ export async function getMemoryCounts(scope?: string): Promise<MemoryCountsByTyp
     }
   }
 
-  const scopeCount = scopeTotalCount - sessionCount - documentCount
+  const scopeCount = scopeTotalCount - sessionCount
+  const scopeChatCount = scopeCount - scopeDocumentCount
 
   const byType: Record<string, number> = {}
   for (const [t, c] of Object.entries(userByType)) byType[t] = (byType[t] ?? 0) + c
   for (const [t, c] of Object.entries(scopeByType)) byType[t] = (byType[t] ?? 0) + c
 
-  return { userCount, scopeCount, sessionCount, documentCount, byType }
+  return { userCount, scopeCount, scopeChatCount, scopeDocumentCount, sessionCount, byType }
 }
 
 /**
@@ -1829,18 +1796,22 @@ export async function updateMemoryRefStats(
 ): Promise<void> {
   const now = new Date().toISOString()
 
+  const updateSql = `UPDATE memories SET metadata = json_set(
+    COALESCE(metadata, '{}'),
+    '$.ref_count', COALESCE(json_extract(metadata, '$.ref_count'), 0) + 1,
+    '$.last_ref_at', ?
+  ) WHERE id = ?`
+
+  type StoreWithRun = { run?(sql: string, params?: unknown[]): Promise<void> }
+
   // User DB
   if (byLayer.user.length > 0) {
     try {
+      const store = getUserManagers().memory.storage.relational
+      const run = (store as StoreWithRun).run?.bind(store)
       for (const id of byLayer.user) {
-        await getUserManagers().memory.storage.relational.query(
-          `UPDATE memories SET metadata = json_set(
-            COALESCE(metadata, '{}'),
-            '$.ref_count', COALESCE(json_extract(metadata, '$.ref_count'), 0) + 1,
-            '$.last_ref_at', ?
-          ) WHERE id = ?`,
-          [now, id]
-        )
+        if (run) await run(updateSql, [now, id])
+        else await store.query(updateSql, [now, id])
       }
     } catch (e) {
       log.warn('updateMemoryRefStats user failed:', e)
@@ -1851,15 +1822,11 @@ export async function updateMemoryRefStats(
   const scopeIds = [...byLayer.scope, ...byLayer.session]
   if (scopeIds.length > 0 && scope) {
     try {
+      const store = getScopeManagers(scope).scopeOnlyMemory.storage.relational
+      const run = (store as StoreWithRun).run?.bind(store)
       for (const id of scopeIds) {
-        await getScopeManagers(scope).scopeOnlyMemory.storage.relational.query(
-          `UPDATE memories SET metadata = json_set(
-            COALESCE(metadata, '{}'),
-            '$.ref_count', COALESCE(json_extract(metadata, '$.ref_count'), 0) + 1,
-            '$.last_ref_at', ?
-          ) WHERE id = ?`,
-          [now, id]
-        )
+        if (run) await run(updateSql, [now, id])
+        else await store.query(updateSql, [now, id])
       }
     } catch (e) {
       log.warn('updateMemoryRefStats scope failed:', e)

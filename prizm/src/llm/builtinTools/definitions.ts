@@ -6,7 +6,6 @@
  */
 
 import type { LLMTool } from '../../adapters/interfaces'
-import { getGuardedGroupNames } from '../toolInstructions'
 
 /** 工具参数属性定义（支持 array 类型的 items） */
 export interface ToolPropertyDef {
@@ -38,11 +37,11 @@ export function tool(
   }
 }
 
-/** workspace 参数：选择操作主工作区还是会话临时工作区（仅在使用相对路径时生效） */
+/** workspace 参数：选择操作的工作区（仅在使用相对路径时生效） */
 export const WORKSPACE_PARAM: ToolPropertyDef = {
   type: 'string',
-  description: '"main"（默认）或 "session"（临时工作区）',
-  enum: ['main', 'session']
+  description: '"main"（默认）/ "session"（临时工作区）/ "workflow"（工作流工作区，仅在工作流上下文中有效）',
+  enum: ['main', 'session', 'workflow']
 }
 
 /**
@@ -89,7 +88,7 @@ export function getBuiltinTools(): LLMTool[] {
             description: '待办项标题数组 (create_list/add_items)',
             items: { type: 'string' }
           },
-          itemId: { type: 'string', description: '条目 ID (update_item/delete_item)' },
+          itemId: { type: 'string', description: '条目 UUID (update_item/delete_item)，通过 list 获取' },
           title: { type: 'string', description: '新标题 (update_item)' },
           description: { type: 'string', description: '新描述 (update_item)' },
           status: {
@@ -128,12 +127,12 @@ export function getBuiltinTools(): LLMTool[] {
     // ── 搜索（复合） ──
     tool(
       'prizm_search',
-      '工作区关键词搜索。mode: keyword(搜索文档/待办/剪贴板)/stats(工作区统计)。语义/记忆搜索请用 prizm_knowledge。',
+      '工作区关键词搜索。action: keyword(搜索文档/待办/剪贴板)/stats(工作区统计)。语义/记忆搜索请用 prizm_knowledge。',
       {
         properties: {
-          mode: {
+          action: {
             type: 'string',
-            description: '搜索模式',
+            description: '操作类型',
             enum: ['keyword', 'stats']
           },
           query: {
@@ -151,7 +150,7 @@ export function getBuiltinTools(): LLMTool[] {
             items: { type: 'string' }
           }
         },
-        required: ['mode']
+        required: ['action']
       }
     ),
 
@@ -196,10 +195,10 @@ export function getBuiltinTools(): LLMTool[] {
       }
     ),
 
-    // ── 资源锁（复合，详细用法见 prizm_tool_guide） ──
+    // ── 资源锁（复合） ──
     tool(
       'prizm_lock',
-      '资源锁管理。action: checkout(签出文档获取编辑锁)/checkin(释放文档锁)/claim(领取待办列表)/set_active(设置待办为进行中)/release(释放待办列表)/status(查询锁定状态)',
+      '资源锁管理。文档编辑流程: checkout→edit→checkin，编辑完务必释放。action: checkout(签出文档获取编辑锁)/checkin(释放文档锁)/claim(领取待办列表)/set_active(设置待办为进行中)/release(释放待办列表)/status(查询锁定状态)',
       {
         properties: {
           action: {
@@ -223,7 +222,7 @@ export function getBuiltinTools(): LLMTool[] {
     ),
 
     // ── 提升文件（独立） ──
-    tool('prizm_promote_file', '将临时工作区文档/待办提升到主工作区（永久保留）。', {
+    tool('prizm_promote_file', '将临时工作区(session)或工作流工作区(workflow)中的文档/待办提升到主工作区。仅对非主工作区创建的文件有效，主工作区文件无需提升。', {
       properties: {
         fileId: { type: 'string', description: '文档或待办列表 ID' },
         folder: { type: 'string', description: '目标目录' }
@@ -231,10 +230,10 @@ export function getBuiltinTools(): LLMTool[] {
       required: ['fileId']
     }),
 
-    // ── 终端工具（独立，详细用法见 prizm_tool_guide） ──
+    // ── 终端工具（独立） ──
     tool(
       'prizm_terminal_execute',
-      '执行一次性命令并返回输出（ls、git status 等）。超时后自动返回。',
+      '执行一次性 shell 命令（ls、git、npm 等）并返回输出。交互/长期进程请用 spawn。',
       {
         properties: {
           command: { type: 'string', description: 'shell 命令' },
@@ -245,7 +244,7 @@ export function getBuiltinTools(): LLMTool[] {
         required: ['command']
       }
     ),
-    tool('prizm_terminal_spawn', '创建持久终端（dev server、watch 等长期进程）。返回终端 ID。', {
+    tool('prizm_terminal_spawn', '创建持久终端（dev server、watch、REPL 等长期进程），用 send_keys 交互。返回终端 ID。', {
       properties: {
         cwd: { type: 'string', description: '工作目录（相对路径），默认根目录' },
         workspace: WORKSPACE_PARAM,
@@ -255,7 +254,7 @@ export function getBuiltinTools(): LLMTool[] {
     }),
     tool(
       'prizm_terminal_send_keys',
-      '向持久终端发送输入。pressEnter=true（默认）自动按回车执行，false 仅键入。',
+      '向持久终端发送输入。pressEnter=true（默认）自动按回车执行，false 仅键入。不要在 input 中加 \\n/\\r。',
       {
         properties: {
           terminalId: { type: 'string', description: '终端 ID' },
@@ -267,7 +266,27 @@ export function getBuiltinTools(): LLMTool[] {
       }
     ),
 
-    // ── 后台任务工具（prizm_set_result 仅后台会话可见，见 getBackgroundOnlyTools()） ──
+    // ── 后台任务工具 ──
+    tool(
+      'prizm_set_result',
+      '提交当前后台会话的执行结果。在工作流中，output 会自动传递给下一步骤作为输入。仅在后台任务/工作流会话中有效。',
+      {
+        properties: {
+          output: { type: 'string', description: '执行结果内容（文本/Markdown）' },
+          status: {
+            type: 'string',
+            description: '结果状态',
+            enum: ['success', 'partial', 'failed']
+          },
+          structured_data: {
+            type: 'string',
+            description: '可选的结构化数据（JSON 字符串），供调用者程序化消费'
+          }
+        },
+        required: ['output']
+      }
+    ),
+
     tool(
       'prizm_spawn_task',
       '派发子任务到后台会话执行。mode: async（默认，立即返回任务 ID）/ sync（阻塞等待结果，适合 <30s 短任务）',
@@ -305,48 +324,124 @@ export function getBuiltinTools(): LLMTool[] {
       }
     ),
 
-    // ── 工具指南（类 Skill 按需查询） ──
+    // ── 日程管理（复合） ──
     tool(
-      'prizm_tool_guide',
-      '查看工具使用指南。受保护工具组（' +
-        getGuardedGroupNames().join('、') +
-        '）首次使用前必须查阅，否则会被拦截。',
+      'prizm_schedule',
+      '日程管理。action: list(列出,可按日期范围)/read(详情)/create(创建)/update(更新)/delete(删除)/link(关联todo或文档)/unlink(解除关联)',
       {
         properties: {
-          tool: { type: 'string', description: '工具名或组名（如 "terminal"），不传列出全部' }
+          action: {
+            type: 'string',
+            description: '操作类型',
+            enum: ['list', 'read', 'create', 'update', 'delete', 'link', 'unlink']
+          },
+          scheduleId: { type: 'string', description: '日程 ID (read/update/delete/link/unlink)' },
+          title: { type: 'string', description: '标题 (create/update)' },
+          description: { type: 'string', description: '描述 (create/update)' },
+          type: {
+            type: 'string',
+            description: '日程类型 (create/update)',
+            enum: ['event', 'reminder', 'deadline']
+          },
+          startTime: { type: 'string', description: 'ISO 日期时间 (create/update)' },
+          endTime: { type: 'string', description: 'ISO 日期时间 (create/update)' },
+          allDay: { type: 'boolean', description: '全天事件 (create/update)' },
+          recurrence: { type: 'string', description: 'JSON: {frequency,interval,...} (create)' },
+          reminders: {
+            type: 'array',
+            description: '提前N分钟提醒数组 (create/update)',
+            items: { type: 'number' }
+          },
+          status: {
+            type: 'string',
+            description: '状态 (update)',
+            enum: ['upcoming', 'active', 'completed', 'cancelled']
+          },
+          tags: {
+            type: 'array',
+            description: '标签 (create/update)',
+            items: { type: 'string' }
+          },
+          linkedType: {
+            type: 'string',
+            description: '关联类型 (link/unlink)',
+            enum: ['todo', 'document']
+          },
+          linkedId: { type: 'string', description: '关联目标 ID (link/unlink)' },
+          from: { type: 'string', description: '查询起始日期 ISO (list)' },
+          to: { type: 'string', description: '查询截止日期 ISO (list)' }
         },
-        required: []
+        required: ['action']
       }
-    )
-  ]
-}
+    ),
 
-/**
- * 仅后台会话 (kind='background') 可见的工具定义
- */
-export function getBackgroundOnlyTools(): LLMTool[] {
-  return [
-    tool('prizm_set_result', '设置当前后台会话的执行结果。必须调用此工具提交输出。', {
-      properties: {
-        output: { type: 'string', description: '执行结果内容（文本/Markdown）' },
-        status: {
-          type: 'string',
-          description: '结果状态',
-          enum: ['success', 'partial', 'failed']
+    // ── 定时任务（复合） ──
+    tool(
+      'prizm_cron',
+      '定时任务管理。action: list(列出)/create(创建)/update(更新)/delete(删除)/pause(暂停)/resume(恢复)/trigger(手动触发)/logs(执行日志)',
+      {
+        properties: {
+          action: {
+            type: 'string',
+            description: '操作类型',
+            enum: ['list', 'create', 'update', 'delete', 'pause', 'resume', 'trigger', 'logs']
+          },
+          jobId: {
+            type: 'string',
+            description: '任务 ID (update/delete/pause/resume/trigger/logs)'
+          },
+          name: { type: 'string', description: '任务名称 (create/update)' },
+          description: { type: 'string', description: '任务描述 (create/update)' },
+          schedule: {
+            type: 'string',
+            description:
+              'cron 表达式(如 "0 9 * * *")或一次性时间("once:2026-03-01T09:00:00") (create/update)'
+          },
+          taskPrompt: { type: 'string', description: '执行时发给 Agent 的指令 (create/update)' },
+          timezone: { type: 'string', description: 'IANA 时区 (create/update)' },
+          model: { type: 'string', description: '指定 LLM 模型 (create/update)' },
+          timeout_seconds: { type: 'number', description: '超时秒数 (create)' },
+          status: {
+            type: 'string',
+            description: '过滤状态 (list)',
+            enum: ['active', 'paused', 'completed', 'failed']
+          }
         },
-        structured_data: {
-          type: 'string',
-          description: '可选的结构化数据（JSON 字符串），供调用者程序化消费'
-        }
-      },
-      required: ['output']
-    })
-  ]
-}
+        required: ['action']
+      }
+    ),
 
-/** 判断工具是否仅限后台会话使用 */
-export function isBackgroundOnlyTool(name: string): boolean {
-  return name === 'prizm_set_result'
+    // ── 工作流引擎（复合） ──
+    tool(
+      'prizm_workflow',
+      '工作流引擎：确定性多步管线 + 审批门控 + 可恢复执行。action: run(异步启动)/resume(恢复审批)/list(列出运行)/status(查看详情)/cancel(取消)/register(注册定义)/list_defs(列出定义)/get_def(查看完整定义及参数)',
+      {
+        properties: {
+          action: {
+            type: 'string',
+            description: '操作类型',
+            enum: ['run', 'resume', 'list', 'status', 'cancel', 'register', 'list_defs', 'get_def']
+          },
+          workflow_name: {
+            type: 'string',
+            description: '工作流名称 (run/get_def: 已注册工作流名/register: 新定义名)'
+          },
+          def_id: { type: 'string', description: '工作流定义 ID (get_def)' },
+          yaml: {
+            type: 'string',
+            description: '工作流 YAML 定义。顶层: name, steps[], description?, args?, outputs?, triggers?, config?({errorStrategy,workspaceMode,maxTotalTimeoutMs,notifyOnComplete,notifyOnFail})。每个 step 必须含 type(agent/approve/transform)，id 可省略。agent 需 prompt，approve 需 approvePrompt，transform 需 transform 表达式。step 可选: description, input, condition, model, timeoutMs, sessionConfig({thinking,skills,allowedTools,outputSchema}), retryConfig({maxRetries,retryDelayMs}), linkedActions。input 省略时自动继承上一步输出（隐式管道）；显式引用: $prev.output 或 $stepId.output'
+          },
+          run_id: { type: 'string', description: '运行 ID (status/cancel)' },
+          resume_token: { type: 'string', description: '恢复令牌 (resume)' },
+          approved: { type: 'boolean', description: '审批结果 (resume, 默认 true)' },
+          args: { type: 'string', description: 'JSON 格式工作流参数 (run)' },
+          description: { type: 'string', description: '工作流描述 (register)' }
+        },
+        required: ['action']
+      }
+    ),
+
+  ]
 }
 
 /** 内置工具名称集合，用于判断是否为内置工具 */
@@ -364,5 +459,7 @@ export const BUILTIN_TOOL_NAMES = new Set([
   'prizm_set_result',
   'prizm_spawn_task',
   'prizm_task_status',
-  'prizm_tool_guide'
+  'prizm_schedule',
+  'prizm_cron',
+  'prizm_workflow'
 ])

@@ -147,14 +147,6 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     scopeActivity: 'none'
   },
 
-  // === 工具指南 ===
-  prizm_tool_guide: {
-    name: 'prizm_tool_guide',
-    displayName: '工具指南',
-    category: 'other',
-    scopeActivity: 'none'
-  },
-
   // === 旧工具名兼容（历史 session 中可能存在） ===
   prizm_file_list: {
     name: 'prizm_file_list',
@@ -349,7 +341,57 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     scopeActivity: 'none'
   },
 
-  // === Tavily 联网搜索 ===
+  // === 日程管理 ===
+  prizm_schedule: {
+    name: 'prizm_schedule',
+    displayName: '日程管理',
+    category: 'other',
+    scopeActivity: 'none',
+    actionLabels: {
+      list: '列出日程',
+      read: '查看日程',
+      create: '创建日程',
+      update: '更新日程',
+      delete: '删除日程',
+      link: '关联资源',
+      unlink: '解除关联'
+    }
+  },
+
+  // === 定时任务 ===
+  prizm_cron: {
+    name: 'prizm_cron',
+    displayName: '定时任务',
+    category: 'other',
+    scopeActivity: 'none',
+    actionLabels: {
+      list: '列出定时任务',
+      create: '创建定时任务',
+      update: '更新定时任务',
+      delete: '删除定时任务',
+      pause: '暂停定时任务',
+      resume: '恢复定时任务',
+      trigger: '手动触发',
+      logs: '执行日志'
+    }
+  },
+
+  // === 联网搜索 ===
+  prizm_web_search: {
+    name: 'prizm_web_search',
+    displayName: '联网搜索',
+    description: '在互联网上搜索实时信息',
+    category: 'external',
+    scopeActivity: 'none'
+  },
+  prizm_web_fetch: {
+    name: 'prizm_web_fetch',
+    displayName: '网页抓取',
+    description: '抓取指定 URL 的网页内容',
+    category: 'external',
+    scopeActivity: 'none'
+  },
+  /** @deprecated 旧名称兼容 */
   tavily_web_search: {
     name: 'tavily_web_search',
     displayName: '联网搜索',
