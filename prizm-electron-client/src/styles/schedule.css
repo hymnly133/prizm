@@ -1,0 +1,812 @@
+/* ================================================================ */
+/* Schedule 组件库完整样式                                            */
+/* ================================================================ */
+
+/* ══════════════════════════════════════════════
+   ScheduleCard — 复用日程卡片
+   ══════════════════════════════════════════════ */
+
+.sc-card {
+  position: relative;
+  padding: 12px;
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.sc-card:hover {
+  border-color: var(--ant-color-primary-border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.sc-card:focus-visible {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: -2px;
+}
+
+.sc-card--finished {
+  opacity: 0.55;
+}
+
+.sc-card--compact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+}
+
+.sc-card--compact:hover {
+  background: var(--ant-color-fill-quaternary);
+  box-shadow: none;
+}
+
+.sc-card__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--ant-color-text-quaternary);
+}
+
+.sc-card__dot--blue { background: var(--ant-color-info); }
+.sc-card__dot--orange { background: var(--ant-color-warning); }
+.sc-card__dot--red { background: var(--ant-color-error); }
+
+.sc-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.sc-card__tags {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.sc-card__actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.sc-card:hover .sc-card__actions {
+  opacity: 1;
+}
+
+.sc-card__title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ant-color-text);
+  margin-bottom: 4px;
+}
+
+.sc-card--compact .sc-card__title {
+  font-size: 13px;
+  font-weight: 400;
+  margin-bottom: 0;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sc-card__time {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ant-color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.sc-card--compact .sc-card__time {
+  flex-shrink: 0;
+  width: 38px;
+  text-align: right;
+}
+
+.sc-card__time-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+  margin-bottom: 4px;
+}
+
+.sc-card__duration {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--ant-color-text-quaternary);
+}
+
+.sc-card__desc {
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
+  line-height: 1.5;
+  margin-top: 4px;
+}
+
+.sc-card__tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+/* ══════════════════════════════════════════════
+   ScheduleTimeline — 分组时间线
+   ══════════════════════════════════════════════ */
+
+.sc-timeline {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.sc-timeline__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 16px 16px;
+  overflow-y: auto;
+}
+
+.sc-timeline__group {
+  display: flex;
+  flex-direction: column;
+}
+
+.sc-timeline__group-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ant-color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.sc-timeline__group-label--overdue {
+  color: var(--ant-color-error);
+}
+
+.sc-timeline__group-count {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ant-color-text-quaternary);
+}
+
+.sc-timeline__group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sc-timeline__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  padding: 8px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.sc-timeline__item:hover {
+  background: var(--ant-color-fill-quaternary);
+}
+
+.sc-timeline__item-time {
+  flex-shrink: 0;
+  width: 44px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ant-color-text-tertiary);
+  text-align: right;
+  padding-top: 1px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sc-timeline__item-indicator {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  width: 24px;
+  padding-top: 5px;
+}
+
+.sc-timeline__item-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ant-color-text-quaternary);
+}
+
+.sc-timeline__item-dot--blue { background: var(--ant-color-info); }
+.sc-timeline__item-dot--orange { background: var(--ant-color-warning); }
+.sc-timeline__item-dot--red { background: var(--ant-color-error); }
+
+.sc-timeline__item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sc-timeline__item-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ant-color-text);
+  line-height: 1.4;
+}
+
+.sc-timeline__item-desc {
+  font-size: 12px;
+  color: var(--ant-color-text-quaternary);
+  line-height: 1.4;
+}
+
+.sc-timeline__item-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.sc-timeline__item-recurrence {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--ant-color-text-quaternary);
+}
+
+.sc-timeline__item-duration {
+  font-size: 11px;
+  color: var(--ant-color-text-quaternary);
+}
+
+.sc-timeline__item-actions {
+  opacity: 0;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.sc-timeline__item:hover .sc-timeline__item-actions {
+  opacity: 1;
+}
+
+.sc-timeline__completed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 4px;
+  font-size: 12px;
+  color: var(--ant-color-success);
+}
+
+/* ══════════════════════════════════════════════
+   ScheduleCalendar — 月历网格
+   ══════════════════════════════════════════════ */
+
+.sc-cal {
+  display: flex;
+  flex-direction: column;
+  padding: 0 12px 12px;
+  position: relative;
+}
+
+.sc-cal__nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.sc-cal__month-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+  padding: 4px 12px;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+
+.sc-cal__month-btn:hover {
+  background: var(--ant-color-fill-tertiary);
+}
+
+.sc-cal__weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0;
+  margin-bottom: 2px;
+}
+
+.sc-cal__weekday {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ant-color-text-quaternary);
+  padding: 4px 0;
+  text-transform: uppercase;
+}
+
+.sc-cal__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+}
+
+.sc-cal__cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 2px;
+  padding: 4px 2px;
+  min-height: 36px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.sc-cal__cell:hover {
+  background: var(--ant-color-fill-quaternary);
+}
+
+.sc-cal__cell--other {
+  opacity: 0.35;
+}
+
+.sc-cal__cell--today .sc-cal__cell-num {
+  background: var(--ant-color-primary);
+  color: #fff;
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sc-cal__cell--selected {
+  background: var(--ant-color-primary-bg);
+}
+
+.sc-cal__cell--selected:hover {
+  background: var(--ant-color-primary-bg-hover);
+}
+
+.sc-cal__cell--has-events {
+  font-weight: 600;
+}
+
+.sc-cal__cell-num {
+  font-size: 12px;
+  line-height: 22px;
+  color: var(--ant-color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.sc-cal__cell-dots {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 8px;
+}
+
+.sc-cal__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ant-color-text-quaternary);
+}
+
+.sc-cal__dot--blue { background: var(--ant-color-info); }
+.sc-cal__dot--orange { background: var(--ant-color-warning); }
+.sc-cal__dot--red { background: var(--ant-color-error); }
+
+.sc-cal__dot-more {
+  font-size: 8px;
+  color: var(--ant-color-text-quaternary);
+  line-height: 1;
+}
+
+.sc-cal__day-panel {
+  overflow: hidden;
+  border-top: 1px solid var(--ant-color-border-secondary);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+.sc-cal__day-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 6px;
+}
+
+.sc-cal__day-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+}
+
+.sc-cal__day-empty {
+  text-align: center;
+  font-size: 12px;
+  color: var(--ant-color-text-quaternary);
+  padding: 16px 0;
+}
+
+.sc-cal__day-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sc-cal__loading {
+  position: absolute;
+  top: 0;
+  right: 16px;
+  font-size: 11px;
+  color: var(--ant-color-text-quaternary);
+  padding: 2px 8px;
+  background: var(--ant-color-bg-container);
+  border-radius: 4px;
+}
+
+/* ══════════════════════════════════════════════
+   CronJobPanel — 定时任务
+   ══════════════════════════════════════════════ */
+
+.sc-cron-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.sc-cron-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+}
+
+.sc-cron-panel__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+}
+
+.sc-cron-panel__count {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ant-color-text-quaternary);
+  background: var(--ant-color-fill-quaternary);
+  padding: 0 6px;
+  border-radius: 10px;
+  line-height: 18px;
+}
+
+.sc-cron-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 16px 16px;
+  overflow-y: auto;
+}
+
+.sc-cron-card {
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--ant-color-bg-container);
+  transition: border-color 0.2s;
+}
+
+.sc-cron-card:hover {
+  border-color: var(--ant-color-primary-border);
+}
+
+.sc-cron-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.sc-cron-card__name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ant-color-text);
+}
+
+.sc-cron-card__desc {
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+
+.sc-cron-card__schedule {
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sc-cron-card__schedule code {
+  font-size: 13px;
+  background: var(--ant-color-fill-tertiary);
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: var(--ant-color-text);
+}
+
+.sc-cron-card__schedule-raw {
+  font-size: 11px;
+  color: var(--ant-color-text-quaternary);
+  font-family: monospace;
+}
+
+.sc-cron-card__stats {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+  margin-bottom: 8px;
+}
+
+.sc-cron-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sc-cron-card__logs-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 8px;
+  border: none;
+  background: var(--ant-color-fill-quaternary);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--ant-color-text-secondary);
+  cursor: pointer;
+  transition: background 0.15s;
+  margin-left: auto;
+}
+
+.sc-cron-card__logs-btn:hover {
+  background: var(--ant-color-fill-tertiary);
+}
+
+.sc-cron-card__logs {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--ant-color-border-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.sc-cron-card__logs-loading,
+.sc-cron-card__logs-empty {
+  text-align: center;
+  font-size: 12px;
+  color: var(--ant-color-text-quaternary);
+  padding: 8px 0;
+}
+
+.sc-cron-log {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  padding: 3px 4px;
+  border-radius: 4px;
+}
+
+.sc-cron-log:hover {
+  background: var(--ant-color-fill-quaternary);
+}
+
+.sc-cron-log__time {
+  font-variant-numeric: tabular-nums;
+  color: var(--ant-color-text-secondary);
+  flex-shrink: 0;
+}
+
+.sc-cron-log__duration {
+  color: var(--ant-color-text-quaternary);
+  flex-shrink: 0;
+}
+
+.sc-cron-log__error {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--ant-color-error);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Cron preset buttons */
+.sc-cron-preset-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--ant-color-border);
+  border-radius: 4px;
+  background: var(--ant-color-bg-container);
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.sc-cron-preset-btn:hover {
+  border-color: var(--ant-color-primary);
+  color: var(--ant-color-primary);
+}
+
+/* ══════════════════════════════════════════════
+   ScheduleDetailDrawer
+   ══════════════════════════════════════════════ */
+
+.sc-drawer__title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sc-drawer__view {
+  display: flex;
+  flex-direction: column;
+}
+
+.sc-drawer__item-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 12px;
+  color: var(--ant-color-text);
+}
+
+.sc-drawer__tag-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.sc-drawer__desc-table {
+  margin-bottom: 0;
+}
+
+.sc-drawer__description {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ant-color-text-secondary);
+  white-space: pre-wrap;
+}
+
+.sc-drawer__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sc-drawer__section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+}
+
+.sc-drawer__reminder-list,
+.sc-drawer__linked-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* ══════════════════════════════════════════════
+   ScheduleCreateModal
+   ══════════════════════════════════════════════ */
+
+.sc-create__quick-dates {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.sc-create__quick-label {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+}
+
+.sc-create__recurrence {
+  padding: 12px;
+  background: var(--ant-color-fill-quaternary);
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+/* ══════════════════════════════════════════════
+   WorkPage 侧边栏日程区域
+   ══════════════════════════════════════════════ */
+
+.ws-schedule-section {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.ws-schedule-section > .section-header {
+  padding: 16px 20px 8px;
+  margin-bottom: 0;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  background: var(--ant-color-bg-layout);
+  z-index: 2;
+}
+
+.ws-schedule-section__views {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* ══════════════════════════════════════════════
+   旧样式兼容保留
+   ══════════════════════════════════════════════ */
+
+.schedule-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 16px;
+  overflow: auto;
+}
+
+.schedule-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-shrink: 0;
+}

@@ -1,0 +1,69 @@
+/* ============ 共享执行组件样式 ============ */
+
+/* ─── ExecutionStatusTag ─── */
+.exec-status-tag {
+  user-select: none;
+}
+
+/* ─── ExecutionCard ─── */
+.exec-card {
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: box-shadow 0.2s;
+}
+.exec-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+.exec-card__body {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.exec-card__main {
+  flex: 1;
+  min-width: 0;
+}
+.exec-card__duration {
+  flex-shrink: 0;
+  font-size: 12px;
+  margin-left: 12px;
+}
+.exec-card__output {
+  margin-top: 4px;
+  margin-bottom: 0 !important;
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+}
+
+/* ─── ExecutionResultView ─── */
+.exec-result {
+  width: 100%;
+}
+.exec-result__output {
+  font-size: 13px;
+  line-height: 1.6;
+}
+.exec-result__structured {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--ant-color-fill-quaternary);
+  border-radius: 6px;
+  padding: 12px;
+  max-height: 400px;
+  overflow: auto;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.exec-result__artifacts {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.exec-result__artifacts li {
+  padding: 4px 0;
+}
+.exec-result__artifacts li + li {
+  border-top: 1px solid var(--ant-color-border-secondary);
+}

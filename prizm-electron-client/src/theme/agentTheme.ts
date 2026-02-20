@@ -451,36 +451,6 @@ export const useAgentPageStyles = createStyles(({ css, token, isDarkMode }) => {
       gap: 8px;
       margin-top: 8px;
     `,
-    reasoningDetails: css`
-      margin: 0;
-      border: 1px solid ${cardBorder};
-      border-radius: ${AGENT_TOKENS.borderRadius.sm}px;
-      background: ${token.colorFillQuaternary};
-    `,
-    reasoningSummary: css`
-      cursor: pointer;
-      padding: 6px 10px;
-      font-size: 12px;
-      font-weight: 500;
-      color: ${token.colorTextSecondary};
-
-      &:hover {
-        color: ${token.colorText};
-      }
-    `,
-    reasoningContent: css`
-      margin: 0;
-      padding: 10px 12px;
-      font-size: 12px;
-      line-height: 1.5;
-      color: ${token.colorTextSecondary};
-      white-space: pre-wrap;
-      word-break: break-word;
-      border-top: 1px solid ${cardBorder};
-      max-height: 200px;
-      overflow-y: auto;
-    `,
-
     /* ── 工具卡片 ── */
     toolCard: css`
       position: relative;

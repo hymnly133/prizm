@@ -1,0 +1,546 @@
+/* ─── Workflow Visual Editor ─── */
+
+/* Editor container */
+.wfe-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background: var(--ant-color-bg-layout);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* ─── Toolbar ─── */
+
+.wfe-toolbar {
+  display: flex;
+  align-items: center;
+  height: 44px;
+  padding: 0 12px;
+  background: var(--ant-color-bg-container);
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.wfe-toolbar__left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wfe-toolbar__center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.wfe-toolbar__right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wfe-toolbar__divider {
+  width: 1px;
+  height: 20px;
+  background: var(--ant-color-border-secondary);
+  margin: 0 4px;
+}
+
+.wfe-toolbar__name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ant-color-text);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── Canvas Area ─── */
+
+.wfe-main {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.wfe-canvas {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ReactFlow overrides */
+.wfe-canvas .react-flow__background {
+  background: var(--ant-color-bg-layout);
+}
+
+.wfe-canvas .react-flow__minimap {
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 6px;
+}
+
+.wfe-canvas .react-flow__controls {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  border: 1px solid var(--ant-color-border-secondary);
+  overflow: hidden;
+}
+
+.wfe-canvas .react-flow__controls-button {
+  background: var(--ant-color-bg-container);
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+  color: var(--ant-color-text);
+  width: 28px;
+  height: 28px;
+}
+
+.wfe-canvas .react-flow__controls-button:hover {
+  background: var(--ant-color-fill-secondary);
+}
+
+.wfe-canvas .react-flow__edge-path {
+  stroke: var(--ant-color-border);
+  stroke-width: 2;
+}
+
+.wfe-canvas .react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--ant-color-primary);
+  stroke-width: 2.5;
+}
+
+.wfe-canvas .react-flow__edge-text {
+  fill: var(--ant-color-text-secondary);
+  font-size: 11px;
+}
+
+/* ─── Custom Nodes ─── */
+
+.wfe-node {
+  min-width: 200px;
+  max-width: 260px;
+  border-radius: 10px;
+  border: 2px solid var(--ant-color-border);
+  background: var(--ant-color-bg-container);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  transition: border-color 0.2s, box-shadow 0.2s;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.wfe-node:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+.wfe-node--selected {
+  border-color: var(--ant-color-primary) !important;
+  box-shadow: 0 0 0 3px var(--ant-color-primary-bg), 0 4px 16px rgba(0, 0, 0, 0.1) !important;
+}
+
+.wfe-node--agent {
+  border-color: var(--ant-color-primary-border);
+}
+
+.wfe-node--agent .wfe-node__header {
+  background: var(--ant-color-primary-bg);
+  color: var(--ant-color-primary);
+}
+
+.wfe-node--approve {
+  border-color: var(--ant-color-warning-border);
+}
+
+.wfe-node--approve .wfe-node__header {
+  background: var(--ant-color-warning-bg);
+  color: var(--ant-color-warning);
+}
+
+.wfe-node--transform {
+  border-color: #8b5cf6;
+}
+
+.wfe-node--transform .wfe-node__header {
+  background: color-mix(in srgb, #8b5cf6 12%, transparent);
+  color: #8b5cf6;
+}
+
+.wfe-node--input {
+  border-color: var(--ant-color-success-border);
+}
+
+.wfe-node--input .wfe-node__header {
+  background: var(--ant-color-success-bg);
+  color: var(--ant-color-success);
+}
+
+.wfe-node--output {
+  border-color: #f97316;
+}
+
+.wfe-node--output .wfe-node__header {
+  background: color-mix(in srgb, #f97316 12%, transparent);
+  color: #f97316;
+}
+
+.wfe-node__fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.wfe-node__field-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-family: monospace;
+  background: var(--ant-color-fill-quaternary);
+  color: var(--ant-color-text-secondary);
+}
+
+.wfe-node__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wfe-node__icon {
+  flex-shrink: 0;
+}
+
+.wfe-node__title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wfe-node__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  background: var(--ant-color-fill-quaternary);
+  color: var(--ant-color-text-secondary);
+}
+
+.wfe-node__body {
+  padding: 6px 10px 8px;
+}
+
+.wfe-node__preview {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ant-color-text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.wfe-node__preview--mono {
+  font-family: monospace;
+  font-size: 10px;
+}
+
+.wfe-node__condition {
+  padding: 3px 10px 6px;
+  font-size: 10px;
+  color: var(--ant-color-warning);
+  font-style: italic;
+}
+
+/* Handle */
+.wfe-handle {
+  width: 10px !important;
+  height: 10px !important;
+  background: var(--ant-color-bg-container) !important;
+  border: 2px solid var(--ant-color-border) !important;
+  border-radius: 50% !important;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.wfe-handle:hover {
+  border-color: var(--ant-color-primary) !important;
+  background: var(--ant-color-primary-bg) !important;
+}
+
+/* ─── Properties Panel ─── */
+
+.wfe-props {
+  width: 300px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--ant-color-border-secondary);
+  background: var(--ant-color-bg-container);
+  overflow: hidden;
+}
+
+.wfe-props__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+  flex-shrink: 0;
+}
+
+.wfe-props__header-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ant-color-text);
+}
+
+.wfe-props__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.wfe-props__form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wfe-props__label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ant-color-text-secondary);
+  margin-top: 4px;
+}
+
+.wfe-props__type-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wfe-props__trigger-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.wfe-props__add-trigger {
+  font-size: 12px;
+  color: var(--ant-color-primary);
+  background: none;
+  border: 1px dashed var(--ant-color-border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  justify-content: center;
+}
+
+.wfe-props__add-trigger:hover {
+  border-color: var(--ant-color-primary);
+}
+
+.wfe-props__kv-group {
+  background: var(--ant-color-fill-quaternary);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wfe-props__kv-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wfe-props__stats {
+  text-align: center;
+  padding: 8px 0;
+}
+
+/* ─── Collapse inside Properties ─── */
+
+.wfe-props__collapse.ant-collapse {
+  background: transparent;
+}
+
+.wfe-props__collapse .ant-collapse-item {
+  border-bottom: 1px solid var(--ant-color-border-secondary) !important;
+}
+
+.wfe-props__collapse .ant-collapse-header {
+  padding: 6px 0 !important;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ant-color-text);
+}
+
+.wfe-props__collapse .ant-collapse-content-box {
+  padding: 4px 0 8px !important;
+}
+
+.wfe-props__collapse-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+/* ─── Switch Row ─── */
+
+.wfe-props__switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 0;
+}
+
+.wfe-props__switch-label {
+  font-size: 12px;
+  color: var(--ant-color-text);
+}
+
+/* ─── YAML Panel ─── */
+
+.wfe-yaml-panel {
+  border-top: 1px solid var(--ant-color-border-secondary);
+  background: var(--ant-color-bg-container);
+  flex-shrink: 0;
+  max-height: 50%;
+  display: flex;
+  flex-direction: column;
+}
+
+.wfe-yaml-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ant-color-text-secondary);
+}
+
+.wfe-yaml-panel__body {
+  flex: 1;
+  overflow: auto;
+  padding: 0;
+}
+
+.wfe-yaml-panel__body textarea {
+  width: 100%;
+  min-height: 200px;
+  border: none;
+  outline: none;
+  padding: 12px;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  background: var(--ant-color-bg-layout);
+  color: var(--ant-color-text);
+}
+
+/* ─── Editor Modal wrapper ─── */
+
+.wfe-modal .ant-modal-body {
+  padding: 0 !important;
+  height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.wfe-modal .ant-modal-content {
+  padding: 0 !important;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.wfe-modal .ant-modal-header {
+  display: none;
+}
+
+/* ─── Empty canvas prompt ─── */
+
+.wfe-empty-prompt {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.wfe-empty-prompt__icon {
+  opacity: 0.15;
+  margin-bottom: 12px;
+}
+
+.wfe-empty-prompt__text {
+  font-size: 14px;
+  color: var(--ant-color-text-tertiary);
+}
+
+.wfe-empty-prompt__hint {
+  font-size: 12px;
+  color: var(--ant-color-text-quaternary);
+  margin-top: 4px;
+}
+
+/* ─── Collaboration panel def chips ─── */
+
+.collab-workflow-panel__defs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+}
+
+.collab-workflow-def-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--ant-color-fill-quaternary);
+  border: 1px solid var(--ant-color-border-secondary);
+  font-size: 12px;
+  color: var(--ant-color-text);
+  transition: border-color 0.2s;
+}
+
+.collab-workflow-def-chip:hover {
+  border-color: var(--ant-color-primary);
+}
+
+.collab-workflow-def-chip__name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

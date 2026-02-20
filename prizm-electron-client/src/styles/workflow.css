@@ -1,0 +1,295 @@
+/* ─── Workflow Pipeline View ─── */
+
+.wf-pipeline {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  padding: 16px 8px;
+  overflow-x: auto;
+  min-height: 80px;
+}
+
+.wf-pipeline--vertical {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+/* Step Node */
+.wf-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 120px;
+  max-width: 180px;
+  cursor: pointer;
+  position: relative;
+  transition: transform 0.2s ease;
+}
+
+.wf-step:hover {
+  transform: translateY(-2px);
+}
+
+.wf-pipeline--vertical .wf-step {
+  flex-direction: row;
+  max-width: none;
+  min-width: 0;
+  gap: 12px;
+}
+
+.wf-pipeline--vertical .wf-step:hover {
+  transform: translateX(2px);
+}
+
+.wf-step__node {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  border: 2px solid var(--ant-color-border);
+  background: color-mix(in srgb, var(--ant-color-bg-container) 85%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: all 0.3s ease;
+  position: relative;
+  z-index: 1;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.wf-step__node--pending {
+  border-color: var(--ant-color-border);
+  color: var(--ant-color-text-quaternary);
+}
+
+.wf-step__node--running {
+  border-color: var(--ant-color-primary);
+  color: var(--ant-color-primary);
+  box-shadow: 0 0 0 4px var(--ant-color-primary-bg), 0 4px 16px rgba(0, 0, 0, 0.08);
+  animation: wf-pulse 1.5s ease-in-out infinite;
+}
+
+.wf-step__node--completed {
+  border-color: var(--ant-color-success);
+  background: var(--ant-color-success);
+  color: #fff;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--ant-color-success) 30%, transparent);
+}
+
+.wf-step__node--failed {
+  border-color: var(--ant-color-error);
+  background: var(--ant-color-error);
+  color: #fff;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--ant-color-error) 30%, transparent);
+}
+
+.wf-step__node--skipped {
+  border-color: var(--ant-color-border);
+  background: var(--ant-color-fill-quaternary);
+  color: var(--ant-color-text-quaternary);
+  border-style: dashed;
+}
+
+.wf-step__node--paused {
+  border-color: var(--ant-color-warning);
+  color: var(--ant-color-warning);
+  box-shadow: 0 0 0 3px var(--ant-color-warning-bg);
+}
+
+@keyframes wf-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+.wf-step__label {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ant-color-text);
+  text-align: center;
+  word-break: break-word;
+  line-height: 1.3;
+}
+
+.wf-pipeline--vertical .wf-step__label {
+  margin-top: 0;
+  text-align: left;
+  flex: 1;
+}
+
+.wf-step__meta {
+  font-size: 11px;
+  color: var(--ant-color-text-tertiary);
+  margin-top: 2px;
+  text-align: center;
+}
+
+/* Connector Line */
+.wf-connector {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 44px;
+  flex-shrink: 0;
+}
+
+.wf-connector__line {
+  width: 32px;
+  height: 2px;
+  background: var(--ant-color-border);
+  position: relative;
+}
+
+.wf-connector__line--active {
+  background: var(--ant-color-success);
+}
+
+.wf-connector__line::after {
+  content: '';
+  position: absolute;
+  right: -1px;
+  top: -4px;
+  border: 5px solid transparent;
+  border-left-color: var(--ant-color-border);
+}
+
+.wf-connector__line--active::after {
+  border-left-color: var(--ant-color-success);
+}
+
+.wf-pipeline--vertical .wf-connector {
+  height: 24px;
+  min-width: 44px;
+  width: 44px;
+}
+
+.wf-pipeline--vertical .wf-connector__line {
+  width: 2px;
+  height: 24px;
+}
+
+.wf-pipeline--vertical .wf-connector__line::after {
+  right: -4px;
+  top: auto;
+  bottom: -1px;
+  border: 5px solid transparent;
+  border-top-color: var(--ant-color-border);
+  border-left-color: transparent;
+}
+
+.wf-pipeline--vertical .wf-connector__line--active::after {
+  border-top-color: var(--ant-color-success);
+  border-left-color: transparent;
+}
+
+/* Step Detail Popover */
+.wf-step-detail {
+  max-width: 360px;
+}
+
+.wf-step-detail__output {
+  background: var(--ant-color-fill-quaternary);
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow: auto;
+  line-height: 1.5;
+  margin-top: 8px;
+}
+
+/* Run Card */
+.wf-run-card {
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+}
+
+.wf-run-card:hover {
+  border-color: var(--ant-color-primary);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  transform: translateY(-1px);
+}
+
+/* Mini Pipeline (for tool cards) */
+.wf-mini-pipeline {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 0;
+}
+
+.wf-mini-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid var(--ant-color-border);
+  flex-shrink: 0;
+}
+
+.wf-mini-dot--completed { background: var(--ant-color-success); border-color: var(--ant-color-success); }
+.wf-mini-dot--running { background: var(--ant-color-primary); border-color: var(--ant-color-primary); animation: wf-pulse 1.5s ease-in-out infinite; }
+.wf-mini-dot--failed { background: var(--ant-color-error); border-color: var(--ant-color-error); }
+.wf-mini-dot--paused { background: var(--ant-color-warning); border-color: var(--ant-color-warning); }
+.wf-mini-dot--skipped { background: var(--ant-color-fill-quaternary); border-style: dashed; }
+
+.wf-mini-line {
+  width: 12px;
+  height: 1.5px;
+  background: var(--ant-color-border);
+  flex-shrink: 0;
+}
+
+.wf-mini-line--active {
+  background: var(--ant-color-success);
+}
+
+/* ─── WorkflowPlayground ─── */
+
+.wf-playground {
+  width: 100%;
+}
+
+.wf-run-item {
+  padding: 12px 14px;
+  border: 1px solid var(--ant-color-border);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+  background: var(--ant-color-bg-container);
+}
+.wf-run-item:hover {
+  border-color: var(--ant-color-primary);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  transform: translateY(-1px);
+}
+
+/* Step timeline item */
+.wf-step-timeline-item {
+  padding-bottom: 4px;
+}
+.wf-run-item__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.wf-def-item {
+  padding: 10px 12px;
+  border: 1px solid var(--ant-color-border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: var(--ant-color-bg-container);
+}
+.wf-def-item__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}

@@ -1,4 +1,8 @@
-/* Work page */
+/* ================================================================ */
+/* WorkPage 工作台样式                                               */
+/* ================================================================ */
+
+/* ── 页面骨架 ── */
 .work-page {
   display: flex;
   flex: 1;
@@ -6,19 +10,20 @@
   overflow: hidden;
 }
 
-/* 卡片式工作页：取消文件列表，中间大卡片展示 */
 .work-page--cards {
   flex-direction: column;
 }
+
 .work-page--cards .work-page__toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 20px;
+  padding: 10px 20px;
   border-bottom: 1px solid var(--ant-color-border);
   flex-shrink: 0;
   gap: 16px;
 }
+
 .work-page--cards .work-page__toolbar-left {
   display: flex;
   align-items: center;
@@ -26,141 +31,26 @@
   flex: 1;
   min-width: 0;
 }
-.work-page--cards .work-page__category-filter {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-shrink: 0;
-}
-.work-page--cards .work-page__category-filter .ant-checkbox-wrapper {
-  font-size: 13px;
-}
+
 .work-page--cards .work-page__toolbar-left .search-section {
   flex: 1;
   min-width: 200px;
   max-width: 400px;
 }
+
 .work-page--cards .work-page__toolbar-actions {
   display: flex;
+  align-items: center;
   gap: 4px;
 }
+
 .work-page--cards .work-page__content {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 24px;
-}
-/* 瀑布流：待办 1x1、便签 2x2、文档 3x3（列 span x 行 span），1 行单位 = 8 格 */
-.work-page--cards .work-page__cards-grid--variable {
-  --grid-gap: 16px;
-  --grid-row: 8px;
-  display: grid;
-  grid-template-columns: repeat(12, 1fr);
-  grid-auto-rows: var(--grid-row);
-  gap: var(--grid-gap);
-  grid-auto-flow: dense;
-  align-content: start;
-  contain: layout style;
-}
-/* 卡片项填满格子高度，待办/便签视觉高度一致 */
-.work-page--cards .work-page__cards-grid--variable .work-page__card-item {
-  align-self: stretch;
-  display: flex;
-  min-height: 0;
-  /* overflow: visible 让 data-card 的 hover box-shadow 不被裁剪 */
-  /* will-change 仅在动画期间由 motion 自动管理，不再永久占用 GPU 层 */
-}
-.work-page--cards .work-page__cards-grid--variable .work-page__card-item .data-card {
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  /* overflow 由内部 data-card__body 处理，此处不设避免裁剪 hover 阴影 */
-  display: flex;
-  flex-direction: column;
-}
-.work-page--cards
-  .work-page__cards-grid--variable
-  .work-page__card-item
-  .data-card
-  .data-card__body {
-  overflow: hidden;
-}
-.work-page--cards .work-page__cards-grid--variable .data-card--note,
-.work-page--cards .work-page__cards-grid--variable .data-card--todoList,
-.work-page--cards .work-page__cards-grid--variable .data-card--document,
-.work-page--cards .work-page__cards-grid--variable .data-card--skeleton {
-  min-height: 0;
-}
-/* 待办：2x1 */
-.work-page--cards .work-page__cards-grid--variable .work-page__card-item--todoList {
-  grid-column: span 2;
-  grid-row-end: span 8;
-}
-/* 便签：2x2 */
-.work-page--cards .work-page__cards-grid--variable .work-page__card-item--note,
-.work-page--cards .work-page__cards-grid--variable .work-page__card-item--skeleton {
-  grid-column: span 2;
-  grid-row-end: span 16;
-}
-/* 文档：3x1.5（高度减半） */
-.work-page--cards .work-page__cards-grid--variable .work-page__card-item--document {
-  grid-column: span 3;
-  grid-row-end: span 12;
-}
-/* 分区分割线 */
-.work-page__section-divider {
-  border-top: 1px solid var(--ant-color-border-secondary);
-  margin: 12px 0;
-}
-@media (max-width: 1200px) {
-  .work-page--cards .work-page__cards-grid--variable {
-    grid-template-columns: repeat(6, 1fr);
-  }
-  .work-page--cards .work-page__cards-grid--variable .work-page__card-item--todoList {
-    grid-column: span 2;
-    grid-row-end: span 8;
-  }
-  .work-page--cards .work-page__cards-grid--variable .work-page__card-item--note,
-  .work-page--cards .work-page__cards-grid--variable .work-page__card-item--skeleton {
-    grid-column: span 2;
-    grid-row-end: span 16;
-  }
-  .work-page--cards .work-page__cards-grid--variable .work-page__card-item--document {
-    grid-column: span 3;
-    grid-row-end: span 12;
-  }
-}
-@media (max-width: 768px) {
-  .work-page--cards .work-page__cards-grid--variable {
-    grid-template-columns: 1fr;
-  }
-  .work-page--cards .work-page__cards-grid--variable .work-page__card-item--todoList {
-    grid-column: span 1;
-    grid-row-end: span 8;
-  }
-  .work-page--cards .work-page__cards-grid--variable .work-page__card-item--note,
-  .work-page--cards .work-page__cards-grid--variable .work-page__card-item--skeleton {
-    grid-column: span 1;
-    grid-row-end: span 16;
-  }
-  .work-page--cards .work-page__cards-grid--variable .work-page__card-item--document {
-    grid-column: span 1;
-    grid-row-end: span 12;
-  }
-}
-.work-page--cards .work-page__empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 320px;
-}
-.work-page--cards .work-page__empty-actions {
-  display: flex;
-  gap: 12px;
-  margin-top: 16px;
+  padding: 0;
 }
 
-/* ── 视图切换器 ── */
 .work-page__toolbar-divider {
   width: 1px;
   height: 20px;
@@ -168,58 +58,644 @@
   margin: 0 4px;
   flex-shrink: 0;
 }
+
+/* ── 集成视图：主区域 + 侧边栏（react-resizable-panels） ── */
+.ws-integrated {
+  height: 100%;
+  min-height: 0;
+}
+
+.ws-primary {
+  overflow-y: auto;
+  padding: 20px 24px 32px;
+}
+
+.ws-sidebar {
+  overflow: hidden;
+}
+
+.ws-sidebar-inner {
+  height: 100%;
+}
+
+.ws-sidebar-panel {
+  overflow-y: auto;
+}
+
+/* ── 分隔手柄样式 ── */
+.ws-separator {
+  transition: background 0.15s;
+}
+
+.ws-separator--h {
+  border-left: 1px solid var(--ant-color-border-secondary);
+}
+
+.ws-separator--h[data-separator]:hover,
+.ws-separator--h[data-separator][data-resize-handle-active] {
+  background: var(--ant-color-primary-bg);
+  border-left-color: var(--ant-color-primary);
+}
+
+.ws-separator--v {
+  border-top: 1px solid var(--ant-color-border-secondary);
+}
+
+.ws-separator--v[data-separator]:hover,
+.ws-separator--v[data-separator][data-resize-handle-active] {
+  background: var(--ant-color-primary-bg);
+  border-top-color: var(--ant-color-primary);
+}
+
+/* ── 通用 Section ── */
+.ws-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.ws-section > .section-header {
+  padding: 16px 20px 12px;
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+
+.ws-section--documents > .section-header {
+  padding: 0 0 16px;
+}
+
+.ws-section--todos {
+  height: 100%;
+}
+
+.ws-section--todos > .section-header,
+.ws-section--schedule > .section-header,
+.ws-schedule-section > .section-header {
+  position: sticky;
+  top: 0;
+  background: var(--ant-color-bg-layout);
+  z-index: 2;
+}
+
+/* ══════════════════════════════════════════════
+   文档卡片网格
+   ══════════════════════════════════════════════ */
+.ws-doc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.ws-doc-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 150px;
+  padding: 18px 20px 14px;
+  background: var(--ant-color-bg-elevated);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+}
+
+.ws-doc-card:hover {
+  border-color: var(--ant-color-primary-border);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+}
+
+.ws-doc-card:focus-visible {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: -2px;
+}
+
+.ws-doc-card__body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ws-doc-card__title {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin: 0 0 8px;
+  color: var(--ant-color-text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ws-doc-card__preview {
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0;
+  color: var(--ant-color-text-tertiary);
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ws-doc-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--ant-color-fill-quaternary);
+}
+
+.ws-doc-card__meta {
+  font-size: 12px;
+  color: var(--ant-color-text-quaternary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ws-doc-card__chars {
+  padding-left: 8px;
+  border-left: 1px solid var(--ant-color-fill-tertiary);
+}
+
+.ws-doc-card__actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.ws-doc-card:hover .ws-doc-card__actions {
+  opacity: 1;
+}
+
+/* ══════════════════════════════════════════════
+   待办卡片
+   ══════════════════════════════════════════════ */
+.ws-todo-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 16px 16px;
+}
+
+.ws-todo-card {
+  position: relative;
+  padding: 14px 16px;
+  background: var(--ant-color-bg-elevated);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.ws-todo-card:hover {
+  border-color: var(--ant-color-primary-border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.ws-todo-card:focus-visible {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: -2px;
+}
+
+.ws-todo-card__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ws-todo-card__title {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--ant-color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ws-todo-card__actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.ws-todo-card:hover .ws-todo-card__actions {
+  opacity: 1;
+}
+
+.ws-todo-card__progress {
+  margin-bottom: 8px;
+}
+
+.ws-todo-card__progress .ant-progress-inner {
+  border-radius: 2px !important;
+}
+
+.ws-todo-card__progress .ant-progress-bg {
+  border-radius: 2px !important;
+}
+
+.ws-todo-card__stats {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.ws-todo-card__stat-text {
+  font-size: 11px;
+  color: var(--ant-color-text-secondary);
+}
+
+.ws-todo-card__items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ws-todo-card__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+  line-height: 1.4;
+}
+
+.ws-todo-card__item-icon {
+  flex-shrink: 0;
+  color: var(--ant-color-text-quaternary);
+}
+
+.ws-todo-card__item-icon--doing {
+  color: var(--ant-color-primary);
+  animation: spin 2s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ws-todo-card__item-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ws-todo-card__item--more {
+  font-size: 11px;
+  color: var(--ant-color-text-quaternary);
+  padding-left: 19px;
+}
+
+.ws-todo-card__time {
+  display: block;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--ant-color-text-quaternary);
+}
+
+/* ══════════════════════════════════════════════
+   日程时间线
+   ══════════════════════════════════════════════ */
+.ws-schedule-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 16px 16px;
+}
+
+.ws-schedule-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.ws-schedule-group__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ant-color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.ws-schedule-group__label--overdue {
+  color: var(--ant-color-error);
+}
+
+.ws-schedule-group__count {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ant-color-text-quaternary);
+}
+
+.ws-schedule-group__items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ws-schedule-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  padding: 8px 4px;
+  border-radius: 6px;
+  transition: background 0.12s;
+}
+
+.ws-schedule-item:hover {
+  background: var(--ant-color-fill-quaternary);
+}
+
+.ws-schedule-item__time {
+  flex-shrink: 0;
+  width: 44px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ant-color-text-tertiary);
+  text-align: right;
+  padding-top: 1px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ws-schedule-item__indicator {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  width: 24px;
+  padding-top: 5px;
+}
+
+.ws-schedule-item__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ant-color-text-quaternary);
+}
+
+.ws-schedule-item__dot--blue {
+  background: var(--ant-color-info);
+}
+.ws-schedule-item__dot--orange {
+  background: var(--ant-color-warning);
+}
+.ws-schedule-item__dot--red {
+  background: var(--ant-color-error);
+}
+
+.ws-schedule-item__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ws-schedule-item__title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ant-color-text);
+  line-height: 1.4;
+}
+
+.ws-schedule-item__desc {
+  font-size: 12px;
+  color: var(--ant-color-text-quaternary);
+  line-height: 1.4;
+}
+
+.ws-schedule-item__tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.ws-schedule-item__duration {
+  font-size: 11px;
+  color: var(--ant-color-text-quaternary);
+}
+
+.ws-schedule-completed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 4px;
+  font-size: 12px;
+  color: var(--ant-color-success);
+}
+
+/* ══════════════════════════════════════════════
+   卡片多选 — 内联 Checkbox
+   ══════════════════════════════════════════════ */
+
+/* 内联 checkbox：嵌入标题行，宽度动画展开/收起 */
+.ws-card-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: width 0.2s cubic-bezier(0.33, 1, 0.68, 1), opacity 0.18s,
+    margin 0.2s cubic-bezier(0.33, 1, 0.68, 1);
+  margin-right: 0;
+  pointer-events: none;
+}
+
+.ws-card-check--visible {
+  width: 22px;
+  opacity: 1;
+  margin-right: 8px;
+  pointer-events: auto;
+}
+
+.ws-card-check--compact.ws-card-check--visible {
+  margin-right: 6px;
+}
+
+/* hover 时展开 checkbox */
+.ws-doc-card:hover .ws-card-check,
+.ws-todo-card:hover .ws-card-check {
+  width: 22px;
+  opacity: 1;
+  margin-right: 8px;
+  pointer-events: auto;
+}
+
+.ws-todo-card:hover .ws-card-check--compact {
+  margin-right: 6px;
+}
+
+/* 文档卡片标题行容器 */
+.ws-doc-card__title-row {
+  display: flex;
+  align-items: flex-start;
+}
+
+.ws-doc-card__title-row .ws-doc-card__title {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 选中态 — 文档卡片 */
+.ws-doc-card--selected {
+  border-color: var(--ant-color-primary) !important;
+  background: var(--ant-color-primary-bg);
+  box-shadow: 0 0 0 1px var(--ant-color-primary), 0 4px 12px rgba(22, 119, 255, 0.1) !important;
+}
+
+.ws-doc-card--selected .ws-doc-card__title {
+  color: var(--ant-color-primary);
+}
+
+.ws-doc-card--selectable {
+  user-select: none;
+}
+
+/* 选中态 — 待办卡片 */
+.ws-todo-card--selected {
+  border-color: var(--ant-color-primary) !important;
+  background: var(--ant-color-primary-bg);
+  box-shadow: 0 0 0 1px var(--ant-color-primary), 0 2px 8px rgba(22, 119, 255, 0.1) !important;
+}
+
+.ws-todo-card--selected .ws-todo-card__title {
+  color: var(--ant-color-primary);
+}
+
+.ws-todo-card--selectable {
+  user-select: none;
+}
+
+/* ══════════════════════════════════════════════
+   批量操作浮动工具栏
+   ══════════════════════════════════════════════ */
+.ws-batch-bar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px 10px 14px;
+  background: var(--ant-color-bg-elevated);
+  border: 1px solid var(--ant-color-border);
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
+  backdrop-filter: blur(12px);
+  min-width: 360px;
+}
+
+.ws-batch-bar__left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.ws-batch-bar__count {
+  font-size: 13px;
+  color: var(--ant-color-text-secondary);
+  white-space: nowrap;
+}
+
+.ws-batch-bar__count strong {
+  color: var(--ant-color-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.ws-batch-bar__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  justify-content: flex-end;
+}
+
+/* 工具栏激活态图标 */
 .work-page__view-toggle--active {
   color: var(--ant-color-primary) !important;
   background: var(--ant-color-primary-bg) !important;
 }
 
-/* ── 工作区文件夹面板（平铺视图底部） ── */
-.workspace-folders-section {
-  margin-top: 16px;
-  border-top: 1px solid var(--ant-color-border-secondary);
-  padding-top: 4px;
+/* ══════════════════════════════════════════════
+   响应式
+   ══════════════════════════════════════════════ */
+@media (max-width: 960px) {
+  .ws-doc-grid {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+  }
+  .ws-batch-bar {
+    min-width: 300px;
+    bottom: 16px;
+    padding: 8px 12px;
+    gap: 10px;
+  }
 }
-.workspace-folders-section__header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 4px;
-  cursor: pointer;
-  user-select: none;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ant-color-text-secondary);
-  transition: color 0.15s;
+
+@media (max-width: 720px) {
+  .ws-integrated {
+    flex-direction: column !important;
+  }
+  .ws-separator--h {
+    display: none;
+  }
+  .ws-sidebar {
+    max-height: 50vh;
+    border-top: 1px solid var(--ant-color-border-secondary);
+  }
+  .ws-primary {
+    padding: 16px;
+  }
+  .ws-batch-bar {
+    left: 16px;
+    right: 16px;
+    transform: none;
+    min-width: auto;
+  }
 }
-.workspace-folders-section__header:hover {
-  color: var(--ant-color-text);
-}
-.workspace-folders-section__title {
-  flex: 1;
-}
-.workspace-folders-section__count {
-  font-size: 11px;
-  color: var(--ant-color-text-quaternary);
-  font-weight: 400;
-}
-.workspace-folders-section__list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 4px 0 8px;
-}
-/* workspace-folders-section__item 已迁移至 LobeUI List（WorkspaceFoldersSection） */
 
 /* ── 文件夹视图 ── */
 .work-folder-view {
   height: 100%;
 }
+
 .work-folder-view .react-arborist {
   font-size: 13px;
 }
+
 .work-folder-view .react-arborist [role='treeitem'] {
   outline: none;
 }
+
 .work-page--cards .work-page__content:has(.work-folder-view) {
   padding: 0;
   overflow: hidden;
@@ -229,7 +705,8 @@
   flex-shrink: 0;
 }
 
-/* 大卡片 - 基础样式 */
+/* ── 已有的通用样式保留 ── */
+
 .data-card {
   position: relative;
   background: var(--ant-color-bg-elevated);
@@ -242,7 +719,7 @@
   flex-direction: column;
   min-height: 120px;
 }
-/* 用 opacity 伪元素替代 box-shadow 过渡 — opacity 可 GPU 合成，不触发主线程重绘 */
+
 .data-card::after {
   content: '';
   position: absolute;
@@ -253,7 +730,7 @@
   transition: opacity 0.2s ease;
   pointer-events: none;
 }
-/* 便签：紧凑型，少行预览 */
+
 .data-card--note {
   min-height: 100px;
 }
@@ -261,11 +738,9 @@
   -webkit-line-clamp: 3;
   line-clamp: 3;
 }
-/* 待办：中等 */
 .data-card--todoList {
   min-height: 120px;
 }
-/* 文档：大卡片，展示更多内容，横跨整行 */
 .data-card--document {
   min-height: 140px;
 }
@@ -273,6 +748,7 @@
   -webkit-line-clamp: 6;
   line-clamp: 6;
 }
+
 .data-card:hover {
   border-color: var(--ant-color-primary);
 }
@@ -282,6 +758,7 @@
 .data-card--done {
   opacity: 0.75;
 }
+
 .data-card__header {
   display: flex;
   align-items: center;
@@ -289,6 +766,7 @@
   margin-bottom: 12px;
   flex-shrink: 0;
 }
+
 .data-card__icon {
   display: flex;
   align-items: center;
@@ -299,6 +777,7 @@
   min-height: 0;
   overflow: hidden;
 }
+
 .data-card__title {
   font-size: 15px;
   font-weight: 600;
@@ -311,6 +790,7 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
 .data-card__preview {
   font-size: 13px;
   line-height: 1.55;
@@ -321,9 +801,11 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
 .data-card__preview .lobe-markdown {
   font-size: inherit;
 }
+
 .data-card__desc {
   font-size: 13px;
   line-height: 1.5;
@@ -335,11 +817,13 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
 .data-card__status {
   font-size: 11px;
   color: var(--ant-color-text-tertiary);
   margin-left: auto;
 }
+
 .data-card__actions {
   display: flex;
   align-items: center;
@@ -351,6 +835,7 @@
   transition: opacity 0.2s ease;
   pointer-events: none;
 }
+
 .data-card:hover .data-card__actions {
   opacity: 1;
   pointer-events: auto;
@@ -361,6 +846,7 @@
 .data-card--skeleton {
   min-height: 160px;
 }
+
 .work-content {
   flex: 1;
   display: flex;
@@ -393,6 +879,7 @@
   flex-direction: column;
   overflow: hidden;
 }
+
 .sidebar-workspace-row {
   padding: 10px 12px;
   border-bottom: 1px solid var(--ant-color-border-secondary);
@@ -617,4 +1104,40 @@
 .empty-desc {
   font-size: 14px;
   line-height: 1.5;
+}
+
+/* Workspace folders section */
+.workspace-folders-section {
+  margin-top: 16px;
+  border-top: 1px solid var(--ant-color-border-secondary);
+  padding-top: 4px;
+}
+.workspace-folders-section__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ant-color-text-secondary);
+  transition: color 0.15s;
+}
+.workspace-folders-section__header:hover {
+  color: var(--ant-color-text);
+}
+.workspace-folders-section__title {
+  flex: 1;
+}
+.workspace-folders-section__count {
+  font-size: 11px;
+  color: var(--ant-color-text-quaternary);
+  font-weight: 400;
+}
+.workspace-folders-section__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 0 8px;
 }
