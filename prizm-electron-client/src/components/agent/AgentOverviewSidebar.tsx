@@ -42,8 +42,9 @@ export interface AgentOverviewSidebarProps {
   memoryEnabled: boolean
   userMemoryCount: number
   scopeMemoryCount: number
+  scopeChatMemoryCount: number
+  scopeDocumentMemoryCount: number
   sessionMemoryCount: number
-  documentMemoryCount: number
   memoryByType?: Record<string, number>
   memoryCountsLoading: boolean
   activeLocks?: ResourceLockInfo[]
@@ -69,8 +70,9 @@ export const AgentOverviewSidebar = memo(function AgentOverviewSidebar({
   memoryEnabled,
   userMemoryCount,
   scopeMemoryCount,
+  scopeChatMemoryCount,
+  scopeDocumentMemoryCount,
   sessionMemoryCount,
-  documentMemoryCount,
   memoryByType,
   memoryCountsLoading,
   activeLocks,
@@ -163,43 +165,28 @@ export const AgentOverviewSidebar = memo(function AgentOverviewSidebar({
               <span className="agent-memory-tier-label">Scope 层</span>
               <span className="agent-memory-tier-count">{scopeMemoryCount}</span>
             </div>
-            {memoryByType && (
-              <>
-                <div
-                  className="agent-memory-tier"
-                  style={{ paddingLeft: 16, borderTop: 'none', paddingTop: 0 }}
-                >
-                  <span className="agent-memory-tier-label" style={{ fontSize: 11, opacity: 0.7 }}>
-                    叙事
-                  </span>
-                  <span className="agent-memory-tier-count" style={{ fontSize: 12 }}>
-                    {memoryByType.narrative ?? 0}
-                  </span>
-                </div>
-                <div
-                  className="agent-memory-tier"
-                  style={{ paddingLeft: 16, borderTop: 'none', paddingTop: 0 }}
-                >
-                  <span className="agent-memory-tier-label" style={{ fontSize: 11, opacity: 0.7 }}>
-                    前瞻
-                  </span>
-                  <span className="agent-memory-tier-count" style={{ fontSize: 12 }}>
-                    {memoryByType.foresight ?? 0}
-                  </span>
-                </div>
-                <div
-                  className="agent-memory-tier"
-                  style={{ paddingLeft: 16, borderTop: 'none', paddingTop: 0 }}
-                >
-                  <span className="agent-memory-tier-label" style={{ fontSize: 11, opacity: 0.7 }}>
-                    文档
-                  </span>
-                  <span className="agent-memory-tier-count" style={{ fontSize: 12 }}>
-                    {memoryByType.document ?? 0}
-                  </span>
-                </div>
-              </>
-            )}
+            <div
+              className="agent-memory-tier"
+              style={{ paddingLeft: 16, borderTop: 'none', paddingTop: 0 }}
+            >
+              <span className="agent-memory-tier-label" style={{ fontSize: 11, opacity: 0.7 }}>
+                对话
+              </span>
+              <span className="agent-memory-tier-count" style={{ fontSize: 12 }}>
+                {scopeChatMemoryCount}
+              </span>
+            </div>
+            <div
+              className="agent-memory-tier"
+              style={{ paddingLeft: 16, borderTop: 'none', paddingTop: 0 }}
+            >
+              <span className="agent-memory-tier-label" style={{ fontSize: 11, opacity: 0.7 }}>
+                文档
+              </span>
+              <span className="agent-memory-tier-count" style={{ fontSize: 12 }}>
+                {scopeDocumentMemoryCount}
+              </span>
+            </div>
             <div className="agent-memory-tier" title={MEMORY_LAYER_DESCRIPTIONS.session}>
               <span className="agent-memory-tier-label">Session 层</span>
               <span className="agent-memory-tier-count">{sessionMemoryCount}</span>

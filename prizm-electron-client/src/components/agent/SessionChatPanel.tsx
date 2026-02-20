@@ -13,11 +13,15 @@ import { motion, AnimatePresence } from 'motion/react'
 import { Copy, Edit, RotateCw, Undo2, Check, X } from 'lucide-react'
 import type { MessagePart, MessagePartTool, SessionCheckpoint } from '@prizm/client-core'
 import { ToolCallCard } from './ToolCallCard'
+import { ToolCallBadge } from './ToolCallBadge'
+import { ToolGroup } from './ToolGroup'
 import { AssistantMessageExtra } from './AssistantMessageExtra'
+import { ReasoningBlock } from './ReasoningBlock'
 import { ThinkingDots } from './ThinkingDots'
 import { InteractActionPanel } from './InteractActionPanel'
 import { ScrollToBottom } from './ScrollToBottom'
 import { useSessionChat } from '../../context/SessionChatContext'
+import { useAgentSessionStore } from '../../store/agentSessionStore'
 import { EASE_SMOOTH } from '../../theme/motionPresets'
 
 /* ── 按角色区分的 ActionBar（统一操作入口） ── */
@@ -109,22 +113,96 @@ function UserMessageEditor({
   )
 }
 
+/**
+ * Group consecutive tool parts into runs for compact ToolGroup rendering.
+ * Returns mixed segments: { type: 'text', ... } or { type: 'tool-group', tools: [...] }
+ */
+type MessagePartText = Extract<MessagePart, { type: 'text' }>
+
+type PartSegment =
+  | { kind: 'text'; part: MessagePartText; index: number }
+  | { kind: 'tool'; part: MessagePartTool; index: number }
+  | { kind: 'tool-group'; tools: MessagePartTool[]; startIndex: number }
+
+function groupPartsForCompact(parts: MessagePart[]): PartSegment[] {
+  const segments: PartSegment[] = []
+  let toolRun: MessagePartTool[] = []
+  let toolRunStart = 0
+
+  const flushToolRun = () => {
+    if (toolRun.length === 0) return
+    if (toolRun.length >= 2) {
+      const allDone = toolRun.every((t) => (t.status ?? 'done') === 'done')
+      if (allDone) {
+        segments.push({ kind: 'tool-group', tools: [...toolRun], startIndex: toolRunStart })
+      } else {
+        for (const t of toolRun) segments.push({ kind: 'tool', part: t, index: toolRunStart })
+      }
+    } else {
+      segments.push({ kind: 'tool', part: toolRun[0], index: toolRunStart })
+    }
+    toolRun = []
+  }
+
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i]
+    if (p.type === 'text') {
+      flushToolRun()
+      segments.push({ kind: 'text', part: p as MessagePartText, index: i })
+    } else {
+      if (toolRun.length === 0) toolRunStart = i
+      toolRun.push(p as MessagePartTool)
+    }
+  }
+  flushToolRun()
+  return segments
+}
+
 const AssistantPartsMessage = memo(function AssistantPartsMessage({
   parts
 }: {
   parts: MessagePart[]
 }) {
+  const compact = useAgentSessionStore((s) => s.toolCardCompact)
+
+  if (!compact) {
+    return (
+      <div className="assistant-message-by-parts">
+        {parts.map((p, i) =>
+          p.type === 'text' ? (
+            <div key={`text-${i}`} className="assistant-part-text">
+              <Markdown>{p.content}</Markdown>
+            </div>
+          ) : (
+            <ToolCallCard key={p.id} tc={p as MessagePartTool} />
+          )
+        )}
+      </div>
+    )
+  }
+
+  const segments = groupPartsForCompact(parts)
+
   return (
     <div className="assistant-message-by-parts">
-      {parts.map((p, i) =>
-        p.type === 'text' ? (
-          <div key={`text-${i}`} className="assistant-part-text">
-            <Markdown>{p.content}</Markdown>
-          </div>
-        ) : (
-          <ToolCallCard key={p.id} tc={p as MessagePartTool} />
-        )
-      )}
+      {segments.map((seg) => {
+        if (seg.kind === 'text') {
+          return (
+            <div key={`text-${seg.index}`} className="assistant-part-text">
+              <Markdown>{seg.part.content}</Markdown>
+            </div>
+          )
+        }
+        if (seg.kind === 'tool-group') {
+          return (
+            <ToolGroup
+              key={`tg-${seg.startIndex}`}
+              tools={seg.tools}
+            />
+          )
+        }
+        return <ToolCallCard key={seg.part.id} tc={seg.part} />
+      })}
     </div>
   )
 })
@@ -229,12 +307,35 @@ export const SessionChatPanel = memo(function SessionChatPanel() {
         return props.editableContent ?? null
       },
       assistant: (props: ChatMessage & { editableContent: React.ReactNode }) => {
-        const extra = props.extra as { parts?: MessagePart[] } | undefined
+        const extra = props.extra as {
+          parts?: MessagePart[]
+          reasoning?: string
+          streaming?: boolean
+        } | undefined
         const parts = extra?.parts
-        if (Array.isArray(parts) && parts.length > 0) {
-          return <AssistantPartsMessage parts={parts} />
-        }
-        return props.editableContent ?? null
+        const reasoning = extra?.reasoning
+        const isStreaming = !!extra?.streaming
+
+        const hasReasoning = !!reasoning?.trim()
+        const hasContent = Array.isArray(parts) && parts.length > 0
+          ? true
+          : !!props.content?.trim?.()
+
+        return (
+          <>
+            {hasReasoning && (
+              <ReasoningBlock
+                reasoning={reasoning!}
+                streaming={isStreaming && !hasContent}
+              />
+            )}
+            {hasContent && Array.isArray(parts) && parts.length > 0 ? (
+              <AssistantPartsMessage parts={parts} />
+            ) : (
+              props.editableContent ?? null
+            )}
+          </>
+        )
       }
     }),
     [editingMessageId, handleEditConfirm, handleEditCancel]

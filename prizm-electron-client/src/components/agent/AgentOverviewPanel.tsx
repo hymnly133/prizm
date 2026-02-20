@@ -6,7 +6,7 @@ import { useCallback, useState } from 'react'
 import { motion } from 'motion/react'
 import { Flexbox } from '@lobehub/ui'
 import { Modal } from '@lobehub/ui'
-import { SpotlightCard } from '@lobehub/ui/awesome'
+import { AccentSpotlightCard } from '../ui/AccentSpotlightCard'
 import { Tag } from 'antd'
 import {
   Activity,
@@ -18,12 +18,15 @@ import {
   Layers,
   MessageSquare,
   Sparkles,
-  User as UserIcon
+  User as UserIcon,
+  Zap
 } from 'lucide-react'
+import { useNavigation } from '../../context/NavigationContext'
 import { useAgentOverviewData } from '../../hooks/useAgentOverviewData'
 import { MemoryInspector } from './MemoryInspector'
 import { MemorySidebarPanel } from './MemorySidebarPanel'
 import { TokenDashboard } from './TokenDashboard'
+import { BackgroundTasksPanel } from './BackgroundTasksPanel'
 import { AnimatedCounter } from './AnimatedCounter'
 import { Select } from '../ui/Select'
 import { EmptyState } from '../ui/EmptyState'
@@ -35,9 +38,11 @@ import type { AvailableModel } from '@prizm/client-core'
 interface AgentOverviewPanelProps {
   selectedModel?: string
   onModelChange?: (model: string | undefined) => void
+  onLoadSession?: (id: string) => void
 }
 
-export function AgentOverviewPanel({ selectedModel, onModelChange }: AgentOverviewPanelProps) {
+export function AgentOverviewPanel({ selectedModel, onModelChange, onLoadSession }: AgentOverviewPanelProps) {
+  const { navigateToDocs } = useNavigation()
   const {
     currentScope,
     scopeContext,
@@ -51,6 +56,8 @@ export function AgentOverviewPanel({ selectedModel, onModelChange }: AgentOvervi
     memoryEnabled,
     userMemoryCount,
     scopeMemoryCount,
+    scopeChatMemoryCount,
+    scopeDocumentMemoryCount,
     sessionMemoryCount,
     memoryByType,
     memoryCountsLoading,
@@ -101,7 +108,7 @@ export function AgentOverviewPanel({ selectedModel, onModelChange }: AgentOvervi
 
       {/* Statistics - SpotlightCard grid */}
       <motion.div {...fadeUp(idx++ * STAGGER_DELAY)}>
-        <SpotlightCard
+        <AccentSpotlightCard
           items={[
             { id: 'sessions' },
             { id: 'documents' },
@@ -158,7 +165,7 @@ export function AgentOverviewPanel({ selectedModel, onModelChange }: AgentOvervi
                 label: '前瞻',
                 value: memoryByType.foresight,
                 loading: memoryCountsLoading,
-                color: '#13c2c2',
+                color: 'var(--ant-cyan-6, #13c2c2)',
                 desc: 'foresight'
               },
               docMem: {
@@ -174,7 +181,7 @@ export function AgentOverviewPanel({ selectedModel, onModelChange }: AgentOvervi
                 label: '事件日志',
                 value: memoryByType.event_log,
                 loading: memoryCountsLoading,
-                color: '#eb2f96',
+                color: 'var(--ant-magenta-6, #eb2f96)',
                 desc: 'event_log'
               }
             }
@@ -240,11 +247,24 @@ export function AgentOverviewPanel({ selectedModel, onModelChange }: AgentOvervi
               memoryEnabled={memoryEnabled}
               userMemoryCount={userMemoryCount}
               scopeMemoryCount={scopeMemoryCount}
+              scopeChatMemoryCount={scopeChatMemoryCount}
+              scopeDocumentMemoryCount={scopeDocumentMemoryCount}
               sessionMemoryCount={sessionMemoryCount}
               memoryByType={memoryByType}
               memoryCountsLoading={memoryCountsLoading}
               onOpenInspector={() => setMemoryInspectorOpen(true)}
             />
+          </div>
+        </motion.div>
+
+        {/* Background Tasks Panel */}
+        <motion.div className="content-card content-card--default content-card--hoverable" {...fadeUp(idx++ * STAGGER_DELAY)}>
+          <div className="content-card__header">
+            <Zap size={16} />
+            <span>后台任务</span>
+          </div>
+          <div className="content-card__body overview-card-body-scroll">
+            <BackgroundTasksPanel onLoadSession={onLoadSession} />
           </div>
         </motion.div>
 
@@ -305,7 +325,14 @@ export function AgentOverviewPanel({ selectedModel, onModelChange }: AgentOvervi
             ) : (
               <ul className="overview-doc-list overview-doc-list-horizontal">
                 {documents.map((doc) => (
-                  <li key={doc.id} className="overview-doc-item">
+                  <li
+                    key={doc.id}
+                    className="overview-doc-item overview-doc-item--clickable"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => navigateToDocs(doc.id)}
+                    onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && navigateToDocs(doc.id)}
+                  >
                     <FileText size={13} />
                     <span className="overview-doc-title" title={doc.title}>
                       {doc.title || '未命名'}

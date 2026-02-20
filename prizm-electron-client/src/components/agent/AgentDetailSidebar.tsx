@@ -2,6 +2,7 @@
  * AgentDetailSidebar — Agent 右侧详情面板（共享组件）
  *
  * 三标签页布局：上下文 / 文件 / 终端
+ * 内部调用 useAgentSidebarData 获取数据，直接渲染 AgentSessionSidebar。
  * 被 AgentPage 和 CollaborationPage 的 AgentPane 共同使用。
  */
 import { Flexbox } from '@lobehub/ui'
@@ -10,7 +11,8 @@ import { motion, AnimatePresence } from 'motion/react'
 import { FolderTree, MessageSquare, Terminal as TerminalLucide } from 'lucide-react'
 import { memo, useState } from 'react'
 import type { EnrichedSession, AgentMessage } from '@prizm/client-core'
-import { AgentRightSidebar } from '../AgentRightSidebar'
+import { useAgentSidebarData } from '../../hooks/useAgentSidebarData'
+import { AgentSessionSidebar } from './AgentSessionSidebar'
 import { FileTreePanel } from './FileTreePanel'
 import { TerminalSidebarTab } from './TerminalSidebarTab'
 
@@ -22,7 +24,6 @@ export interface AgentDetailSidebarProps {
   selectedModel?: string
   onModelChange?: (model: string | undefined) => void
   scope: string
-  /** 文件面板点击文件时的回调 */
   onPreviewFile?: (relativePath: string) => void
 }
 
@@ -37,6 +38,17 @@ export const AgentDetailSidebar = memo(function AgentDetailSidebar({
   onPreviewFile
 }: AgentDetailSidebarProps) {
   const [sidebarTab, setSidebarTab] = useState<'context' | 'files' | 'terminal'>('context')
+
+  const sidebarData = useAgentSidebarData(
+    scope,
+    currentSession?.id,
+    sending,
+    optimisticMessages,
+    currentSession?.messages,
+    currentSession?.heldLocks
+  )
+
+  const isNewConversationReady = !currentSession
 
   return (
     <Flexbox style={{ height: '100%', overflow: 'hidden' }} gap={0}>
@@ -68,15 +80,44 @@ export const AgentDetailSidebar = memo(function AgentDetailSidebar({
             exit={{ opacity: 0, x: -8 }}
             transition={{ duration: 0.15 }}
           >
-            <AgentRightSidebar
-              sending={sending}
-              error={error}
-              currentSession={currentSession}
-              optimisticMessages={optimisticMessages}
-              selectedModel={selectedModel}
-              onModelChange={onModelChange}
-              overviewMode={false}
-            />
+            <aside className="agent-right-sidebar">
+              <div className="agent-right-sidebar-header">
+                <span className="agent-right-sidebar-title">
+                  {isNewConversationReady ? '新对话' : 'Agent 状态'}
+                </span>
+              </div>
+              <div className="agent-right-sidebar-body">
+                <AgentSessionSidebar
+                  sending={sending}
+                  error={error}
+                  currentSession={currentSession}
+                  isNewConversationReady={isNewConversationReady}
+                  models={sidebarData.models}
+                  defaultModel={sidebarData.defaultModel}
+                  selectedModel={selectedModel}
+                  onModelChange={onModelChange}
+                  systemPrompt={sidebarData.systemPrompt}
+                  systemPromptLoading={sidebarData.systemPromptLoading}
+                  onSystemPromptModalOpenChange={sidebarData.setSystemPromptModalOpen}
+                  systemPromptModalOpen={sidebarData.systemPromptModalOpen}
+                  sessionContext={sidebarData.sessionContext}
+                  sessionContextLoading={sidebarData.sessionContextLoading}
+                  latestToolCalls={sidebarData.latestToolCalls}
+                  provisionsSummary={sidebarData.provisionsSummary}
+                  sessionStats={sidebarData.sessionStats}
+                  sessionStatsLoading={sidebarData.sessionStatsLoading}
+                  memoryEnabled={sidebarData.memoryCounts.enabled}
+                  userMemoryCount={sidebarData.memoryCounts.userCount}
+                  scopeMemoryCount={sidebarData.memoryCounts.scopeCount}
+                  scopeChatMemoryCount={sidebarData.memoryCounts.scopeChatCount}
+                  scopeDocumentMemoryCount={sidebarData.memoryCounts.scopeDocumentCount}
+                  sessionMemoryCount={sidebarData.memoryCounts.sessionCount}
+                  memoryByType={sidebarData.memoryCounts.byType}
+                  memoryCountsLoading={sidebarData.memoryCountsLoading}
+                  sessionLocks={sidebarData.sessionLocks}
+                />
+              </div>
+            </aside>
           </motion.div>
         ) : sidebarTab === 'files' ? (
           <motion.div

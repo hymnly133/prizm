@@ -53,8 +53,9 @@ export interface AgentSessionSidebarProps {
   memoryEnabled: boolean
   userMemoryCount: number
   scopeMemoryCount: number
+  scopeChatMemoryCount: number
+  scopeDocumentMemoryCount: number
   sessionMemoryCount: number
-  documentMemoryCount: number
   memoryByType?: Record<string, number>
   memoryCountsLoading: boolean
   sessionLocks?: ResourceLockInfo[]
@@ -82,8 +83,9 @@ export const AgentSessionSidebar = memo(function AgentSessionSidebar({
   memoryEnabled,
   userMemoryCount,
   scopeMemoryCount,
+  scopeChatMemoryCount,
+  scopeDocumentMemoryCount,
   sessionMemoryCount,
-  documentMemoryCount,
   memoryByType,
   memoryCountsLoading,
   sessionLocks
@@ -209,8 +211,9 @@ export const AgentSessionSidebar = memo(function AgentSessionSidebar({
           memoryEnabled={memoryEnabled}
           userMemoryCount={userMemoryCount}
           scopeMemoryCount={scopeMemoryCount}
+          scopeChatMemoryCount={scopeChatMemoryCount}
+          scopeDocumentMemoryCount={scopeDocumentMemoryCount}
           sessionMemoryCount={sessionMemoryCount}
-          documentMemoryCount={documentMemoryCount}
           memoryByType={memoryByType}
           memoryCountsLoading={memoryCountsLoading}
           onOpenInspector={() => setMemoryInspectorOpen(true)}

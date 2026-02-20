@@ -395,42 +395,46 @@ const ToolGuideCard = memo(function ToolGuideCard({ tc }: { tc: ToolCallRecord }
   )
 }, propsEq)
 
-/* ═══════ tavily_web_search ═══════ */
+/* ═══════ web search / web fetch ═══════ */
 
-function getTavilySummary(argsStr: string): string {
+function getWebSearchSummary(argsStr: string): string {
   const obj = parseArgs(argsStr)
   if (obj.query) return String(obj.query).slice(0, 50)
+  if (obj.url) return String(obj.url).slice(0, 60)
   return ''
 }
 
-const TAVILY_META: ActionStyle = {
+const WEB_SEARCH_META: ActionStyle = {
   icon: Globe,
   color: '#f97316',
   badge: '联网',
   badgeColor: 'warning'
 }
 
-const TavilyToolCard = memo(function TavilyToolCard({ tc }: { tc: ToolCallRecord }) {
+const WEB_FETCH_META: ActionStyle = {
+  icon: Globe,
+  color: '#f97316',
+  badge: '抓取',
+  badgeColor: 'warning'
+}
+
+const WebSearchToolCard = memo(function WebSearchToolCard({ tc }: { tc: ToolCallRecord }) {
   const status = tc.status ?? 'done'
   const displayName = getToolDisplayName(tc.name, tc.arguments)
-  const argsSummary = getTavilySummary(tc.arguments)
+  const argsSummary = getWebSearchSummary(tc.arguments)
+  const meta = tc.name === 'prizm_web_fetch' ? WEB_FETCH_META : WEB_SEARCH_META
   if (status === 'preparing' || status === 'running')
     return (
       <CompoundCardPhase
         tc={tc}
         displayName={displayName}
-        meta={TAVILY_META}
+        meta={meta}
         argsSummary={argsSummary}
         phase={status}
       />
     )
   return (
-    <CompoundCardDone
-      tc={tc}
-      displayName={displayName}
-      meta={TAVILY_META}
-      argsSummary={argsSummary}
-    />
+    <CompoundCardDone tc={tc} displayName={displayName} meta={meta} argsSummary={argsSummary} />
   )
 }, propsEq)
 
@@ -441,7 +445,9 @@ registerToolRender('prizm_knowledge', (props) => <KnowledgeToolCard tc={props.tc
 registerToolRender('prizm_lock', (props) => <LockToolCard tc={props.tc} />)
 registerToolRender('prizm_promote_file', (props) => <PromoteFileToolCard tc={props.tc} />)
 registerToolRender('prizm_tool_guide', (props) => <ToolGuideCard tc={props.tc} />)
-registerToolRender('tavily_web_search', (props) => <TavilyToolCard tc={props.tc} />)
+registerToolRender('prizm_web_search', (props) => <WebSearchToolCard tc={props.tc} />)
+registerToolRender('prizm_web_fetch', (props) => <WebSearchToolCard tc={props.tc} />)
+registerToolRender('tavily_web_search', (props) => <WebSearchToolCard tc={props.tc} />)
 
 // 旧工具名兼容
 const LEGACY_SEARCH = ['prizm_scope_stats', 'prizm_list_memories', 'prizm_search_memories'] as const

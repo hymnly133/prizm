@@ -8,8 +8,8 @@ import { useState, useCallback } from 'react'
 
 const _expandedState = new Map<string, boolean>()
 
-export function useToolCardExpanded(id: string): [boolean, () => void] {
-  const [expanded, setExpanded] = useState(() => _expandedState.get(id) ?? false)
+export function useToolCardExpanded(id: string, defaultExpanded?: boolean): [boolean, () => void] {
+  const [expanded, setExpanded] = useState(() => _expandedState.get(id) ?? (defaultExpanded || false))
 
   const toggle = useCallback(() => {
     setExpanded((v) => {

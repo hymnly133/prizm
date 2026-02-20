@@ -1,13 +1,13 @@
 /**
- * 助手消息额外信息：思考过程 + Token 展示 + 记忆标签
+ * 助手消息额外信息：Token 展示 + 记忆标签
  * 增强版：内联 token 环形图 + hover 展开详情
+ * （思考过程已迁移到 ReasoningBlock，渲染在消息正文之前）
  */
 import type { ChatMessage } from '@lobehub/ui/chat'
-import { Flexbox, Popover, Text } from '@lobehub/ui'
+import { Flexbox, Popover } from '@lobehub/ui'
 import { Coins } from 'lucide-react'
 import type { MemoryIdsByLayer } from '@prizm/shared'
-import { useCallback, useState } from 'react'
-import { motion, AnimatePresence } from 'motion/react'
+import { useCallback } from 'react'
 import { usePrizmContext } from '../../context/PrizmContext'
 import { useScope } from '../../hooks/useScope'
 import { MemoryRefsTag } from './MemoryRefsTag'
@@ -19,41 +19,12 @@ function formatToken(n: number): string {
   return String(n)
 }
 
-const useStyles = createStyles(({ css, token }) => ({
+const useStyles = createStyles(({ css, token, isDarkMode }) => ({
   extra: css`
     display: flex;
     flex-direction: column;
     gap: 8px;
     margin-top: 8px;
-  `,
-  reasoning: css`
-    margin: 0;
-    border: 1px solid ${token.colorBorderSecondary};
-    border-radius: 8px;
-    background: ${token.colorFillQuaternary};
-  `,
-  reasoningSummary: css`
-    cursor: pointer;
-    padding: 6px 10px;
-    font-size: 12px;
-    font-weight: 500;
-    color: ${token.colorTextSecondary};
-
-    &:hover {
-      color: ${token.colorText};
-    }
-  `,
-  reasoningContent: css`
-    margin: 0;
-    padding: 10px 12px;
-    font-size: 12px;
-    line-height: 1.5;
-    color: ${token.colorTextSecondary};
-    white-space: pre-wrap;
-    word-break: break-word;
-    border-top: 1px solid ${token.colorBorderSecondary};
-    max-height: 200px;
-    overflow-y: auto;
   `,
   usageRow: css`
     display: inline-flex;
@@ -64,19 +35,31 @@ const useStyles = createStyles(({ css, token }) => ({
     cursor: default;
     padding: 2px 8px;
     border-radius: 10px;
-    transition: background 0.15s, color 0.15s;
+    transition: background 0.2s, color 0.2s;
 
     &:hover {
       background: ${token.colorFillQuaternary};
       color: ${token.colorTextSecondary};
     }
   `,
+  cacheBadge: css`
+    display: inline-flex;
+    align-items: center;
+    font-size: 10px;
+    font-weight: 500;
+    color: ${token.colorTextQuaternary};
+    padding: 0 5px;
+    border-radius: 8px;
+    background: ${isDarkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'};
+    line-height: 16px;
+    letter-spacing: 0.01em;
+  `,
   usagePop: css`
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 8px 4px;
-    min-width: 180px;
+    gap: 7px;
+    padding: 10px 6px;
+    min-width: 210px;
   `,
   usagePopRow: css`
     display: flex;
@@ -92,11 +75,37 @@ const useStyles = createStyles(({ css, token }) => ({
     font-weight: 500;
     color: ${token.colorText};
   `,
-  miniRing: css`
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    flex-shrink: 0;
+  usagePopDivider: css`
+    border-top: 1px solid ${token.colorBorderSecondary};
+    padding-top: 7px;
+    margin-top: 3px;
+  `,
+  usagePopCacheBar: css`
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 2px;
+    padding-left: 8px;
+  `,
+  cacheBarTrack: css`
+    flex: 1;
+    height: 3px;
+    border-radius: 1.5px;
+    background: ${token.colorFillSecondary};
+    overflow: hidden;
+  `,
+  cacheBarFill: css`
+    height: 100%;
+    border-radius: 1.5px;
+    background: ${token.colorPrimary};
+    background-image: repeating-linear-gradient(
+      -45deg,
+      transparent 0px,
+      transparent 1.5px,
+      ${token.colorBgContainer} 1.5px,
+      ${token.colorBgContainer} 3px
+    );
+    transition: width 0.3s ease;
   `,
   modelTag: css`
     font-size: 11px;
@@ -107,28 +116,39 @@ const useStyles = createStyles(({ css, token }) => ({
   `
 }))
 
-/** 小型 CSS 环形图 */
+/**
+ * 二段式 CSS 环形图：Input (蓝) + Output (绿)
+ * 缓存信息由外部的 badge 文本展示，不在环形图中用独立颜色
+ */
 function MiniRing({ inputPct, size = 18 }: { inputPct: number; size?: number }) {
-  const outPct = 100 - inputPct
+  const outPct = Math.max(0, 100 - inputPct)
+
+  const gradient = `conic-gradient(
+    var(--ant-color-primary) 0% ${inputPct}%,
+    var(--ant-color-success) ${inputPct}% 100%
+  )`
+
+  const title = `输入 ${inputPct.toFixed(0)}% / 输出 ${outPct.toFixed(0)}%`
+
+  const ringWidth = Math.max(3, Math.round(size * 0.18))
+
   return (
     <div
       style={{
         width: size,
         height: size,
         borderRadius: '50%',
-        background: `conic-gradient(
-          var(--ant-color-primary) 0% ${inputPct}%,
-          var(--ant-color-success) ${inputPct}% 100%
-        )`,
+        background: gradient,
         flexShrink: 0,
-        position: 'relative'
+        position: 'relative',
+        transition: 'transform 0.15s ease'
       }}
-      title={`Input ${inputPct.toFixed(0)}% / Output ${outPct.toFixed(0)}%`}
+      title={title}
     >
       <div
         style={{
           position: 'absolute',
-          inset: 3,
+          inset: ringWidth,
           borderRadius: '50%',
           background: 'var(--ant-color-bg-container)'
         }}
@@ -146,14 +166,17 @@ export function AssistantMessageExtra(props: AssistantMessageExtraProps) {
   const extra = props.extra as
     | {
         model?: string
-        usage?: { totalTokens?: number; totalInputTokens?: number; totalOutputTokens?: number }
-        reasoning?: string
+        usage?: {
+          totalTokens?: number
+          totalInputTokens?: number
+          totalOutputTokens?: number
+          cachedInputTokens?: number
+        }
         parts?: import('@prizm/client-core').MessagePart[]
         memoryRefs?: import('@prizm/shared').MemoryRefs | null
         messageId?: string
       }
     | undefined
-  const hasReasoning = !!extra?.reasoning?.trim()
   const http = manager?.getHttpClient()
 
   const handleResolve = useCallback(
@@ -174,20 +197,17 @@ export function AssistantMessageExtra(props: AssistantMessageExtraProps) {
     usage?.totalTokens ?? (usage?.totalInputTokens ?? 0) + (usage?.totalOutputTokens ?? 0)
   const inputPct =
     total > 0 && usage?.totalInputTokens != null ? (usage.totalInputTokens / total) * 100 : 50
+  const cached = usage?.cachedInputTokens ?? 0
+  const cacheHitPct =
+    cached > 0 && usage?.totalInputTokens ? Math.round((cached / usage.totalInputTokens) * 100) : 0
+  const freshInput =
+    usage?.totalInputTokens != null ? Math.max(0, usage.totalInputTokens - cached) : 0
 
   return (
     <div className={styles.extra}>
-      {hasReasoning && (
-        <details className={styles.reasoning}>
-          <summary className={styles.reasoningSummary}>思考过程</summary>
-          <pre className={styles.reasoningContent}>{extra!.reasoning}</pre>
-        </details>
-      )}
       <Flexbox horizontal align="center" gap={4} wrap="wrap">
-        {/* 模型标签 */}
         {extra?.model && <span className={styles.modelTag}>{extra.model}</span>}
 
-        {/* Token 内联展示 */}
         {hasUsage && (
           <Popover
             content={
@@ -206,6 +226,52 @@ export function AssistantMessageExtra(props: AssistantMessageExtraProps) {
                     </span>
                   </div>
                 )}
+                {cached > 0 && (
+                  <>
+                    <div className={styles.usagePopRow} style={{ paddingLeft: 10 }}>
+                      <span
+                        className={styles.usagePopLabel}
+                        style={{ fontSize: 11, opacity: 0.75 }}
+                      >
+                        实际输入
+                      </span>
+                      <span className={styles.usagePopValue} style={{ fontSize: 11 }}>
+                        {formatToken(freshInput)}
+                      </span>
+                    </div>
+                    <div className={styles.usagePopRow} style={{ paddingLeft: 10 }}>
+                      <span
+                        className={styles.usagePopLabel}
+                        style={{ fontSize: 11, opacity: 0.75 }}
+                      >
+                        缓存命中
+                      </span>
+                      <span
+                        className={styles.usagePopValue}
+                        style={{ color: 'var(--ant-color-text-tertiary)', fontSize: 11 }}
+                      >
+                        {formatToken(cached)}
+                      </span>
+                    </div>
+                    <div className={styles.usagePopCacheBar}>
+                      <div className={styles.cacheBarTrack}>
+                        <div className={styles.cacheBarFill} style={{ width: `${cacheHitPct}%` }} />
+                      </div>
+                      <span
+                        style={{
+                          fontSize: 10,
+                          color: 'var(--ant-color-text-quaternary)',
+                          fontWeight: 500,
+                          fontVariantNumeric: 'tabular-nums',
+                          minWidth: 28,
+                          textAlign: 'right'
+                        }}
+                      >
+                        {cacheHitPct}%
+                      </span>
+                    </div>
+                  </>
+                )}
                 {usage?.totalOutputTokens != null && (
                   <div className={styles.usagePopRow}>
                     <span className={styles.usagePopLabel}>Output</span>
@@ -215,13 +281,8 @@ export function AssistantMessageExtra(props: AssistantMessageExtraProps) {
                   </div>
                 )}
                 <div
-                  className={styles.usagePopRow}
-                  style={{
-                    borderTop: '1px solid var(--ant-color-border-secondary)',
-                    paddingTop: 6,
-                    marginTop: 2,
-                    fontWeight: 600
-                  }}
+                  className={`${styles.usagePopRow} ${styles.usagePopDivider}`}
+                  style={{ fontWeight: 600 }}
                 >
                   <span className={styles.usagePopLabel}>合计</span>
                   <span className={styles.usagePopValue}>{formatToken(total)}</span>
@@ -233,11 +294,11 @@ export function AssistantMessageExtra(props: AssistantMessageExtraProps) {
               <MiniRing inputPct={inputPct} />
               <Coins size={11} />
               <span>{formatToken(total)}</span>
+              {cacheHitPct > 0 && <span className={styles.cacheBadge}>{cacheHitPct}%</span>}
             </span>
           </Popover>
         )}
 
-        {/* 记忆引用标签 */}
         <MemoryRefsTag
           memoryRefs={extra?.memoryRefs}
           onResolve={handleResolve}

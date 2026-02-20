@@ -27,13 +27,15 @@ const MEMORY_TYPE_LABELS: Record<string, string> = {
 
 const LAYER_COLORS: Record<string, string> = {
   user: '#faad14',
-  scope: '#1677ff',
+  scopeChat: '#1677ff',
+  scopeDocument: '#52c41a',
   session: '#13c2c2'
 }
 
 const LAYER_LABELS: Record<string, string> = {
   user: 'User',
-  scope: 'Scope',
+  scopeChat: '对话',
+  scopeDocument: '文档',
   session: 'Session'
 }
 
@@ -135,20 +137,27 @@ export function MemoryStatsChart() {
       setTotal(memories.length)
 
       const typeCounts: Record<string, number> = {}
-      const layerCounts: Record<string, number> = { user: 0, scope: 0, session: 0 }
+      const layerCounts: Record<string, number> = {
+        user: 0,
+        scopeChat: 0,
+        scopeDocument: 0,
+        session: 0
+      }
 
       for (const m of memories) {
         const mt = m.memory_type || 'narrative'
         typeCounts[mt] = (typeCounts[mt] || 0) + 1
 
-        let layer = 'scope'
+        let layer = 'scopeChat'
         if (m.memory_layer === 'user') layer = 'user'
         else if (m.memory_layer === 'session') layer = 'session'
-        else if (m.memory_layer === 'scope') layer = 'scope'
-        else {
+        else if (m.memory_layer === 'scope') {
+          layer = mt === 'document' ? 'scopeDocument' : 'scopeChat'
+        } else {
           const gid = m.group_id ?? ''
           if (!gid || gid === 'user') layer = 'user'
           else if (gid.includes(':session:')) layer = 'session'
+          else layer = mt === 'document' ? 'scopeDocument' : 'scopeChat'
         }
         layerCounts[layer]++
       }
@@ -165,7 +174,7 @@ export function MemoryStatsChart() {
       )
 
       setByLayer(
-        ['user', 'scope', 'session'].map((key) => ({
+        ['user', 'scopeChat', 'scopeDocument', 'session'].map((key) => ({
           key,
           label: LAYER_LABELS[key],
           count: layerCounts[key] || 0,

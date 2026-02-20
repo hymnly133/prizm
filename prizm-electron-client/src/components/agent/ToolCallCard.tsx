@@ -26,6 +26,8 @@ import {
   Bell,
   ChevronDown,
   ShieldCheck,
+  Copy,
+  Check,
   type LucideIcon
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react'
@@ -36,6 +38,8 @@ import { getToolDisplayName, getToolMetadata, getToolRender, isPrizmTool } from 
 import { createStyles } from 'antd-style'
 import type { FileKind } from '../../hooks/useFileList'
 import { useWorkNavigation } from '../../context/WorkNavigationContext'
+import { useAgentSessionStore } from '../../store/agentSessionStore'
+import { ToolCallBadge } from './ToolCallBadge'
 
 const useStyles = createStyles(({ css }) => ({
   cardPadding: css`
@@ -108,7 +112,12 @@ const CATEGORY_COLORS: Record<string, string> = {
 function getCategoryIcon(toolName: string): LucideIcon {
   const meta = getToolMetadata(toolName)
   if (meta?.category && CATEGORY_ICONS[meta.category]) return CATEGORY_ICONS[meta.category]
-  if (toolName === 'tavily_web_search') return Globe
+  if (
+    toolName === 'prizm_web_search' ||
+    toolName === 'prizm_web_fetch' ||
+    toolName === 'tavily_web_search'
+  )
+    return Globe
   if (isPrizmTool(toolName)) return FileText
   return Wrench
 }
@@ -116,7 +125,12 @@ function getCategoryIcon(toolName: string): LucideIcon {
 function getCategoryColor(toolName: string): string {
   const meta = getToolMetadata(toolName)
   if (meta?.category && CATEGORY_COLORS[meta.category]) return CATEGORY_COLORS[meta.category]
-  if (toolName === 'tavily_web_search') return '#f97316'
+  if (
+    toolName === 'prizm_web_search' ||
+    toolName === 'prizm_web_fetch' ||
+    toolName === 'tavily_web_search'
+  )
+    return '#f97316'
   return '#94a3b8'
 }
 
@@ -153,6 +167,16 @@ function parseFileRef(argsStr: string, resultStr?: string): { kind: FileKind; id
   return null
 }
 
+/* ── 格式化流式 partial JSON 参数用于展示 ── */
+function formatArgsSoFar(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw)
+    return JSON.stringify(parsed, null, 2)
+  } catch {
+    return raw
+  }
+}
+
 /* ── 从参数提取摘要（支持复合工具 action/mode） ── */
 function parseArgsSummary(argsStr: string): string {
   try {
@@ -175,11 +199,20 @@ function parseArgsSummary(argsStr: string): string {
 
 export const ToolCallCard = memo(function ToolCallCard({ tc }: ToolCallCardProps) {
   const { styles } = useStyles()
+  const compact = useAgentSessionStore((s) => s.toolCardCompact)
+
+  const status = tc.status ?? 'done'
+  const isError = !!tc.isError
+
+  /* 精简模式：done 状态的非错误卡片渲染为 inline badge */
+  if (compact && status === 'done' && !isError) {
+    return <ToolCallBadge tc={tc} />
+  }
+
   /* 外部注册的自定义渲染器优先（MCP 扩展等） */
   const customRender = getToolRender(tc.name)
   if (customRender) return <>{customRender({ tc })}</>
 
-  const status = tc.status ?? 'done'
   if (status === 'preparing' || status === 'running') {
     log.debug('Render:', status, tc.id, tc.name)
   }
@@ -187,14 +220,13 @@ export const ToolCallCard = memo(function ToolCallCard({ tc }: ToolCallCardProps
   const CategoryIcon = getCategoryIcon(tc.name)
   const accentColor = getCategoryColor(tc.name)
   const argsSummary = parseArgsSummary(tc.arguments)
-  const isError = !!tc.isError
   const { openFileAtWork } = useWorkNavigation()
 
   const isFileRelated = FILE_TOOLS.has(tc.name)
   const fileRef =
     isFileRelated && status === 'done' && !isError ? parseFileRef(tc.arguments, tc.result) : null
 
-  /* ── preparing: LLM 刚决定调用此工具 ── */
+  /* ── preparing: LLM 正在生成工具参数 ── */
   if (status === 'preparing') {
     return (
       <div className="tool-card" data-status="preparing">
@@ -205,10 +237,22 @@ export const ToolCallCard = memo(function ToolCallCard({ tc }: ToolCallCardProps
           </div>
           <Flexbox flex={1} gap={2}>
             <span className="tool-card__name">{displayName}</span>
-            <span className="tool-card__status-text">准备调用…</span>
+            {argsSummary ? (
+              <span className="tool-card__desc">{argsSummary}</span>
+            ) : (
+              <span className="tool-card__status-text">生成参数中…</span>
+            )}
           </Flexbox>
           <Loader2 size={14} className="tool-card__spinner" />
         </Flexbox>
+        {tc.arguments && tc.arguments !== '{}' && (
+          <div className="tool-card__streaming-args">
+            <pre className="tool-card__pre tool-card__pre--streaming">
+              {formatArgsSoFar(tc.arguments)}
+            </pre>
+          </div>
+        )}
+        <div className="tool-card__progress-bar" style={{ '--tc-accent': accentColor } as never} />
       </div>
     )
   }
@@ -229,6 +273,7 @@ export const ToolCallCard = memo(function ToolCallCard({ tc }: ToolCallCardProps
           </Flexbox>
           <Loader2 size={14} className="tool-card__spinner" />
         </Flexbox>
+        <div className="tool-card__progress-bar" style={{ '--tc-accent': accentColor } as never} />
       </div>
     )
   }
@@ -287,6 +332,58 @@ function extractPathFromArgs(argsStr: string): string | null {
   }
 }
 
+const RESULT_TRUNCATE_LIMIT = 500
+
+function formatResultStr(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw)
+    return JSON.stringify(parsed, null, 2)
+  } catch {
+    return raw
+  }
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      void navigator.clipboard.writeText(text).then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1500)
+      })
+    },
+    [text]
+  )
+  return (
+    <button className="tool-card__copy-btn" onClick={handleCopy} title="复制结果">
+      {copied ? <Check size={12} /> : <Copy size={12} />}
+    </button>
+  )
+}
+
+function TruncatedPre({ text, isError }: { text: string; isError: boolean }) {
+  const formatted = formatResultStr(text)
+  const needsTruncation = formatted.length > RESULT_TRUNCATE_LIMIT
+  const [showAll, setShowAll] = useState(false)
+  const displayText =
+    needsTruncation && !showAll ? formatted.slice(0, RESULT_TRUNCATE_LIMIT) + '…' : formatted
+
+  return (
+    <div className="tool-card__pre-wrap">
+      <pre className={`tool-card__pre${isError ? ' tool-card__pre--error' : ''}`}>
+        {displayText || '(无返回)'}
+      </pre>
+      {text && <CopyButton text={text} />}
+      {needsTruncation && !showAll && (
+        <span className="tool-card__show-more" onClick={() => setShowAll(true)}>
+          查看完整结果
+        </span>
+      )}
+    </div>
+  )
+}
+
 /* ── Done 状态的卡片，独立组件以维护 expanded state ── */
 function ToolCardDone({
   tc,
@@ -308,7 +405,7 @@ function ToolCardDone({
   onOpenFile: (kind: FileKind, id: string) => void
 }) {
   const { styles } = useStyles()
-  const [expanded, toggleExpanded] = useToolCardExpanded(tc.id)
+  const [expanded, toggleExpanded] = useToolCardExpanded(tc.id, isError)
   const handleKeyDown = useToolCardExpandedKeyboard(toggleExpanded)
   const [granting, setGranting] = useState(false)
   const [granted, setGranted] = useState(false)
@@ -337,7 +434,6 @@ function ToolCardDone({
   return (
     <div className={`tool-card${isError ? ' tool-card--error' : ''}`} data-status="done">
       <div className="tool-card__indicator" style={{ background: accentColor }} />
-      {/* 头部：点击展开/折叠 */}
       <div
         className="tool-card__header"
         role="button"
@@ -347,7 +443,7 @@ function ToolCardDone({
       >
         <Flexbox gap={8} horizontal align="center" className={styles.fullWidth}>
           <div className="tool-card__icon-wrap" style={{ '--tc-accent': accentColor } as never}>
-            <Icon icon={CategoryIcon} size={15} />
+            <Icon icon={isError ? AlertCircle : CategoryIcon} size={15} />
           </div>
           <Flexbox flex={1} gap={2} className={styles.noShrink}>
             <Flexbox horizontal align="center" gap={6}>
@@ -406,7 +502,6 @@ function ToolCardDone({
           />
         </Flexbox>
       </div>
-      {/* 展开内容 - 带动画 */}
       <AnimatePresence initial={false}>
         {expanded && (
           <motion.div
@@ -418,16 +513,18 @@ function ToolCardDone({
             style={{ overflow: 'hidden' }}
           >
             {tc.arguments && tc.arguments !== '{}' && (
-              <div>
+              <div className="tool-card__pre-wrap">
                 <div className="tool-card__section-label">参数</div>
-                <pre className="tool-card__pre">{tc.arguments}</pre>
+                <pre className="tool-card__pre">{formatResultStr(tc.arguments)}</pre>
+                <CopyButton text={tc.arguments} />
               </div>
             )}
             <div>
               <div className="tool-card__section-label">{isError ? '错误信息' : '结果'}</div>
-              <pre className={`tool-card__pre${isError ? ' tool-card__pre--error' : ''}`}>
-                {tc.result || '(无返回)'}
-              </pre>
+              <TruncatedPre text={tc.result || ''} isError={isError} />
+              {isError && (
+                <div className="tool-card__retry-hint">可通过发送消息要求 Agent 重试此操作</div>
+              )}
             </div>
           </motion.div>
         )}

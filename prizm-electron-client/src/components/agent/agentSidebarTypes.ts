@@ -26,9 +26,10 @@ export interface SessionStats {
     totalInputTokens: number
     totalOutputTokens: number
     totalTokens: number
+    totalCachedInputTokens?: number
     rounds: number
-    byModel: Record<string, { input: number; output: number; total: number; count: number }>
-    byCategory?: Record<string, { input: number; output: number; total: number; count: number }>
+    byModel: Record<string, { input: number; output: number; total: number; cached?: number; count: number }>
+    byCategory?: Record<string, { input: number; output: number; total: number; cached?: number; count: number }>
   }
   memoryCreated: {
     totalCount: number
@@ -49,7 +50,9 @@ export interface ActivityItem {
 
 export const MEMORY_LAYER_DESCRIPTIONS: Record<string, string> = {
   user: '用户画像 / 偏好（跨 Scope 共享）',
-  scope: '情景叙事 / 前瞻计划 / 文档记忆（工作区级）',
+  scope: '工作区级记忆（对话 + 文档）',
+  scopeChat: '情景叙事 / 前瞻计划（对话产生的工作区记忆）',
+  scopeDocument: '文档记忆（从文档内容提取的记忆）',
   session: '事件日志 / 原子事实（会话级，自动清理）'
 }
 

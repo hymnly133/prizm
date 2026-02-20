@@ -152,8 +152,9 @@ interface MemorySidebarPanelProps {
   memoryEnabled: boolean
   userMemoryCount: number
   scopeMemoryCount: number
+  scopeChatMemoryCount: number
+  scopeDocumentMemoryCount: number
   sessionMemoryCount: number
-  documentMemoryCount: number
   memoryByType?: Record<string, number>
   memoryCountsLoading: boolean
   onOpenInspector?: () => void
@@ -163,8 +164,9 @@ export function MemorySidebarPanel({
   memoryEnabled,
   userMemoryCount,
   scopeMemoryCount,
+  scopeChatMemoryCount,
+  scopeDocumentMemoryCount,
   sessionMemoryCount,
-  documentMemoryCount,
   memoryByType,
   memoryCountsLoading,
   onOpenInspector
@@ -199,7 +201,8 @@ export function MemorySidebarPanel({
 
   const filtered = memories.filter((m) => {
     if (layerFilter === 'all') return true
-    if (layerFilter === 'document') return m.memory_type === 'document' && m.memory_layer === 'scope'
+    if (layerFilter === 'document')
+      return m.memory_type === 'document' && m.memory_layer === 'scope'
     if (layerFilter === 'scope') return m.memory_layer === 'scope' && m.memory_type !== 'document'
     return m.memory_layer === layerFilter
   })
@@ -227,7 +230,7 @@ export function MemorySidebarPanel({
           记忆
           {!memoryCountsLoading && (
             <span className={styles.countBadge}>
-              {userMemoryCount + scopeMemoryCount + documentMemoryCount + sessionMemoryCount}
+              {userMemoryCount + scopeMemoryCount + sessionMemoryCount}
             </span>
           )}
         </span>
@@ -248,8 +251,8 @@ export function MemorySidebarPanel({
         options={[
           { label: '全部', value: 'all' },
           { label: `User ${userMemoryCount}`, value: 'user' },
-          { label: `Scope ${scopeMemoryCount}`, value: 'scope' },
-          { label: `文档 ${documentMemoryCount}`, value: 'document' },
+          { label: `对话 ${scopeChatMemoryCount}`, value: 'scope' },
+          { label: `文档 ${scopeDocumentMemoryCount}`, value: 'document' },
           { label: `Session ${sessionMemoryCount}`, value: 'session' }
         ]}
       />
