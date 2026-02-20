@@ -2,6 +2,10 @@ import { ILLMProvider } from '../core/RetrievalManager.js'
 
 export interface CompletionRequest {
   prompt: string
+  /** 稳定的系统指令（作为 messages[0] system，可缓存前缀） */
+  systemPrompt?: string
+  /** 缓存路由 key（透传给 LLM API 的 prompt_cache_key） */
+  cacheKey?: string
   temperature?: number
   json?: boolean
   /** 操作标签，用于 token 统计分类（如 'memory:dedup'） */

@@ -155,6 +155,11 @@ export class SQLiteAdapter implements RelationalStoreAdapter {
     return stmt.all(...params).map((r) => this.parseResult(r))
   }
 
+  async run(sql: string, params: any[] = []): Promise<void> {
+    const stmt = this.db.prepare(sql)
+    stmt.run(...params)
+  }
+
   private parseResult(row: any): any {
     if (row.metadata && typeof row.metadata === 'string') {
       try {

@@ -7,7 +7,8 @@ import {
   textSimilarity,
   normalizeForDedup,
   buildBigrams,
-  diceCoefficientFromBigrams
+  diceCoefficientFromBigrams,
+  isTrivialEventLog
 } from './MemoryManager.js'
 import { MemoryType, RawDataType, type MemCell, type MemoryRoutingContext } from '../types.js'
 import type { StorageAdapter } from '../storage/interfaces.js'
@@ -1083,6 +1084,46 @@ describe('MemoryManager', () => {
       expect(results).toHaveLength(2)
       expect(results[0].id).toBe('p1-mem')
       expect(results[1].id).toBe('p2-mem')
+    })
+  })
+
+  describe('isTrivialEventLog', () => {
+    it('should filter greetings in Chinese', () => {
+      expect(isTrivialEventLog('user 于 2026-02-19 22:30 向 assistant 打招呼"你好"')).toBe(true)
+      expect(isTrivialEventLog('用户向助手问好')).toBe(true)
+      expect(isTrivialEventLog('用户对AI说了"你好"')).toBe(true)
+      expect(isTrivialEventLog('用户向assistant表示问候')).toBe(true)
+    })
+
+    it('should filter AI greeting responses', () => {
+      expect(isTrivialEventLog('assistant 回复 user 并询问是否需要帮助')).toBe(true)
+      expect(isTrivialEventLog('助手回应用户并询问有什么需要帮忙的')).toBe(true)
+    })
+
+    it('should filter session lifecycle descriptions', () => {
+      expect(isTrivialEventLog('对话开始')).toBe(true)
+      expect(isTrivialEventLog('会话结束')).toBe(true)
+    })
+
+    it('should filter bare greeting messages', () => {
+      expect(isTrivialEventLog('user 说了"你好"')).toBe(true)
+      expect(isTrivialEventLog('用户发送"hi"')).toBe(true)
+      expect(isTrivialEventLog('用户输入"hello"')).toBe(true)
+      expect(isTrivialEventLog('user 说 "您好"')).toBe(true)
+    })
+
+    it('should filter very short facts', () => {
+      expect(isTrivialEventLog('hi')).toBe(true)
+      expect(isTrivialEventLog('你好')).toBe(true)
+    })
+
+    it('should NOT filter substantive facts', () => {
+      expect(isTrivialEventLog('用户要求重构登录模块的认证逻辑')).toBe(false)
+      expect(isTrivialEventLog('用户反馈搜索功能响应时间超过3秒')).toBe(false)
+      expect(isTrivialEventLog('用户决定采用方案A进行数据库迁移')).toBe(false)
+      expect(isTrivialEventLog('用户询问如何优化React组件的性能')).toBe(false)
+      expect(isTrivialEventLog('assistant 为用户生成了一个Python脚本来处理CSV文件')).toBe(false)
+      expect(isTrivialEventLog('用户提到项目需要支持多语言国际化')).toBe(false)
     })
   })
 })

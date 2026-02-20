@@ -13,6 +13,8 @@ export interface RelationalStoreAdapter {
   update(table: string, id: string, item: any): Promise<void>
   delete(table: string, id: string): Promise<void>
   query(sql: string, params?: any[]): Promise<any[]>
+  /** Execute a write statement (INSERT/UPDATE/DELETE) that does not return rows */
+  run?(sql: string, params?: any[]): Promise<void>
 }
 
 export interface StorageAdapter {

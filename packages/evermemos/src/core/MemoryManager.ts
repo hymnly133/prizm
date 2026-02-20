@@ -22,7 +22,7 @@ import { createHash } from 'node:crypto'
 
 import type { UnifiedExtractor } from '../extractors/UnifiedExtractor.js'
 import type { ICompletionProvider } from '../utils/llm.js'
-import { DEDUP_CONFIRM_PROMPT } from '../prompts.js'
+import { DEDUP_CONFIRM_SYSTEM, DEDUP_CONFIRM_USER_TEMPLATE } from '../prompts.js'
 import { mergeProfilesSimple, mergeProfilesWithLLM } from '../utils/profileMerger.js'
 import { Jieba } from '@node-rs/jieba'
 
@@ -758,14 +758,16 @@ export class MemoryManager {
     existingContent: string,
     newContent: string
   ): Promise<{ isDuplicate: boolean; reasoning: string }> {
-    const prompt = DEDUP_CONFIRM_PROMPT.replace(
+    const userPrompt = DEDUP_CONFIRM_USER_TEMPLATE.replace(
       '{{EXISTING}}',
       existingContent.slice(0, 500)
     ).replace('{{NEW}}', newContent.slice(0, 500))
 
     const response = await this.llmProvider!.generate({
-      prompt,
+      systemPrompt: DEDUP_CONFIRM_SYSTEM,
+      prompt: userPrompt,
       temperature: 0,
+      cacheKey: 'prizm:memory:dedup',
       operationTag: 'memory:dedup'
     })
 
@@ -969,6 +971,7 @@ export class MemoryManager {
         : routing?.scope
       for (const fact of result.event_log.atomic_fact) {
         if (typeof fact !== 'string' || !fact.trim()) continue
+        if (isTrivialEventLog(fact)) continue
         const id = uuidv4()
         let embedding: number[] | undefined
         try {
@@ -1889,6 +1892,33 @@ export function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
   }
   const union = a.size + b.size - intersection
   return union === 0 ? 0 : intersection / union
+}
+
+// ==================== EVENT_LOG 低质量记忆过滤 ====================
+
+/**
+ * 低质量/无信息量事件日志的关键词模式。
+ * 匹配这些模式的 FACT 将在写入前被过滤掉。
+ */
+const TRIVIAL_EVENT_PATTERNS: RegExp[] = [
+  /^.{0,5}(打招呼|问好|寒暄|say\s*h(ello|i)|greet)/i,
+  /(打招呼|问好|问候|寒暄)/,
+  /(向|对)\s*(assistant|ai|助手|用户|user)\s*(打招呼|问好|说[了]?\s*[""\u201c\u201d]?[你您]好[""\u201c\u201d]?)/i,
+  /(assistant|ai|助手)\s*(回复|回应|响应)\s*(user|用户)\s*(并)?\s*(询问|问)\s*(是否|有什么).*(帮助|帮忙|需要)/,
+  /^(user|用户)\s*(说|发送|输入)[了]?\s*["'""]*\s*(你好|您好|hi|hello|hey|在吗|嗨)\s*["'""]*\s*$/i,
+  /(assistant|ai|助手)\s*(进行了?|做了?)?\s*(自我介绍|介绍自己)/,
+  /^(对话|会话)\s*(开始|结束|启动)/,
+  /^(user|用户)\s*(向|对)\s*(assistant|ai|助手)\s*(表示|说了?)\s*(问候|你好|您好)/
+]
+
+/**
+ * 判断一条 EVENT_LOG FACT 是否属于低质量/无信息量的记忆。
+ * 用于在 LLM 抽取后、写入前做代码级防御过滤。
+ */
+export function isTrivialEventLog(fact: string): boolean {
+  const trimmed = fact.trim()
+  if (trimmed.length < 5) return true
+  return TRIVIAL_EVENT_PATTERNS.some((pattern) => pattern.test(trimmed))
 }
 
 /**
