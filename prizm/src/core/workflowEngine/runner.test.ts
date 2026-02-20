@@ -64,7 +64,14 @@ vi.mock('../PathProviderCore', async () => {
     ensureRunWorkspace: vi.fn((scopeRoot: string, workflowName: string, runId: string) => {
       const dir = _dirName(workflowName)
       const persistentDir = path.join(scopeRoot, '.prizm', 'workflows', dir, 'persistent')
-      const runDir = path.join(scopeRoot, '.prizm', 'workflows', dir, 'run-workspaces', _safeId(runId))
+      const runDir = path.join(
+        scopeRoot,
+        '.prizm',
+        'workflows',
+        dir,
+        'run-workspaces',
+        _safeId(runId)
+      )
       fs.mkdirSync(persistentDir, { recursive: true })
       fs.mkdirSync(runDir, { recursive: true })
       return { persistentDir, runDir }
@@ -76,7 +83,15 @@ vi.mock('../PathProviderCore', async () => {
       return path.join(scopeRoot, '.prizm', 'workflows', _dirName(workflowName), '.meta', 'runs')
     }),
     getWorkflowRunMetaPath: vi.fn((scopeRoot: string, workflowName: string, runId: string) => {
-      return path.join(scopeRoot, '.prizm', 'workflows', _dirName(workflowName), '.meta', 'runs', `${_safeId(runId)}.md`)
+      return path.join(
+        scopeRoot,
+        '.prizm',
+        'workflows',
+        _dirName(workflowName),
+        '.meta',
+        'runs',
+        `${_safeId(runId)}.md`
+      )
     })
   }
 })

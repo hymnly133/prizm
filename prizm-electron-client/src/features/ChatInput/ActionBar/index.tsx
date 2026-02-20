@@ -6,6 +6,7 @@ import Clear from "./Clear";
 import Upload from "./Upload";
 import ThinkingToggle from "./ThinkingToggle";
 import ToolCompactToggle from "./ToolCompactToggle";
+import SkillsToggle from "./SkillsToggle";
 
 interface ActionBarProps {
 	leftActions?: ActionKeys[];
@@ -20,6 +21,7 @@ const actionMap: Record<
 	clear: Clear,
 	thinking: ThinkingToggle,
 	toolCompact: ToolCompactToggle,
+	skills: SkillsToggle,
 };
 
 const ActionBar = memo<ActionBarProps>(({ leftActions = [], onClear }) => {

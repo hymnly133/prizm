@@ -9,6 +9,7 @@
 
 import fs from 'fs'
 import path from 'path'
+import yaml from 'js-yaml'
 import { createLogger } from '../../logger'
 import { genUniqueId } from '../../id'
 import {
@@ -27,6 +28,8 @@ interface DefMeta {
   id: string
   createdAt: number
   updatedAt: number
+  /** 关联的 Tool LLM 对话会话 ID（AI 创建/编辑时写入） */
+  toolLLMSessionId?: string
 }
 
 // ─── 内部辅助 ───
@@ -64,22 +67,30 @@ function writeMeta(metaPath: string, meta: DefMeta): void {
   fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8')
 }
 
-function extractYamlFields(yamlContent: string): { name?: string; description?: string; triggersJson?: string } {
+function extractYamlFields(yamlContent: string): {
+  name?: string
+  description?: string
+  triggersJson?: string
+} {
   try {
-    const yaml = require('js-yaml')
     const parsed = yaml.load(yamlContent)
     if (!parsed || typeof parsed !== 'object') return {}
+    const obj = parsed as Record<string, unknown>
     return {
-      name: typeof parsed.name === 'string' ? parsed.name : undefined,
-      description: typeof parsed.description === 'string' ? parsed.description : undefined,
-      triggersJson: parsed.triggers ? JSON.stringify(parsed.triggers) : undefined
+      name: typeof obj.name === 'string' ? obj.name : undefined,
+      description: typeof obj.description === 'string' ? obj.description : undefined,
+      triggersJson: obj.triggers ? JSON.stringify(obj.triggers) : undefined
     }
   } catch {
     return {}
   }
 }
 
-function readDefFromDisk(scopeRoot: string, dirName: string, scope: string): WorkflowDefRecord | null {
+function readDefFromDisk(
+  scopeRoot: string,
+  dirName: string,
+  scope: string
+): WorkflowDefRecord | null {
   const defPath = getWorkflowDefPath(scopeRoot, dirName)
   if (!fs.existsSync(defPath)) return null
 
@@ -178,7 +189,9 @@ export function getDefById(id: string): WorkflowDefRecord | null {
           return readDefFromDisk(scopeRoot, d.name, scope)
         }
       }
-    } catch { /* skip inaccessible dirs */ }
+    } catch {
+      /* skip inaccessible dirs */
+    }
   }
   return null
 }
@@ -233,6 +246,36 @@ export function listDefs(scope?: string): WorkflowDefRecord[] {
   return results
 }
 
+/**
+ * 获取工作流的 DefMeta 元数据
+ */
+export function getDefMeta(name: string, scope: string): DefMeta | null {
+  const scopeRoot = scopeStore.getScopeRootPath(scope)
+  const dirName = workflowDirName(name)
+  const metaPath = getWorkflowDefMetaPath(scopeRoot, dirName)
+  return readMeta(metaPath)
+}
+
+/**
+ * 更新工作流的 DefMeta 部分字段（merge 语义）
+ */
+export function updateDefMeta(
+  name: string,
+  scope: string,
+  patch: Partial<Pick<DefMeta, 'toolLLMSessionId'>>
+): void {
+  const scopeRoot = scopeStore.getScopeRootPath(scope)
+  const dirName = workflowDirName(name)
+  const metaPath = getWorkflowDefMetaPath(scopeRoot, dirName)
+  const existing = readMeta(metaPath)
+  if (!existing) {
+    log.warn('Cannot update DefMeta: not found for', name)
+    return
+  }
+  const updated: DefMeta = { ...existing, ...patch, updatedAt: Date.now() }
+  writeMeta(metaPath, updated)
+}
+
 export function deleteDef(id: string): boolean {
   for (const scope of scopeStore.getAllScopes()) {
     const scopeRoot = scopeStore.getScopeRootPath(scope)
@@ -253,7 +296,9 @@ export function deleteDef(id: string): boolean {
         log.info('Deleted workflow def:', d.name, 'scope:', scope)
         return true
       }
-    } catch { /* skip */ }
+    } catch {
+      /* skip */
+    }
   }
   return false
 }

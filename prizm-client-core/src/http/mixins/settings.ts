@@ -53,11 +53,56 @@ declare module '../client' {
       license?: string
       metadata?: Record<string, string>
     }): Promise<unknown>
+    updateSkill(
+      name: string,
+      update: { description?: string; body?: string; enabled?: boolean }
+    ): Promise<unknown>
     deleteSkill(name: string): Promise<void>
     importSkills(
       source: 'claude-code' | 'github',
       path?: string
     ): Promise<{ imported: number; skills: unknown[] }>
+    searchSkillRegistry(
+      query: string,
+      page?: number
+    ): Promise<{
+      items: Array<{
+        name: string
+        description: string
+        owner: string
+        repo: string
+        skillPath: string
+        stars?: number
+        license?: string
+        source: string
+        htmlUrl?: string
+      }>
+      totalCount: number
+      query: string
+    }>
+    getFeaturedSkills(): Promise<{
+      skills: Array<{
+        name: string
+        description: string
+        owner: string
+        repo: string
+        skillPath: string
+        license?: string
+        source: string
+        htmlUrl?: string
+        installed?: boolean
+      }>
+    }>
+    previewRegistrySkill(
+      owner: string,
+      repo: string,
+      skillPath: string
+    ): Promise<{ name: string; description: string; body: string; license?: string } | null>
+    installRegistrySkill(
+      owner: string,
+      repo: string,
+      skillPath: string
+    ): Promise<unknown>
     importMcpConfig(
       source: 'cursor' | 'claude-code' | 'vscode',
       path?: string
@@ -222,6 +267,17 @@ PrizmClient.prototype.deleteSkill = async function (this: PrizmClient, name: str
   })
 }
 
+PrizmClient.prototype.updateSkill = async function (
+  this: PrizmClient,
+  name: string,
+  update: { description?: string; body?: string; enabled?: boolean }
+) {
+  return this.request(`/skills/${encodeURIComponent(name)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(update)
+  })
+}
+
 PrizmClient.prototype.importSkills = async function (
   this: PrizmClient,
   source: 'claude-code' | 'github',
@@ -230,6 +286,42 @@ PrizmClient.prototype.importSkills = async function (
   return this.request('/skills/import', {
     method: 'POST',
     body: JSON.stringify({ source, path })
+  })
+}
+
+PrizmClient.prototype.searchSkillRegistry = async function (
+  this: PrizmClient,
+  query: string,
+  page?: number
+) {
+  const params = new URLSearchParams({ q: query })
+  if (page) params.set('page', String(page))
+  return this.request(`/skills/registry/search?${params.toString()}`)
+}
+
+PrizmClient.prototype.getFeaturedSkills = async function (this: PrizmClient) {
+  return this.request('/skills/registry/featured')
+}
+
+PrizmClient.prototype.previewRegistrySkill = async function (
+  this: PrizmClient,
+  owner: string,
+  repo: string,
+  skillPath: string
+) {
+  const params = new URLSearchParams({ owner, repo, path: skillPath })
+  return this.request(`/skills/registry/preview?${params.toString()}`)
+}
+
+PrizmClient.prototype.installRegistrySkill = async function (
+  this: PrizmClient,
+  owner: string,
+  repo: string,
+  skillPath: string
+) {
+  return this.request('/skills/registry/install', {
+    method: 'POST',
+    body: JSON.stringify({ owner, repo, skillPath })
   })
 }
 

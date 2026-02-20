@@ -115,6 +115,8 @@ export async function executeBuiltinTool(
         return dispatchCron(ctx)
       case 'prizm_workflow':
         return workflowTools.dispatchWorkflow(ctx)
+      case 'prizm_workflow_builder':
+        return workflowTools.dispatchWorkflowBuilder(ctx)
       default:
         return { text: `未知内置工具: ${toolName}`, isError: true }
     }

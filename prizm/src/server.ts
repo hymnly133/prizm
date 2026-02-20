@@ -49,6 +49,7 @@ import { clearAll as clearEventBus } from './core/eventBus'
 import { bgSessionManager } from './core/backgroundSession'
 import { cronManager } from './core/cronScheduler'
 import { chatCore } from './routes/agent/chatCore'
+import { toolLLMManager } from './llm/toolLLM'
 import type { IChatService } from './core/interfaces'
 import { registerPermissionCleanupHandler } from './core/toolPermission'
 import {
@@ -312,6 +313,7 @@ export function createPrizmServer(
               log.warn('Audit manager init failed:', e)
             }
             const chatService: IChatService = { execute: chatCore }
+            toolLLMManager.init(adapters.agent, chatService)
             await bgSessionManager.init(adapters.agent, chatService)
             await cronManager.init(bgSessionManager)
             initResumeStore()

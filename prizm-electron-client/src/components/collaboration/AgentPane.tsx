@@ -32,7 +32,7 @@ import {
 } from '../../features/ChatInput'
 import '../../components/agent/TerminalToolCards'
 
-const LEFT_ACTIONS: ActionKeys[] = ['fileUpload', 'thinking', 'toolCompact', 'clear']
+const LEFT_ACTIONS: ActionKeys[] = ['fileUpload', 'thinking', 'toolCompact', 'skills', 'clear']
 const RIGHT_ACTIONS: ActionKeys[] = []
 
 const COMPACT_INPUT_STYLE = {

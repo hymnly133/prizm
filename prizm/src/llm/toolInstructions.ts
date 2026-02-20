@@ -72,6 +72,17 @@ const GUIDES: ToolGuide[] = [
     ].join('\n')
   },
   {
+    category: 'workflow_builder',
+    toolNames: ['prizm_workflow_builder'],
+    firstCallHint: [
+      '[注意事项]',
+      '· build: 创建新工作流，edit: 修改已有工作流',
+      '· edit 时 workflow_name 必填，指定要修改的工作流',
+      '· 结果通过内联卡片展示，用户可在卡片内多轮微调并确认',
+      '· intent 要详细描述用户需求，context 传递当前对话上下文'
+    ].join('\n')
+  },
+  {
     category: 'web_search',
     toolNames: ['prizm_web_search', 'prizm_web_fetch'],
     firstCallHint: [

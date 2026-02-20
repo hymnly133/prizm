@@ -12,6 +12,7 @@ import {
 } from '../../core/workflowEngine'
 import * as resumeStore from '../../core/workflowEngine/resumeStore'
 import * as defStore from '../../core/workflowEngine/workflowDefStore'
+import { toolLLMManager } from '../toolLLM'
 import type { BuiltinToolContext, BuiltinToolResult } from './types'
 
 export function dispatchWorkflow(ctx: BuiltinToolContext): BuiltinToolResult | Promise<BuiltinToolResult> {
@@ -238,6 +239,102 @@ function executeGetDef(ctx: BuiltinToolContext): BuiltinToolResult {
         name: defRecord.name,
         yamlContent: defRecord.yamlContent
       }, null, 2)
+    }
+  }
+}
+
+/** 工作流构建器（桥接到 Tool LLM） */
+export async function dispatchWorkflowBuilder(ctx: BuiltinToolContext): Promise<BuiltinToolResult> {
+  const action = ctx.args.action as string
+  const intent = ctx.args.intent as string
+  const workflowName = ctx.args.workflow_name as string | undefined
+  const context = ctx.args.context as string | undefined
+
+  if (!intent) {
+    return { text: '需要提供 intent 参数', isError: true }
+  }
+
+  try {
+    if (action === 'build') {
+      const result = await toolLLMManager.start(
+        ctx.scope,
+        { domain: 'workflow', intent, context },
+        () => {} // 内置工具调用时不做流式传输，结果通过 tool_result 返回
+      )
+      return {
+        text: JSON.stringify({
+          sessionId: result.sessionId,
+          status: result.status,
+          version: result.version,
+          workflowDef: result.workflowDef,
+          yamlContent: result.yamlContent,
+          _toolLLM: true,
+          message: '工作流已生成预览，请在构建器卡片中确认或继续修改'
+        })
+      }
+    }
+
+    if (action === 'edit') {
+      if (!workflowName) {
+        return { text: 'edit action 需要提供 workflow_name', isError: true }
+      }
+
+      const defRecord = defStore.getDefByName(workflowName, ctx.scope)
+      if (!defRecord) {
+        return { text: `工作流 "${workflowName}" 未找到`, isError: true }
+      }
+
+      const existingSessionId = toolLLMManager.getSessionIdForWorkflow(ctx.scope, workflowName)
+
+      if (existingSessionId) {
+        const result = await toolLLMManager.resume(
+          ctx.scope,
+          existingSessionId,
+          intent + (context ? `\n补充上下文：${context}` : ''),
+          () => {}
+        )
+        return {
+          text: JSON.stringify({
+            sessionId: result.sessionId,
+            status: result.status,
+            version: result.version,
+            workflowDef: result.workflowDef,
+            yamlContent: result.yamlContent,
+            _toolLLM: true,
+            message: '工作流已更新预览（复用已有对话），请在构建器卡片中确认或继续修改'
+          })
+        }
+      }
+
+      const result = await toolLLMManager.start(
+        ctx.scope,
+        {
+          domain: 'workflow',
+          intent,
+          workflowName,
+          existingYaml: defRecord.yamlContent,
+          context
+        },
+        () => {}
+      )
+      return {
+        text: JSON.stringify({
+          sessionId: result.sessionId,
+          status: result.status,
+          version: result.version,
+          workflowDef: result.workflowDef,
+          yamlContent: result.yamlContent,
+          _toolLLM: true,
+          message: '工作流已更新预览（新建对话），请在构建器卡片中确认或继续修改'
+        })
+      }
+    }
+
+    return { text: `未知 action: ${action}，仅支持 build/edit`, isError: true }
+  } catch (err) {
+    return {
+      text: `工作流构建器错误: ${err instanceof Error ? err.message : String(err)}`,
+      isError: true
     }
   }
 }

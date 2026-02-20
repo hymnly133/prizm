@@ -119,6 +119,27 @@ declare module '../client' {
       skills: unknown[]
       rules: unknown[]
     }>
+    activateSessionSkill(
+      sessionId: string,
+      skillName: string,
+      scope?: string
+    ): Promise<{ skillName: string; instructions: string; activatedAt: number; autoActivated: boolean }>
+    deactivateSessionSkill(
+      sessionId: string,
+      skillName: string,
+      scope?: string
+    ): Promise<{ deactivated: boolean }>
+    getActiveSessionSkills(
+      sessionId: string,
+      scope?: string
+    ): Promise<{
+      skills: Array<{
+        skillName: string
+        instructions: string
+        activatedAt: number
+        autoActivated: boolean
+      }>
+    }>
   }
 }
 
@@ -516,4 +537,40 @@ PrizmClient.prototype.stopAgentChat = async function (
 
 PrizmClient.prototype.getAgentCapabilities = async function (this: PrizmClient) {
   return this.request('/agent/capabilities')
+}
+
+PrizmClient.prototype.activateSessionSkill = async function (
+  this: PrizmClient,
+  sessionId: string,
+  skillName: string,
+  scope?: string
+) {
+  const s = scope ?? this.defaultScope
+  return this.request(`/skills/${encodeURIComponent(skillName)}/activate`, {
+    method: 'POST',
+    body: JSON.stringify({ scope: s, sessionId })
+  })
+}
+
+PrizmClient.prototype.deactivateSessionSkill = async function (
+  this: PrizmClient,
+  sessionId: string,
+  skillName: string,
+  scope?: string
+) {
+  const s = scope ?? this.defaultScope
+  return this.request(`/skills/${encodeURIComponent(skillName)}/deactivate`, {
+    method: 'POST',
+    body: JSON.stringify({ scope: s, sessionId })
+  })
+}
+
+PrizmClient.prototype.getActiveSessionSkills = async function (
+  this: PrizmClient,
+  sessionId: string,
+  scope?: string
+) {
+  const s = scope ?? this.defaultScope
+  const params = new URLSearchParams({ scope: s, sessionId })
+  return this.request(`/skills/active?${params.toString()}`)
 }

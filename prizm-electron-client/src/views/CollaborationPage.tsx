@@ -52,7 +52,7 @@ import { CollabInteractionContext, useCollabInteractionValue } from '../hooks/us
 import type { RightPanelTab } from '../components/collaboration/collabTypes'
 import '../styles/collab-hub.css'
 
-const LEFT_ACTIONS: ActionKeys[] = ['fileUpload', 'thinking', 'toolCompact', 'clear']
+const LEFT_ACTIONS: ActionKeys[] = ['fileUpload', 'thinking', 'toolCompact', 'skills', 'clear']
 const RIGHT_ACTIONS: ActionKeys[] = []
 
 /* ── CtrlLHandler (needed inside ChatInputProvider) ── */

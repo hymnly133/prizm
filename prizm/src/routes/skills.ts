@@ -22,6 +22,12 @@ import {
   deactivateSkill,
   getActiveSkills
 } from '../llm/skillManager'
+import {
+  searchRegistrySkills,
+  getFeaturedSkills,
+  fetchSkillPreview,
+  installSkillFromRegistry
+} from '../llm/skillRegistry'
 
 const log = createLogger('Skills')
 
@@ -240,6 +246,76 @@ export function createSkillsRoutes(router: Router): void {
       res.json({ deactivated: result })
     } catch (error) {
       log.error('deactivate skill error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // ============ Registry Routes ============
+
+  // GET /skills/registry/search?q=<query>&page=1
+  router.get('/skills/registry/search', async (req: Request, res: Response) => {
+    try {
+      const q = typeof req.query.q === 'string' ? req.query.q : ''
+      const page =
+        typeof req.query.page === 'string' ? Math.max(1, parseInt(req.query.page, 10) || 1) : 1
+      const result = await searchRegistrySkills(q, { page })
+      res.json(result)
+    } catch (error) {
+      log.error('registry search error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // GET /skills/registry/featured
+  router.get('/skills/registry/featured', (_req: Request, res: Response) => {
+    try {
+      const skills = getFeaturedSkills()
+      res.json({ skills })
+    } catch (error) {
+      log.error('registry featured error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // GET /skills/registry/preview?owner=&repo=&path=
+  router.get('/skills/registry/preview', async (req: Request, res: Response) => {
+    try {
+      const owner = typeof req.query.owner === 'string' ? req.query.owner : ''
+      const repo = typeof req.query.repo === 'string' ? req.query.repo : ''
+      const skillPath = typeof req.query.path === 'string' ? req.query.path : ''
+      if (!owner || !repo || !skillPath) {
+        return res.status(400).json({ error: 'owner, repo, and path are required' })
+      }
+      const preview = await fetchSkillPreview(owner, repo, skillPath)
+      if (!preview) {
+        return res.status(404).json({ error: 'SKILL.md not found in repository' })
+      }
+      res.json(preview)
+    } catch (error) {
+      log.error('registry preview error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // POST /skills/registry/install
+  router.post('/skills/registry/install', async (req: Request, res: Response) => {
+    try {
+      const { owner, repo, skillPath } = req.body ?? {}
+      if (
+        typeof owner !== 'string' ||
+        typeof repo !== 'string' ||
+        typeof skillPath !== 'string'
+      ) {
+        return res.status(400).json({ error: 'owner, repo, and skillPath are required' })
+      }
+      const skill = await installSkillFromRegistry(owner, repo, skillPath)
+      res.status(201).json(skill)
+    } catch (error) {
+      log.error('registry install error:', error)
       const { status, body } = toErrorResponse(error)
       res.status(status).json(body)
     }

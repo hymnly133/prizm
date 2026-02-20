@@ -318,8 +318,8 @@ export type SessionChatStatus = 'idle' | 'chatting'
 /** BG Session 触发方式 */
 export type BgTriggerType = 'tool_spawn' | 'api' | 'cron' | 'event_hook'
 
-/** BG Session 上层来源：direct=直接触发 task=TaskRunner workflow=WorkflowRunner */
-export type BgSessionSource = 'direct' | 'task' | 'workflow'
+/** BG Session 上层来源：direct=直接触发 task=TaskRunner workflow=WorkflowRunner tool-llm=ToolLLM会话 */
+export type BgSessionSource = 'direct' | 'task' | 'workflow' | 'tool-llm'
 
 /** BG Session 运行状态 */
 export type BgStatus =

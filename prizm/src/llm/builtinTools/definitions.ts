@@ -40,7 +40,8 @@ export function tool(
 /** workspace 参数：选择操作的工作区（仅在使用相对路径时生效） */
 export const WORKSPACE_PARAM: ToolPropertyDef = {
   type: 'string',
-  description: '"main"（默认）/ "session"（临时工作区）/ "workflow"（工作流工作区，仅在工作流上下文中有效）',
+  description:
+    '"main"（默认）/ "session"（临时工作区）/ "workflow"（工作流工作区，仅在工作流上下文中有效）',
   enum: ['main', 'session', 'workflow']
 }
 
@@ -88,7 +89,10 @@ export function getBuiltinTools(): LLMTool[] {
             description: '待办项标题数组 (create_list/add_items)',
             items: { type: 'string' }
           },
-          itemId: { type: 'string', description: '条目 UUID (update_item/delete_item)，通过 list 获取' },
+          itemId: {
+            type: 'string',
+            description: '条目 UUID (update_item/delete_item)，通过 list 获取'
+          },
           title: { type: 'string', description: '新标题 (update_item)' },
           description: { type: 'string', description: '新描述 (update_item)' },
           status: {
@@ -222,13 +226,17 @@ export function getBuiltinTools(): LLMTool[] {
     ),
 
     // ── 提升文件（独立） ──
-    tool('prizm_promote_file', '将临时工作区(session)或工作流工作区(workflow)中的文档/待办提升到主工作区。仅对非主工作区创建的文件有效，主工作区文件无需提升。', {
-      properties: {
-        fileId: { type: 'string', description: '文档或待办列表 ID' },
-        folder: { type: 'string', description: '目标目录' }
-      },
-      required: ['fileId']
-    }),
+    tool(
+      'prizm_promote_file',
+      '将临时工作区(session)或工作流工作区(workflow)中的文档/待办提升到主工作区。仅对非主工作区创建的文件有效，主工作区文件无需提升。',
+      {
+        properties: {
+          fileId: { type: 'string', description: '文档或待办列表 ID' },
+          folder: { type: 'string', description: '目标目录' }
+        },
+        required: ['fileId']
+      }
+    ),
 
     // ── 终端工具（独立） ──
     tool(
@@ -244,14 +252,18 @@ export function getBuiltinTools(): LLMTool[] {
         required: ['command']
       }
     ),
-    tool('prizm_terminal_spawn', '创建持久终端（dev server、watch、REPL 等长期进程），用 send_keys 交互。返回终端 ID。', {
-      properties: {
-        cwd: { type: 'string', description: '工作目录（相对路径），默认根目录' },
-        workspace: WORKSPACE_PARAM,
-        title: { type: 'string', description: '终端标题' }
-      },
-      required: []
-    }),
+    tool(
+      'prizm_terminal_spawn',
+      '创建持久终端（dev server、watch、REPL 等长期进程），用 send_keys 交互。返回终端 ID。',
+      {
+        properties: {
+          cwd: { type: 'string', description: '工作目录（相对路径），默认根目录' },
+          workspace: WORKSPACE_PARAM,
+          title: { type: 'string', description: '终端标题' }
+        },
+        required: []
+      }
+    ),
     tool(
       'prizm_terminal_send_keys',
       '向持久终端发送输入。pressEnter=true（默认）自动按回车执行，false 仅键入。不要在 input 中加 \\n/\\r。',
@@ -411,6 +423,34 @@ export function getBuiltinTools(): LLMTool[] {
       }
     ),
 
+    // ── 工作流构建器（Tool LLM 桥接） ──
+    tool(
+      'prizm_workflow_builder',
+      '启动工作流构建器。创建新工作流用 build，修改已有工作流用 edit。结果通过内联卡片展示给用户，用户可在卡片内多轮微调。',
+      {
+        properties: {
+          action: {
+            type: 'string',
+            description: '操作类型',
+            enum: ['build', 'edit']
+          },
+          intent: {
+            type: 'string',
+            description: '用户的需求描述（创建什么工作流/如何修改）'
+          },
+          workflow_name: {
+            type: 'string',
+            description: '工作流名称（edit 时必需，指定要修改的已有工作流）'
+          },
+          context: {
+            type: 'string',
+            description: '来自当前对话的相关上下文信息'
+          }
+        },
+        required: ['action', 'intent']
+      }
+    ),
+
     // ── 工作流引擎（复合） ──
     tool(
       'prizm_workflow',
@@ -429,7 +469,8 @@ export function getBuiltinTools(): LLMTool[] {
           def_id: { type: 'string', description: '工作流定义 ID (get_def)' },
           yaml: {
             type: 'string',
-            description: '工作流 YAML 定义。顶层: name, steps[], description?, args?, outputs?, triggers?, config?({errorStrategy,workspaceMode,maxTotalTimeoutMs,notifyOnComplete,notifyOnFail})。每个 step 必须含 type(agent/approve/transform)，id 可省略。agent 需 prompt，approve 需 approvePrompt，transform 需 transform 表达式。step 可选: description, input, condition, model, timeoutMs, sessionConfig({thinking,skills,allowedTools,outputSchema}), retryConfig({maxRetries,retryDelayMs}), linkedActions。input 省略时自动继承上一步输出（隐式管道）；显式引用: $prev.output 或 $stepId.output'
+            description:
+              '工作流 YAML 定义。顶层: name, steps[], description?, args?, outputs?, triggers?, config?({errorStrategy,workspaceMode,maxTotalTimeoutMs,notifyOnComplete,notifyOnFail})。每个 step 必须含 type(agent/approve/transform)，id 可省略。agent 需 prompt，approve 需 approvePrompt，transform 需 transform 表达式。step 可选: description, input, condition, model, timeoutMs, sessionConfig({thinking,skills,allowedTools,outputSchema}), retryConfig({maxRetries,retryDelayMs}), linkedActions。input 省略时自动继承上一步输出（隐式管道）；显式引用: $prev.output 或 $stepId.output'
           },
           run_id: { type: 'string', description: '运行 ID (status/cancel)' },
           resume_token: { type: 'string', description: '恢复令牌 (resume)' },
@@ -439,8 +480,7 @@ export function getBuiltinTools(): LLMTool[] {
         },
         required: ['action']
       }
-    ),
-
+    )
   ]
 }
 
@@ -461,5 +501,6 @@ export const BUILTIN_TOOL_NAMES = new Set([
   'prizm_task_status',
   'prizm_schedule',
   'prizm_cron',
-  'prizm_workflow'
+  'prizm_workflow',
+  'prizm_workflow_builder'
 ])

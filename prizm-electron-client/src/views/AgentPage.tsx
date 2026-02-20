@@ -45,7 +45,7 @@ import '../components/agent/TerminalToolCards'
 import '../components/agent/TaskToolCards'
 import { TaskToolCardsConnector } from '../components/agent/TaskToolCards'
 
-const LEFT_ACTIONS: ActionKeys[] = ['fileUpload', 'thinking', 'toolCompact', 'clear']
+const LEFT_ACTIONS: ActionKeys[] = ['fileUpload', 'thinking', 'toolCompact', 'skills', 'clear']
 const RIGHT_ACTIONS: ActionKeys[] = []
 
 const SPLIT_MODE_KEY = 'prizm-agent-split-mode'

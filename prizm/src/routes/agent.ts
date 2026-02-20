@@ -9,10 +9,12 @@ import { registerMetadataRoutes } from './agent/metadata'
 import { registerSessionRoutes } from './agent/sessions'
 import { registerChatRoutes } from './agent/chat'
 import { registerAuditRoutes } from './agent/audit'
+import { registerToolLLMRoutes } from './agent/toolLLM'
 
 export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void {
   registerMetadataRoutes(router)
   registerSessionRoutes(router, adapter)
   registerChatRoutes(router, adapter)
   registerAuditRoutes(router)
+  registerToolLLMRoutes(router)
 }
