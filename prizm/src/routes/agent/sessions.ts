@@ -11,7 +11,7 @@ import {
   requireScopeForList,
   hasScopeAccess
 } from '../../scopeUtils'
-import { getTextContent } from '@prizm/shared'
+import { getTextContent, isChatCategory } from '@prizm/shared'
 import type { MemoryIdsByLayer } from '@prizm/shared'
 import type { TokenUsageCategory } from '../../types'
 import { getSessionContext, resetSessionContext } from '../../llm/contextTracker'
@@ -39,107 +39,9 @@ import * as documentService from '../../services/documentService'
 import { getVersionHistory, saveVersion } from '../../core/documentVersionStore'
 import { resetSessionAccumulator } from '../../llm/EverMemService'
 import { scheduleTurnSummary } from '../../llm/conversationSummaryService'
-import { bgSessionManager } from '../../core/backgroundSession'
-import type { BgTriggerPayload } from '../../core/backgroundSession'
 import { log, getScopeFromQuery, activeChats, chatKey } from './_shared'
 
 export function registerSessionRoutes(router: Router, adapter?: IAgentAdapter): void {
-  // POST /agent/sessions/trigger — 触发 BG Session（API 入口）
-  router.post('/agent/sessions/trigger', async (req: Request, res: Response) => {
-    try {
-      const scope = getScopeForCreate(req)
-      const { prompt, systemInstructions, context, expectedOutputFormat, label, model, timeoutMs, autoCleanup } = req.body ?? {}
-      if (!prompt || typeof prompt !== 'string') {
-        return res.status(400).json({ error: 'prompt is required' })
-      }
-      const payload: BgTriggerPayload = {
-        prompt,
-        systemInstructions: typeof systemInstructions === 'string' ? systemInstructions : undefined,
-        context: context && typeof context === 'object' ? context : undefined,
-        expectedOutputFormat: typeof expectedOutputFormat === 'string' ? expectedOutputFormat : undefined
-      }
-      const meta = {
-        triggerType: 'api' as const,
-        label: typeof label === 'string' ? label : undefined,
-        model: typeof model === 'string' ? model : undefined,
-        timeoutMs: typeof timeoutMs === 'number' ? timeoutMs : undefined,
-        autoCleanup: typeof autoCleanup === 'boolean' ? autoCleanup : undefined
-      }
-      const { sessionId, promise: _ } = await bgSessionManager.trigger(scope, payload, meta)
-      res.status(201).json({ sessionId, status: 'pending' })
-    } catch (error) {
-      log.error('trigger BG session error:', error)
-      const { status, body } = toErrorResponse(error)
-      res.status(status).json(body)
-    }
-  })
-
-  // GET /agent/background-summary — BG 会话概览统计
-  router.get('/agent/background-summary', async (req: Request, res: Response) => {
-    try {
-      const scope = requireScopeForList(req, res)
-      if (!scope) return
-      const summary = await bgSessionManager.getSummary(scope)
-      res.json(summary)
-    } catch (error) {
-      log.error('background summary error:', error)
-      const { status, body } = toErrorResponse(error)
-      res.status(status).json(body)
-    }
-  })
-
-  // POST /agent/sessions/:id/cancel — 取消运行中的 BG Session
-  router.post('/agent/sessions/:id/cancel', async (req: Request, res: Response) => {
-    try {
-      const id = ensureStringParam(req.params.id)
-      const scope = getScopeFromQuery(req)
-      if (!hasScopeAccess(req, scope)) {
-        return res.status(403).json({ error: 'scope access denied' })
-      }
-      await bgSessionManager.cancel(scope, id)
-      res.json({ sessionId: id, status: 'cancelled' })
-    } catch (error) {
-      log.error('cancel BG session error:', error)
-      const { status, body } = toErrorResponse(error)
-      res.status(status).json(body)
-    }
-  })
-
-  // GET /agent/sessions/:id/result — 获取 BG 执行结果
-  router.get('/agent/sessions/:id/result', async (req: Request, res: Response) => {
-    try {
-      const id = ensureStringParam(req.params.id)
-      const scope = getScopeFromQuery(req)
-      if (!hasScopeAccess(req, scope)) {
-        return res.status(403).json({ error: 'scope access denied' })
-      }
-      const result = await bgSessionManager.getResult(scope, id)
-      if (!result) {
-        return res.status(404).json({ error: 'Result not available' })
-      }
-      res.json(result)
-    } catch (error) {
-      log.error('get BG result error:', error)
-      const { status, body } = toErrorResponse(error)
-      res.status(status).json(body)
-    }
-  })
-
-  // POST /agent/background/batch-cancel — 批量取消 BG Sessions
-  router.post('/agent/background/batch-cancel', async (req: Request, res: Response) => {
-    try {
-      const scope = requireScopeForList(req, res)
-      if (!scope) return
-      const { sessionIds } = req.body ?? {}
-      const ids = Array.isArray(sessionIds) ? sessionIds.filter((id: unknown) => typeof id === 'string') : undefined
-      const count = await bgSessionManager.batchCancel(scope, ids)
-      res.json({ cancelled: count })
-    } catch (error) {
-      log.error('batch cancel BG sessions error:', error)
-      const { status, body } = toErrorResponse(error)
-      res.status(status).json(body)
-    }
-  })
   // GET /agent/sessions/:id/context
   router.get('/agent/sessions/:id/context', async (req: Request, res: Response) => {
     try {
@@ -205,38 +107,43 @@ export function registerSessionRoutes(router: Router, adapter?: IAgentAdapter): 
         totalInputTokens: 0,
         totalOutputTokens: 0,
         totalTokens: 0,
-        rounds: tokenRecords.filter((r) => r.category === 'chat').length,
+        totalCachedInputTokens: 0,
+        rounds: tokenRecords.filter((r) => isChatCategory(r.category)).length,
         byModel: {} as Record<
           string,
-          { input: number; output: number; total: number; count: number }
+          { input: number; output: number; total: number; cached: number; count: number }
         >,
         byCategory: {} as Partial<
           Record<
             TokenUsageCategory,
-            { input: number; output: number; total: number; count: number }
+            { input: number; output: number; total: number; cached: number; count: number }
           >
         >
       }
       for (const r of tokenRecords) {
+        const cached = r.cachedInputTokens ?? 0
         tokenSummary.totalInputTokens += r.inputTokens
         tokenSummary.totalOutputTokens += r.outputTokens
         tokenSummary.totalTokens += r.totalTokens
+        tokenSummary.totalCachedInputTokens += cached
         const m = r.model || getLLMProviderName()
         if (!tokenSummary.byModel[m]) {
-          tokenSummary.byModel[m] = { input: 0, output: 0, total: 0, count: 0 }
+          tokenSummary.byModel[m] = { input: 0, output: 0, total: 0, cached: 0, count: 0 }
         }
         tokenSummary.byModel[m].input += r.inputTokens
         tokenSummary.byModel[m].output += r.outputTokens
         tokenSummary.byModel[m].total += r.totalTokens
+        tokenSummary.byModel[m].cached += cached
         tokenSummary.byModel[m].count += 1
         const cat = (r.category || 'chat') as TokenUsageCategory
         if (!tokenSummary.byCategory[cat]) {
-          tokenSummary.byCategory[cat] = { input: 0, output: 0, total: 0, count: 0 }
+          tokenSummary.byCategory[cat] = { input: 0, output: 0, total: 0, cached: 0, count: 0 }
         }
         const catBucket = tokenSummary.byCategory[cat]!
         catBucket.input += r.inputTokens
         catBucket.output += r.outputTokens
         catBucket.total += r.totalTokens
+        catBucket.cached += cached
         catBucket.count += 1
       }
 
@@ -361,7 +268,7 @@ export function registerSessionRoutes(router: Router, adapter?: IAgentAdapter): 
     }
   })
 
-  // GET /agent/sessions — 返回 EnrichedSession[]，自带 heldLocks，支持 ?kind= 过滤
+  // GET /agent/sessions — 返回 EnrichedSession[]，自带 heldLocks，支持 ?kind= / ?source= 过滤
   router.get('/agent/sessions', async (req: Request, res: Response) => {
     try {
       if (!adapter?.listSessions) {
@@ -379,6 +286,16 @@ export function registerSessionRoutes(router: Router, adapter?: IAgentAdapter): 
       const bgStatusFilter = typeof req.query.bgStatus === 'string' ? req.query.bgStatus : undefined
       if (bgStatusFilter) {
         sessions = sessions.filter((s) => s.bgStatus === bgStatusFilter)
+      }
+      const sourceFilter = typeof req.query.source === 'string' ? req.query.source : undefined
+      if (sourceFilter === 'direct') {
+        sessions = sessions.filter((s) => {
+          if (s.kind !== 'background') return true
+          const src = s.bgMeta?.source
+          return !src || src === 'direct'
+        })
+      } else if (sourceFilter === 'task' || sourceFilter === 'workflow') {
+        sessions = sessions.filter((s) => s.bgMeta?.source === sourceFilter)
       }
       const scopeLocks = lockManager.listScopeLocks(scope)
       const locksBySession = new Map<string, ResourceLock[]>()
@@ -582,288 +499,309 @@ export function registerSessionRoutes(router: Router, adapter?: IAgentAdapter): 
   })
 
   // POST /agent/sessions/:id/rollback/:checkpointId — 回退到指定 checkpoint
-  router.post(
-    '/agent/sessions/:id/rollback/:checkpointId',
-    async (req: Request, res: Response) => {
-      try {
-        if (!adapter?.getSession || !adapter?.truncateMessages) {
-          return res.status(503).json({ error: 'Agent adapter not available' })
-        }
-        const id = ensureStringParam(req.params.id)
-        const checkpointId = ensureStringParam(req.params.checkpointId)
-        const scope = getScopeFromQuery(req)
-        if (!hasScopeAccess(req, scope)) {
-          return res.status(403).json({ error: 'scope access denied' })
-        }
-        const restoreFiles = req.body?.restoreFiles !== false
-
-        log.info(
-          'Rollback started: session=%s checkpoint=%s scope=%s restoreFiles=%s',
-          id, checkpointId, scope, restoreFiles
-        )
-
-        // 1. 中止活跃聊天 + 清理交互请求
-        const ck = chatKey(scope, id)
-        const hadActiveChat = activeChats.has(ck)
-        activeChats.get(ck)?.abort()
-        activeChats.delete(ck)
-        interactManager.cancelSession(id, scope)
-        if (hadActiveChat) {
-          log.info('Rollback: aborted active chat for session=%s', id)
-        }
-
-        const session = await adapter.getSession(scope, id)
-        if (!session) {
-          return res.status(404).json({ error: 'Session not found' })
-        }
-
-        const checkpoints = session.checkpoints ?? []
-        const cpIndex = checkpoints.findIndex((cp) => cp.id === checkpointId)
-        if (cpIndex < 0) {
-          return res.status(404).json({ error: 'Checkpoint not found' })
-        }
-
-        const checkpoint = checkpoints[cpIndex]
-        const scopeRoot = scopeStore.getScopeRootPath(scope)
-
-        // 2. 收集将被删除的 checkpoint 及消息
-        const removedCheckpoints = checkpoints.slice(cpIndex)
-        const removedCpIds = removedCheckpoints.map((cp) => cp.id)
-        const rolledBackMessages = session.messages.slice(checkpoint.messageIndex)
-        const assistantMessages = rolledBackMessages.filter((m) => m.role === 'assistant')
-        const allFileChanges = extractFileChangesFromMessages(
-          assistantMessages.map((m) => ({ parts: m.parts as Array<{ type: string; name?: string; arguments?: string; result?: string; isError?: boolean }> }))
-        )
-
-        log.debug(
-          'Rollback: removedCheckpoints=%d removedMessages=%d assistantMessages=%d',
-          removedCheckpoints.length, rolledBackMessages.length, assistantMessages.length
-        )
-
-        // 3. 从被删除消息的 memoryRefs.created 中收集 P1 记忆 ID
-        const removedMemoryIds: MemoryIdsByLayer = { user: [], scope: [], session: [] }
-        for (const msg of rolledBackMessages) {
-          if (msg.memoryRefs?.created) {
-            removedMemoryIds.user.push(...msg.memoryRefs.created.user)
-            removedMemoryIds.scope.push(...msg.memoryRefs.created.scope)
-            removedMemoryIds.session.push(...msg.memoryRefs.created.session)
-          }
-        }
-        const totalP1Memories =
-          removedMemoryIds.user.length +
-          removedMemoryIds.scope.length +
-          removedMemoryIds.session.length
-        if (totalP1Memories > 0) {
-          log.info(
-            'Rollback: collected %d P1 memory IDs for cleanup (user=%d scope=%d session=%d)',
-            totalP1Memories,
-            removedMemoryIds.user.length,
-            removedMemoryIds.scope.length,
-            removedMemoryIds.session.length
-          )
-        }
-
-        // 4. 合并快照：first-occurrence-wins（第一个 checkpoint 的快照代表变更前的原始状态）
-        const mergedSnapshots = new Map<string, string>()
-        for (const cp of removedCheckpoints) {
-          const snapshots = loadFileSnapshots(scopeRoot, id, cp.id)
-          for (const [snapKey, value] of Object.entries(snapshots)) {
-            if (!mergedSnapshots.has(snapKey)) {
-              mergedSnapshots.set(snapKey, value)
-            }
-          }
-        }
-
-        // 5. 恢复文件和文档内容，同时跟踪被删除/恢复的文档 ID
-        const restoredFiles: string[] = []
-        const deletedDocumentIds: string[] = []
-        const restoredDocumentIds: string[] = []
-        if (restoreFiles) {
-          for (const [snapKey, snapshotValue] of mergedSnapshots) {
-            try {
-              if (snapKey.startsWith('[todo:')) {
-                const listId = snapKey.slice(6, -1)
-                const todoInfo = JSON.parse(snapshotValue) as {
-                  action: 'create_list' | 'modify'
-                  listSnapshot?: import('@prizm/shared').TodoList
-                }
-
-                log.debug('Rollback todo: listId=%s action=%s', listId, todoInfo.action)
-
-                const data = scopeStore.getScopeData(scope)
-                if (!data.todoLists) data.todoLists = []
-
-                if (todoInfo.action === 'create_list') {
-                  data.todoLists = data.todoLists.filter((l) => l.id !== listId)
-                  log.debug('Rollback: removed created todo list %s', listId)
-                } else if (todoInfo.action === 'modify' && todoInfo.listSnapshot) {
-                  const idx = data.todoLists.findIndex((l) => l.id === listId)
-                  if (idx >= 0) {
-                    data.todoLists[idx] = todoInfo.listSnapshot
-                  } else {
-                    data.todoLists.push(todoInfo.listSnapshot)
-                  }
-                  log.debug('Rollback: restored todo list %s to snapshot', listId)
-                }
-
-                scopeStore.saveScope(scope)
-                lockManager.releaseLock(scope, 'todo_list', listId, id)
-                restoredFiles.push(snapKey)
-                continue
-              }
-
-              if (snapKey.startsWith('[doc:')) {
-                const docId = snapKey.slice(5, -1)
-                const info = JSON.parse(snapshotValue) as {
-                  action: 'create' | 'update' | 'delete'
-                  versionBefore?: number
-                  title?: string
-                  relativePath?: string
-                }
-                const rollbackCtx = {
-                  scope,
-                  actor: { type: 'user' as const, source: 'api:rollback' as const }
-                }
-
-                log.debug('Rollback doc: id=%s action=%s versionBefore=%s', docId, info.action, info.versionBefore)
-
-                if (info.action === 'update' && info.versionBefore) {
-                  const history = getVersionHistory(scopeRoot, docId)
-                  const targetVer = history.versions.find((v) => v.version === info.versionBefore)
-                  if (targetVer) {
-                    await documentService.updateDocument(
-                      rollbackCtx,
-                      docId,
-                      { title: targetVer.title, content: targetVer.content },
-                      { changeReason: `Checkpoint rollback to v${info.versionBefore}` }
-                    )
-                    saveVersion(scopeRoot, docId, targetVer.title, targetVer.content, {
-                      changedBy: { type: 'user', source: 'api:rollback' },
-                      changeReason: `Checkpoint rollback`
-                    })
-                    restoredDocumentIds.push(docId)
-                  } else {
-                    log.warn('Rollback: target version v%d not found for doc=%s', info.versionBefore, docId)
-                  }
-                } else if (info.action === 'create') {
-                  try {
-                    await documentService.deleteDocument(rollbackCtx, docId)
-                    deletedDocumentIds.push(docId)
-                  } catch (delErr) {
-                    log.warn('Failed to undo document creation on rollback:', docId, delErr)
-                  }
-                } else if (info.action === 'delete' && info.versionBefore) {
-                  const history = getVersionHistory(scopeRoot, docId)
-                  const targetVer = history.versions.find((v) => v.version === info.versionBefore)
-                  if (targetVer) {
-                    await documentService.importDocument(rollbackCtx, {
-                      id: docId,
-                      title: info.title ?? targetVer.title,
-                      content: targetVer.content,
-                      relativePath: info.relativePath ?? '',
-                      createdAt: Date.now(),
-                      updatedAt: Date.now()
-                    })
-                    restoredDocumentIds.push(docId)
-                  }
-                }
-
-                lockManager.releaseLock(scope, 'document', docId, id)
-                restoredFiles.push(snapKey)
-                continue
-              }
-
-              mdStore.writeFileByPath(scopeRoot, snapKey, snapshotValue)
-              restoredFiles.push(snapKey)
-            } catch (e) {
-              log.warn('Failed to restore on rollback:', snapKey, e)
-            }
-          }
-        }
-
-        // 6. 截断消息
-        const updatedSession = await adapter.truncateMessages(scope, id, checkpoint.messageIndex)
-
-        // 7. 清理快照文件
-        deleteCheckpointSnapshots(scopeRoot, id, removedCpIds)
-
-        // 8. 同步重置：累积器 + 上下文追踪 + compressedThroughRound
-        resetSessionAccumulator(scope, id)
-        resetSessionContext(scope, id)
-
-        const remainingRounds = Math.floor(checkpoint.messageIndex / 2)
-        const oldCompressed = session.compressedThroughRound ?? 0
-        if (oldCompressed > remainingRounds && adapter.updateSession) {
-          const newCompressed = Math.min(oldCompressed, remainingRounds)
-          await adapter.updateSession(scope, id, { compressedThroughRound: newCompressed })
-          updatedSession.compressedThroughRound = newCompressed
-          log.info(
-            'Rollback: adjusted compressedThroughRound %d → %d for session=%s',
-            oldCompressed, newCompressed, id
-          )
-        }
-        log.debug('Rollback: accumulator and context tracker reset for session=%s', id)
-
-        // 9. 摘要更新：根据剩余消息重建或清空 llmSummary
-        const remainingMessages = updatedSession.messages ?? []
-        const lastUserMsg = [...remainingMessages].reverse().find((m) => m.role === 'user')
-        if (lastUserMsg) {
-          const userText = getTextContent(lastUserMsg).trim()
-          if (userText) {
-            log.debug('Rollback: re-scheduling turn summary from remaining user message')
-            scheduleTurnSummary(scope, id, userText)
-          }
-        } else {
-          const data = scopeStore.getScopeData(scope)
-          const sessionInStore = data.agentSessions.find((s) => s.id === id)
-          if (sessionInStore && sessionInStore.llmSummary) {
-            sessionInStore.llmSummary = undefined
-            sessionInStore.updatedAt = Date.now()
-            scopeStore.saveScope(scope)
-            log.debug('Rollback: cleared llmSummary (no remaining user messages)')
-          }
-        }
-
-        log.info(
-          'Session rolled back: %s to checkpoint=%s messageIndex=%d restored=%d files deletedDocs=%d restoredDocs=%d p1Memories=%d',
-          id,
-          checkpointId,
-          checkpoint.messageIndex,
-          restoredFiles.length,
-          deletedDocumentIds.length,
-          restoredDocumentIds.length,
-          totalP1Memories
-        )
-
-        // 10. 发射 agent:session.rolledBack 事件（异步处理器完成清理）
-        emit('agent:session.rolledBack', {
-          scope,
-          sessionId: id,
-          checkpointId,
-          checkpointMessageIndex: checkpoint.messageIndex,
-          removedCheckpointIds: removedCpIds,
-          removedMemoryIds,
-          deletedDocumentIds,
-          restoredDocumentIds,
-          remainingMessageCount: checkpoint.messageIndex,
-          actor: { type: 'user', clientId: req.prizmClient?.clientId, source: 'api:rollback' }
-        }).catch((err) => {
-          log.warn('Rollback event emission failed:', err)
-        })
-
-        res.json({
-          session: updatedSession,
-          rolledBackMessageCount: rolledBackMessages.length,
-          restoredFiles,
-          rolledBackFileChanges: allFileChanges
-        })
-      } catch (error) {
-        log.error('rollback error:', error)
-        const { status, body } = toErrorResponse(error)
-        res.status(status).json(body)
+  router.post('/agent/sessions/:id/rollback/:checkpointId', async (req: Request, res: Response) => {
+    try {
+      if (!adapter?.getSession || !adapter?.truncateMessages) {
+        return res.status(503).json({ error: 'Agent adapter not available' })
       }
+      const id = ensureStringParam(req.params.id)
+      const checkpointId = ensureStringParam(req.params.checkpointId)
+      const scope = getScopeFromQuery(req)
+      if (!hasScopeAccess(req, scope)) {
+        return res.status(403).json({ error: 'scope access denied' })
+      }
+      const restoreFiles = req.body?.restoreFiles !== false
+
+      log.info(
+        'Rollback started: session=%s checkpoint=%s scope=%s restoreFiles=%s',
+        id,
+        checkpointId,
+        scope,
+        restoreFiles
+      )
+
+      // 1. 中止活跃聊天 + 清理交互请求
+      const ck = chatKey(scope, id)
+      const hadActiveChat = activeChats.has(ck)
+      activeChats.get(ck)?.abort()
+      activeChats.delete(ck)
+      interactManager.cancelSession(id, scope)
+      if (hadActiveChat) {
+        log.info('Rollback: aborted active chat for session=%s', id)
+      }
+
+      const session = await adapter.getSession(scope, id)
+      if (!session) {
+        return res.status(404).json({ error: 'Session not found' })
+      }
+
+      const checkpoints = session.checkpoints ?? []
+      const cpIndex = checkpoints.findIndex((cp) => cp.id === checkpointId)
+      if (cpIndex < 0) {
+        return res.status(404).json({ error: 'Checkpoint not found' })
+      }
+
+      const checkpoint = checkpoints[cpIndex]
+      const scopeRoot = scopeStore.getScopeRootPath(scope)
+
+      // 2. 收集将被删除的 checkpoint 及消息
+      const removedCheckpoints = checkpoints.slice(cpIndex)
+      const removedCpIds = removedCheckpoints.map((cp) => cp.id)
+      const rolledBackMessages = session.messages.slice(checkpoint.messageIndex)
+      const assistantMessages = rolledBackMessages.filter((m) => m.role === 'assistant')
+      const allFileChanges = extractFileChangesFromMessages(
+        assistantMessages.map((m) => ({
+          parts: m.parts as Array<{
+            type: string
+            name?: string
+            arguments?: string
+            result?: string
+            isError?: boolean
+          }>
+        }))
+      )
+
+      log.debug(
+        'Rollback: removedCheckpoints=%d removedMessages=%d assistantMessages=%d',
+        removedCheckpoints.length,
+        rolledBackMessages.length,
+        assistantMessages.length
+      )
+
+      // 3. 从被删除消息的 memoryRefs.created 中收集 P1 记忆 ID
+      const removedMemoryIds: MemoryIdsByLayer = { user: [], scope: [], session: [] }
+      for (const msg of rolledBackMessages) {
+        if (msg.memoryRefs?.created) {
+          removedMemoryIds.user.push(...msg.memoryRefs.created.user)
+          removedMemoryIds.scope.push(...msg.memoryRefs.created.scope)
+          removedMemoryIds.session.push(...msg.memoryRefs.created.session)
+        }
+      }
+      const totalP1Memories =
+        removedMemoryIds.user.length +
+        removedMemoryIds.scope.length +
+        removedMemoryIds.session.length
+      if (totalP1Memories > 0) {
+        log.info(
+          'Rollback: collected %d P1 memory IDs for cleanup (user=%d scope=%d session=%d)',
+          totalP1Memories,
+          removedMemoryIds.user.length,
+          removedMemoryIds.scope.length,
+          removedMemoryIds.session.length
+        )
+      }
+
+      // 4. 合并快照：first-occurrence-wins（第一个 checkpoint 的快照代表变更前的原始状态）
+      const mergedSnapshots = new Map<string, string>()
+      for (const cp of removedCheckpoints) {
+        const snapshots = loadFileSnapshots(scopeRoot, id, cp.id)
+        for (const [snapKey, value] of Object.entries(snapshots)) {
+          if (!mergedSnapshots.has(snapKey)) {
+            mergedSnapshots.set(snapKey, value)
+          }
+        }
+      }
+
+      // 5. 恢复文件和文档内容，同时跟踪被删除/恢复的文档 ID
+      const restoredFiles: string[] = []
+      const deletedDocumentIds: string[] = []
+      const restoredDocumentIds: string[] = []
+      if (restoreFiles) {
+        for (const [snapKey, snapshotValue] of mergedSnapshots) {
+          try {
+            if (snapKey.startsWith('[todo:')) {
+              const listId = snapKey.slice(6, -1)
+              const todoInfo = JSON.parse(snapshotValue) as {
+                action: 'create_list' | 'modify'
+                listSnapshot?: import('@prizm/shared').TodoList
+              }
+
+              log.debug('Rollback todo: listId=%s action=%s', listId, todoInfo.action)
+
+              const data = scopeStore.getScopeData(scope)
+              if (!data.todoLists) data.todoLists = []
+
+              if (todoInfo.action === 'create_list') {
+                data.todoLists = data.todoLists.filter((l) => l.id !== listId)
+                log.debug('Rollback: removed created todo list %s', listId)
+              } else if (todoInfo.action === 'modify' && todoInfo.listSnapshot) {
+                const idx = data.todoLists.findIndex((l) => l.id === listId)
+                if (idx >= 0) {
+                  data.todoLists[idx] = todoInfo.listSnapshot
+                } else {
+                  data.todoLists.push(todoInfo.listSnapshot)
+                }
+                log.debug('Rollback: restored todo list %s to snapshot', listId)
+              }
+
+              scopeStore.saveScope(scope)
+              lockManager.releaseLock(scope, 'todo_list', listId, id)
+              restoredFiles.push(snapKey)
+              continue
+            }
+
+            if (snapKey.startsWith('[doc:')) {
+              const docId = snapKey.slice(5, -1)
+              const info = JSON.parse(snapshotValue) as {
+                action: 'create' | 'update' | 'delete'
+                versionBefore?: number
+                title?: string
+                relativePath?: string
+              }
+              const rollbackCtx = {
+                scope,
+                actor: { type: 'user' as const, source: 'api:rollback' as const }
+              }
+
+              log.debug(
+                'Rollback doc: id=%s action=%s versionBefore=%s',
+                docId,
+                info.action,
+                info.versionBefore
+              )
+
+              if (info.action === 'update' && info.versionBefore) {
+                const history = getVersionHistory(scopeRoot, docId)
+                const targetVer = history.versions.find((v) => v.version === info.versionBefore)
+                if (targetVer) {
+                  await documentService.updateDocument(
+                    rollbackCtx,
+                    docId,
+                    { title: targetVer.title, content: targetVer.content },
+                    { changeReason: `Checkpoint rollback to v${info.versionBefore}` }
+                  )
+                  saveVersion(scopeRoot, docId, targetVer.title, targetVer.content, {
+                    changedBy: { type: 'user', source: 'api:rollback' },
+                    changeReason: `Checkpoint rollback`
+                  })
+                  restoredDocumentIds.push(docId)
+                } else {
+                  log.warn(
+                    'Rollback: target version v%d not found for doc=%s',
+                    info.versionBefore,
+                    docId
+                  )
+                }
+              } else if (info.action === 'create') {
+                try {
+                  await documentService.deleteDocument(rollbackCtx, docId)
+                  deletedDocumentIds.push(docId)
+                } catch (delErr) {
+                  log.warn('Failed to undo document creation on rollback:', docId, delErr)
+                }
+              } else if (info.action === 'delete' && info.versionBefore) {
+                const history = getVersionHistory(scopeRoot, docId)
+                const targetVer = history.versions.find((v) => v.version === info.versionBefore)
+                if (targetVer) {
+                  await documentService.importDocument(rollbackCtx, {
+                    id: docId,
+                    title: info.title ?? targetVer.title,
+                    content: targetVer.content,
+                    relativePath: info.relativePath ?? '',
+                    createdAt: Date.now(),
+                    updatedAt: Date.now()
+                  })
+                  restoredDocumentIds.push(docId)
+                }
+              }
+
+              lockManager.releaseLock(scope, 'document', docId, id)
+              restoredFiles.push(snapKey)
+              continue
+            }
+
+            mdStore.writeFileByPath(scopeRoot, snapKey, snapshotValue)
+            restoredFiles.push(snapKey)
+          } catch (e) {
+            log.warn('Failed to restore on rollback:', snapKey, e)
+          }
+        }
+      }
+
+      // 6. 截断消息
+      const updatedSession = await adapter.truncateMessages(scope, id, checkpoint.messageIndex)
+
+      // 7. 清理快照文件
+      deleteCheckpointSnapshots(scopeRoot, id, removedCpIds)
+
+      // 8. 同步重置：累积器 + 上下文追踪 + compressedThroughRound
+      resetSessionAccumulator(scope, id)
+      resetSessionContext(scope, id)
+
+      const remainingRounds = Math.floor(checkpoint.messageIndex / 2)
+      const oldCompressed = session.compressedThroughRound ?? 0
+      if (oldCompressed > remainingRounds && adapter.updateSession) {
+        const newCompressed = Math.min(oldCompressed, remainingRounds)
+        await adapter.updateSession(scope, id, { compressedThroughRound: newCompressed })
+        updatedSession.compressedThroughRound = newCompressed
+        log.info(
+          'Rollback: adjusted compressedThroughRound %d → %d for session=%s',
+          oldCompressed,
+          newCompressed,
+          id
+        )
+      }
+      log.debug('Rollback: accumulator and context tracker reset for session=%s', id)
+
+      // 9. 摘要更新：根据剩余消息重建或清空 llmSummary
+      const remainingMessages = updatedSession.messages ?? []
+      const lastUserMsg = [...remainingMessages].reverse().find((m) => m.role === 'user')
+      if (lastUserMsg) {
+        const userText = getTextContent(lastUserMsg).trim()
+        if (userText) {
+          log.debug('Rollback: re-scheduling turn summary from remaining user message')
+          scheduleTurnSummary(scope, id, userText)
+        }
+      } else {
+        const data = scopeStore.getScopeData(scope)
+        const sessionInStore = data.agentSessions.find((s) => s.id === id)
+        if (sessionInStore && sessionInStore.llmSummary) {
+          sessionInStore.llmSummary = undefined
+          sessionInStore.updatedAt = Date.now()
+          scopeStore.saveScope(scope)
+          log.debug('Rollback: cleared llmSummary (no remaining user messages)')
+        }
+      }
+
+      log.info(
+        'Session rolled back: %s to checkpoint=%s messageIndex=%d restored=%d files deletedDocs=%d restoredDocs=%d p1Memories=%d',
+        id,
+        checkpointId,
+        checkpoint.messageIndex,
+        restoredFiles.length,
+        deletedDocumentIds.length,
+        restoredDocumentIds.length,
+        totalP1Memories
+      )
+
+      // 10. 发射 agent:session.rolledBack 事件（异步处理器完成清理）
+      emit('agent:session.rolledBack', {
+        scope,
+        sessionId: id,
+        checkpointId,
+        checkpointMessageIndex: checkpoint.messageIndex,
+        removedCheckpointIds: removedCpIds,
+        removedMemoryIds,
+        deletedDocumentIds,
+        restoredDocumentIds,
+        remainingMessageCount: checkpoint.messageIndex,
+        actor: { type: 'user', clientId: req.prizmClient?.clientId, source: 'api:rollback' }
+      }).catch((err) => {
+        log.warn('Rollback event emission failed:', err)
+      })
+
+      res.json({
+        session: updatedSession,
+        rolledBackMessageCount: rolledBackMessages.length,
+        restoredFiles,
+        rolledBackFileChanges: allFileChanges
+      })
+    } catch (error) {
+      log.error('rollback error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
     }
-  )
+  })
 
   // DELETE /agent/sessions/:id
   router.delete('/agent/sessions/:id', async (req: Request, res: Response) => {

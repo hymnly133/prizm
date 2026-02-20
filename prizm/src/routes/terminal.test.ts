@@ -78,7 +78,8 @@ vi.mock('../core/ScopeStore', () => {
 // Mock scopeUtils — 跳过权限检查
 vi.mock('../scopeUtils', () => ({
   ensureStringParam: (v: unknown) => String(v),
-  hasScopeAccess: () => true
+  hasScopeAccess: () => true,
+  getScopeFromQuery: (req: { query?: { scope?: string } }) => req?.query?.scope ?? 'default'
 }))
 
 // ---- Test Setup ----

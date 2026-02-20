@@ -47,6 +47,30 @@ import { TerminalWebSocketServer } from './terminal/TerminalWebSocketServer'
 import { createTerminalRoutes } from './routes/terminal'
 import { clearAll as clearEventBus } from './core/eventBus'
 import { bgSessionManager } from './core/backgroundSession'
+import { cronManager } from './core/cronScheduler'
+import { chatCore } from './routes/agent/chatCore'
+import type { IChatService } from './core/interfaces'
+import { registerPermissionCleanupHandler } from './core/toolPermission'
+import {
+  initResumeStore,
+  closeResumeStore,
+  initWorkflowRunner,
+  initTaskRunner,
+  shutdownTaskRunner,
+  BgSessionStepExecutor,
+  registerWorkflowTriggerHandlers,
+  recoverStaleTaskRuns,
+  recoverStaleWorkflowRuns,
+  pruneTaskRuns,
+  pruneRuns,
+  recoverStaleTaskRunsByAge,
+  recoverStaleWorkflowRunsByAge,
+  readLegacyDefs,
+  dropLegacyDefTable,
+  registerDef
+} from './core/workflowEngine'
+import { startReminderService, stopReminderService } from './core/scheduleReminder'
+import { resetStaleChatStatus } from './routes/agent/_shared'
 import {
   registerAuditHandlers,
   registerLockHandlers,
@@ -55,12 +79,39 @@ import {
   setWebSocketServer,
   registerSearchHandlers,
   setSearchIndex,
-  registerBgSessionHandlers
+  registerBgSessionHandlers,
+  registerScheduleHandlers
 } from './core/eventBus/handlers'
 import { createEmbeddingRoutes } from './routes/embedding'
+import { createScheduleRoutes } from './routes/schedule'
+import { createCronRoutes } from './routes/cron'
+import { createWorkflowRoutes } from './routes/workflow'
+import { createTaskRoutes } from './routes/task'
 import { localEmbedding } from './llm/localEmbedding'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+/** 一次性迁移：将 SQLite workflow_defs 数据写入文件系统，然后删除旧表 */
+function migrateWorkflowDefsToFiles(): void {
+  try {
+    const legacyDefs = readLegacyDefs()
+    if (legacyDefs.length === 0) return
+
+    log.info(`Migrating ${legacyDefs.length} workflow defs from SQLite to files...`)
+    for (const def of legacyDefs) {
+      try {
+        registerDef(def.name, def.scope, def.yamlContent, def.description, def.triggersJson)
+        log.info(`  Migrated workflow def: ${def.name} (scope: ${def.scope})`)
+      } catch (err) {
+        log.warn(`  Failed to migrate workflow def "${def.name}":`, err)
+      }
+    }
+    dropLegacyDefTable()
+    log.info('Workflow defs migration complete')
+  } catch (err) {
+    log.warn('Workflow defs migration failed:', err)
+  }
+}
 
 export interface PrizmServer {
   /**
@@ -113,6 +164,7 @@ export function createPrizmServer(
   let terminalWsServer: TerminalWebSocketServer | undefined = undefined
   const terminalManager = getTerminalManager()
   let isRunning = false
+  let taskPruneTimer: ReturnType<typeof setInterval> | null = null
 
   const clientRegistry = new ClientRegistry(dataDir)
 
@@ -179,6 +231,10 @@ export function createPrizmServer(
   createSettingsRoutes(router)
   createMemoryRoutes(router)
   createEmbeddingRoutes(router)
+  createScheduleRoutes(router)
+  createCronRoutes(router)
+  createWorkflowRoutes(router)
+  createTaskRoutes(router)
   app.use('/', router)
 
   // MCP 端点：供 Cursor、LobeChat 等 Agent 连接（wsServer 在 start 后注入）
@@ -234,6 +290,7 @@ export function createPrizmServer(
             } catch (e) {
               log.warn('App-level migration failed:', e)
             }
+            resetStaleChatStatus()
             try {
               await initEverMemService()
             } catch (e) {
@@ -254,13 +311,39 @@ export function createPrizmServer(
             } catch (e) {
               log.warn('Audit manager init failed:', e)
             }
-            bgSessionManager.init(adapters.agent)
+            const chatService: IChatService = { execute: chatCore }
+            await bgSessionManager.init(adapters.agent, chatService)
+            await cronManager.init(bgSessionManager)
+            initResumeStore()
+            migrateWorkflowDefsToFiles()
+            recoverStaleTaskRuns()
+            recoverStaleWorkflowRuns()
+            const stepExecutor = new BgSessionStepExecutor(bgSessionManager)
+            initWorkflowRunner(stepExecutor)
+            initTaskRunner(stepExecutor)
+            registerWorkflowTriggerHandlers()
+            startReminderService()
+
+            // 每 24h 清理过期任务记录 + 恢复超龄僵尸记录
+            taskPruneTimer = setInterval(() => {
+              try {
+                pruneTaskRuns(90)
+                pruneRuns(90)
+                recoverStaleTaskRunsByAge(7)
+                recoverStaleWorkflowRunsByAge(7)
+              } catch (e) {
+                log.warn('Task/workflow prune failed:', e)
+              }
+            }, 24 * 60 * 60_000)
+            if (taskPruneTimer.unref) taskPruneTimer.unref()
 
             // ── EventBus handler 注册（在所有服务初始化之后） ──
             registerAuditHandlers()
             registerLockHandlers()
             registerMemoryHandlers()
             registerBgSessionHandlers()
+            registerScheduleHandlers()
+            registerPermissionCleanupHandler()
             setSearchIndex(searchIndex)
             registerSearchHandlers()
 
@@ -337,8 +420,16 @@ export function createPrizmServer(
       // 关闭 Token Usage DB
       closeTokenUsageDb()
 
-      // 关闭后台会话管理器、锁管理器和审计管理器
-      bgSessionManager.shutdown()
+      // 关闭后台会话管理器（先 await 以确保 interrupted 状态持久化）、锁管理器和审计管理器
+      stopReminderService()
+      if (taskPruneTimer) {
+        clearInterval(taskPruneTimer)
+        taskPruneTimer = null
+      }
+      shutdownTaskRunner()
+      closeResumeStore()
+      await cronManager.shutdown()
+      await bgSessionManager.shutdown()
       lockManager.shutdown()
       auditManager.shutdown()
 

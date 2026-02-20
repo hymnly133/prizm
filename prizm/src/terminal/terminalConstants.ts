@@ -25,14 +25,7 @@ export const SHUTDOWN_GRACE_MS = 3000
 export const EXEC_WORKER_IDLE_MS = 10 * 60 * 1000
 
 /** 需要从 env 中剥离的关键词（大写比较） */
-export const BLOCKED_ENV_PATTERNS = [
-  'KEY',
-  'SECRET',
-  'TOKEN',
-  'PASSWORD',
-  'CREDENTIAL',
-  'PRIVATE'
-]
+export const BLOCKED_ENV_PATTERNS = ['KEY', 'SECRET', 'TOKEN', 'PASSWORD', 'CREDENTIAL', 'PRIVATE']
 
 // ============ 类型定义 ============
 
@@ -40,8 +33,8 @@ export interface Disposable {
   dispose(): void
 }
 
-/** 工作区类型：main = scope 根目录, session = session 临时工作区 */
-export type ExecWorkspaceType = 'main' | 'session'
+/** 工作区类型：main = scope 根目录, session = session 临时工作区, workflow = 工作流工作区 */
+export type ExecWorkspaceType = 'main' | 'session' | 'workflow'
 
 /** 单次 exec 命令的历史记录 */
 export interface ExecRecord {
@@ -94,10 +87,7 @@ export function generateId(): string {
 }
 
 /** 生成 exec worker 的复合 key */
-export function execWorkerKey(
-  agentSessionId: string,
-  workspaceType: ExecWorkspaceType
-): string {
+export function execWorkerKey(agentSessionId: string, workspaceType: ExecWorkspaceType): string {
   return `${agentSessionId}:${workspaceType}`
 }
 
@@ -106,9 +96,7 @@ export function isAllowedShell(shell: string): boolean {
   if (os.platform() === 'win32') {
     return ALLOWED_SHELLS_WIN.some((s) => normalized.endsWith(s))
   }
-  return ALLOWED_SHELLS_UNIX.some(
-    (s) => normalized === s || normalized.endsWith('/' + s)
-  )
+  return ALLOWED_SHELLS_UNIX.some((s) => normalized === s || normalized.endsWith('/' + s))
 }
 
 /**

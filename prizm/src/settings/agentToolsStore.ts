@@ -18,7 +18,8 @@ import type {
   CommandsSettings,
   SkillsSettings,
   RulesSettings,
-  TerminalSettings
+  TerminalSettings,
+  ToolGroupConfig
 } from './types'
 import type { McpServerConfig } from '../mcp-client/types'
 
@@ -201,6 +202,10 @@ export function getContextWindowSettings(): ContextWindowSettings {
   }
 }
 
+export function getDynamicContextMode(): 'system' | 'user_prefix' {
+  return loadRaw().agent?.promptCaching?.dynamicContextMode ?? 'system'
+}
+
 export function updateAgentLLMSettings(update: Partial<AgentLLMSettings>): void {
   const data = loadRaw()
   data.agent = { ...data.agent, ...update }
@@ -258,4 +263,17 @@ export function updateTerminalSettings(update: Partial<TerminalSettings>): void 
   data.terminal = { ...data.terminal, ...update }
   saveRaw(data)
   log.info('Terminal settings updated')
+}
+
+// ============ 工具分组设置 ============
+
+export function getToolGroupConfig(): ToolGroupConfig | undefined {
+  return loadRaw().toolGroups
+}
+
+export function updateToolGroupConfig(update: ToolGroupConfig): void {
+  const data = loadRaw()
+  data.toolGroups = { ...data.toolGroups, ...update }
+  saveRaw(data)
+  log.info('Tool group config updated')
 }

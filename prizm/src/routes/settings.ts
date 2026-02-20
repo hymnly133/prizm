@@ -15,7 +15,9 @@ import {
   updateCommandsSettings,
   updateSkillsSettings,
   updateRulesSettings,
-  updateTerminalSettings
+  updateTerminalSettings,
+  getToolGroupConfig,
+  updateToolGroupConfig
 } from '../settings/agentToolsStore'
 import { getAvailableModels } from '../llm'
 import { getAvailableShells } from '../terminal/shellDetector'
@@ -26,8 +28,10 @@ import type {
   CommandsSettings,
   SkillsSettings,
   RulesSettings,
-  TerminalSettings
+  TerminalSettings,
+  ToolGroupConfig
 } from '../settings/types'
+import { resolveGroupStates } from '../llm/builtinTools/toolGroups'
 
 const log = createLogger('Settings')
 
@@ -140,6 +144,37 @@ export function createSettingsRoutes(router: Router): void {
       })
     } catch (error) {
       log.error('put tavily settings error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // GET /settings/tool-groups - 获取工具分组定义及当前开关状态
+  router.get('/settings/tool-groups', (_req: Request, res: Response) => {
+    try {
+      const config = getToolGroupConfig()
+      const groups = resolveGroupStates(config)
+      res.json({ groups })
+    } catch (error) {
+      log.error('get tool-groups error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // PUT /settings/tool-groups - 更新工具分组开关
+  router.put('/settings/tool-groups', (req: Request, res: Response) => {
+    try {
+      const body = req.body as ToolGroupConfig
+      if (!body || typeof body !== 'object') {
+        return res.status(400).json({ error: 'Invalid request body: expected { [groupId]: boolean }' })
+      }
+      updateToolGroupConfig(body)
+      const config = getToolGroupConfig()
+      const groups = resolveGroupStates(config)
+      res.json({ groups })
+    } catch (error) {
+      log.error('put tool-groups error:', error)
       const { status, body } = toErrorResponse(error)
       res.status(status).json(body)
     }

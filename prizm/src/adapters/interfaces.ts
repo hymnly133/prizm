@@ -138,6 +138,8 @@ export interface LLMStreamChunk {
   toolCalls?: Array<{ id: string; name: string; arguments: string }>
   /** LLM 流式生成阶段，一旦检测到工具名即发出，让 UI 提前显示 preparing 卡片 */
   toolCallPreparing?: { id: string; name: string }
+  /** 工具调用参数增量，流式生成期间逐 chunk 发出，用于 UI 实时显示参数填充 */
+  toolCallArgsDelta?: { id: string; name: string; argumentsDelta: string; argumentsSoFar: string }
   /** 单次工具执行完成，用于 SSE 下发客户端展示 */
   toolCall?: ToolCallRecord
   /** 工具结果分块（大 result 时先流式下发，再发完整 toolCall） */
@@ -152,6 +154,12 @@ export interface LLMStreamChunk {
     toolCallId: string
     toolName: string
     paths: string[]
+  }
+  /** 工具执行进度心跳（长时间运行的工具定期发送） */
+  toolProgress?: {
+    id: string
+    name: string
+    elapsedMs: number
   }
 }
 
@@ -180,6 +188,10 @@ export interface ILLMProvider {
       temperature?: number
       signal?: AbortSignal
       tools?: LLMTool[]
+      /** 启用深度思考（reasoning / thinking chain） */
+      thinking?: boolean
+      /** 缓存路由键（OpenAI prompt_cache_key），相同 key 的请求优先路由到同一缓存节点 */
+      promptCacheKey?: string
     }
   ): AsyncIterable<LLMStreamChunk>
 }
@@ -210,11 +222,14 @@ export interface IAgentAdapter {
     update: {
       llmSummary?: string
       compressedThroughRound?: number
+      compressionSummaries?: Array<{ throughRound: number; text: string }>
       grantedPaths?: string[]
       kind?: import('@prizm/shared').SessionKind
       bgMeta?: import('@prizm/shared').BgSessionMeta
       bgStatus?: import('@prizm/shared').BgStatus
       bgResult?: string
+      bgStructuredData?: string
+      bgArtifacts?: string[]
       startedAt?: number
       finishedAt?: number
     }
@@ -225,6 +240,12 @@ export interface IAgentAdapter {
    * 同时清除 checkpoint.messageIndex 之后的所有 checkpoint。
    */
   truncateMessages?(scope: string, sessionId: string, messageIndex: number): Promise<AgentSession>
+
+  /**
+   * 从 checkpoint 分叉出新 session，继承截止到 checkpointId 的消息。
+   * 如未指定 checkpointId，则复制全部消息。
+   */
+  forkSession?(scope: string, sourceSessionId: string, checkpointId?: string): Promise<AgentSession>
 
   /** 流式对话，返回 SSE 流 */
   chat?(
@@ -245,6 +266,16 @@ export interface IAgentAdapter {
       customRulesContent?: string
       /** 用户授权的外部文件路径列表 */
       grantedPaths?: string[]
+      /** 工具白名单（AgentDefinition.allowedTools，undefined 表示全部） */
+      allowedTools?: string[]
+      /** 启用深度思考 */
+      thinking?: boolean
+      /** 记忆系统消息文本（画像 + 上下文记忆），注入到消息末尾动态区 */
+      memoryTexts?: string[]
+      /** BG 前置系统消息（会话内不变），合并到静态前缀区 */
+      systemPreamble?: string
+      /** Slash 命令注入（本轮临时指令），注入到消息末尾动态区 */
+      promptInjection?: string
     }
   ): AsyncIterable<LLMStreamChunk>
 }

@@ -197,7 +197,11 @@ export async function updateTodoItem(
   options?: { checkLock?: boolean; lockSessionId?: string }
 ): Promise<{ list: TodoList; item: TodoItem }> {
   const found = await findTodoItem(ctx.scope, itemId)
-  if (!found) throw new ResourceNotFoundException(`待办项不存在: ${itemId}`)
+  if (!found) {
+    throw new ResourceNotFoundException(
+      `待办项不存在: ${itemId}。itemId 应为 UUID 格式，请先用 prizm_todo({ action: "list", listId }) 查看正确的 itemId`
+    )
+  }
 
   if (options?.checkLock) {
     assertNotLocked(ctx.scope, found.list.id, options.lockSessionId ?? ctx.actor.sessionId)
@@ -237,7 +241,11 @@ export async function deleteTodoItem(
   options?: { checkLock?: boolean; lockSessionId?: string }
 ): Promise<{ list: TodoList; deletedTitle: string }> {
   const found = await findTodoItem(ctx.scope, itemId)
-  if (!found) throw new ResourceNotFoundException(`待办项不存在: ${itemId}`)
+  if (!found) {
+    throw new ResourceNotFoundException(
+      `待办项不存在: ${itemId}。itemId 应为 UUID 格式，请先用 prizm_todo({ action: "list", listId }) 查看正确的 itemId`
+    )
+  }
 
   if (options?.checkLock) {
     assertNotLocked(ctx.scope, found.list.id, options.lockSessionId ?? ctx.actor.sessionId)

@@ -17,6 +17,8 @@ import { loadAllCustomCommands } from '../../llm/customCommandLoader'
 import { listSlashCommands } from '../../llm/slashCommandRegistry'
 import { getAllToolMetadata } from '../../llm/toolMetadata'
 import { getBuiltinTools } from '../../llm/builtinTools'
+import { resolveGroupStates } from '../../llm/builtinTools/toolGroups'
+import { getToolGroupConfig } from '../../settings/agentToolsStore'
 import { listAllUserProfiles, isMemoryEnabled } from '../../llm/EverMemService'
 import { log, getScopeFromQuery } from './_shared'
 
@@ -208,12 +210,14 @@ export function registerMetadataRoutes(router: Router): void {
       }))
       const rules = listDiscoveredRules()
       const metadata = getAllToolMetadata()
+      const toolGroups = resolveGroupStates(getToolGroupConfig())
       res.json({
         builtinTools: metadata,
         slashCommands,
         customCommands,
         skills,
-        rules
+        rules,
+        toolGroups
       })
     } catch (error) {
       log.error('get capabilities error:', error)

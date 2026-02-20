@@ -369,7 +369,7 @@ export class ExecWorkerPool {
 
   getExecWorkerInfos(agentSessionId: string): ExecWorkerInfo[] {
     const results: ExecWorkerInfo[] = []
-    for (const wsType of ['main', 'session'] as ExecWorkspaceType[]) {
+    for (const wsType of ['main', 'session', 'workflow'] as ExecWorkspaceType[]) {
       const key = execWorkerKey(agentSessionId, wsType)
       const worker = this.execWorkers.get(key)
       if (!worker) continue
@@ -409,7 +409,7 @@ export class ExecWorkerPool {
   /** 仅清理该 session 的 exec workers */
   cleanupSession(agentSessionId: string): number {
     let workersCleaned = 0
-    for (const wsType of ['main', 'session'] as ExecWorkspaceType[]) {
+    for (const wsType of ['main', 'session', 'workflow'] as ExecWorkspaceType[]) {
       const key = execWorkerKey(agentSessionId, wsType)
       const worker = this.execWorkers.get(key)
       if (worker) {

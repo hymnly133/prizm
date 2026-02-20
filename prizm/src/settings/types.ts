@@ -44,6 +44,17 @@ export interface ContextWindowSettings {
   cachedContextTurns?: number
 }
 
+/** Prompt 缓存优化设置 */
+export interface PromptCachingSettings {
+  /**
+   * 动态上下文注入方式：
+   * - 'system': 独立 system 消息（方式 A，遵循度更好但部分模型不支持）
+   * - 'user_prefix': user 消息前缀（方式 B，更通用安全）
+   * 默认 'system'
+   */
+  dynamicContextMode?: 'system' | 'user_prefix'
+}
+
 /** Agent LLM 相关设置（文档记忆、对话摘要、默认模型、记忆、上下文窗口） */
 export interface AgentLLMSettings {
   /** 文档记忆配置（原 documentSummary） */
@@ -56,6 +67,8 @@ export interface AgentLLMSettings {
   memory?: MemorySettings
   /** 上下文窗口 A/B 压缩配置 */
   contextWindow?: ContextWindowSettings
+  /** Prompt 缓存优化配置 */
+  promptCaching?: PromptCachingSettings
 }
 
 /** 内置工具集合（可扩展） */
@@ -113,6 +126,9 @@ export interface RulesSettings {
   enabledSources?: string[]
 }
 
+/** 工具分组开关配置：groupId → enabled */
+export type ToolGroupConfig = Record<string, boolean>
+
 /** 统一 Agent 工具设置 */
 export interface AgentToolsSettings {
   builtin?: BuiltinToolsSettings
@@ -127,5 +143,7 @@ export interface AgentToolsSettings {
   rules?: RulesSettings
   /** 终端设置 */
   terminal?: TerminalSettings
+  /** 工具分组开关 */
+  toolGroups?: ToolGroupConfig
   updatedAt?: number
 }
