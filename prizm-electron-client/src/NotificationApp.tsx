@@ -10,17 +10,17 @@ interface NotifItem {
   id: string
   eventType: string
   payload: unknown
-  /** 兼容：主动通知的 title/body */
   title?: string
   body?: string
   source?: string
   createdAt: number
-  /** 刚被更新（非新建），用于播放高亮动画 */
   justUpdated?: boolean
 }
 
 const AUTO_DISMISS_MS = 8000
 const MAX_VISIBLE = 12
+/** 收起态最多露出的堆叠层数（含最前面完整显示的那条） */
+const MAX_STACK_LAYERS = 3
 
 function formatTime(ts: number): string {
   const d = new Date(ts)
@@ -122,6 +122,20 @@ function NotificationItemContent({ item }: { item: NotifItem }) {
     )
   }
 
+  if (eventType === 'agent:message.completed') {
+    return (
+      <div className="notification-item__content">
+        <div className="notification-item__title notification-item__title--agent">
+          Agent 回复完成
+        </div>
+        {(body ?? (p.body as string)) && (
+          <div className="notification-item__body">{body ?? (p.body as string)}</div>
+        )}
+        <div className="notification-item__meta">{formatTime(item.createdAt)}</div>
+      </div>
+    )
+  }
+
   if (eventType === 'notification' || (title !== undefined && !eventType)) {
     return (
       <div className="notification-item__content">
@@ -174,10 +188,12 @@ function NotificationItemContent({ item }: { item: NotifItem }) {
 
 export default function NotificationApp() {
   const [items, setItems] = useState<NotifItem[]>([])
+  const [expanded, setExpanded] = useState(false)
   const timersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>())
-  const panelRefRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
   const prevLenRef = useRef(0)
   const shouldReduceMotion = useReducedMotion()
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const remove = useCallback((id: string) => {
     const timers = timersRef.current
@@ -188,6 +204,32 @@ export default function NotificationApp() {
     }
     setItems((prev) => prev.filter((x) => x.id !== id))
   }, [])
+
+  /** Pause auto-dismiss timers while expanded, resume on collapse */
+  const pausedTimersRef = useRef(new Map<string, number>())
+
+  const pauseAllTimers = useCallback(() => {
+    const timers = timersRef.current
+    const paused = pausedTimersRef.current
+    paused.clear()
+    timers.forEach((t, id) => {
+      clearTimeout(t)
+      paused.set(id, Date.now())
+    })
+    timers.clear()
+  }, [])
+
+  const resumeAllTimers = useCallback(() => {
+    const paused = pausedTimersRef.current
+    paused.forEach((_ts, id) => {
+      const timer = setTimeout(() => {
+        timersRef.current.delete(id)
+        remove(id)
+      }, AUTO_DISMISS_MS)
+      timersRef.current.set(id, timer)
+    })
+    paused.clear()
+  }, [remove])
 
   useEffect(() => {
     const timers = timersRef.current
@@ -208,11 +250,10 @@ export default function NotificationApp() {
 
   useEffect(() => {
     const prev = prevLenRef.current
-    if (items.length > prev) {
-      panelRefRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
-    }
     prevLenRef.current = items.length
     if (prev > 0 && items.length === 0) {
+      setExpanded(false)
+      window.notificationApi?.setMouseInteractive?.(false)
       window.notificationApi?.notifyPanelEmpty?.()
     }
   }, [items.length])
@@ -292,62 +333,145 @@ export default function NotificationApp() {
     window.notificationApi?.notifyReady?.()
   }, [remove])
 
-  const cardVariants = {
-    enter: {
-      opacity: 0,
-      scale: 0.96,
-      y: shouldReduceMotion ? 0 : 8
-    },
-    animate: {
-      opacity: 1,
-      scale: 1,
-      y: 0,
-      transition: { duration: shouldReduceMotion ? 0.1 : 0.25, ease: 'easeOut' as const }
-    },
-    exit: {
-      opacity: 0,
-      scale: 0.96,
-      y: shouldReduceMotion ? 0 : -8,
-      transition: { duration: shouldReduceMotion ? 0.05 : 0.2, ease: 'easeIn' as const }
+  const handleMouseEnter = useCallback(() => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current)
+      hoverTimerRef.current = null
     }
-  }
+    setExpanded(true)
+    pauseAllTimers()
+    window.notificationApi?.setMouseInteractive?.(true)
+  }, [pauseAllTimers])
 
-  const layoutTransition = {
-    layout: { duration: shouldReduceMotion ? 0 : 0.25, ease: 'easeOut' as const }
-  }
+  const handleMouseLeave = useCallback(() => {
+    hoverTimerRef.current = setTimeout(() => {
+      setExpanded(false)
+      resumeAllTimers()
+      window.notificationApi?.setMouseInteractive?.(false)
+      hoverTimerRef.current = null
+    }, 300)
+  }, [resumeAllTimers])
+
+  const dur = shouldReduceMotion ? 0.05 : 0.3
+
+  if (items.length === 0) return null
+
+  const isStacked = !expanded && items.length > 1
+  const hiddenCount = isStacked ? items.length - 1 : 0
 
   return (
-    <div ref={panelRefRef} className="notification-panel">
-      <AnimatePresence mode="popLayout" initial={false}>
-        {items.map((item) => (
-          <motion.div
-            key={item.id}
-            className={`notification-item${item.justUpdated ? ' notification-item--updated' : ''}`}
-            role="alert"
-            aria-live="polite"
-            layout
-            variants={cardVariants}
-            initial="enter"
-            animate="animate"
-            exit="exit"
-            transition={layoutTransition}
-            onClick={() => remove(item.id)}
-            style={{ position: 'relative' }}
-          >
-            <NotificationItemContent item={item} />
-            <ActionIcon
-              icon={X}
-              size="small"
-              aria-label="关闭"
-              onClick={(e) => {
-                e.stopPropagation()
-                remove(item.id)
-              }}
-              className="notification-item__close"
-            />
-          </motion.div>
-        ))}
-      </AnimatePresence>
+    <div
+      ref={panelRef}
+      className={`notification-panel ${expanded ? 'notification-panel--expanded' : ''}`}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
+      {/* Expanded: scrollable list */}
+      {expanded && (
+        <div className="notification-panel__list">
+          <AnimatePresence mode="popLayout" initial={false}>
+            {items.map((item) => (
+              <motion.div
+                key={item.id}
+                className={`notification-item${
+                  item.justUpdated ? ' notification-item--updated' : ''
+                }`}
+                role="alert"
+                aria-live="polite"
+                layout
+                initial={{ opacity: 0, y: 20, scale: 0.96 }}
+                animate={{
+                  opacity: 1,
+                  y: 0,
+                  scale: 1,
+                  transition: { duration: dur, ease: 'easeOut' }
+                }}
+                exit={{
+                  opacity: 0,
+                  scale: 0.96,
+                  y: -10,
+                  transition: { duration: dur * 0.7, ease: 'easeIn' }
+                }}
+                style={{ position: 'relative' }}
+              >
+                <NotificationItemContent item={item} />
+                <ActionIcon
+                  icon={X}
+                  size="small"
+                  aria-label="关闭"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    remove(item.id)
+                  }}
+                  className="notification-item__close"
+                />
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </div>
+      )}
+
+      {/* Collapsed: stacked cards */}
+      {!expanded && (
+        <div className="notification-panel__stack">
+          {items.slice(0, MAX_STACK_LAYERS).map((item, i) => {
+            const isTop = i === 0
+            const scale = 1 - i * 0.04
+            const yOffset = i * -6
+            const opacity = i === 0 ? 1 : i === 1 ? 0.7 : 0.4
+
+            return (
+              <motion.div
+                key={item.id}
+                className={`notification-item notification-item--stacked${
+                  item.justUpdated && isTop ? ' notification-item--updated' : ''
+                }`}
+                role={isTop ? 'alert' : undefined}
+                aria-live={isTop ? 'polite' : undefined}
+                initial={{ opacity: 0, y: 30, scale: 0.9 }}
+                animate={{
+                  opacity,
+                  y: yOffset,
+                  scale,
+                  transition: { duration: dur, ease: [0.32, 0.72, 0, 1] }
+                }}
+                exit={{ opacity: 0, y: 20, scale: 0.9, transition: { duration: dur * 0.6 } }}
+                style={{
+                  zIndex: MAX_STACK_LAYERS - i,
+                  position: i === 0 ? 'relative' : 'absolute',
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  pointerEvents: isTop ? 'auto' : 'none'
+                }}
+              >
+                {isTop && (
+                  <>
+                    <NotificationItemContent item={item} />
+                    <ActionIcon
+                      icon={X}
+                      size="small"
+                      aria-label="关闭"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        remove(item.id)
+                      }}
+                      className="notification-item__close"
+                    />
+                  </>
+                )}
+                {!isTop && (
+                  <div className="notification-item__content" style={{ visibility: 'hidden' }}>
+                    <div className="notification-item__title">&nbsp;</div>
+                  </div>
+                )}
+              </motion.div>
+            )
+          })}
+
+          {hiddenCount > 0 && <div className="notification-stack__badge">+{hiddenCount}</div>}
+        </div>
+      )}
     </div>
   )
 }

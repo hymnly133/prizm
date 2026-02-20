@@ -4,16 +4,15 @@ import { App as AntdApp, Modal } from 'antd'
 import type { NotificationPayload } from '@prizm/client-core'
 import type { LucideIcon } from 'lucide-react'
 import {
-  Bot,
-  Columns2,
   FileText,
   FlaskConical,
   Gem,
+  GitBranch,
   Home,
   LayoutDashboard,
   ScrollText,
   Settings,
-  User
+  Users
 } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { ClientSettingsProvider } from './context/ClientSettingsContext'
@@ -38,16 +37,23 @@ import { CommandPalette } from './components/CommandPalette'
 import { useHashRoute } from './hooks/useHashRoute'
 import { useScopeDataBinding } from './hooks/useScopeDataBinding'
 import { QuickActionHandler } from './components/QuickActionHandler'
-import AgentPage from './views/AgentPage'
+import CollaborationPage from './views/CollaborationPage'
 import DocumentEditorPage from './views/DocumentEditorPage'
 import HomePage from './views/HomePage'
 import SettingsPage from './views/SettingsPage'
 import DevToolsPage from './views/DevToolsPage'
-import UserPage from './views/UserPage'
 import WorkPage from './views/WorkPage'
-import CollaborationPage from './views/CollaborationPage'
+import WorkflowPage from './views/WorkflowPage'
+import { ErrorBoundary } from './components/ErrorBoundary'
+import './styles/schedule.css'
+import './styles/workflow-page.css'
+import './styles/workflow.css'
+import './styles/workflow-editor.css'
+import './styles/execution.css'
+import './components/workflow/WorkflowToolCards'
+import './components/agent/WorkflowBuilderCard'
 
-type PageKey = 'home' | 'work' | 'docs' | 'agent' | 'collaboration' | 'user' | 'settings' | 'test'
+type PageKey = 'home' | 'work' | 'docs' | 'agent' | 'workflow' | 'settings' | 'test'
 
 const STATUS_LABELS: Record<'connected' | 'disconnected' | 'connecting' | 'error', string> = {
   connected: '已连接',
@@ -57,12 +63,11 @@ const STATUS_LABELS: Record<'connected' | 'disconnected' | 'connecting' | 'error
 }
 
 const NAV_ITEMS: Array<{ key: PageKey; label: string; icon: LucideIcon }> = [
-  { key: 'home', label: '主页', icon: Home },
-  { key: 'work', label: '工作', icon: LayoutDashboard },
+  { key: 'home', label: '仪表盘', icon: Home },
+  { key: 'work', label: '工作台', icon: LayoutDashboard },
   { key: 'docs', label: '文档', icon: FileText },
-  { key: 'agent', label: 'Agent', icon: Bot },
-  { key: 'collaboration', label: '协作', icon: Columns2 },
-  { key: 'user', label: '用户', icon: User }
+  { key: 'agent', label: '协作', icon: Users },
+  { key: 'workflow', label: '工作流', icon: GitBranch }
 ]
 
 function AppContent() {
@@ -83,16 +88,10 @@ function AppContent() {
 
   /**
    * Stable: 带离开保护的页面切换 — 通过 ref 读取当前页，回调引用永久稳定。
-   * 不使用 startTransition，因为级联重渲染已被根治（稳定回调 + memoized context），
-   * 而 startTransition 会让 React 将此更新标记为非紧急，被 Segmented 动画延迟。
    */
-  const collabDocDirtyRef = useRef(false)
-
   const setActivePageSafe = useCallback((next: PageKey) => {
     const cur = activePageRef.current
-    const hasDirtyDoc =
-      (cur === 'docs' && docsDirtyRef.current) ||
-      (cur === 'collaboration' && collabDocDirtyRef.current)
+    const hasDirtyDoc = cur === 'docs' && docsDirtyRef.current
     if (hasDirtyDoc && next !== cur) {
       Modal.confirm({
         title: '未保存的更改',
@@ -110,14 +109,13 @@ function AppContent() {
   const navigateToWork = useCallback(() => setActivePageSafe('work'), [setActivePageSafe])
   const navigateToDocs = useCallback(() => setActivePageSafe('docs'), [setActivePageSafe])
   const navigateToAgent = useCallback(() => setActivePageSafe('agent'), [setActivePageSafe])
-  const navigateToUser = useCallback(() => setActivePageSafe('user'), [setActivePageSafe])
 
   /** 懒挂载 + 空闲预加载：首屏只挂载 home，之后空闲时预挂载高频页面 */
   const mountedPagesRef = useRef(new Set<PageKey>(['home']))
   mountedPagesRef.current.add(activePage)
   const [, preloadTick] = useState(0)
   useEffect(() => {
-    const PRELOAD_PAGES: PageKey[] = ['work', 'docs', 'agent', 'collaboration']
+    const PRELOAD_PAGES: PageKey[] = ['work', 'docs', 'agent', 'workflow']
     const schedule = () => {
       let added = false
       for (const p of PRELOAD_PAGES) {
@@ -302,7 +300,6 @@ function AppContent() {
                     <HomePage
                       onNavigateToAgent={navigateToAgent}
                       onNavigateToWork={navigateToWork}
-                      onNavigateToUser={navigateToUser}
                     />
                   </div>
                 )}
@@ -312,7 +309,9 @@ function AppContent() {
                       activePage !== 'work' ? ' page-keep-alive--hidden' : ''
                     }`}
                   >
-                    <WorkPage />
+                    <ErrorBoundary>
+                      <WorkPage />
+                    </ErrorBoundary>
                   </div>
                 )}
                 {mounted.has('docs') && (
@@ -330,28 +329,20 @@ function AppContent() {
                       activePage !== 'agent' ? ' page-keep-alive--hidden' : ''
                     }`}
                   >
-                    <AgentPage />
+                    <ErrorBoundary>
+                      <CollaborationPage />
+                    </ErrorBoundary>
                   </div>
                 )}
-                {mounted.has('collaboration') && (
+                {mounted.has('workflow') && (
                   <div
                     className={`page-keep-alive${
-                      activePage !== 'collaboration' ? ' page-keep-alive--hidden' : ''
+                      activePage !== 'workflow' ? ' page-keep-alive--hidden' : ''
                     }`}
                   >
-                    <CollaborationPage
-                      onNavigateToAgent={navigateToAgent}
-                      onNavigateToDocs={navigateToDocs}
-                    />
-                  </div>
-                )}
-                {mounted.has('user') && (
-                  <div
-                    className={`page-keep-alive${
-                      activePage !== 'user' ? ' page-keep-alive--hidden' : ''
-                    }`}
-                  >
-                    <UserPage />
+                    <ErrorBoundary>
+                      <WorkflowPage />
+                    </ErrorBoundary>
                   </div>
                 )}
                 {mounted.has('settings') && (

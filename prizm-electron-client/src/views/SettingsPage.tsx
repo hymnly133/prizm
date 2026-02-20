@@ -37,11 +37,9 @@ import {
   Sparkles,
   ScrollText,
   Zap,
-  Palette,
-  Coins
+  Palette
 } from 'lucide-react'
 import { OnboardingWizard } from '../components/OnboardingWizard'
-import { TokenUsagePanel } from '../components/TokenUsagePanel'
 type SettingsCategory =
   | 'connection'
   | 'appearance'
@@ -49,7 +47,6 @@ type SettingsCategory =
   | 'scope'
   | 'agent'
   | 'embedding'
-  | 'token-usage'
   | 'mcp'
   | 'commands'
   | 'skills'
@@ -70,7 +67,6 @@ const CATEGORIES: CategoryItem[] = [
   { key: 'scope', label: '工作区', icon: <FolderOpen size={16} />, requiresAuth: true },
   { key: 'agent', label: 'Agent', icon: <Bot size={16} />, requiresAuth: true },
   { key: 'embedding', label: '模型', icon: <Cpu size={16} />, requiresAuth: true },
-  { key: 'token-usage', label: 'Token 用量', icon: <Coins size={16} />, requiresAuth: true },
   { key: 'mcp', label: 'MCP', icon: <Plug size={16} />, requiresAuth: true },
   { key: 'commands', label: '命令', icon: <TerminalIcon size={16} />, requiresAuth: true },
   { key: 'skills', label: '技能', icon: <Sparkles size={16} />, requiresAuth: true },
@@ -455,9 +451,6 @@ function SettingsPage() {
 
       case 'embedding':
         return <EmbeddingStatus http={manager?.getHttpClient() ?? null} onLog={addLog} />
-
-      case 'token-usage':
-        return <TokenUsagePanel http={manager?.getHttpClient() ?? null} onLog={addLog} />
 
       case 'mcp':
         return <McpSettings http={manager?.getHttpClient() ?? null} onLog={addLog} />

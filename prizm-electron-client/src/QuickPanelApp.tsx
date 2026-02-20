@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { FilePlus, MessageSquare, FileText, Sparkles, X } from 'lucide-react'
+import { FilePlus, MessageSquare, FileText, Sparkles, X, PenLine, Undo2 } from 'lucide-react'
 
 export type QuickPanelAction =
   | 'create-document'
@@ -23,13 +23,61 @@ const TEXT_ITEMS: QuickPanelItem[] = [
   { id: 'ai-organize-to-document', label: 'AI 整理到文档', icon: <Sparkles size={18} /> }
 ]
 
+function SmallIconButton({
+  onClick,
+  ariaLabel,
+  children
+}: {
+  onClick: () => void
+  ariaLabel: string
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={ariaLabel}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 20,
+        height: 20,
+        border: 'none',
+        borderRadius: 4,
+        background: 'transparent',
+        color: 'rgba(255,255,255,0.3)',
+        cursor: 'pointer',
+        padding: 0,
+        flexShrink: 0
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = 'rgba(255,255,255,0.1)'
+        e.currentTarget.style.color = 'rgba(255,255,255,0.7)'
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'transparent'
+        e.currentTarget.style.color = 'rgba(255,255,255,0.3)'
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
 export default function QuickPanelApp() {
   const [selectedText, setSelectedText] = useState('')
   const [clipboardText, setClipboardText] = useState('')
   const [focusedIndex, setFocusedIndex] = useState(0)
+  const [isEditing, setIsEditing] = useState(false)
+  const [customText, setCustomText] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
-  const actionableText = selectedText.trim() || clipboardText.trim()
+  const capturedText = selectedText.trim() || clipboardText.trim()
+  const hasCaptured = capturedText.length > 0
+  const effectiveEditing = isEditing || !hasCaptured
+  const actionableText = effectiveEditing ? customText.trim() : capturedText
   const items: QuickPanelItem[] =
     actionableText.length > 0 ? [...BASE_ITEMS, ...TEXT_ITEMS] : BASE_ITEMS
   const maxIndex = items.length - 1
@@ -37,13 +85,13 @@ export default function QuickPanelApp() {
   useEffect(() => {
     const api = window.quickPanelApi
     if (!api) return
-    // 初始显示：重置全部状态
     const unsubShow = api.onShow((data) => {
       setSelectedText('')
       setClipboardText(data.clipboardText ?? '')
       setFocusedIndex(0)
+      setIsEditing(false)
+      setCustomText('')
     })
-    // 增量更新：仅补充选中文字，不重置焦点位置
     const unsubUpdate = api.onSelectionUpdate((data) => {
       if (data.selectedText) {
         setSelectedText(data.selectedText)
@@ -66,10 +114,34 @@ export default function QuickPanelApp() {
     [actionableText]
   )
 
+  const enterEditMode = useCallback(() => {
+    setIsEditing(true)
+    setCustomText('')
+    requestAnimationFrame(() => inputRef.current?.focus())
+  }, [])
+
+  const exitEditMode = useCallback(() => {
+    setIsEditing(false)
+    setCustomText('')
+  }, [])
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (effectiveEditing && hasCaptured) {
+          exitEditMode()
+          return
+        }
         hidePanel()
+        return
+      }
+      // When the input is focused, don't intercept typing keys
+      if (inputRef.current === document.activeElement) {
+        if (e.key === 'Enter' && !e.isComposing) {
+          e.preventDefault()
+          const item = items[focusedIndex]
+          if (item) runAction(item.id)
+        }
         return
       }
       if (e.key === 'ArrowDown') {
@@ -90,7 +162,16 @@ export default function QuickPanelApp() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [items, focusedIndex, maxIndex, runAction, hidePanel])
+  }, [
+    items,
+    focusedIndex,
+    maxIndex,
+    runAction,
+    hidePanel,
+    effectiveEditing,
+    hasCaptured,
+    exitEditMode
+  ])
 
   useEffect(() => {
     const el = listRef.current
@@ -99,12 +180,22 @@ export default function QuickPanelApp() {
     child?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   }, [focusedIndex])
 
+  // Auto-focus the input when entering edit mode or when no captured text
+  useEffect(() => {
+    if (effectiveEditing) {
+      requestAnimationFrame(() => inputRef.current?.focus())
+    }
+  }, [effectiveEditing])
+
+  const showEditInput = effectiveEditing
+  const showPreview = !effectiveEditing && hasCaptured
+
   return (
     <div
       className="quickpanel-root"
       style={{
         width: 280,
-        height: 256,
+        height: 280,
         padding: 10,
         background: '#16161c',
         borderRadius: 12,
@@ -156,8 +247,8 @@ export default function QuickPanelApp() {
         </button>
       </div>
 
-      {/* 可操作文字预览 */}
-      {actionableText.length > 0 && (
+      {/* Preview 模式：显示捕获的文字 + 编辑图标 */}
+      {showPreview && (
         <div
           style={{
             marginBottom: 6,
@@ -192,8 +283,51 @@ export default function QuickPanelApp() {
               userSelect: 'none'
             }}
           >
-            {actionableText.length > 60 ? actionableText.slice(0, 60) + '…' : actionableText}
+            {capturedText.length > 60 ? capturedText.slice(0, 60) + '…' : capturedText}
           </span>
+          <SmallIconButton onClick={enterEditMode} ariaLabel="自定义输入">
+            <PenLine size={12} />
+          </SmallIconButton>
+        </div>
+      )}
+
+      {/* Edit 模式：自定义文字输入框 */}
+      {showEditInput && (
+        <div
+          style={{
+            marginBottom: 6,
+            padding: '4px 6px',
+            background: 'rgba(255,255,255,0.08)',
+            borderRadius: 6,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            minHeight: 0,
+            flexShrink: 0
+          }}
+        >
+          <input
+            ref={inputRef}
+            type="text"
+            value={customText}
+            onChange={(e) => setCustomText(e.target.value)}
+            placeholder={hasCaptured ? '输入自定义文字...' : '输入文字...'}
+            style={{
+              flex: 1,
+              border: 'none',
+              outline: 'none',
+              background: 'transparent',
+              color: 'rgba(255,255,255,0.85)',
+              fontSize: 11,
+              padding: 0,
+              lineHeight: '20px'
+            }}
+          />
+          {hasCaptured && (
+            <SmallIconButton onClick={exitEditMode} ariaLabel="还原捕获文字">
+              <Undo2 size={12} />
+            </SmallIconButton>
+          )}
         </div>
       )}
 

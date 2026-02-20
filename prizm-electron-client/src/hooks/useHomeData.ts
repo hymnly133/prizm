@@ -32,6 +32,9 @@ export interface HomeData {
     documentsCount: number
     userMemoryCount: number
     scopeMemoryCount: number
+    scopeChatMemoryCount: number
+    scopeDocumentMemoryCount: number
+    sessionMemoryCount: number
     memoryEnabled: boolean
     memoryByType: MemoryCountsByType
   }

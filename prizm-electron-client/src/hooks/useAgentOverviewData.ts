@@ -23,8 +23,9 @@ export interface AgentOverviewData {
   memoryEnabled: boolean
   userMemoryCount: number
   scopeMemoryCount: number
+  scopeChatMemoryCount: number
+  scopeDocumentMemoryCount: number
   sessionMemoryCount: number
-  documentMemoryCount: number
   memoryByType: MemoryCountsByType
   memoryCountsLoading: boolean
   loadMemoryCounts: () => void
@@ -98,8 +99,9 @@ export function useAgentOverviewData(): AgentOverviewData {
     memoryEnabled: stats.memoryEnabled,
     userMemoryCount: stats.userMemoryCount,
     scopeMemoryCount: stats.scopeMemoryCount,
+    scopeChatMemoryCount: stats.scopeChatMemoryCount,
+    scopeDocumentMemoryCount: stats.scopeDocumentMemoryCount,
     sessionMemoryCount: stats.sessionMemoryCount,
-    documentMemoryCount: stats.documentMemoryCount,
     memoryByType: stats.memoryByType,
     memoryCountsLoading: statsLoading,
     loadMemoryCounts: refreshStats,

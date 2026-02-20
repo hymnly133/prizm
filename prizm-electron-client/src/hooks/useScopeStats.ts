@@ -23,8 +23,9 @@ export interface ScopeStats {
   documentsCount: number
   userMemoryCount: number
   scopeMemoryCount: number
+  scopeChatMemoryCount: number
+  scopeDocumentMemoryCount: number
   sessionMemoryCount: number
-  documentMemoryCount: number
   memoryEnabled: boolean
   /** 按类型细分的记忆计数 */
   memoryByType: MemoryCountsByType
@@ -72,8 +73,9 @@ export function useScopeStats(): ScopeStatsResult {
       documentsCount: documents.length,
       userMemoryCount: memoryCounts.userCount,
       scopeMemoryCount: memoryCounts.scopeCount,
+      scopeChatMemoryCount: memoryCounts.scopeChatCount,
+      scopeDocumentMemoryCount: memoryCounts.scopeDocumentCount,
       sessionMemoryCount: memoryCounts.sessionCount,
-      documentMemoryCount: memoryCounts.documentCount,
       memoryEnabled: memoryCounts.enabled,
       memoryByType: parseByType(memoryCounts.byType)
     }),

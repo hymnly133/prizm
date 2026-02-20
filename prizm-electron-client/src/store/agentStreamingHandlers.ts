@@ -226,6 +226,38 @@ export function processStreamChunk(chunk: StreamChatChunk, ctx: ProcessChunkCont
     })
   }
 
+  // tool_call_args_delta
+  if (
+    chunk.type === 'tool_call_args_delta' &&
+    chunk.value &&
+    typeof chunk.value === 'object' &&
+    'id' in chunk.value
+  ) {
+    const { id, name, argumentsSoFar } = chunk.value as unknown as {
+      id: string
+      name: string
+      argumentsDelta: string
+      argumentsSoFar: string
+    }
+    const existing = acc.parts.find((p): p is MessagePartTool => p.type === 'tool' && p.id === id)
+    if (existing) {
+      existing.arguments = argumentsSoFar
+    } else {
+      acc.parts.push({
+        type: 'tool',
+        id,
+        name,
+        arguments: argumentsSoFar,
+        result: '',
+        status: 'preparing' as const
+      })
+    }
+    updateOptimisticMessages(set, get, sessionId, (prev) => {
+      if (prev.length < 2) return prev
+      return [prev[0], { ...prev[1], parts: [...acc.parts] }]
+    })
+  }
+
   // tool_call
   if (
     chunk.type === 'tool_call' &&

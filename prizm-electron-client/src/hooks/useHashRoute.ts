@@ -7,11 +7,16 @@
  */
 import { useEffect, useRef } from 'react'
 
-type PageKey = 'home' | 'work' | 'docs' | 'agent' | 'collaboration' | 'user' | 'settings' | 'test'
+type PageKey = 'home' | 'work' | 'docs' | 'agent' | 'workflow' | 'settings' | 'test'
 
-const VALID_PAGES = new Set<string>(['home', 'work', 'docs', 'agent', 'collaboration', 'user', 'settings', 'test'])
+const VALID_PAGES = new Set<string>(['home', 'work', 'docs', 'agent', 'workflow', 'settings', 'test'])
 
-const PAGE_ALIASES: Record<string, PageKey> = {}
+const PAGE_ALIASES: Record<string, PageKey> = {
+  user: 'home',
+  collaboration: 'agent',
+  collab: 'agent',
+  schedule: 'work'
+}
 
 function parseHash(): PageKey {
   const hash = window.location.hash.replace('#/', '').replace('#', '')

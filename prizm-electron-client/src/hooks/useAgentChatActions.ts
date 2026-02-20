@@ -107,14 +107,16 @@ export function useAgentChatActions(options: UseAgentChatActionsOptions) {
     [setCurrentSession]
   )
 
+  const isDisabled = sending
+
   const sendButtonProps = useMemo<SendButtonProps>(
     () => ({
-      disabled: sending,
+      disabled: isDisabled,
       generating: sending,
       onStop: stopGeneration,
       shape: 'round' as const
     }),
-    [sending, stopGeneration]
+    [isDisabled, sending, stopGeneration]
   )
 
   return {

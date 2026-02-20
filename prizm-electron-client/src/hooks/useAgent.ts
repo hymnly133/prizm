@@ -22,7 +22,7 @@ export function useAgent(scope: string) {
   // --- 转发 sync events（使用 emitter 获取完整 payload）---
   useEffect(() => {
     const unsub = subscribeSyncEvents((eventType: string, payload?: SyncEventPayload) => {
-      if (eventType.startsWith('agent:') && scopeRef.current) {
+      if ((eventType.startsWith('agent:') || eventType.startsWith('bg:session.')) && scopeRef.current) {
         useAgentSessionStore.getState().handleSyncEvent(
           eventType,
           scopeRef.current,
@@ -39,6 +39,7 @@ export function useAgent(scope: string) {
   const loading = useAgentSessionStore((s) => s.loading)
   const error = useAgentSessionStore((s) => s.error)
   const selectedModel = useAgentSessionStore((s) => s.selectedModel)
+  const thinkingEnabled = useAgentSessionStore((s) => s.thinkingEnabled)
 
   const streamingState = useAgentSessionStore(selectCurrentStreamingState)
   const sending = streamingState?.sending ?? false
@@ -100,6 +101,10 @@ export function useAgent(scope: string) {
     useAgentSessionStore.getState().setSelectedModel(model)
   }, [])
 
+  const setThinkingEnabled = useCallback((enabled: boolean) => {
+    useAgentSessionStore.getState().setThinkingEnabled(enabled)
+  }, [])
+
   const respondToInteract = useCallback(
     (requestId: string, approved: boolean, paths?: string[]) => {
       const state = useAgentSessionStore.getState()
@@ -140,6 +145,8 @@ export function useAgent(scope: string) {
     optimisticMessages,
     selectedModel,
     setSelectedModel,
+    thinkingEnabled,
+    setThinkingEnabled,
     lastInjectedMemories,
     pendingInteract,
     respondToInteract,

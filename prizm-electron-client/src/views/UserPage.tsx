@@ -4,7 +4,7 @@
  */
 import { memo, useMemo, useCallback } from 'react'
 import { motion } from 'motion/react'
-import { SpotlightCard } from '@lobehub/ui/awesome'
+import { AccentSpotlightCard } from '../components/ui/AccentSpotlightCard'
 import {
   Activity,
   Brain,
@@ -63,7 +63,7 @@ function UserPage() {
         icon: <Eye size={20} />,
         label: '前瞻',
         value: statsLoading ? '...' : String(bt.foresight),
-        color: '#13c2c2',
+        color: 'var(--ant-cyan-6, #13c2c2)',
         description: 'foresight'
       },
       {
@@ -77,7 +77,7 @@ function UserPage() {
         icon: <Activity size={20} />,
         label: '事件日志',
         value: statsLoading ? '...' : String(bt.event_log),
-        color: '#eb2f96',
+        color: 'var(--ant-magenta-6, #eb2f96)',
         description: 'event_log'
       }
     ],
@@ -111,7 +111,7 @@ function UserPage() {
         {/* 数据概览: SpotlightCard 统计网格 */}
         <motion.div {...fadeUpStagger(sectionIdx++)}>
           <SectionHeader icon={Sparkles} title="数据概览" />
-          <SpotlightCard
+          <AccentSpotlightCard
             items={statItems}
             renderItem={renderStatItem}
             columns={Math.min(statItems.length, 4)}

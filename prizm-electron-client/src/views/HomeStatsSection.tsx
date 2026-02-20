@@ -2,7 +2,7 @@
  * HomeStatsSection - 工作区概览统计卡片（SpotlightCard）
  */
 import { motion } from 'motion/react'
-import { SpotlightCard } from '@lobehub/ui/awesome'
+import { AccentSpotlightCard } from '../components/ui/AccentSpotlightCard'
 import { Sparkles } from 'lucide-react'
 import { fadeUpStagger } from '../theme/motionPresets'
 import { SectionHeader } from '../components/ui/SectionHeader'
@@ -41,7 +41,7 @@ export default function HomeStatsSection({ items, animationIndex = 0 }: HomeStat
   return (
     <motion.div {...fadeUpStagger(animationIndex)}>
       <SectionHeader icon={Sparkles} title="工作区概览" />
-      <SpotlightCard
+      <AccentSpotlightCard
         items={items}
         renderItem={renderStatItem}
         columns={columns}

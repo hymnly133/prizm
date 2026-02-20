@@ -14,6 +14,7 @@ declare global {
       onNotification: (callback: (payload: { title: string; body?: string }) => void) => void
       notifyPanelEmpty?: () => void
       notifyReady?: () => void
+      setMouseInteractive?: (interactive: boolean) => void
     }
   }
 }

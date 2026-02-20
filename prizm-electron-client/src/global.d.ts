@@ -71,6 +71,8 @@ declare global {
       }): Promise<boolean>
       /** 设置原生主题模式，同步到主进程 nativeTheme 并持久化 */
       setNativeTheme(mode: 'auto' | 'light' | 'dark'): Promise<boolean>
+      /** 在系统资源管理器中打开目录 */
+      openInExplorer(dirPath: string): Promise<boolean>
     }
     quickPanelApi?: {
       onShow(callback: (data: { clipboardText: string }) => void): () => void

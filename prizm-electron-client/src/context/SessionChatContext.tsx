@@ -12,6 +12,7 @@ import {
   memo,
   useCallback,
   useContext,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -151,10 +152,16 @@ export const SessionChatProvider = memo(function SessionChatProvider({ sessionId
     if (optimisticMessages.length === 0) return baseChatData
     const optimisticIds = new Set(optimisticMessages.map((m) => m.id))
     const filteredBase = baseChatData.filter((m) => !optimisticIds.has(m.id))
-    const optimisticConverted = optimisticMessages.map((m) =>
+    const visibleOptimistic = optimisticMessages.filter(
+      (m) => !m.id.startsWith('observe-phantom')
+    )
+    const optimisticConverted = visibleOptimistic.map((m) =>
       toChatMessage({
         ...m,
-        streaming: sending && m.role === 'assistant' && m.id.startsWith('assistant-')
+        streaming:
+          sending &&
+          m.role === 'assistant' &&
+          (m.id.startsWith('assistant-') || m.id.startsWith('observe'))
       })
     )
     return [...filteredBase, ...optimisticConverted]
@@ -185,6 +192,17 @@ export const SessionChatProvider = memo(function SessionChatProvider({ sessionId
       el.scrollTop = el.scrollHeight
     }
   }, [chatData, sending, active])
+
+  // --- Auto-observe running BG sessions ---
+  const isBgRunning = session?.kind === 'background' &&
+    (session.bgStatus === 'running' || session.bgStatus === 'pending')
+  useEffect(() => {
+    if (!active || !isBgRunning || sending) return
+    useAgentSessionStore.getState().startObserving(sessionId, scope)
+    return () => {
+      useAgentSessionStore.getState().stopObserving(sessionId)
+    }
+  }, [active, isBgRunning, sessionId, scope]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- Actions (bound to sessionId + scope) ---
   const sendMessage = useCallback(

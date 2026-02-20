@@ -28,8 +28,9 @@ export interface MemoryCounts {
   enabled: boolean
   userCount: number
   scopeCount: number
+  scopeChatCount: number
+  scopeDocumentCount: number
   sessionCount: number
-  documentCount: number
   byType: Record<string, number>
 }
 
@@ -37,8 +38,9 @@ const EMPTY_MEMORY_COUNTS: MemoryCounts = {
   enabled: false,
   userCount: 0,
   scopeCount: 0,
+  scopeChatCount: 0,
+  scopeDocumentCount: 0,
   sessionCount: 0,
-  documentCount: 0,
   byType: {}
 }
 

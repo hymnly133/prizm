@@ -53,6 +53,8 @@ export interface AgentSessionStoreState {
   loading: boolean
   error: string | null
   selectedModel: string | undefined
+  thinkingEnabled: boolean
+  toolCardCompact: boolean
 
   // --- Actions ---
   setHttpClient(http: PrizmClient): void
@@ -87,8 +89,48 @@ export interface AgentSessionStoreState {
     scope: string,
     restoreFiles?: boolean
   ): Promise<RollbackResult | null>
+  startObserving(sessionId: string, scope: string): void
+  stopObserving(sessionId: string): void
   handleSyncEvent(event: string, scope: string, payload?: Record<string, unknown>): void
   setSelectedModel(model: string | undefined): void
+  setThinkingEnabled(enabled: boolean): void
+  setToolCardCompact(compact: boolean): void
+  toggleToolCardCompact(): void
+}
+
+const THINKING_STORAGE_KEY = 'prizm.agent.thinkingEnabled'
+const TOOL_COMPACT_STORAGE_KEY = 'prizm.agent.toolCardCompact'
+
+function loadThinkingEnabled(): boolean {
+  try {
+    return localStorage.getItem(THINKING_STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function saveThinkingEnabled(v: boolean): void {
+  try {
+    localStorage.setItem(THINKING_STORAGE_KEY, v ? '1' : '0')
+  } catch {
+    /* ignore */
+  }
+}
+
+function loadToolCardCompact(): boolean {
+  try {
+    return localStorage.getItem(TOOL_COMPACT_STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function saveToolCardCompact(v: boolean): void {
+  try {
+    localStorage.setItem(TOOL_COMPACT_STORAGE_KEY, v ? '1' : '0')
+  } catch {
+    /* ignore */
+  }
 }
 
 /** 模块级：HTTP client 引用（避免存入 zustand state） */
@@ -96,6 +138,9 @@ let _httpClient: PrizmClient | null = null
 
 /** 模块级：loadSession in-flight 去重 */
 const _loadInflight = new Map<string, Promise<AgentSession | null>>()
+
+/** 模块级：BG session observe AbortController 追踪 */
+const _observeControllers = new Map<string, AbortController>()
 
 /** 模块级：每个 session 的最后成功 fetch 时间（用于 stale-while-revalidate） */
 const _lastFetchTime = new Map<string, number>()
@@ -156,6 +201,8 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
     loading: false,
     error: null,
     selectedModel: undefined,
+    thinkingEnabled: loadThinkingEnabled(),
+    toolCardCompact: loadToolCardCompact(),
 
     // --- Actions ---
 
@@ -165,6 +212,22 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
 
     setSelectedModel(model: string | undefined) {
       set({ selectedModel: model })
+    },
+
+    setThinkingEnabled(enabled: boolean) {
+      set({ thinkingEnabled: enabled })
+      saveThinkingEnabled(enabled)
+    },
+
+    setToolCardCompact(compact: boolean) {
+      set({ toolCardCompact: compact })
+      saveToolCardCompact(compact)
+    },
+
+    toggleToolCardCompact() {
+      const next = !get().toolCardCompact
+      set({ toolCardCompact: next })
+      saveToolCardCompact(next)
     },
 
     async refreshSessions(scope: string) {
@@ -429,9 +492,79 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
       }
     },
 
-    handleSyncEvent(event: string, scope: string, payload?: Record<string, unknown>) {
-      if (!event.startsWith('agent:')) return
+    startObserving(sessionId: string, scope: string) {
       const http = _httpClient
+      if (!http) return
+
+      if (_observeControllers.has(sessionId)) return
+
+      const ac = new AbortController()
+      _observeControllers.set(sessionId, ac)
+
+      const phantomMsg: AgentMessage = {
+        id: tmpId('observe-phantom'),
+        role: 'user',
+        parts: [{ type: 'text', content: '' }],
+        createdAt: Date.now()
+      }
+      const assistantMsg: AgentMessage = {
+        id: tmpId('observe'),
+        role: 'assistant',
+        parts: [],
+        createdAt: Date.now()
+      }
+
+      updateStreamingState(setStreaming, sessionId, {
+        sending: true,
+        thinking: true,
+        optimisticMessages: [phantomMsg, assistantMsg]
+      })
+
+      const acc = createStreamAccumulator()
+      const internals = getInternals(sessionId)
+      internals.lastContentTime = Date.now()
+
+      const chunkCtx = { set: setStreaming, get: getStreaming, sessionId, internals, acc }
+
+      http
+        .observeBgSession(sessionId, {
+          scope,
+          signal: ac.signal,
+          onChunk: (chunk) => {
+            if (chunk.type === 'done') return
+            processStreamChunk(chunk, chunkCtx)
+          },
+          onError: (msg) => log.warn('Observe error:', msg)
+        })
+        .catch((err) => {
+          if (err instanceof Error && err.name === 'AbortError') return
+          log.error('Observe stream error:', err)
+        })
+        .finally(() => {
+          _observeControllers.delete(sessionId)
+          updateStreamingState(setStreaming, sessionId, {
+            sending: false,
+            thinking: false,
+            optimisticMessages: []
+          })
+          internals.lastContentTime = 0
+          _invalidateSessionCache(sessionId)
+          _backgroundRevalidate(sessionId, scope)
+        })
+    },
+
+    stopObserving(sessionId: string) {
+      const ac = _observeControllers.get(sessionId)
+      if (ac) {
+        ac.abort()
+        _observeControllers.delete(sessionId)
+      }
+    },
+
+    handleSyncEvent(event: string, scope: string, payload?: Record<string, unknown>) {
+      if (!event.startsWith('agent:') && !event.startsWith('bg:session.')) return
+      const http = _httpClient
+
       log.debug('Sync event received:', event, 'scope:', scope)
 
       if (event === 'agent:session.created') {
@@ -468,6 +601,21 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
             }
             return next
           })
+        }
+        return
+      }
+
+      if (event === 'agent:session.chatStatusChanged') {
+        const sessionId = payload?.sessionId as string | undefined
+        const chatStatus = payload?.chatStatus as string | undefined
+        if (sessionId && chatStatus) {
+          set((s) => ({
+            sessions: s.sessions.map((sess) =>
+              sess.id === sessionId
+                ? { ...sess, chatStatus: chatStatus as 'idle' | 'chatting' }
+                : sess
+            )
+          }))
         }
         return
       }
@@ -542,12 +690,14 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
       const acc = createStreamAccumulator()
       const chunkCtx = { set: setStreaming, get: getStreaming, sessionId, internals, acc }
 
+      const thinkingEnabled = get().thinkingEnabled
       try {
         await http.streamChat(sessionId, content.trim(), {
           scope,
           signal: ac.signal,
           model: selectedModel,
           fileRefs,
+          thinking: thinkingEnabled || undefined,
           onChunk: (chunk) => processStreamChunk(chunk, chunkCtx),
           onError: (msg) => set({ error: msg })
         })
@@ -563,6 +713,25 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
         _lastFetchTime.set(sessionId, Date.now())
         log.info('Stream completed, session:', sessionId)
         updateStreamingState(setStreaming, sessionId, { optimisticMessages: [] })
+
+        // 对话完成 → 桌面通知
+        try {
+          const session = get().sessions.find((s) => s.id === sessionId)
+          const sessionLabel = session?.llmSummary?.trim() || '会话'
+          const replyPreview = getTextContent({ parts: acc.parts })
+          const bodyText = replyPreview
+            ? replyPreview.slice(0, 100) + (replyPreview.length > 100 ? '…' : '')
+            : '回复已生成'
+          window.prizm?.showNotification?.({
+            title: `Agent 回复完成`,
+            body: `[${sessionLabel}] ${bodyText}`,
+            eventType: 'agent:message.completed',
+            updateId: `agent-chat-done:${sessionId}`
+          })
+        } catch {
+          // ignore notification errors
+        }
+
         return acc.commandResultContent ?? getTextContent({ parts: acc.parts })
       } catch (err) {
         const isAbort = err instanceof Error && err.name === 'AbortError'
