@@ -213,6 +213,8 @@ export interface MessageUsage {
   totalTokens?: number
   totalInputTokens?: number
   totalOutputTokens?: number
+  /** 从 API 前缀缓存命中的输入 token 数 */
+  cachedInputTokens?: number
 }
 
 /** 工具调用状态：preparing=参数填写中 running=执行中 awaiting_interact=等待用户交互 done=已完成 */
@@ -263,16 +265,71 @@ export function getToolCalls(msg: Pick<AgentMessage, 'parts'>): MessagePartTool[
   return msg.parts.filter((p): p is MessagePartTool => p.type === 'tool')
 }
 
+export interface MessageContentOptions {
+  /** 是否将 tool parts 序列化为摘要文本追加到内容中 */
+  includeToolSummary?: boolean
+  /** tool result 最大截取长度（默认 150） */
+  toolResultMaxLen?: number
+}
+
+/**
+ * 从 parts 中提取内容文本，可选附带工具调用摘要。
+ * chat 历史构建使用 includeToolSummary:true 保留跨轮次工具上下文；
+ * 记忆提取/摘要等场景不传或传 false，等同于 getTextContent。
+ */
+export function getMessageContent(
+  msg: Pick<AgentMessage, 'parts'>,
+  opts?: MessageContentOptions
+): string {
+  const textContent = getTextContent(msg)
+  if (!opts?.includeToolSummary) return textContent
+
+  const toolParts = msg.parts.filter((p): p is MessagePartTool => p.type === 'tool')
+  if (toolParts.length === 0) return textContent
+
+  const maxLen = opts.toolResultMaxLen ?? 150
+  const toolLines = toolParts.map((t) => {
+    const resultPreview = t.result.length > maxLen ? t.result.slice(0, maxLen) + '...' : t.result
+    return `[${t.name}] ${t.isError ? 'ERROR: ' : ''}${resultPreview}`
+  })
+
+  const toolBlock = '<tool_history>\n' + toolLines.join('\n') + '\n</tool_history>'
+  return textContent ? textContent + '\n\n' + toolBlock : toolBlock
+}
+
 // ============ Background Session 类型 ============
 
 /** 会话使用场景：interactive=用户对话驱动 background=触发器驱动 */
 export type SessionKind = 'interactive' | 'background'
 
+/**
+ * 权限模式：
+ * - default: 标准模式，写操作需审批
+ * - acceptEdits: 自动批准编辑操作（BG Session 默认）
+ * - bypassPermissions: 跳过所有权限检查
+ * - plan: 只读模式，拒绝所有写操作
+ * - dontAsk: 拒绝所有需要审批的操作
+ */
+export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk'
+
+/** 交互式会话的对话状态 */
+export type SessionChatStatus = 'idle' | 'chatting'
+
 /** BG Session 触发方式 */
 export type BgTriggerType = 'tool_spawn' | 'api' | 'cron' | 'event_hook'
 
+/** BG Session 上层来源：direct=直接触发 task=TaskRunner workflow=WorkflowRunner */
+export type BgSessionSource = 'direct' | 'task' | 'workflow'
+
 /** BG Session 运行状态 */
-export type BgStatus = 'pending' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled'
+export type BgStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'timeout'
+  | 'cancelled'
+  | 'interrupted'
 
 /** 会话级记忆策略 — 运行时可配置的豁免粒度 */
 export interface SessionMemoryPolicy {
@@ -288,6 +345,56 @@ export interface SessionMemoryPolicy {
   extractionPromptOverride?: string
 }
 
+/** Agent 定义 — 预定义的 Agent 模板，用于子任务工具隔离和行为定制 */
+export interface AgentDefinition {
+  /** 唯一 ID */
+  id: string
+  /** 人类可读名称 */
+  name: string
+  /** Agent 描述 */
+  description?: string
+  /** 系统提示词覆盖 */
+  systemPrompt?: string
+  /** 工具白名单（undefined 表示使用全部工具） */
+  allowedTools?: string[]
+  /** 指定 LLM 模型 */
+  model?: string
+  /** 最大工具调用轮次 */
+  maxTurns?: number
+  /** 权限模式覆盖 */
+  permissionMode?: PermissionMode
+  /** 记忆抽取策略 */
+  memoryPolicy?: SessionMemoryPolicy
+  /** 记忆注入策略 */
+  memoryInjectPolicy?: MemoryInjectPolicy
+}
+
+/** 记忆注入策略 — 控制注入哪些类型的记忆 */
+export interface MemoryInjectPolicy {
+  /** 注入的记忆类型白名单（undefined = 全部） */
+  allowedTypes?: string[]
+  /** 是否注入 User Profile（默认 true） */
+  injectProfile?: boolean
+  /** 自定义检索 query（覆盖用户消息作为 query） */
+  customQuery?: string
+  /** 最大注入条数（默认使用全局配置） */
+  maxInjectCount?: number
+}
+
+/** Session 函数化 I/O 配置 — 将 Session 视为函数，定义输入输出契约 */
+export interface SessionIOConfig {
+  /** 输入参数（schema 描述 + 实际值，注入系统提示词） */
+  inputParams?: {
+    schema: Record<string, { type?: string; description?: string }>
+    values: Record<string, unknown>
+  }
+  /** 输出参数（schema 描述，用于动态构建 prizm_set_result 工具） */
+  outputParams?: {
+    schema: Record<string, { type?: string; description?: string }>
+    required?: string[]
+  }
+}
+
 /** 后台会话元数据 — 仅 kind='background' 时有值 */
 export interface BgSessionMeta {
   triggerType: BgTriggerType
@@ -299,7 +406,7 @@ export interface BgSessionMeta {
   model?: string
   /** 最大执行时间 ms，默认 600_000 */
   timeoutMs?: number
-  /** 完成后自动删除会话数据 */
+  /** 完成后从内存追踪中自动清理（不删除持久化资源） */
   autoCleanup?: boolean
   /** 结果回传目标 session */
   announceTarget?: { sessionId: string; scope: string }
@@ -307,6 +414,22 @@ export interface BgSessionMeta {
   memoryPolicy?: SessionMemoryPolicy
   /** 嵌套深度（spawn 链追踪，根 = 0） */
   depth?: number
+  /** 引用的 AgentDefinition ID */
+  agentDefinitionId?: string
+  /** 内联 AgentDefinition（优先于 agentDefinitionId） */
+  inlineAgentDef?: Omit<AgentDefinition, 'id' | 'name'>
+  /** 记忆注入策略覆盖 */
+  memoryInjectPolicy?: MemoryInjectPolicy
+  /** 工作区目录覆盖（Workflow 步骤执行时指向 workflow 工作区） */
+  workspaceDir?: string
+  /** 上层来源：direct=直接触发 task=TaskRunner workflow=WorkflowRunner（默认 direct） */
+  source?: BgSessionSource
+  /** 关联的上层记录 ID（TaskRun.id 或 WorkflowRun.id） */
+  sourceId?: string
+  /** 函数化 I/O 配置（动态 prizm_set_result 工具 + 输入参数注入） */
+  ioConfig?: SessionIOConfig
+  /** 工具组开关覆盖：groupId → enabled */
+  toolGroups?: Record<string, boolean>
 }
 
 export interface AgentSession {
@@ -317,6 +440,8 @@ export interface AgentSession {
   llmSummary?: string
   /** 已压缩为 Session 记忆的轮次上界（滑动窗口 A/B 用） */
   compressedThroughRound?: number
+  /** 压缩摘要链：每次压缩追加一段不可变摘要，用于 API 前缀缓存优化 */
+  compressionSummaries?: Array<{ throughRound: number; text: string }>
   /** 用户授权的外部文件/文件夹路径列表（仅当前会话有效） */
   grantedPaths?: string[]
   /** 会话 checkpoint 列表（按时间序，每轮对话前自动创建） */
@@ -329,10 +454,18 @@ export interface AgentSession {
   bgStatus?: BgStatus
   /** 后台执行结果（由 prizm_set_result 工具写入） */
   bgResult?: string
+  /** 后台结构化数据（由 prizm_set_result 的 structured_data 参数写入） */
+  bgStructuredData?: string
+  /** 后台产出文件列表（由 prizm_set_result 的 artifacts 参数写入，相对于工作区的路径） */
+  bgArtifacts?: string[]
   /** 后台运行开始时间 */
   startedAt?: number
   /** 后台运行结束时间 */
   finishedAt?: number
+  /** 交互式会话的对话状态：idle=空闲 chatting=正在对话 */
+  chatStatus?: SessionChatStatus
+  /** 工具权限模式 */
+  permissionMode?: PermissionMode
   createdAt: number
   updatedAt: number
 }
@@ -596,7 +729,11 @@ export interface DedupLogEntry {
 
 /** Token 使用的功能类别，细粒度区分不同操作 */
 export type TokenUsageCategory =
-  | 'chat' // 对话
+  | 'chat' // 对话（旧数据兼容，迁移前的未分类对话）
+  | 'chat:user' // 用户交互对话
+  | 'chat:workflow' // 工作流步骤执行
+  | 'chat:task' // 任务 / Cron 定时任务执行
+  | 'chat:guard' // 系统守卫（BG 结果检查 / Schema 重试）
   | 'conversation_summary' // 对话轮次摘要
   | 'memory:conversation_extract' // 对话记忆提取（unified: profile+narrative+foresight+event_log）
   | 'memory:per_round_extract' // Pipeline 1：每轮轻量抽取（event_log+profile+foresight）
@@ -614,7 +751,11 @@ export type TokenUsageCategory =
 
 /** Token 类别的中文标签，与 TokenUsageCategory 枚举对齐 */
 export const TOKEN_CATEGORY_LABELS: Partial<Record<TokenUsageCategory, string>> = {
-  chat: '对话',
+  chat: '对话（旧）',
+  'chat:user': '对话',
+  'chat:workflow': '工作流',
+  'chat:task': '任务',
+  'chat:guard': '系统守卫',
   conversation_summary: '对话摘要',
   'memory:per_round_extract': '记忆提取（每轮·P1）',
   'memory:narrative_batch_extract': '记忆提取（叙述·P2）',
@@ -634,6 +775,10 @@ export const TOKEN_CATEGORY_LABELS: Partial<Record<TokenUsageCategory, string>> 
 /** Token 类别的展示颜色 */
 export const TOKEN_CATEGORY_COLORS: Partial<Record<TokenUsageCategory, string>> = {
   chat: '#1677ff',
+  'chat:user': '#1677ff',
+  'chat:workflow': '#0958d9',
+  'chat:task': '#531dab',
+  'chat:guard': '#c41d7f',
   conversation_summary: '#722ed1',
   'memory:per_round_extract': '#08979c',
   'memory:narrative_batch_extract': '#006d75',
@@ -652,6 +797,10 @@ export const TOKEN_CATEGORY_COLORS: Partial<Record<TokenUsageCategory, string>> 
 
 /** Token 类别的排序（UI 条形图 / 列表中的显示顺序） */
 export const TOKEN_CATEGORY_ORDER: TokenUsageCategory[] = [
+  'chat:user',
+  'chat:workflow',
+  'chat:task',
+  'chat:guard',
   'chat',
   'conversation_summary',
   'memory:per_round_extract',
@@ -668,6 +817,11 @@ export const TOKEN_CATEGORY_ORDER: TokenUsageCategory[] = [
   'memory:profile_extract',
   'document_summary'
 ]
+
+/** 判断类别是否属于对话系统（包括旧 'chat' 和新 'chat:*' 子类别） */
+export function isChatCategory(cat: string): boolean {
+  return cat === 'chat' || cat.startsWith('chat:')
+}
 
 /** 判断类别是否属于记忆系统 */
 export function isMemoryCategory(cat: string): boolean {
@@ -695,6 +849,8 @@ export interface TokenUsageRecord {
   inputTokens: number
   outputTokens: number
   totalTokens: number
+  /** 从 API 前缀缓存命中的输入 token 数 */
+  cachedInputTokens?: number
 }
 
 // ============ 终端 ============
@@ -756,6 +912,367 @@ export interface CreateTerminalOptions {
   rows?: number
   /** 终端标题 */
   title?: string
+}
+
+// ============ 日程 ============
+
+/** 日程类型 */
+export type ScheduleItemType = 'event' | 'reminder' | 'deadline'
+
+/** 循环频率 */
+export type RecurrenceFrequency = 'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom'
+
+/** 循环规则 */
+export interface RecurrenceRule {
+  frequency: RecurrenceFrequency
+  /** 每 N 个频率单位重复 */
+  interval: number
+  /** 0-6 (周日-周六), 仅 weekly */
+  daysOfWeek?: number[]
+  /** 1-31, 仅 monthly */
+  dayOfMonth?: number
+  /** 截止时间戳 (ms), 可选 */
+  endDate?: number
+  /** 最大重复次数, 可选 */
+  maxOccurrences?: number
+}
+
+/** 日程关联项 */
+export interface ScheduleLinkedItem {
+  type: 'todo' | 'document'
+  id: string
+  title?: string
+}
+
+/** 日程状态 */
+export type ScheduleStatus = 'upcoming' | 'active' | 'completed' | 'cancelled'
+
+/** 日程项 */
+export interface ScheduleItem {
+  id: string
+  title: string
+  description?: string
+  type: ScheduleItemType
+  /** 开始时间 Unix ms */
+  startTime: number
+  /** 结束时间 Unix ms, event 类型必填 */
+  endTime?: number
+  allDay?: boolean
+  recurrence?: RecurrenceRule
+  /** 提前 N 分钟提醒 (如 [15, 60]) */
+  reminders?: number[]
+  linkedItems?: ScheduleLinkedItem[]
+  tags?: string[]
+  status: ScheduleStatus
+  completedAt?: number
+  /** 相对 scopeRoot 的路径（含文件名） */
+  relativePath: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface CreateSchedulePayload {
+  title: string
+  description?: string
+  type: ScheduleItemType
+  startTime: number
+  endTime?: number
+  allDay?: boolean
+  recurrence?: RecurrenceRule
+  reminders?: number[]
+  linkedItems?: ScheduleLinkedItem[]
+  tags?: string[]
+}
+
+export interface UpdateSchedulePayload {
+  title?: string
+  description?: string
+  type?: ScheduleItemType
+  startTime?: number
+  endTime?: number
+  allDay?: boolean
+  recurrence?: RecurrenceRule | null
+  reminders?: number[] | null
+  linkedItems?: ScheduleLinkedItem[]
+  tags?: string[]
+  status?: ScheduleStatus
+}
+
+// ============ 定时任务 (Cron) ============
+
+export type CronJobStatus = 'active' | 'paused' | 'completed' | 'failed'
+
+export type CronExecutionMode = 'isolated' | 'main'
+
+export interface CronJob {
+  id: string
+  name: string
+  description?: string
+  scope: string
+  /** cron 表达式 或 'once:{ISO时间戳}' */
+  schedule: string
+  /** IANA 时区, 默认系统时区 */
+  timezone?: string
+  /** 执行时发给 Agent 的提示词 */
+  taskPrompt: string
+  /** JSON 格式上下文 */
+  taskContext?: string
+  executionMode: CronExecutionMode
+  /** 指定 LLM 模型 */
+  model?: string
+  timeoutMs?: number
+  maxRetries?: number
+  /** 关联的日程 ID */
+  linkedScheduleId?: string
+  status: CronJobStatus
+  lastRunAt?: number
+  lastRunStatus?: string
+  nextRunAt?: number
+  runCount: number
+  createdAt: number
+  updatedAt: number
+}
+
+export interface CronRunLog {
+  id: string
+  jobId: string
+  sessionId?: string
+  status: 'running' | 'success' | 'failed' | 'timeout'
+  startedAt: number
+  finishedAt?: number
+  error?: string
+  durationMs?: number
+}
+
+// ============ 任务执行 (Task Run) ============
+
+export type TaskRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled'
+
+/** 独立任务运行记录 — Workflow 子模块级复用组件，单步执行单元 */
+export interface TaskRun {
+  id: string
+  scope: string
+  label?: string
+  status: TaskRunStatus
+  /** 底层 BG Session ID（双向引用） */
+  sessionId?: string
+  /** 结构化输入 */
+  input: {
+    prompt: string
+    context?: Record<string, unknown>
+    expectedOutputFormat?: string
+    model?: string
+    timeoutMs?: number
+  }
+  /** 执行输出 */
+  output?: string
+  structuredData?: string
+  artifacts?: string[]
+  error?: string
+  /** 触发来源 */
+  triggerType: 'manual' | 'tool_spawn' | 'workflow_step'
+  parentSessionId?: string
+  createdAt: number
+  finishedAt?: number
+  durationMs?: number
+}
+
+// ============ 工作流引擎 (Workflow Engine) ============
+
+export type WorkflowStepType = 'agent' | 'approve' | 'transform'
+
+export type WorkflowRunStatus =
+  | 'pending'
+  | 'running'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+
+/** 步骤完成后触发的 Prizm 系统联动操作 */
+export interface WorkflowLinkedAction {
+  type: 'create_todo' | 'update_todo' | 'create_document' | 'update_schedule' | 'notify'
+  /** 支持 $stepId.output 变量引用 */
+  params: Record<string, string>
+}
+
+/** 工作流声明式触发条件 */
+export interface WorkflowTriggerDef {
+  type: 'cron' | 'schedule_remind' | 'todo_completed' | 'document_saved'
+  /** 事件过滤条件 */
+  filter?: Record<string, string>
+}
+
+/** Agent 步骤的 Session 高级配置 */
+export interface WorkflowStepSessionConfig {
+  /** 启用深度思考（reasoning chain） */
+  thinking?: boolean
+  /** 激活的技能名称列表 */
+  skills?: string[]
+  /** 系统提示词覆盖/追加 */
+  systemPrompt?: string
+  /** 工具白名单（undefined = 使用全部工具） */
+  allowedTools?: string[]
+  /** 指定 LLM 模型（覆盖步骤级 model） */
+  model?: string
+  /** 最大工具调用轮次 */
+  maxTurns?: number
+  /** 权限模式覆盖 */
+  permissionMode?: PermissionMode
+  /** 记忆抽取策略覆盖 */
+  memoryPolicy?: SessionMemoryPolicy
+  /** 记忆注入策略覆盖 */
+  memoryInjectPolicy?: MemoryInjectPolicy
+  /** 期望的输出格式描述 */
+  expectedOutputFormat?: string
+  /** JSON Schema 描述期望的输出结构（启用结构化输出验证） */
+  outputSchema?: Record<string, unknown>
+  /** Schema 验证失败时的最大重试次数 */
+  maxSchemaRetries?: number
+  /** 工具组开关覆盖：groupId → enabled */
+  toolGroups?: Record<string, boolean>
+}
+
+/** 步骤级重试配置 */
+export interface WorkflowStepRetryConfig {
+  /** 最大重试次数，默认 0（不重试） */
+  maxRetries?: number
+  /** 重试间隔 ms */
+  retryDelayMs?: number
+  /** 哪些状态触发重试 */
+  retryOn?: ('failed' | 'timeout')[]
+}
+
+/** 工作流步骤定义 */
+export interface WorkflowStepDef {
+  id: string
+  type: WorkflowStepType
+  /** 步骤描述（可选） */
+  description?: string
+  /** agent step 的 prompt */
+  prompt?: string
+  /** approve step 的审批提示 */
+  approvePrompt?: string
+  /** transform step 的 jq-like 表达式 */
+  transform?: string
+  /** 输入引用：'$prev.output' 或 '$stepId.output' */
+  input?: string
+  /** 条件表达式：'$stepId.approved' 等 */
+  condition?: string
+  model?: string
+  timeoutMs?: number
+  /** Agent 步骤的 Session 高级配置 */
+  sessionConfig?: WorkflowStepSessionConfig
+  /** 步骤级重试配置 */
+  retryConfig?: WorkflowStepRetryConfig
+  /** 步骤完成后触发的联动操作 */
+  linkedActions?: WorkflowLinkedAction[]
+}
+
+/**
+ * 工作空间模式：
+ * - 'dual'（默认）: 双层工作空间，持久空间跨 run 共享 + run 级独立空间
+ * - 'shared': 所有 run 共享同一个工作空间（旧 reuseWorkspace=true 行为）
+ * - 'isolated': 每次 run 全新独立空间，run 结束后保留
+ */
+export type WorkflowWorkspaceMode = 'dual' | 'shared' | 'isolated'
+
+/** 工作流运行配置 */
+export interface WorkflowDefConfig {
+  /** 工作流总超时 ms */
+  maxTotalTimeoutMs?: number
+  /** 错误策略：fail_fast=立即停止 continue=跳过失败步骤继续 */
+  errorStrategy?: 'fail_fast' | 'continue'
+  /** @deprecated 使用 workspaceMode 替代 */
+  reuseWorkspace?: boolean
+  /** @deprecated 使用 workspaceMode 替代 */
+  cleanBefore?: boolean
+  /** 工作空间模式（默认 'dual'） */
+  workspaceMode?: WorkflowWorkspaceMode
+  /** 完成时发送通知 */
+  notifyOnComplete?: boolean
+  /** 失败时发送通知 */
+  notifyOnFail?: boolean
+  /** 标签/分类 */
+  tags?: string[]
+  /** 版本号 */
+  version?: string
+}
+
+/** 工作流定义 */
+export interface WorkflowDef {
+  name: string
+  description?: string
+  steps: WorkflowStepDef[]
+  args?: Record<string, { default?: unknown; description?: string }>
+  /** 工作流输出 schema（定义最终输出的结构化字段） */
+  outputs?: Record<string, { type?: string; description?: string }>
+  /** 声明式触发条件 */
+  triggers?: WorkflowTriggerDef[]
+  /** 工作流运行配置 */
+  config?: WorkflowDefConfig
+}
+
+export type WorkflowStepResultStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'skipped'
+  | 'paused'
+
+/** 单步执行结果 */
+export interface WorkflowStepResult {
+  stepId: string
+  status: WorkflowStepResultStatus
+  /** 步骤类型 */
+  type?: WorkflowStepType
+  output?: string
+  /** 结构化数据（JSON 字符串，由 prizm_set_result 的 structured_data 写入） */
+  structuredData?: string
+  /** 产出文件列表（相对于 workflow 工作区的路径） */
+  artifacts?: string[]
+  /** agent step 关联的 BG Session ID */
+  sessionId?: string
+  /** approve step 的审批结果 */
+  approved?: boolean
+  startedAt?: number
+  finishedAt?: number
+  durationMs?: number
+  error?: string
+}
+
+/** 工作流运行实例 */
+export interface WorkflowRun {
+  id: string
+  workflowName: string
+  scope: string
+  status: WorkflowRunStatus
+  currentStepIndex: number
+  stepResults: Record<string, WorkflowStepResult>
+  resumeToken?: string
+  args?: Record<string, unknown>
+  /** 触发方式 */
+  triggerType?: 'manual' | 'cron' | 'schedule' | 'event'
+  linkedScheduleId?: string
+  linkedTodoId?: string
+  /** Run 级工作空间相对路径（相对于 workflow 工作区） */
+  runWorkspaceDir?: string
+  createdAt: number
+  updatedAt: number
+  error?: string
+}
+
+/** 已注册的工作流定义（持久化形态） */
+export interface WorkflowDefRecord {
+  id: string
+  name: string
+  scope: string
+  yamlContent: string
+  description?: string
+  triggersJson?: string
+  createdAt: number
+  updatedAt: number
 }
 
 // ============ 通知 ============

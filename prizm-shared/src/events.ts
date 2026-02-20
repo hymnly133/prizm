@@ -37,13 +37,29 @@ export const EVENT_TYPES = [
   'agent:session.created',
   'agent:session.deleted',
   'agent:session.rolledBack',
+  'agent:session.chatStatusChanged',
   'agent:message.completed',
-  'bg:session.triggered',
-  'bg:session.started',
   'bg:session.completed',
   'bg:session.failed',
   'bg:session.timeout',
-  'bg:session.cancelled'
+  'bg:session.cancelled',
+  'schedule:created',
+  'schedule:updated',
+  'schedule:deleted',
+  'schedule:reminded',
+  'cron:job.created',
+  'cron:job.executed',
+  'cron:job.failed',
+  'document:memory.updated',
+  'task:started',
+  'task:completed',
+  'task:failed',
+  'task:cancelled',
+  'workflow:started',
+  'workflow:step.completed',
+  'workflow:paused',
+  'workflow:completed',
+  'workflow:failed'
 ] as const
 
 export type EventType = (typeof EVENT_TYPES)[number]
@@ -75,13 +91,29 @@ export const EVENT_TYPES_OBJ = {
   AGENT_SESSION_CREATED: 'agent:session.created',
   AGENT_SESSION_DELETED: 'agent:session.deleted',
   AGENT_SESSION_ROLLED_BACK: 'agent:session.rolledBack',
+  AGENT_SESSION_CHAT_STATUS_CHANGED: 'agent:session.chatStatusChanged',
   AGENT_MESSAGE_COMPLETED: 'agent:message.completed',
-  BG_SESSION_TRIGGERED: 'bg:session.triggered',
-  BG_SESSION_STARTED: 'bg:session.started',
   BG_SESSION_COMPLETED: 'bg:session.completed',
   BG_SESSION_FAILED: 'bg:session.failed',
   BG_SESSION_TIMEOUT: 'bg:session.timeout',
-  BG_SESSION_CANCELLED: 'bg:session.cancelled'
+  BG_SESSION_CANCELLED: 'bg:session.cancelled',
+  SCHEDULE_CREATED: 'schedule:created',
+  SCHEDULE_UPDATED: 'schedule:updated',
+  SCHEDULE_DELETED: 'schedule:deleted',
+  SCHEDULE_REMINDED: 'schedule:reminded',
+  CRON_JOB_CREATED: 'cron:job.created',
+  CRON_JOB_EXECUTED: 'cron:job.executed',
+  CRON_JOB_FAILED: 'cron:job.failed',
+  DOCUMENT_MEMORY_UPDATED: 'document:memory.updated',
+  TASK_STARTED: 'task:started',
+  TASK_COMPLETED: 'task:completed',
+  TASK_FAILED: 'task:failed',
+  TASK_CANCELLED: 'task:cancelled',
+  WORKFLOW_STARTED: 'workflow:started',
+  WORKFLOW_STEP_COMPLETED: 'workflow:step.completed',
+  WORKFLOW_PAUSED: 'workflow:paused',
+  WORKFLOW_COMPLETED: 'workflow:completed',
+  WORKFLOW_FAILED: 'workflow:failed'
 } as const satisfies Record<string, EventType>
 
 /** 服务端全部事件类型（用于 subscribeEvents: "all"） */
@@ -107,13 +139,29 @@ export const DATA_SYNC_EVENTS = [
   'agent:session.created',
   'agent:session.deleted',
   'agent:session.rolledBack',
+  'agent:session.chatStatusChanged',
   'agent:message.completed',
-  'bg:session.triggered',
-  'bg:session.started',
   'bg:session.completed',
   'bg:session.failed',
   'bg:session.timeout',
-  'bg:session.cancelled'
+  'bg:session.cancelled',
+  'schedule:created',
+  'schedule:updated',
+  'schedule:deleted',
+  'schedule:reminded',
+  'cron:job.created',
+  'cron:job.executed',
+  'cron:job.failed',
+  'document:memory.updated',
+  'task:started',
+  'task:completed',
+  'task:failed',
+  'task:cancelled',
+  'workflow:started',
+  'workflow:step.completed',
+  'workflow:paused',
+  'workflow:completed',
+  'workflow:failed'
 ] as const
 
 export type DataSyncEventType = (typeof DATA_SYNC_EVENTS)[number]
@@ -192,6 +240,12 @@ export interface AgentSessionRolledBackPayload extends EventPayloadBase {
   remainingMessageCount: number
 }
 
+/** Agent 会话对话状态变更载荷 */
+export interface AgentSessionChatStatusChangedPayload extends EventPayloadBase {
+  sessionId: string
+  chatStatus: import('./domain').SessionChatStatus
+}
+
 /** Agent 消息完成事件载荷 */
 export interface AgentMessageCompletedPayload extends EventPayloadBase {
   sessionId: string
@@ -207,6 +261,110 @@ export interface BgSessionEventPayload extends EventPayloadBase {
   error?: string
   durationMs?: number
   timeoutMs?: number
+}
+
+/** Schedule 事件载荷 */
+export interface ScheduleEventPayload extends EventPayloadBase {
+  scheduleId: string
+  title?: string
+  type?: string
+  startTime?: number
+  endTime?: number
+  status?: string
+}
+
+/** Schedule 提醒事件载荷 */
+export interface ScheduleRemindedPayload extends EventPayloadBase {
+  scheduleId: string
+  title: string
+  startTime: number
+  reminderMinutes: number
+}
+
+/** Cron Job 创建事件载荷 */
+export interface CronJobCreatedPayload extends EventPayloadBase {
+  jobId: string
+  name: string
+  schedule: string
+}
+
+/** Cron Job 执行事件载荷 */
+export interface CronJobExecutedPayload extends EventPayloadBase {
+  jobId: string
+  name?: string
+  sessionId?: string
+  status: string
+  durationMs?: number
+  error?: string
+}
+
+/** Cron Job 失败事件载荷 */
+export interface CronJobFailedPayload extends EventPayloadBase {
+  jobId: string
+  error: string
+}
+
+/** 文档记忆更新事件载荷 */
+export interface DocumentMemoryUpdatedPayload extends EventPayloadBase {
+  documentId: string
+  title: string
+  updatedSubTypes: string[]
+}
+
+/** Task 事件载荷 */
+export interface TaskStartedPayload extends EventPayloadBase {
+  taskId: string
+  label?: string
+}
+
+export interface TaskCompletedPayload extends EventPayloadBase {
+  taskId: string
+  label?: string
+  durationMs?: number
+}
+
+export interface TaskFailedPayload extends EventPayloadBase {
+  taskId: string
+  label?: string
+  error: string
+}
+
+export interface TaskCancelledPayload extends EventPayloadBase {
+  taskId: string
+  label?: string
+}
+
+/** Workflow 事件载荷 */
+export interface WorkflowStartedPayload extends EventPayloadBase {
+  runId: string
+  workflowName: string
+}
+
+export interface WorkflowStepCompletedPayload extends EventPayloadBase {
+  runId: string
+  stepId: string
+  stepStatus: string
+  outputPreview?: string
+  approved?: boolean
+}
+
+export interface WorkflowPausedPayload extends EventPayloadBase {
+  runId: string
+  workflowName: string
+  stepId: string
+  approvePrompt: string
+}
+
+export interface WorkflowCompletedPayload extends EventPayloadBase {
+  runId: string
+  workflowName: string
+  finalOutput?: string
+}
+
+export interface WorkflowFailedPayload extends EventPayloadBase {
+  runId: string
+  workflowName: string
+  error: string
 }
 
 /** 各事件类型对应的 payload 类型 */
@@ -236,13 +394,29 @@ export interface EventPayloadMap {
   'agent:session.created': AgentSessionEventPayload
   'agent:session.deleted': AgentSessionEventPayload
   'agent:session.rolledBack': AgentSessionRolledBackPayload
+  'agent:session.chatStatusChanged': AgentSessionChatStatusChangedPayload
   'agent:message.completed': AgentMessageCompletedPayload
-  'bg:session.triggered': BgSessionEventPayload
-  'bg:session.started': BgSessionEventPayload
   'bg:session.completed': BgSessionEventPayload
   'bg:session.failed': BgSessionEventPayload
   'bg:session.timeout': BgSessionEventPayload
   'bg:session.cancelled': BgSessionEventPayload
+  'schedule:created': ScheduleEventPayload
+  'schedule:updated': ScheduleEventPayload
+  'schedule:deleted': { scheduleId: string } & EventPayloadBase
+  'schedule:reminded': ScheduleRemindedPayload
+  'cron:job.created': CronJobCreatedPayload
+  'cron:job.executed': CronJobExecutedPayload
+  'cron:job.failed': CronJobFailedPayload
+  'document:memory.updated': DocumentMemoryUpdatedPayload
+  'task:started': TaskStartedPayload
+  'task:completed': TaskCompletedPayload
+  'task:failed': TaskFailedPayload
+  'task:cancelled': TaskCancelledPayload
+  'workflow:started': WorkflowStartedPayload
+  'workflow:step.completed': WorkflowStepCompletedPayload
+  'workflow:paused': WorkflowPausedPayload
+  'workflow:completed': WorkflowCompletedPayload
+  'workflow:failed': WorkflowFailedPayload
 }
 
 /** 类型安全的 EventPushMessage，payload 与 eventType 对应 */
