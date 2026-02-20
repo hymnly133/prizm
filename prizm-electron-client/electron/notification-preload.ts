@@ -45,5 +45,9 @@ contextBridge.exposeInMainWorld('notificationApi', {
   notifyReady: () => {
     console.log('[Notify preload] notifyReady 发送')
     ipcRenderer.send('notification-ready')
+  },
+  /** 切换鼠标交互：true = 可点击/滚动，false = 穿透（仅转发 hover 事件） */
+  setMouseInteractive: (interactive: boolean) => {
+    ipcRenderer.send('notification-set-interactive', interactive)
   }
 })

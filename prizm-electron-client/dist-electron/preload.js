@@ -96,6 +96,10 @@ electron_1.contextBridge.exposeInMainWorld('prizm', {
     /** 设置原生主题模式，同步到 nativeTheme.themeSource 并持久化 */
     setNativeTheme(mode) {
         return electron_1.ipcRenderer.invoke('set_native_theme', { mode });
+    },
+    /** 在系统资源管理器中打开目录 */
+    openInExplorer(dirPath) {
+        return electron_1.ipcRenderer.invoke('open_in_explorer', { dirPath });
     }
 });
 //# sourceMappingURL=preload.js.map

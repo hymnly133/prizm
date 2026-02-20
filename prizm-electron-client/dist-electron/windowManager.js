@@ -159,12 +159,13 @@ function createNotificationWindow() {
     const { width: workWidth, height: workHeight } = primaryDisplay.workAreaSize;
     const workArea = primaryDisplay.workArea;
     const winWidth = 400;
+    const winHeight = Math.min(Math.round(workHeight * 0.6), 520);
     const margin = 12;
     config_1.sharedState.notificationWindow = new electron_1.BrowserWindow({
         width: winWidth,
-        height: workHeight,
+        height: winHeight,
         x: workArea.x + workWidth - winWidth - margin,
-        y: workArea.y,
+        y: workArea.y + workHeight - winHeight - margin,
         frame: false,
         transparent: true,
         backgroundColor: '#00000000',
@@ -201,7 +202,22 @@ function createNotificationWindow() {
         notificationWindow.webContents.openDevTools({ mode: 'detach' });
     }
     notificationWindow.setAlwaysOnTop(true, 'pop-up-menu');
-    notificationWindow.setIgnoreMouseEvents(true, { forward: false });
+    notificationWindow.setIgnoreMouseEvents(true, { forward: true });
+    const onSetInteractive = (_event, interactive) => {
+        if (config_1.sharedState.notificationWindow && !config_1.sharedState.notificationWindow.isDestroyed()) {
+            if (interactive) {
+                config_1.sharedState.notificationWindow.setIgnoreMouseEvents(false);
+            }
+            else {
+                config_1.sharedState.notificationWindow.setIgnoreMouseEvents(true, { forward: true });
+            }
+        }
+    };
+    electron_1.ipcMain.on('notification-set-interactive', onSetInteractive);
+    const onPanelEmpty = () => {
+        /* keep window visible */
+    };
+    electron_1.ipcMain.on('notification-panel-empty', onPanelEmpty);
     notificationWindow.webContents.setWindowOpenHandler(({ url }) => {
         electron_1.shell.openExternal(url);
         return { action: 'deny' };
@@ -214,10 +230,9 @@ function createNotificationWindow() {
         }
     });
     notificationWindow.on('closed', () => {
+        electron_1.ipcMain.removeListener('notification-set-interactive', onSetInteractive);
+        electron_1.ipcMain.removeListener('notification-panel-empty', onPanelEmpty);
         config_1.sharedState.notificationWindow = null;
-    });
-    electron_1.ipcMain.on('notification-panel-empty', () => {
-        // 保持窗口可见，不隐藏
     });
     return notificationWindow;
 }
@@ -231,7 +246,7 @@ function createQuickPanelWindow() {
     const isDev = !electron_1.app.isPackaged;
     config_1.sharedState.quickPanelWindow = new electron_1.BrowserWindow({
         width: 280,
-        height: 256,
+        height: 280,
         frame: false,
         thickFrame: false,
         resizable: false,

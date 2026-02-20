@@ -145,13 +145,14 @@ export function createNotificationWindow(): BrowserWindow {
   const workArea = primaryDisplay.workArea
 
   const winWidth = 400
+  const winHeight = Math.min(Math.round(workHeight * 0.6), 520)
   const margin = 12
 
   sharedState.notificationWindow = new BrowserWindow({
     width: winWidth,
-    height: workHeight,
+    height: winHeight,
     x: workArea.x + workWidth - winWidth - margin,
-    y: workArea.y,
+    y: workArea.y + workHeight - winHeight - margin,
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
@@ -198,7 +199,23 @@ export function createNotificationWindow(): BrowserWindow {
   }
 
   notificationWindow.setAlwaysOnTop(true, 'pop-up-menu')
-  notificationWindow.setIgnoreMouseEvents(true, { forward: false })
+  notificationWindow.setIgnoreMouseEvents(true, { forward: true })
+
+  const onSetInteractive = (_event: unknown, interactive: boolean) => {
+    if (sharedState.notificationWindow && !sharedState.notificationWindow.isDestroyed()) {
+      if (interactive) {
+        sharedState.notificationWindow.setIgnoreMouseEvents(false)
+      } else {
+        sharedState.notificationWindow.setIgnoreMouseEvents(true, { forward: true })
+      }
+    }
+  }
+  ipcMain.on('notification-set-interactive', onSetInteractive)
+
+  const onPanelEmpty = () => {
+    /* keep window visible */
+  }
+  ipcMain.on('notification-panel-empty', onPanelEmpty)
 
   notificationWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
@@ -214,11 +231,9 @@ export function createNotificationWindow(): BrowserWindow {
   })
 
   notificationWindow.on('closed', () => {
+    ipcMain.removeListener('notification-set-interactive', onSetInteractive)
+    ipcMain.removeListener('notification-panel-empty', onPanelEmpty)
     sharedState.notificationWindow = null
-  })
-
-  ipcMain.on('notification-panel-empty', () => {
-    // 保持窗口可见，不隐藏
   })
 
   return notificationWindow
@@ -234,7 +249,7 @@ export function createQuickPanelWindow(): BrowserWindow | null {
   const isDev = !app.isPackaged
   sharedState.quickPanelWindow = new BrowserWindow({
     width: 280,
-    height: 256,
+    height: 280,
     frame: false,
     thickFrame: false,
     resizable: false,

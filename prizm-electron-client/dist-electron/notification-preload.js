@@ -27,6 +27,10 @@ electron_1.contextBridge.exposeInMainWorld('notificationApi', {
     notifyReady: () => {
         console.log('[Notify preload] notifyReady 发送');
         electron_1.ipcRenderer.send('notification-ready');
+    },
+    /** 切换鼠标交互：true = 可点击/滚动，false = 穿透（仅转发 hover 事件） */
+    setMouseInteractive: (interactive) => {
+        electron_1.ipcRenderer.send('notification-set-interactive', interactive);
     }
 });
 //# sourceMappingURL=notification-preload.js.map

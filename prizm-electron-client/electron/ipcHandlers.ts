@@ -437,6 +437,29 @@ export function registerIpcHandlers(): void {
     return true
   })
 
+  ipcMain.handle('open_in_explorer', async (_event, { dirPath }: { dirPath: string }) => {
+    try {
+      if (!dirPath) return false
+      if (fs.existsSync(dirPath)) {
+        const stat = fs.statSync(dirPath)
+        if (stat.isDirectory()) {
+          await shell.openPath(dirPath)
+        } else {
+          shell.showItemInFolder(dirPath)
+        }
+      } else {
+        const parent = path.dirname(dirPath)
+        if (fs.existsSync(parent)) {
+          await shell.openPath(parent)
+        }
+      }
+      return true
+    } catch (err) {
+      log.error('[IPC] open_in_explorer error:', err)
+      return false
+    }
+  })
+
   ipcMain.on('quick-panel-action', (_event, payload: { action: string; selectedText: string }) => {
     if (sharedState.quickPanelWindow && !sharedState.quickPanelWindow.isDestroyed()) {
       sharedState.quickPanelWindow.hide()

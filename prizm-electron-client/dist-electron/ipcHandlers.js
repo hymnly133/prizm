@@ -404,6 +404,32 @@ function registerIpcHandlers() {
         }
         return true;
     });
+    electron_1.ipcMain.handle('open_in_explorer', async (_event, { dirPath }) => {
+        try {
+            if (!dirPath)
+                return false;
+            if (fs.existsSync(dirPath)) {
+                const stat = fs.statSync(dirPath);
+                if (stat.isDirectory()) {
+                    await electron_1.shell.openPath(dirPath);
+                }
+                else {
+                    electron_1.shell.showItemInFolder(dirPath);
+                }
+            }
+            else {
+                const parent = path.dirname(dirPath);
+                if (fs.existsSync(parent)) {
+                    await electron_1.shell.openPath(parent);
+                }
+            }
+            return true;
+        }
+        catch (err) {
+            main_1.default.error('[IPC] open_in_explorer error:', err);
+            return false;
+        }
+    });
     electron_1.ipcMain.on('quick-panel-action', (_event, payload) => {
         if (config_1.sharedState.quickPanelWindow && !config_1.sharedState.quickPanelWindow.isDestroyed()) {
             config_1.sharedState.quickPanelWindow.hide();
