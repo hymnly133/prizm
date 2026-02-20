@@ -11,6 +11,7 @@ import Clipboard from './views/Clipboard.vue'
 import Documents from './views/Documents.vue'
 import Agent from './views/Agent.vue'
 import Settings from './views/Settings.vue'
+import TokenStats from './views/TokenStats.vue'
 
 const router = createRouter({
   history: createWebHistory('/dashboard/'),
@@ -24,6 +25,7 @@ const router = createRouter({
     { path: '/clipboard', name: 'Clipboard', component: Clipboard },
     { path: '/documents', name: 'Documents', component: Documents },
     { path: '/agent', name: 'Agent', component: Agent },
+    { path: '/token-stats', name: 'TokenStats', component: TokenStats },
     { path: '/settings', name: 'Settings', component: Settings }
   ]
 })

@@ -17,7 +17,9 @@ import type {
   AgentSession,
   AgentMessage,
   ClientInfo,
-  ScopeDescription
+  ScopeDescription,
+  TokenUsageRecord,
+  TokenUsageCategory
 } from '@prizm/shared'
 
 export type {
@@ -34,7 +36,9 @@ export type {
   AgentSession,
   AgentMessage,
   ClientInfo,
-  ScopeDescription
+  ScopeDescription,
+  TokenUsageRecord,
+  TokenUsageCategory
 }
 
 const getBaseUrl = (): string => {
@@ -474,4 +478,50 @@ export async function sendAgentChat(
       }
     }
   })
+}
+
+// Token Usage
+
+export interface TokenUsageBucketStat {
+  input: number
+  output: number
+  total: number
+  cached: number
+  count: number
+}
+
+export interface TokenUsageSummary {
+  totalInputTokens: number
+  totalOutputTokens: number
+  totalTokens: number
+  totalCachedInputTokens: number
+  count: number
+  byCategory: Record<string, TokenUsageBucketStat>
+  byDataScope: Record<string, TokenUsageBucketStat>
+  byModel: Record<string, TokenUsageBucketStat>
+}
+
+export interface TokenUsageFilter {
+  scope?: string
+  category?: string
+  sessionId?: string
+  from?: number
+  to?: number
+  limit?: number
+  offset?: number
+}
+
+export function getTokenUsage(filter?: TokenUsageFilter) {
+  const params = new URLSearchParams()
+  if (filter?.scope) params.set('scope', filter.scope)
+  if (filter?.category) params.set('category', filter.category)
+  if (filter?.sessionId) params.set('sessionId', filter.sessionId)
+  if (filter?.from != null) params.set('from', String(filter.from))
+  if (filter?.to != null) params.set('to', String(filter.to))
+  if (filter?.limit != null) params.set('limit', String(filter.limit))
+  if (filter?.offset != null) params.set('offset', String(filter.offset))
+  const qs = params.toString()
+  return request<{ records: TokenUsageRecord[]; summary: TokenUsageSummary }>(
+    `/agent/token-usage${qs ? '?' + qs : ''}`
+  )
 }
