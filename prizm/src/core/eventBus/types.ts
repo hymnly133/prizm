@@ -3,7 +3,12 @@
  * 定义系统内部各模块之间通过 EventBus 通信的事件映射
  */
 
-import type { AgentMessage, OperationActor, MemoryIdsByLayer, BgTriggerType } from '@prizm/shared'
+import type {
+  AgentMessage,
+  OperationActor,
+  MemoryIdsByLayer,
+  SessionChatStatus
+} from '@prizm/shared'
 import type { AuditEntryInput } from '../agentAuditLog'
 import type { LockableResourceType } from '../resourceLockManager'
 
@@ -62,6 +67,13 @@ export interface AgentSessionRolledBackEvent {
   actor?: OperationActor
 }
 
+export interface AgentSessionChatStatusChangedEvent {
+  scope: string
+  sessionId: string
+  chatStatus: SessionChatStatus
+  actor?: OperationActor
+}
+
 // ─── Tool 执行事件 ───
 
 export interface ToolExecutedEvent {
@@ -101,6 +113,14 @@ export interface DocumentDeletedEvent {
   documentId: string
   /** 操作者身份 */
   actor?: OperationActor
+}
+
+export interface DocumentMemoryUpdatedEvent {
+  scope: string
+  documentId: string
+  title: string
+  /** 更新了哪些子类型的记忆 */
+  updatedSubTypes: string[]
 }
 
 // ─── 资源锁事件 ───
@@ -163,19 +183,6 @@ export interface ClipboardMutatedEvent {
 
 // ─── BG Session 生命周期事件 ───
 
-export interface BgSessionTriggeredEvent {
-  scope: string
-  sessionId: string
-  triggerType: BgTriggerType
-  parentSessionId?: string
-  label?: string
-}
-
-export interface BgSessionStartedEvent {
-  scope: string
-  sessionId: string
-}
-
 export interface BgSessionCompletedEvent {
   scope: string
   sessionId: string
@@ -199,6 +206,139 @@ export interface BgSessionTimeoutEvent {
 export interface BgSessionCancelledEvent {
   scope: string
   sessionId: string
+  done?: boolean
+}
+
+// ─── Schedule 事件 ───
+
+export interface ScheduleCreatedEvent {
+  scope: string
+  scheduleId: string
+  title: string
+  type: string
+  startTime: number
+  actor?: OperationActor
+}
+
+export interface ScheduleUpdatedEvent {
+  scope: string
+  scheduleId: string
+  title?: string
+  status?: string
+  actor?: OperationActor
+}
+
+export interface ScheduleDeletedEvent {
+  scope: string
+  scheduleId: string
+  actor?: OperationActor
+}
+
+export interface ScheduleRemindedEvent {
+  scope: string
+  scheduleId: string
+  title: string
+  startTime: number
+  reminderMinutes: number
+}
+
+// ─── Cron Job 事件 ───
+
+export interface CronJobCreatedEvent {
+  scope: string
+  jobId: string
+  name: string
+  schedule: string
+}
+
+export interface CronJobExecutedEvent {
+  scope: string
+  jobId: string
+  sessionId: string
+  status: string
+  durationMs?: number
+}
+
+export interface CronJobFailedEvent {
+  scope: string
+  jobId: string
+  error: string
+}
+
+// ─── Task 事件 ───
+
+export interface TaskStartedEvent {
+  scope: string
+  taskId: string
+  label?: string
+}
+
+export interface TaskCompletedEvent {
+  scope: string
+  taskId: string
+  label?: string
+  durationMs?: number
+}
+
+export interface TaskFailedEvent {
+  scope: string
+  taskId: string
+  label?: string
+  error: string
+}
+
+export interface TaskCancelledEvent {
+  scope: string
+  taskId: string
+  label?: string
+}
+
+// ─── Workflow 事件 ───
+
+export interface WorkflowStartedEvent {
+  scope: string
+  runId: string
+  workflowName: string
+}
+
+export interface WorkflowStepCompletedEvent {
+  scope: string
+  runId: string
+  stepId: string
+  stepStatus: string
+  outputPreview?: string
+  approved?: boolean
+}
+
+export interface WorkflowPausedEvent {
+  scope: string
+  runId: string
+  workflowName: string
+  stepId: string
+  approvePrompt: string
+}
+
+export interface WorkflowCompletedEvent {
+  scope: string
+  runId: string
+  workflowName: string
+  finalOutput?: string
+}
+
+export interface WorkflowFailedEvent {
+  scope: string
+  runId: string
+  workflowName: string
+  error: string
+}
+
+// ─── 通知事件 ───
+
+export interface NotificationRequestedEvent {
+  scope: string
+  title: string
+  body?: string
+  source?: string
 }
 
 // ─── 统一领域事件映射 ───
@@ -210,6 +350,7 @@ export interface DomainEventMap {
   'agent:message.completed': AgentMessageCompletedEvent
   'agent:session.compressing': AgentSessionCompressingEvent
   'agent:session.rolledBack': AgentSessionRolledBackEvent
+  'agent:session.chatStatusChanged': AgentSessionChatStatusChangedEvent
 
   // Tool 执行（审计用）
   'tool:executed': ToolExecutedEvent
@@ -217,6 +358,7 @@ export interface DomainEventMap {
   // 文档
   'document:saved': DocumentSavedEvent
   'document:deleted': DocumentDeletedEvent
+  'document:memory.updated': DocumentMemoryUpdatedEvent
 
   // 资源锁
   'resource:lock.changed': ResourceLockChangedEvent
@@ -231,12 +373,37 @@ export interface DomainEventMap {
   'clipboard:mutated': ClipboardMutatedEvent
 
   // BG Session 生命周期
-  'bg:session.triggered': BgSessionTriggeredEvent
-  'bg:session.started': BgSessionStartedEvent
   'bg:session.completed': BgSessionCompletedEvent
   'bg:session.failed': BgSessionFailedEvent
   'bg:session.timeout': BgSessionTimeoutEvent
   'bg:session.cancelled': BgSessionCancelledEvent
+
+  // Schedule
+  'schedule:created': ScheduleCreatedEvent
+  'schedule:updated': ScheduleUpdatedEvent
+  'schedule:deleted': ScheduleDeletedEvent
+  'schedule:reminded': ScheduleRemindedEvent
+
+  // Cron Job
+  'cron:job.created': CronJobCreatedEvent
+  'cron:job.executed': CronJobExecutedEvent
+  'cron:job.failed': CronJobFailedEvent
+
+  // Task
+  'task:started': TaskStartedEvent
+  'task:completed': TaskCompletedEvent
+  'task:failed': TaskFailedEvent
+  'task:cancelled': TaskCancelledEvent
+
+  // Workflow
+  'workflow:started': WorkflowStartedEvent
+  'workflow:step.completed': WorkflowStepCompletedEvent
+  'workflow:paused': WorkflowPausedEvent
+  'workflow:completed': WorkflowCompletedEvent
+  'workflow:failed': WorkflowFailedEvent
+
+  // Notification
+  'notification:requested': NotificationRequestedEvent
 }
 
 /** 领域事件名称 */

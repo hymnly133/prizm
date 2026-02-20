@@ -54,3 +54,15 @@ export {
 } from './sessionStore'
 
 export { readSessionActivities, appendSessionActivities } from './tokenUsageStore'
+
+export {
+  readScheduleItems,
+  readScheduleItemsByRange,
+  readScheduleItemsExpanded,
+  readSingleScheduleById,
+  writeSingleSchedule,
+  deleteSingleSchedule,
+  findSchedulesByLinkedItem,
+  expandRecurrence,
+  detectConflicts
+} from './scheduleStore'

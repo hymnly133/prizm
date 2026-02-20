@@ -8,6 +8,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { AgentSession } from '@prizm/shared'
 import type { IAgentAdapter, LLMStreamChunk } from '../../adapters/interfaces'
+import type { IChatService } from '../interfaces'
 import { BackgroundSessionManager } from './manager'
 import { emit, subscribe, clearAll } from '../eventBus/eventBus'
 
@@ -35,8 +36,42 @@ function createMockAdapter(): IAgentAdapter & { _sessions: Map<string, AgentSess
       Object.assign(s, update, { updatedAt: Date.now() })
       return { ...s }
     }),
+    appendMessage: vi.fn(async (_scope: string, _sessionId: string, msg: Record<string, unknown>) => ({
+      id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      role: msg.role as string,
+      parts: msg.parts as unknown[],
+      createdAt: Date.now()
+    })),
     chat: vi.fn(async function* (): AsyncIterable<LLMStreamChunk> {
       yield { text: '已完成任务' }
+    })
+  }
+}
+
+function makeChatResult() {
+  return {
+    appendedMsg: { id: 'msg-1', role: 'assistant', parts: [{ type: 'text', content: 'ok' }], createdAt: Date.now() },
+    parts: [{ type: 'text', content: 'ok' }],
+    reasoning: '',
+    usage: undefined,
+    memoryRefs: { injected: { user: [], scope: [], session: [] }, created: { user: [], scope: [], session: [] } },
+    injectedMemories: null,
+    stopped: false
+  }
+}
+
+function createMockChatService(adapter: IAgentAdapter): IChatService {
+  return {
+    execute: vi.fn(async (_adapter, options, onChunk) => {
+      const session = await adapter.getSession!('default', options.sessionId)
+      if (session) {
+        session.bgResult = '成功结果'
+        session.bgStatus = 'completed'
+        session.finishedAt = Date.now()
+      }
+      onChunk({ text: 'ok' })
+      onChunk({ done: true })
+      return makeChatResult()
     })
   }
 }
@@ -44,13 +79,15 @@ function createMockAdapter(): IAgentAdapter & { _sessions: Map<string, AgentSess
 describe('BG Session 集成测试', () => {
   let mgr: BackgroundSessionManager
   let adapter: ReturnType<typeof createMockAdapter>
+  let chatService: IChatService
 
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     clearAll()
     mgr = new BackgroundSessionManager()
     adapter = createMockAdapter()
-    mgr.init(adapter)
+    chatService = createMockChatService(adapter)
+    mgr.init(adapter, chatService)
   })
 
   afterEach(() => {
@@ -63,15 +100,17 @@ describe('BG Session 集成测试', () => {
 
   describe('场景 A：完整 BG Session 生命周期', () => {
     it('trigger → running → set_result → completed → getResult', async () => {
-      const chatMock = adapter.chat as ReturnType<typeof vi.fn>
-      chatMock.mockImplementation(async function* (_s: string, sid: string) {
-        const session = adapter._sessions.get(sid)
+      const executeMock = chatService.execute as ReturnType<typeof vi.fn>
+      executeMock.mockImplementation(async (_a: unknown, options: { sessionId: string }, onChunk: (c: unknown) => void) => {
+        const session = adapter._sessions.get(options.sessionId)
         if (session) {
           session.bgResult = '集成测试报告'
           session.bgStatus = 'completed'
           session.finishedAt = Date.now()
         }
-        yield { text: 'ok' }
+        onChunk({ text: 'ok' })
+        onChunk({ done: true })
+        return makeChatResult()
       })
 
       const { sessionId, promise } = await mgr.trigger(
@@ -91,10 +130,9 @@ describe('BG Session 集成测试', () => {
       expect(result.status).toBe('success')
       expect(result.output).toBe('集成测试报告')
 
-      const fetchedResult = await mgr.getResult('default', sessionId)
-      expect(fetchedResult).not.toBeNull()
-      expect(fetchedResult!.output).toBe('集成测试报告')
-      expect(fetchedResult!.status).toBe('success')
+      const updatedSession = adapter._sessions.get(sessionId)!
+      expect(updatedSession.bgResult).toBe('集成测试报告')
+      expect(updatedSession.bgStatus).toBe('completed')
     })
   })
 
@@ -102,11 +140,11 @@ describe('BG Session 集成测试', () => {
 
   describe('场景 B：结果守卫完整流程', () => {
     it('chat 未调用 set_result → 守卫提醒 → 仍未设置 → fallback 降级', async () => {
-      const chatMock = adapter.chat as ReturnType<typeof vi.fn>
+      const executeMock = chatService.execute as ReturnType<typeof vi.fn>
       let callCount = 0
-      chatMock.mockImplementation(async function* (_s: string, sid: string) {
+      executeMock.mockImplementation(async (_a: unknown, options: { sessionId: string }, onChunk: (c: unknown) => void) => {
         callCount++
-        const session = adapter._sessions.get(sid)
+        const session = adapter._sessions.get(options.sessionId)
         if (session && callCount === 1) {
           session.messages.push({
             id: `msg-${callCount}`,
@@ -115,7 +153,9 @@ describe('BG Session 集成测试', () => {
             createdAt: Date.now()
           })
         }
-        yield { text: '回复' }
+        onChunk({ text: '回复' })
+        onChunk({ done: true })
+        return makeChatResult()
       })
 
       const { promise } = await mgr.trigger(
@@ -137,10 +177,10 @@ describe('BG Session 集成测试', () => {
     it('timeoutMs=100 + chat 延迟 → bgStatus=timeout', async () => {
       let resolveBlock!: () => void
       const blockPromise = new Promise<void>((r) => { resolveBlock = r })
-      const chatMock = adapter.chat as ReturnType<typeof vi.fn>
-      chatMock.mockImplementation(async function* () {
+      const executeMock = chatService.execute as ReturnType<typeof vi.fn>
+      executeMock.mockImplementation(async () => {
         await blockPromise
-        yield { text: 'late' }
+        return makeChatResult()
       })
 
       const { sessionId, promise } = await mgr.trigger(
@@ -188,13 +228,9 @@ describe('BG Session 集成测试', () => {
   // ─── 场景 E：EventBus 事件链 ───
 
   describe('场景 E：EventBus 事件链', () => {
-    it('trigger → bg:session.triggered; completed → bg:session.completed', async () => {
-      const triggeredEvents: string[] = []
+    it('completed → bg:session.completed', async () => {
       const completedEvents: string[] = []
 
-      subscribe('bg:session.triggered', (data) => {
-        triggeredEvents.push(data.sessionId)
-      })
       subscribe('bg:session.completed', (data) => {
         completedEvents.push(data.sessionId)
       })
@@ -216,11 +252,9 @@ describe('BG Session 集成测试', () => {
       )
 
       await promise
-      // manager 使用 void emit() 异步发射事件，需要等待微任务处理
       await new Promise((r) => setTimeout(r, 0))
       await vi.advanceTimersByTimeAsync(10)
 
-      expect(triggeredEvents).toContain(sessionId)
       expect(completedEvents).toContain(sessionId)
     })
   })
@@ -230,7 +264,7 @@ describe('BG Session 集成测试', () => {
   describe('场景 F：并发限制', () => {
     it('maxGlobal=2 → 第 3 个触发失败 → 取消 1 个后可以触发', async () => {
       const mgr2 = new BackgroundSessionManager()
-      mgr2.init(adapter, { maxGlobal: 2, maxDepth: 5 })
+      mgr2.init(adapter, chatService, { maxGlobal: 2, maxDepth: 5 })
 
       let resolveBlock1!: () => void
       let resolveBlock2!: () => void
@@ -238,12 +272,12 @@ describe('BG Session 集成测试', () => {
       const block2 = new Promise<void>((r) => { resolveBlock2 = r })
       let callIdx = 0
 
-      const chatMock = adapter.chat as ReturnType<typeof vi.fn>
-      chatMock.mockImplementation(async function* () {
+      const executeMock = chatService.execute as ReturnType<typeof vi.fn>
+      executeMock.mockImplementation(async () => {
         const idx = callIdx++
         if (idx === 0) await block1
         else if (idx === 1) await block2
-        yield { text: 'ok' }
+        return makeChatResult()
       })
 
       const { sessionId: id1 } = await mgr2.trigger('default', { prompt: '任务1' }, {})
@@ -272,7 +306,7 @@ describe('BG Session 集成测试', () => {
   describe('场景 G：嵌套深度限制', () => {
     it('maxDepth=1 → depth=0 成功, depth=1 失败', async () => {
       const mgr2 = new BackgroundSessionManager()
-      mgr2.init(adapter, { maxDepth: 1 })
+      mgr2.init(adapter, chatService, { maxDepth: 1 })
 
       const chatMock = adapter.chat as ReturnType<typeof vi.fn>
       chatMock.mockImplementation(async function* (_s: string, sid: string) {

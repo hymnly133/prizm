@@ -1,9 +1,7 @@
 export { BackgroundSessionManager, bgSessionManager } from './manager'
 export { needsResultGuard, RESULT_GUARD_PROMPT, extractFallbackResult } from './resultGuard'
-export type {
-  BgTriggerPayload,
-  BgRunResult,
-  BgListFilter,
-  ActiveRunEntry,
-  BgConcurrencyLimits
-} from './types'
+export { observerRegistry } from './observerRegistry'
+export { buildBgSystemPreamble } from './preambleBuilder'
+export { validateJsonSchema } from './schemaValidation'
+export type { ObserverCallbacks } from './observerRegistry'
+export type { BgTriggerPayload, BgRunResult, ActiveRunEntry, BgConcurrencyLimits } from './types'

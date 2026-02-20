@@ -6,6 +6,7 @@
 
 import fs from 'fs'
 import path from 'path'
+import crypto from 'crypto'
 import { getConfig } from '../config'
 
 const SCOPES_DIR = 'scopes'
@@ -27,6 +28,13 @@ const TOKEN_USAGE_FILE = 'token_usage.md'
 const AGENT_SESSIONS_DIR = 'agent-sessions'
 const CLIPBOARD_DIR = 'clipboard'
 const SESSION_WORKSPACE_DIR = 'workspace'
+const WORKFLOWS_DIR = 'workflows'
+const WORKFLOW_META_DIR = '.meta'
+const WORKFLOW_RUNS_DIR = 'runs'
+const WORKFLOW_DEF_FILE = 'workflow.yaml'
+const WORKFLOW_DEF_META_FILE = 'def.json'
+const WORKFLOW_PERSISTENT_WORKSPACE_DIR = 'workspace'
+const WORKFLOW_RUN_WORKSPACES_DIR = 'run-workspaces'
 
 const EVERMEMOS_DB = 'evermemos.db'
 const EVERMEMOS_VEC = 'evermemos_vec'
@@ -143,6 +151,100 @@ export function getScopeMemoryDbPath(scopeRoot: string): string {
 /** {scopeRoot}/.prizm/memory/scope_vec（scope 级向量库） */
 export function getScopeMemoryVecPath(scopeRoot: string): string {
   return path.join(getScopeMemoryDir(scopeRoot), SCOPE_VEC)
+}
+
+// ============ workflow 级路径 ============
+
+/** {scopeRoot}/.prizm/workflows/ */
+export function getWorkflowsDir(scopeRoot: string): string {
+  return path.join(getPrizmDir(scopeRoot), WORKFLOWS_DIR)
+}
+
+/**
+ * 从 workflow 名称生成安全、无碰撞的目录名。
+ * 纯 ASCII 名称原样返回；含非 ASCII 字符时附加 sha256 短哈希以避免碰撞。
+ */
+export function workflowDirName(name: string): string {
+  const ascii = name.replace(/[^a-zA-Z0-9_-]/g, '')
+  if (ascii === name && name.length > 0) return name
+  const hash = crypto.createHash('sha256').update(name).digest('hex').slice(0, 12)
+  return ascii ? `${ascii.slice(0, 30)}-${hash}` : hash
+}
+
+/** {scopeRoot}/.prizm/workflows/{dirName}/ — 持久工作区 */
+export function getWorkflowWorkspaceDir(scopeRoot: string, workflowName: string): string {
+  return path.join(getWorkflowsDir(scopeRoot), workflowDirName(workflowName))
+}
+
+/** {workflowWorkspace}/.meta/runs/ */
+export function getWorkflowRunMetaDir(scopeRoot: string, workflowName: string): string {
+  return path.join(getWorkflowWorkspaceDir(scopeRoot, workflowName), WORKFLOW_META_DIR, WORKFLOW_RUNS_DIR)
+}
+
+/** {workflowWorkspace}/.meta/runs/{runId}.md */
+export function getWorkflowRunMetaPath(scopeRoot: string, workflowName: string, runId: string): string {
+  const safeId = runId.replace(/[^a-zA-Z0-9_-]/g, '_') || 'unknown'
+  return path.join(getWorkflowRunMetaDir(scopeRoot, workflowName), `${safeId}.md`)
+}
+
+/** {workflowWorkspace}/workflow.yaml — 工作流定义文件 */
+export function getWorkflowDefPath(scopeRoot: string, workflowName: string): string {
+  return path.join(getWorkflowWorkspaceDir(scopeRoot, workflowName), WORKFLOW_DEF_FILE)
+}
+
+/** {workflowWorkspace}/.meta/def.json — 工作流定义元数据 */
+export function getWorkflowDefMetaPath(scopeRoot: string, workflowName: string): string {
+  return path.join(getWorkflowWorkspaceDir(scopeRoot, workflowName), WORKFLOW_META_DIR, WORKFLOW_DEF_META_FILE)
+}
+
+/** 确保 workflow 工作区、workspace/（持久工作空间）及 .meta/runs/ 目录存在 */
+export function ensureWorkflowWorkspace(scopeRoot: string, workflowName: string): string {
+  const wsDir = getWorkflowWorkspaceDir(scopeRoot, workflowName)
+  if (!fs.existsSync(wsDir)) {
+    fs.mkdirSync(wsDir, { recursive: true })
+  }
+  const persistentDir = getWorkflowPersistentWorkspace(scopeRoot, workflowName)
+  if (!fs.existsSync(persistentDir)) {
+    fs.mkdirSync(persistentDir, { recursive: true })
+  }
+  const runsDir = getWorkflowRunMetaDir(scopeRoot, workflowName)
+  if (!fs.existsSync(runsDir)) {
+    fs.mkdirSync(runsDir, { recursive: true })
+  }
+  return wsDir
+}
+
+/** {workflowWorkspace}/workspace/ — Workflow 级持久工作空间（跨 run 共享） */
+export function getWorkflowPersistentWorkspace(scopeRoot: string, workflowName: string): string {
+  return path.join(getWorkflowWorkspaceDir(scopeRoot, workflowName), WORKFLOW_PERSISTENT_WORKSPACE_DIR)
+}
+
+/** {workflowWorkspace}/run-workspaces/ — Run 级工作空间父目录 */
+export function getWorkflowRunWorkspacesDir(scopeRoot: string, workflowName: string): string {
+  return path.join(getWorkflowWorkspaceDir(scopeRoot, workflowName), WORKFLOW_RUN_WORKSPACES_DIR)
+}
+
+/** {workflowWorkspace}/run-workspaces/{runId}/ — 单次 Run 的独立工作空间 */
+export function getWorkflowRunWorkspace(scopeRoot: string, workflowName: string, runId: string): string {
+  const safeId = runId.replace(/[^a-zA-Z0-9_-]/g, '_') || 'unknown'
+  return path.join(getWorkflowRunWorkspacesDir(scopeRoot, workflowName), safeId)
+}
+
+/** 确保持久工作空间和 Run 工作空间目录存在，返回 { persistentDir, runDir } */
+export function ensureRunWorkspace(
+  scopeRoot: string,
+  workflowName: string,
+  runId: string
+): { persistentDir: string; runDir: string } {
+  const persistentDir = getWorkflowPersistentWorkspace(scopeRoot, workflowName)
+  const runDir = getWorkflowRunWorkspace(scopeRoot, workflowName, runId)
+  if (!fs.existsSync(persistentDir)) {
+    fs.mkdirSync(persistentDir, { recursive: true })
+  }
+  if (!fs.existsSync(runDir)) {
+    fs.mkdirSync(runDir, { recursive: true })
+  }
+  return { persistentDir, runDir }
 }
 
 // ============ session 级路径 ============

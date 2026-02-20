@@ -15,29 +15,6 @@ const log = createLogger('BgSessionHandlers')
 
 export function registerBgSessionHandlers(): void {
   subscribe(
-    'bg:session.triggered',
-    (data) => {
-      try {
-        auditManager.record(
-          data.scope,
-          { actorType: data.parentSessionId ? 'agent' : 'system', sessionId: data.parentSessionId },
-          {
-            toolName: 'bg:session',
-            action: 'bg_trigger',
-            resourceType: 'session',
-            resourceId: data.sessionId,
-            result: 'success',
-            detail: `triggerType=${data.triggerType}, parent=${data.parentSessionId ?? 'none'}, label=${data.label ?? ''}`
-          }
-        )
-      } catch (err) {
-        log.error('Failed to record bg:session.triggered audit:', err)
-      }
-    },
-    'bgSession.triggered.audit'
-  )
-
-  subscribe(
     'bg:session.completed',
     async (data) => {
       try {

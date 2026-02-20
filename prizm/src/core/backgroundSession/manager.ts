@@ -1,24 +1,24 @@
 /**
- * BackgroundSessionManager
+ * BackgroundSessionManager (Task Orchestrator)
  *
- * BG Session 的核心管理模块，负责：
+ * BG Session 的轻量编排模块，负责：
  * - 触发并执行 BG Session（异步/同步）
  * - 超时控制与取消
  * - 结果守卫（检查 prizm_set_result 是否被调用）
- * - 活跃运行追踪
- * - 自动清理
+ * - 活跃运行追踪与并发限制
+ *
+ * 不再包含：BG 专用 chunk 广播、孤儿恢复、列表/结果查询/摘要统计等
+ * 路由级功能已移除，这些数据直接从 session 读取。
  */
 
 import type { AgentSession, BgSessionMeta, BgStatus, SessionMemoryPolicy } from '@prizm/shared'
 import type { IAgentAdapter } from '../../adapters/interfaces'
-import type {
-  ActiveRunEntry,
-  BgConcurrencyLimits,
-  BgListFilter,
-  BgRunResult,
-  BgTriggerPayload
-} from './types'
+import type { IChatService } from '../interfaces'
+import type { ActiveRunEntry, BgConcurrencyLimits, BgRunResult, BgTriggerPayload } from './types'
 import { needsResultGuard, RESULT_GUARD_PROMPT, extractFallbackResult } from './resultGuard'
+import { observerRegistry } from './observerRegistry'
+import { buildBgSystemPreamble } from './preambleBuilder'
+import { validateJsonSchema } from './schemaValidation'
 import { createLogger } from '../../logger'
 import { emit } from '../eventBus/eventBus'
 
@@ -34,6 +34,7 @@ const DEFAULT_BG_MEMORY_POLICY: SessionMemoryPolicy = {
 
 export class BackgroundSessionManager {
   private adapter: IAgentAdapter | undefined
+  private chatService: IChatService | undefined
   private activeRuns = new Map<string, ActiveRunEntry>()
   private cleanupTimer: ReturnType<typeof setInterval> | null = null
   private limits: BgConcurrencyLimits = {
@@ -42,19 +43,36 @@ export class BackgroundSessionManager {
     maxDepth: 2
   }
 
-  init(adapter: IAgentAdapter | undefined, limits?: Partial<BgConcurrencyLimits>): void {
+  async init(
+    adapter: IAgentAdapter | undefined,
+    chatService: IChatService,
+    limits?: Partial<BgConcurrencyLimits>
+  ): Promise<void> {
     this.adapter = adapter
+    this.chatService = chatService
     if (limits) Object.assign(this.limits, limits)
     this.cleanupTimer = setInterval(() => this.cleanup(), 60_000)
     log.info('BackgroundSessionManager initialized')
   }
 
-  shutdown(): void {
-    for (const [, entry] of this.activeRuns) {
+  async shutdown(): Promise<void> {
+    for (const [sessionId, entry] of this.activeRuns) {
       entry.abortController.abort()
       if (entry.timeoutTimer) clearTimeout(entry.timeoutTimer)
+      try {
+        const session = await this.adapter?.getSession?.(entry.scope, sessionId)
+        if (session && session.bgStatus === 'running') {
+          session.bgStatus = 'interrupted'
+          session.finishedAt = Date.now()
+          await this.saveSessionFields(entry.scope, session)
+          log.info('Marked running BG session as interrupted on shutdown:', sessionId)
+        }
+      } catch (err) {
+        log.warn('Failed to mark BG session as interrupted:', sessionId, err)
+      }
     }
     this.activeRuns.clear()
+    observerRegistry.clear()
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer)
       this.cleanupTimer = null
@@ -81,11 +99,14 @@ export class BackgroundSessionManager {
     const sessionId = session.id
     const now = Date.now()
 
-    const mergedMeta: BgSessionMeta = {
+    const rawMeta: BgSessionMeta = {
       triggerType: meta.triggerType ?? 'api',
       ...meta,
       memoryPolicy: { ...DEFAULT_BG_MEMORY_POLICY, ...meta.memoryPolicy }
     }
+    const mergedMeta = Object.fromEntries(
+      Object.entries(rawMeta).filter(([, v]) => v !== undefined)
+    ) as BgSessionMeta
     const timeoutMs = mergedMeta.timeoutMs ?? DEFAULT_TIMEOUT_MS
 
     Object.assign(session, {
@@ -96,12 +117,10 @@ export class BackgroundSessionManager {
     })
     await this.saveSessionFields(scope, session)
 
-    void emit('bg:session.triggered', {
+    void emit('agent:session.created', {
       scope,
       sessionId,
-      triggerType: mergedMeta.triggerType,
-      parentSessionId: mergedMeta.parentSessionId,
-      label: mergedMeta.label
+      actor: { type: 'system' as const, source: 'bg-session' }
     })
 
     const abortController = new AbortController()
@@ -128,11 +147,9 @@ export class BackgroundSessionManager {
     }
     this.activeRuns.set(sessionId, entry)
 
-    this.executeRun(scope, sessionId, payload, mergedMeta, abortController.signal).catch(
-      (err) => {
-        log.error('BG session execution error:', sessionId, err)
-      }
-    )
+    this.executeRun(scope, sessionId, payload, mergedMeta, abortController.signal).catch((err) => {
+      log.error('BG session execution error:', sessionId, err)
+    })
 
     return { sessionId, promise }
   }
@@ -144,10 +161,15 @@ export class BackgroundSessionManager {
     scope: string,
     payload: BgTriggerPayload,
     meta: Partial<BgSessionMeta>,
-    options?: { timeoutMs?: number }
+    options?: { timeoutMs?: number; signal?: AbortSignal }
   ): Promise<BgRunResult> {
     const tm = options?.timeoutMs ?? meta.timeoutMs ?? DEFAULT_TIMEOUT_MS
-    const { promise } = await this.trigger(scope, payload, { ...meta, timeoutMs: tm })
+    const { promise } = await this.trigger(
+      scope,
+      payload,
+      { ...meta, timeoutMs: tm },
+      { signal: options?.signal }
+    )
     return promise
   }
 
@@ -174,105 +196,10 @@ export class BackgroundSessionManager {
       this.activeRuns.delete(sessionId)
     }
 
+    observerRegistry.endSession(sessionId, { bgStatus: 'cancelled' })
+
     void emit('bg:session.cancelled', { scope, sessionId })
     log.info('BG session cancelled:', sessionId)
-  }
-
-  /**
-   * 列出 BG Sessions（支持按状态/父会话筛选）
-   */
-  async list(scope: string, filter?: BgListFilter): Promise<AgentSession[]> {
-    const sessions = await this.adapter?.listSessions?.(scope)
-    if (!sessions) return []
-    return sessions.filter((s) => {
-      if (s.kind !== 'background') return false
-      if (filter?.bgStatus && s.bgStatus !== filter.bgStatus) return false
-      if (filter?.triggerType && s.bgMeta?.triggerType !== filter.triggerType) return false
-      if (filter?.parentSessionId && s.bgMeta?.parentSessionId !== filter.parentSessionId)
-        return false
-      if (filter?.label && s.bgMeta?.label !== filter.label) return false
-      return true
-    })
-  }
-
-  /**
-   * 获取 BG 运行结果
-   */
-  async getResult(scope: string, sessionId: string): Promise<BgRunResult | null> {
-    const session = await this.adapter?.getSession?.(scope, sessionId)
-    if (!session || session.kind !== 'background') return null
-    if (!session.bgStatus || session.bgStatus === 'pending' || session.bgStatus === 'running') {
-      return null
-    }
-    const durationMs = (session.finishedAt ?? Date.now()) - (session.startedAt ?? session.createdAt)
-    const statusMap: Record<string, BgRunResult['status']> = {
-      completed: 'success',
-      failed: 'failed',
-      timeout: 'timeout',
-      cancelled: 'cancelled'
-    }
-    return {
-      sessionId,
-      status: statusMap[session.bgStatus] ?? 'failed',
-      output: session.bgResult ?? '',
-      durationMs
-    }
-  }
-
-  /** 获取后台概览统计 */
-  async getSummary(scope: string): Promise<{
-    active: number
-    completed: number
-    failed: number
-    timeout: number
-    cancelled: number
-  }> {
-    const sessions = await this.adapter?.listSessions?.(scope)
-    const bg = (sessions ?? []).filter((s) => s.kind === 'background')
-    return {
-      active: bg.filter((s) => s.bgStatus === 'running' || s.bgStatus === 'pending').length,
-      completed: bg.filter((s) => s.bgStatus === 'completed').length,
-      failed: bg.filter((s) => s.bgStatus === 'failed').length,
-      timeout: bg.filter((s) => s.bgStatus === 'timeout').length,
-      cancelled: bg.filter((s) => s.bgStatus === 'cancelled').length
-    }
-  }
-
-  /** 批量取消运行中的 BG Sessions */
-  async batchCancel(scope: string, sessionIds?: string[]): Promise<number> {
-    const targets = sessionIds
-      ? sessionIds
-      : [...this.activeRuns.values()]
-          .filter((e) => e.scope === scope)
-          .map((e) => e.sessionId)
-    let count = 0
-    for (const id of targets) {
-      try {
-        await this.cancel(scope, id)
-        count++
-      } catch {
-        log.warn('Failed to cancel BG session:', id)
-      }
-    }
-    return count
-  }
-
-  /** 清理已完成且标记 autoCleanup 的会话 */
-  async cleanup(): Promise<void> {
-    // 清理已完成且 autoCleanup=true 的会话（需遍历所有 scope，但此处仅处理内存追踪）
-    for (const [sessionId, entry] of this.activeRuns) {
-      const session = await this.adapter?.getSession?.(entry.scope, sessionId)
-      if (!session) {
-        this.activeRuns.delete(sessionId)
-        if (entry.timeoutTimer) clearTimeout(entry.timeoutTimer)
-        continue
-      }
-      const terminal = ['completed', 'failed', 'timeout', 'cancelled']
-      if (terminal.includes(session.bgStatus ?? '')) {
-        this.activeRuns.delete(sessionId)
-        if (entry.timeoutTimer) clearTimeout(entry.timeoutTimer)
-      }
-    }
   }
 
   /** 检查某个 session 是否正在后台运行 */
@@ -289,9 +216,7 @@ export class BackgroundSessionManager {
 
   private checkConcurrencyLimits(meta: Partial<BgSessionMeta>): void {
     if (this.activeRuns.size >= this.limits.maxGlobal) {
-      throw new Error(
-        `BG session global concurrency limit reached (${this.limits.maxGlobal})`
-      )
+      throw new Error(`BG session global concurrency limit reached (${this.limits.maxGlobal})`)
     }
     if (meta.parentSessionId) {
       const parentChildren = [...this.activeRuns.values()].filter(
@@ -305,9 +230,7 @@ export class BackgroundSessionManager {
       }
     }
     if ((meta.depth ?? 0) >= this.limits.maxDepth) {
-      throw new Error(
-        `BG session max nesting depth reached (${this.limits.maxDepth})`
-      )
+      throw new Error(`BG session max nesting depth reached (${this.limits.maxDepth})`)
     }
   }
 
@@ -318,38 +241,66 @@ export class BackgroundSessionManager {
     meta: BgSessionMeta,
     signal: AbortSignal
   ): Promise<void> {
+    observerRegistry.startSession(sessionId)
+    const chunkHandler = (chunk: import('../../adapters/interfaces').LLMStreamChunk) => {
+      observerRegistry.dispatch(sessionId, chunk)
+    }
+
     try {
       const session = await this.adapter!.getSession!(scope, sessionId)
       if (!session) throw new Error('Session not found after creation')
 
       session.bgStatus = 'running'
       await this.saveSessionFields(scope, session)
-      void emit('bg:session.started', { scope, sessionId })
 
-      const messages = this.buildMessages(payload, meta)
+      const systemPreamble = buildBgSystemPreamble(payload, meta)
+      const memPolicy = meta.memoryPolicy ?? DEFAULT_BG_MEMORY_POLICY
 
-      const chatOptions = {
-        model: meta.model,
-        signal,
-        includeScopeContext: true,
-        grantedPaths: session.grantedPaths
-      }
+      await this.chatService!.execute(
+        this.adapter!,
+        {
+          scope,
+          sessionId,
+          content: payload.prompt,
+          model: meta.model,
+          signal,
+          includeScopeContext: true,
+          systemPreamble,
+          skipCheckpoint: true,
+          skipSummary: memPolicy.skipConversationSummary !== false,
+          skipPerRoundExtract: memPolicy.skipPerRoundExtract !== false,
+          skipNarrativeBatchExtract: memPolicy.skipNarrativeBatchExtract !== false,
+          skipSlashCommands: true,
+          skipChatStatus: true,
+          actor: { type: 'system', source: 'bg-session' }
+        },
+        chunkHandler
+      )
 
-      const stream = this.adapter!.chat!(scope, sessionId, messages, chatOptions)
-      for await (const _chunk of stream) {
-        if (signal.aborted) break
-      }
-
+      // 结果守卫
       const updatedSession = await this.adapter!.getSession!(scope, sessionId)
       if (!updatedSession) return
 
       if (needsResultGuard(updatedSession)) {
         log.info('BG session result guard triggered, sending reminder:', sessionId)
-        const guardMessages = [{ role: 'system', content: RESULT_GUARD_PROMPT }]
-        const guardStream = this.adapter!.chat!(scope, sessionId, guardMessages, chatOptions)
-        for await (const _chunk of guardStream) {
-          if (signal.aborted) break
-        }
+        await this.chatService!.execute(
+          this.adapter!,
+          {
+            scope,
+            sessionId,
+            content: RESULT_GUARD_PROMPT,
+            model: meta.model,
+            signal,
+            includeScopeContext: false,
+            skipCheckpoint: true,
+            skipSummary: true,
+            skipMemory: true,
+            skipSlashCommands: true,
+            skipChatStatus: true,
+            actor: { type: 'system', source: 'bg-session:guard' }
+          },
+          chunkHandler
+        )
 
         const finalSession = await this.adapter!.getSession!(scope, sessionId)
         if (finalSession && needsResultGuard(finalSession)) {
@@ -362,6 +313,11 @@ export class BackgroundSessionManager {
         }
       }
 
+      // ── 结构化输出 Schema 验证 ──
+      if (payload.outputSchema) {
+        await this.validateOutputSchema(scope, sessionId, payload, meta, signal, chunkHandler)
+      }
+
       this.completeRun(scope, sessionId)
     } catch (err: unknown) {
       if (signal.aborted) return
@@ -371,38 +327,64 @@ export class BackgroundSessionManager {
     }
   }
 
-  private buildMessages(
+  /**
+   * 验证 bgResult 是否符合 outputSchema，不通过则注入修正提示重试
+   */
+  private async validateOutputSchema(
+    scope: string,
+    sessionId: string,
     payload: BgTriggerPayload,
-    meta: BgSessionMeta
-  ): Array<{ role: string; content: string }> {
-    const messages: Array<{ role: string; content: string }> = []
+    meta: BgSessionMeta,
+    signal: AbortSignal,
+    chunkHandler: (chunk: import('../../adapters/interfaces').LLMStreamChunk) => void
+  ): Promise<void> {
+    const maxRetries = payload.maxSchemaRetries ?? 2
+    const schema = payload.outputSchema
+    if (!schema) return
 
-    let systemContent = ''
-    if (payload.systemInstructions) {
-      systemContent += payload.systemInstructions + '\n\n'
-    }
-    if (payload.context && Object.keys(payload.context).length > 0) {
-      systemContent += '## 上下文数据\n```json\n' + JSON.stringify(payload.context, null, 2) + '\n```\n\n'
-    }
-    if (payload.expectedOutputFormat) {
-      systemContent +=
-        '## 输出格式要求\n' +
-        payload.expectedOutputFormat +
-        '\n\n' +
-        '**重要**：任务完成后你必须调用 `prizm_set_result` 工具提交结果。\n'
-    } else {
-      systemContent +=
-        '**重要**：任务完成后你必须调用 `prizm_set_result` 工具提交结果。\n'
-    }
-    if (meta.label) {
-      systemContent += `\n任务标签：${meta.label}\n`
-    }
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const session = await this.adapter!.getSession!(scope, sessionId)
+      if (!session?.bgStructuredData) break
 
-    if (systemContent.trim()) {
-      messages.push({ role: 'system', content: systemContent.trim() })
+      const validationError = validateJsonSchema(session.bgStructuredData, schema)
+      if (!validationError) {
+        log.info('BG session schema validation passed: %s (attempt %d)', sessionId, attempt)
+        return
+      }
+
+      log.info(
+        'BG session schema validation failed (attempt %d/%d): %s — %s',
+        attempt + 1,
+        maxRetries,
+        sessionId,
+        validationError
+      )
+
+      const correctionPrompt =
+        `你之前提交的 structured_data 不符合要求的 JSON Schema。\n\n` +
+        `验证错误：${validationError}\n\n` +
+        `要求的 Schema：\n\`\`\`json\n${JSON.stringify(schema, null, 2)}\n\`\`\`\n\n` +
+        `请重新调用 prizm_set_result 工具，确保 structured_data 参数严格符合上述 Schema。`
+
+      await this.chatService!.execute(
+        this.adapter!,
+        {
+          scope,
+          sessionId,
+          content: correctionPrompt,
+          model: meta.model,
+          signal,
+          includeScopeContext: false,
+          skipCheckpoint: true,
+          skipSummary: true,
+          skipMemory: true,
+          skipSlashCommands: true,
+          skipChatStatus: true,
+          actor: { type: 'system', source: 'bg-session:schema-retry' }
+        },
+        chunkHandler
+      )
     }
-    messages.push({ role: 'user', content: payload.prompt })
-    return messages
   }
 
   private async completeRun(scope: string, sessionId: string): Promise<void> {
@@ -424,6 +406,8 @@ export class BackgroundSessionManager {
       sessionId,
       status: session?.bgStatus === 'completed' ? 'success' : 'failed',
       output: session?.bgResult ?? '',
+      structuredData: session?.bgStructuredData,
+      artifacts: session?.bgArtifacts,
       durationMs
     }
 
@@ -432,6 +416,11 @@ export class BackgroundSessionManager {
       entry.resolve(result)
       this.activeRuns.delete(sessionId)
     }
+
+    observerRegistry.endSession(sessionId, {
+      bgStatus: session?.bgStatus ?? 'completed',
+      bgResult: session?.bgResult
+    })
 
     void emit('bg:session.completed', {
       scope,
@@ -467,6 +456,8 @@ export class BackgroundSessionManager {
       this.activeRuns.delete(sessionId)
     }
 
+    observerRegistry.endSession(sessionId, { bgStatus: 'failed', bgResult: `错误：${error}` })
+
     void emit('bg:session.failed', { scope, sessionId, error, durationMs })
     log.info('BG session failed:', sessionId, error)
   }
@@ -494,6 +485,8 @@ export class BackgroundSessionManager {
     })
     this.activeRuns.delete(sessionId)
 
+    observerRegistry.endSession(sessionId, { bgStatus: 'timeout' })
+
     void emit('bg:session.timeout', { scope, sessionId, timeoutMs })
     log.info('BG session timed out:', sessionId)
   }
@@ -508,9 +501,28 @@ export class BackgroundSessionManager {
       bgMeta: session.bgMeta,
       bgStatus: session.bgStatus,
       bgResult: session.bgResult,
+      bgStructuredData: session.bgStructuredData,
+      bgArtifacts: session.bgArtifacts,
       startedAt: session.startedAt,
       finishedAt: session.finishedAt
     })
+  }
+
+  /** 清理 activeRuns 中已达终态的条目 */
+  private async cleanup(): Promise<void> {
+    const TERMINAL: BgStatus[] = ['completed', 'failed', 'timeout', 'cancelled', 'interrupted']
+    for (const [sessionId, entry] of this.activeRuns) {
+      const session = await this.adapter?.getSession?.(entry.scope, sessionId)
+      if (!session) {
+        this.activeRuns.delete(sessionId)
+        if (entry.timeoutTimer) clearTimeout(entry.timeoutTimer)
+        continue
+      }
+      if (TERMINAL.includes(session.bgStatus as BgStatus)) {
+        this.activeRuns.delete(sessionId)
+        if (entry.timeoutTimer) clearTimeout(entry.timeoutTimer)
+      }
+    }
   }
 }
 

@@ -36,13 +36,20 @@ function getDb(): Database.Database {
       model TEXT NOT NULL DEFAULT '',
       input_tokens INTEGER NOT NULL DEFAULT 0,
       output_tokens INTEGER NOT NULL DEFAULT 0,
-      total_tokens INTEGER NOT NULL DEFAULT 0
+      total_tokens INTEGER NOT NULL DEFAULT 0,
+      cached_input_tokens INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_tu_scope ON token_usage(data_scope);
     CREATE INDEX IF NOT EXISTS idx_tu_category ON token_usage(category);
     CREATE INDEX IF NOT EXISTS idx_tu_session ON token_usage(session_id);
     CREATE INDEX IF NOT EXISTS idx_tu_timestamp ON token_usage(timestamp);
   `)
+  // 迁移：为已有表添加 cached_input_tokens 列
+  try {
+    _db.exec(`ALTER TABLE token_usage ADD COLUMN cached_input_tokens INTEGER NOT NULL DEFAULT 0`)
+  } catch {
+    // 列已存在，忽略
+  }
   return _db
 }
 
@@ -65,9 +72,9 @@ export function insertTokenUsage(record: TokenUsageRecord): void {
   const db = getDb()
   const stmt = db.prepare(`
     INSERT OR IGNORE INTO token_usage
-      (id, category, data_scope, session_id, timestamp, model, input_tokens, output_tokens, total_tokens)
+      (id, category, data_scope, session_id, timestamp, model, input_tokens, output_tokens, total_tokens, cached_input_tokens)
     VALUES
-      (@id, @category, @dataScope, @sessionId, @timestamp, @model, @inputTokens, @outputTokens, @totalTokens)
+      (@id, @category, @dataScope, @sessionId, @timestamp, @model, @inputTokens, @outputTokens, @totalTokens, @cachedInputTokens)
   `)
   stmt.run({
     id: record.id,
@@ -78,7 +85,8 @@ export function insertTokenUsage(record: TokenUsageRecord): void {
     model: record.model,
     inputTokens: record.inputTokens,
     outputTokens: record.outputTokens,
-    totalTokens: record.totalTokens
+    totalTokens: record.totalTokens,
+    cachedInputTokens: record.cachedInputTokens ?? 0
   })
 }
 
@@ -153,6 +161,7 @@ export interface TokenUsageBucketStat {
   input: number
   output: number
   total: number
+  cached: number
   count: number
 }
 
@@ -160,6 +169,7 @@ export interface TokenUsageSummary {
   totalInputTokens: number
   totalOutputTokens: number
   totalTokens: number
+  totalCachedInputTokens: number
   count: number
   byCategory: Record<string, TokenUsageBucketStat>
   byDataScope: Record<string, TokenUsageBucketStat>
@@ -179,16 +189,23 @@ export function aggregateTokenUsage(
         COALESCE(SUM(input_tokens), 0) AS totalInput,
         COALESCE(SUM(output_tokens), 0) AS totalOutput,
         COALESCE(SUM(total_tokens), 0) AS totalAll,
+        COALESCE(SUM(cached_input_tokens), 0) AS totalCached,
         COUNT(*) AS cnt
       FROM token_usage ${where}`
     )
-    .get(params) as { totalInput: number; totalOutput: number; totalAll: number; cnt: number }
+    .get(params) as {
+    totalInput: number
+    totalOutput: number
+    totalAll: number
+    totalCached: number
+    cnt: number
+  }
 
   const byCategoryRows = db
     .prepare(
       `SELECT category,
         SUM(input_tokens) AS input, SUM(output_tokens) AS output,
-        SUM(total_tokens) AS total, COUNT(*) AS count
+        SUM(total_tokens) AS total, SUM(cached_input_tokens) AS cached, COUNT(*) AS count
       FROM token_usage ${where}
       GROUP BY category`
     )
@@ -197,6 +214,7 @@ export function aggregateTokenUsage(
     input: number
     output: number
     total: number
+    cached: number
     count: number
   }>
 
@@ -204,7 +222,7 @@ export function aggregateTokenUsage(
     .prepare(
       `SELECT data_scope,
         SUM(input_tokens) AS input, SUM(output_tokens) AS output,
-        SUM(total_tokens) AS total, COUNT(*) AS count
+        SUM(total_tokens) AS total, SUM(cached_input_tokens) AS cached, COUNT(*) AS count
       FROM token_usage ${where}
       GROUP BY data_scope`
     )
@@ -213,6 +231,7 @@ export function aggregateTokenUsage(
     input: number
     output: number
     total: number
+    cached: number
     count: number
   }>
 
@@ -220,7 +239,7 @@ export function aggregateTokenUsage(
     .prepare(
       `SELECT model,
         SUM(input_tokens) AS input, SUM(output_tokens) AS output,
-        SUM(total_tokens) AS total, COUNT(*) AS count
+        SUM(total_tokens) AS total, SUM(cached_input_tokens) AS cached, COUNT(*) AS count
       FROM token_usage ${where}
       GROUP BY model`
     )
@@ -229,17 +248,30 @@ export function aggregateTokenUsage(
     input: number
     output: number
     total: number
+    cached: number
     count: number
   }>
 
   const byCategory: Record<string, TokenUsageBucketStat> = {}
   for (const r of byCategoryRows) {
-    byCategory[r.category] = { input: r.input, output: r.output, total: r.total, count: r.count }
+    byCategory[r.category] = {
+      input: r.input,
+      output: r.output,
+      total: r.total,
+      cached: r.cached,
+      count: r.count
+    }
   }
 
   const byDataScope: Record<string, TokenUsageBucketStat> = {}
   for (const r of byDataScopeRows) {
-    byDataScope[r.data_scope] = { input: r.input, output: r.output, total: r.total, count: r.count }
+    byDataScope[r.data_scope] = {
+      input: r.input,
+      output: r.output,
+      total: r.total,
+      cached: r.cached,
+      count: r.count
+    }
   }
 
   const byModel: Record<string, TokenUsageBucketStat> = {}
@@ -248,6 +280,7 @@ export function aggregateTokenUsage(
       input: r.input,
       output: r.output,
       total: r.total,
+      cached: r.cached,
       count: r.count
     }
   }
@@ -256,6 +289,7 @@ export function aggregateTokenUsage(
     totalInputTokens: totalRow.totalInput,
     totalOutputTokens: totalRow.totalOutput,
     totalTokens: totalRow.totalAll,
+    totalCachedInputTokens: totalRow.totalCached,
     count: totalRow.cnt,
     byCategory,
     byDataScope,
@@ -264,6 +298,7 @@ export function aggregateTokenUsage(
 }
 
 function rowToRecord(row: Record<string, unknown>): TokenUsageRecord {
+  const cached = row.cached_input_tokens as number | undefined
   return {
     id: row.id as string,
     category: row.category as TokenUsageCategory,
@@ -273,6 +308,7 @@ function rowToRecord(row: Record<string, unknown>): TokenUsageRecord {
     model: row.model as string,
     inputTokens: row.input_tokens as number,
     outputTokens: row.output_tokens as number,
-    totalTokens: row.total_tokens as number
+    totalTokens: row.total_tokens as number,
+    ...(cached ? { cachedInputTokens: cached } : {})
   }
 }

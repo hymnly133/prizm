@@ -164,6 +164,10 @@ function parseAgentSession(
   const bgResult = typeof d.bgResult === 'string' ? d.bgResult : undefined
   const startedAt = typeof d.startedAt === 'number' ? d.startedAt : undefined
   const finishedAt = typeof d.finishedAt === 'number' ? d.finishedAt : undefined
+  const chatStatus =
+    d.chatStatus === 'chatting' || d.chatStatus === 'idle'
+      ? (d.chatStatus as AgentSession['chatStatus'])
+      : undefined
 
   return {
     id,
@@ -180,7 +184,8 @@ function parseAgentSession(
     ...(bgStatus && { bgStatus }),
     ...(bgResult != null && { bgResult }),
     ...(startedAt != null && { startedAt }),
-    ...(finishedAt != null && { finishedAt })
+    ...(finishedAt != null && { finishedAt }),
+    ...(chatStatus && { chatStatus })
   }
 }
 
@@ -270,6 +275,7 @@ export function writeAgentSessions(
       ...(s.bgResult != null && { bgResult: s.bgResult }),
       ...(s.startedAt != null && { startedAt: s.startedAt }),
       ...(s.finishedAt != null && { finishedAt: s.finishedAt }),
+      ...(s.chatStatus && { chatStatus: s.chatStatus }),
       messages: s.messages.map((m) => ({
         id: m.id,
         role: m.role,

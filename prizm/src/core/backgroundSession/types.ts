@@ -14,6 +14,15 @@ export interface BgTriggerPayload {
   context?: Record<string, unknown>
   /** 期望的输出格式描述（注入 system 消息，指导 LLM 格式化输出） */
   expectedOutputFormat?: string
+  /** JSON Schema 描述期望的输出结构（启用结构化输出验证） */
+  outputSchema?: Record<string, unknown>
+  /** Schema 验证失败时的最大重试次数，默认 2 */
+  maxSchemaRetries?: number
+  /** 函数化输入参数（schema + 实际值，注入 preamble 的 <input_params> 区块） */
+  inputParams?: {
+    schema: Record<string, { type?: string; description?: string }>
+    values: Record<string, unknown>
+  }
 }
 
 /** BG Session 运行结果 */
@@ -24,15 +33,9 @@ export interface BgRunResult {
   output: string
   /** 可选的结构化数据 */
   structuredData?: string
+  /** 可选的产出文件列表 */
+  artifacts?: string[]
   durationMs: number
-}
-
-/** BG Session 列表过滤器 */
-export interface BgListFilter {
-  bgStatus?: BgStatus
-  triggerType?: BgTriggerType
-  parentSessionId?: string
-  label?: string
 }
 
 /** 活跃运行追踪条目 */

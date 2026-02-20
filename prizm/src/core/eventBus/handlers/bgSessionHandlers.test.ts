@@ -37,49 +37,6 @@ afterEach(() => {
 })
 
 describe('bgSessionHandlers', () => {
-  describe('bg:session.triggered', () => {
-    it('有 parentSessionId → actorType=agent', async () => {
-      await emit('bg:session.triggered', {
-        scope: 'default',
-        sessionId: 'bg-1',
-        triggerType: 'tool_spawn',
-        parentSessionId: 'parent-1',
-        label: 'task-A'
-      })
-
-      expect(mockRecord).toHaveBeenCalledOnce()
-      const [scope, actor, entry] = mockRecord.mock.calls[0]
-      expect(scope).toBe('default')
-      expect(actor.actorType).toBe('agent')
-      expect(actor.sessionId).toBe('parent-1')
-      expect(entry.action).toBe('bg_trigger')
-    })
-
-    it('无 parentSessionId → actorType=system', async () => {
-      await emit('bg:session.triggered', {
-        scope: 'default',
-        sessionId: 'bg-2',
-        triggerType: 'api'
-      })
-
-      expect(mockRecord).toHaveBeenCalledOnce()
-      const [, actor] = mockRecord.mock.calls[0]
-      expect(actor.actorType).toBe('system')
-    })
-
-    it('record 抛错 → 不影响事件传播', async () => {
-      mockRecord.mockImplementation(() => { throw new Error('DB fail') })
-
-      await expect(
-        emit('bg:session.triggered', {
-          scope: 'default',
-          sessionId: 'bg-3',
-          triggerType: 'api'
-        })
-      ).resolves.toBeUndefined()
-    })
-  })
-
   describe('bg:session.completed', () => {
     it('审计记录包含 durationMs 和 resultLength', async () => {
       mockGetScopeData.mockReturnValue({ agentSessions: [] })
@@ -99,17 +56,24 @@ describe('bgSessionHandlers', () => {
 
     it('有 announceTarget + 父 session 存在 → 注入 system 消息', async () => {
       const parentSession: AgentSession = {
-        id: 'parent-1', scope: 'default',
-        messages: [], createdAt: Date.now(), updatedAt: Date.now()
+        id: 'parent-1',
+        scope: 'default',
+        messages: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now()
       }
       const bgSession: AgentSession = {
-        id: 'bg-5', scope: 'default', kind: 'background',
+        id: 'bg-5',
+        scope: 'default',
+        kind: 'background',
         bgMeta: {
           triggerType: 'tool_spawn',
           announceTarget: { sessionId: 'parent-1', scope: 'default' },
           label: '数据报告'
         },
-        messages: [], createdAt: Date.now(), updatedAt: Date.now()
+        messages: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now()
       }
 
       mockGetScopeData.mockImplementation((scope: string) => ({
@@ -125,42 +89,54 @@ describe('bgSessionHandlers', () => {
 
       expect(parentSession.messages.length).toBe(1)
       expect(parentSession.messages[0].role).toBe('system')
-      expect(parentSession.messages[0].parts[0]).toEqual(
-        expect.objectContaining({ type: 'text' })
-      )
+      expect(parentSession.messages[0].parts[0]).toEqual(expect.objectContaining({ type: 'text' }))
       expect(mockSaveScope).toHaveBeenCalledWith('default')
     })
 
     it('有 announceTarget + 父 session 不存在 → 优雅跳过', async () => {
       const bgSession: AgentSession = {
-        id: 'bg-6', scope: 'default', kind: 'background',
+        id: 'bg-6',
+        scope: 'default',
+        kind: 'background',
         bgMeta: {
           triggerType: 'tool_spawn',
           announceTarget: { sessionId: 'nonexistent', scope: 'default' }
         },
-        messages: [], createdAt: Date.now(), updatedAt: Date.now()
+        messages: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now()
       }
 
       mockGetScopeData.mockReturnValue({ agentSessions: [bgSession] })
 
       await expect(
         emit('bg:session.completed', {
-          scope: 'default', sessionId: 'bg-6', result: '', durationMs: 100
+          scope: 'default',
+          sessionId: 'bg-6',
+          result: '',
+          durationMs: 100
         })
       ).resolves.toBeUndefined()
     })
 
     it('无 announceTarget → 不注入', async () => {
       const bgSession: AgentSession = {
-        id: 'bg-7', scope: 'default', kind: 'background',
+        id: 'bg-7',
+        scope: 'default',
+        kind: 'background',
         bgMeta: { triggerType: 'api' },
-        messages: [], createdAt: Date.now(), updatedAt: Date.now()
+        messages: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now()
       }
 
       mockGetScopeData.mockReturnValue({ agentSessions: [bgSession] })
 
       await emit('bg:session.completed', {
-        scope: 'default', sessionId: 'bg-7', result: '结果', durationMs: 100
+        scope: 'default',
+        sessionId: 'bg-7',
+        result: '结果',
+        durationMs: 100
       })
 
       expect(mockSaveScope).not.toHaveBeenCalled()
@@ -170,7 +146,10 @@ describe('bgSessionHandlers', () => {
   describe('bg:session.failed', () => {
     it('记录 result=error + errorMessage', async () => {
       await emit('bg:session.failed', {
-        scope: 'default', sessionId: 'bg-f1', error: 'LLM 超时', durationMs: 5000
+        scope: 'default',
+        sessionId: 'bg-f1',
+        error: 'LLM 超时',
+        durationMs: 5000
       })
 
       expect(mockRecord).toHaveBeenCalledOnce()
@@ -183,7 +162,9 @@ describe('bgSessionHandlers', () => {
   describe('bg:session.timeout', () => {
     it('记录 errorMessage 包含 timeoutMs', async () => {
       await emit('bg:session.timeout', {
-        scope: 'default', sessionId: 'bg-t1', timeoutMs: 60000
+        scope: 'default',
+        sessionId: 'bg-t1',
+        timeoutMs: 60000
       })
 
       expect(mockRecord).toHaveBeenCalledOnce()
@@ -195,7 +176,8 @@ describe('bgSessionHandlers', () => {
   describe('bg:session.cancelled', () => {
     it('记录 action=bg_cancel + result=success', async () => {
       await emit('bg:session.cancelled', {
-        scope: 'default', sessionId: 'bg-c1'
+        scope: 'default',
+        sessionId: 'bg-c1'
       })
 
       expect(mockRecord).toHaveBeenCalledOnce()
