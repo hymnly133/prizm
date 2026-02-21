@@ -38,6 +38,11 @@ coverage/
 reference/
 research/
 
+# Internal docs (do not publish to repo)
+docs/OPEN_SOURCE_UX_AUDIT.md
+docs/bg-session-interactive-test-guide.md
+docs/chat-system-test-scenarios.md
+
 # Rust/Tauri
 src-tauri/target/
 lobehub
