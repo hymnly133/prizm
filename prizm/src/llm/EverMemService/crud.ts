@@ -19,12 +19,18 @@ import {
 import type { MemoryItem, MemoryIdsByLayer } from '@prizm/shared'
 import type { DedupLogEntry } from '@prizm/evermemos'
 
+/** 列表单次最大条数，避免 /agent/memories 只返回 200 导致 scope 叙事/前瞻只显示零星几条 */
+const LIST_MEMORIES_LIMIT = 5000
+
 export async function getAllMemories(scope?: string): Promise<MemoryItem[]> {
-  const userRows = await getUserManagers().memory.listMemories()
+  const userRows = await getUserManagers().memory.listMemories(DEFAULT_USER_ID, LIST_MEMORIES_LIMIT)
   let rows = userRows
   if (scope) {
     try {
-      const scopeRows = await getScopeManagers(scope).scopeOnlyMemory.listMemories()
+      const scopeRows = await getScopeManagers(scope).scopeOnlyMemory.listMemories(
+        DEFAULT_USER_ID,
+        LIST_MEMORIES_LIMIT
+      )
       rows = [...userRows, ...scopeRows]
     } catch {
       // scope not found, use user only
@@ -147,7 +153,7 @@ export async function getMemoryCounts(scope?: string): Promise<MemoryCountsByTyp
 
       try {
         const rows = await managers.scopeOnlyMemory.storage.relational.query(
-          "SELECT COUNT(*) as cnt FROM memories WHERE memory_type = 'document' AND (group_id IS NULL OR group_id NOT LIKE ?)",
+          "SELECT COUNT(*) as cnt FROM memories WHERE type = 'document' AND (group_id IS NULL OR group_id NOT LIKE ?)",
           [`${sessionPrefix}%`]
         )
         scopeDocumentCount = (rows[0] as { cnt: number })?.cnt ?? 0

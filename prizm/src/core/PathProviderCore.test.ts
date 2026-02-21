@@ -235,7 +235,7 @@ describe('getWorkflowRunWorkspace', () => {
 })
 
 describe('ensureRunWorkspace', () => {
-  it('应创建持久工作空间和 run 工作空间目录', () => {
+  it('应创建工作流工作区和运行工作区目录', () => {
     const scopeRoot = makeTmpDir()
     ensureWorkflowWorkspace(scopeRoot, 'test-wf')
     const { persistentDir, runDir } = ensureRunWorkspace(scopeRoot, 'test-wf', 'run-001')

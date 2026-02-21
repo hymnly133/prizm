@@ -12,7 +12,7 @@ import { registerAuditRoutes } from './agent/audit'
 import { registerToolLLMRoutes } from './agent/toolLLM'
 
 export function createAgentRoutes(router: Router, adapter?: IAgentAdapter): void {
-  registerMetadataRoutes(router)
+  registerMetadataRoutes(router, adapter)
   registerSessionRoutes(router, adapter)
   registerChatRoutes(router, adapter)
   registerAuditRoutes(router)

@@ -3,8 +3,9 @@
  */
 
 import { createLogger } from '../../logger'
-import { extractToolPaths } from '../../utils/toolMatcher'
-import type { LLMStreamChunk } from '../interfaces'
+import { extractToolPaths, extractInteractDetails } from '../../utils/toolMatcher'
+import type { InteractDetails } from '../../core/toolPermission/types'
+import type { IAgentAdapter, LLMStreamChunk } from '../interfaces'
 import { getMcpClientManager } from '../../mcp-client/McpClientManager'
 import { webSearch, webFetch, formatSearchResults, formatFetchResult } from '../../llm/webSearch'
 import { BUILTIN_TOOL_NAMES, executeBuiltinTool } from '../../llm/builtinTools'
@@ -43,7 +44,8 @@ export interface ToolExecContext {
 export async function executeToolCalls(
   toolCalls: Array<{ id: string; name: string; arguments: string }>,
   ctx: ToolExecContext,
-  progressBuffer: LLMStreamChunk[]
+  progressBuffer: LLMStreamChunk[],
+  adapter?: IAgentAdapter
 ): Promise<ExecResult[]> {
   const { scope, sessionId, grantedPaths } = ctx
   const manager = getMcpClientManager()
@@ -92,13 +94,13 @@ export async function executeToolCalls(
           }
         }
 
-        if (preDecision.decision === 'ask' && preDecision.interactPaths?.length) {
+        if (preDecision.decision === 'ask' && preDecision.interactDetails) {
           return {
             tc,
             text: `OUT_OF_BOUNDS: ${OUT_OF_BOUNDS_ERROR_CODE}`,
             isError: true,
             needsInteract: true,
-            interactPaths: preDecision.interactPaths,
+            interactDetails: preDecision.interactDetails,
             parsedArgs: preDecision.updatedArguments ?? args
           }
         }
@@ -114,7 +116,8 @@ export async function executeToolCalls(
             args,
             sessionId,
             undefined,
-            grantedPaths
+            grantedPaths,
+            adapter
           )
           text = result.text
           isError = result.isError ?? false
@@ -135,7 +138,7 @@ export async function executeToolCalls(
                 text,
                 isError,
                 needsInteract: true,
-                interactPaths: paths,
+                interactDetails: { kind: 'file_access', paths } as InteractDetails,
                 parsedArgs: args
               }
             }
@@ -201,7 +204,8 @@ export async function executeToolCalls(
                 args,
                 sessionId,
                 undefined,
-                grantedPaths
+                grantedPaths,
+                adapter
               )
               text = result.text
               isError = result.isError ?? false
@@ -235,13 +239,34 @@ export interface InteractionYield {
   chunk: LLMStreamChunk
 }
 
+/** Serialize InteractDetails to SSE payload */
+function interactDetailsToPayload(
+  requestId: string,
+  toolCallId: string,
+  toolName: string,
+  details: InteractDetails
+): Record<string, unknown> {
+  const base = { requestId, toolCallId, toolName, kind: details.kind }
+  switch (details.kind) {
+    case 'file_access':
+      return { ...base, paths: details.paths }
+    case 'terminal_command':
+      return { ...base, command: details.command, cwd: details.cwd }
+    case 'destructive_operation':
+      return { ...base, resourceType: details.resourceType, resourceId: details.resourceId, description: details.description }
+    case 'custom':
+      return { ...base, title: details.title, description: details.description, data: details.data }
+  }
+}
+
 /**
  * 处理需要用户交互确认的工具执行结果。
  * 返回需要 yield 的 chunks 列表和更新后的 execResults。
  */
 export async function handleInteractions(
   execResults: ExecResult[],
-  ctx: ToolExecContext
+  ctx: ToolExecContext,
+  adapter?: IAgentAdapter
 ): Promise<{ chunks: LLMStreamChunk[]; updatedGrantedPaths: string[] }> {
   const { scope, sessionId, signal } = ctx
   const chunks: LLMStreamChunk[] = []
@@ -249,29 +274,34 @@ export async function handleInteractions(
 
   for (let i = 0; i < execResults.length; i++) {
     const r = execResults[i]
-    if (!r.needsInteract || !r.interactPaths?.length) continue
+    if (!r.needsInteract || !r.interactDetails) continue
     if (signal?.aborted) break
 
-    const uncoveredPaths = r.interactPaths.filter((p) => !runtimeGrantedPaths.includes(p))
-    if (uncoveredPaths.length === 0) {
-      try {
-        const retryResult = await executeBuiltinTool(
-          scope,
-          r.tc.name,
-          r.parsedArgs ?? {},
-          sessionId,
-          undefined,
-          runtimeGrantedPaths
-        )
-        execResults[i] = {
-          tc: r.tc,
-          text: retryResult.text,
-          isError: retryResult.isError ?? false
+    const details = r.interactDetails
+
+    if (details.kind === 'file_access') {
+      const uncoveredPaths = details.paths.filter((p) => !runtimeGrantedPaths.includes(p))
+      if (uncoveredPaths.length === 0) {
+        try {
+          const retryResult = await executeBuiltinTool(
+            scope,
+            r.tc.name,
+            r.parsedArgs ?? {},
+            sessionId,
+            undefined,
+            runtimeGrantedPaths,
+            adapter
+          )
+          execResults[i] = {
+            tc: r.tc,
+            text: retryResult.text,
+            isError: retryResult.isError ?? false
+          }
+        } catch (retryErr) {
+          log.warn('Auto-retry after batch interact failed:', retryErr)
         }
-      } catch (retryErr) {
-        log.warn('Auto-retry after batch interact failed:', retryErr)
+        continue
       }
-      continue
     }
 
     chunks.push({
@@ -290,30 +320,32 @@ export async function handleInteractions(
       scope,
       r.tc.id,
       r.tc.name,
-      uncoveredPaths
+      details
     )
 
     chunks.push({
-      interactRequest: {
-        requestId: request.requestId,
-        toolCallId: r.tc.id,
-        toolName: r.tc.name,
-        paths: uncoveredPaths
-      }
+      interactRequest: interactDetailsToPayload(
+        request.requestId,
+        r.tc.id,
+        r.tc.name,
+        details
+      )
     })
 
     log.info(
-      '[Interact] Blocking for tool=%s paths=%s requestId=%s',
+      '[Interact] Blocking for tool=%s kind=%s requestId=%s',
       r.tc.name,
-      uncoveredPaths.join(', '),
+      details.kind,
       request.requestId
     )
 
     const response = await promise
 
-    if (response.approved && response.grantedPaths?.length) {
-      for (const p of response.grantedPaths) {
-        if (!runtimeGrantedPaths.includes(p)) runtimeGrantedPaths.push(p)
+    if (response.approved) {
+      if (response.grantedPaths?.length) {
+        for (const p of response.grantedPaths) {
+          if (!runtimeGrantedPaths.includes(p)) runtimeGrantedPaths.push(p)
+        }
       }
 
       chunks.push({
@@ -334,7 +366,8 @@ export async function handleInteractions(
           r.parsedArgs ?? {},
           sessionId,
           undefined,
-          runtimeGrantedPaths
+          runtimeGrantedPaths,
+          adapter
         )
         execResults[i] = {
           tc: r.tc,

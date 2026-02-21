@@ -29,6 +29,12 @@ export interface TavilySettings {
   configured?: boolean
 }
 
+/** 内置 Skill 源：SkillsMP 市场（需 API Key） */
+export interface SkillsMPSettings {
+  apiKey?: string
+  configured?: boolean
+}
+
 /** 文档记忆设置（原 DocumentSummarySettings） */
 export interface DocumentSummarySettings {
   enabled?: boolean
@@ -89,7 +95,7 @@ export interface TerminalSettings {
 
 /** Agent 工具统一设置 */
 export interface AgentToolsSettings {
-  builtin?: { tavily?: TavilySettings }
+  builtin?: { tavily?: TavilySettings; skillsmp?: SkillsMPSettings }
   agent?: AgentLLMSettings
   mcpServers?: McpServerConfig[]
   terminal?: TerminalSettings

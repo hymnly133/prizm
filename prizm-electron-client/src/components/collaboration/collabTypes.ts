@@ -5,9 +5,6 @@
  * Document/Task/Workflow live in an expandable right panel.
  */
 
-/** @deprecated kept for migration — use RightPanelTab instead */
-export type CollabPanelType = 'hub' | 'agent' | 'workflow' | 'task' | 'document'
-
 /** Tabs available inside the right drawer panel. */
 export type RightPanelTab = 'document' | 'task' | 'workflow'
 
@@ -34,13 +31,4 @@ export const RIGHT_PANEL_TAB_LABELS: Record<RightPanelTab, string> = {
   document: '文档',
   task: '任务',
   workflow: '工作流'
-}
-
-/** @deprecated kept for CollabHub drawer */
-export const COLLAB_PANEL_LABELS: Record<CollabPanelType, string> = {
-  hub: '总览',
-  agent: 'Agent',
-  workflow: '工作流',
-  task: '后台任务',
-  document: '文档'
 }

@@ -5,24 +5,93 @@
  * 每个实例管理自己的滚动状态，配合 KeepAlive 池实现 O(1) 会话切换。
  */
 import { memo, useMemo, useState, useCallback, useRef, useEffect } from 'react'
-import { ActionIcon, ActionIconGroup, Markdown } from '@lobehub/ui'
+import { ActionIcon, ActionIconGroup } from '@lobehub/ui'
+import { PrizmMarkdown as Markdown } from './PrizmMarkdown'
 import { ChatList, type ChatMessage } from '@lobehub/ui/chat'
 import type { ChatActionsBarProps } from '@lobehub/ui/chat'
-import { Modal, message } from 'antd'
+import { Button, Modal, message } from 'antd'
 import { motion, AnimatePresence } from 'motion/react'
 import { Copy, Edit, RotateCw, Undo2, Check, X } from 'lucide-react'
-import type { MessagePart, MessagePartTool, SessionCheckpoint } from '@prizm/client-core'
+import type { MessagePart, MessagePartTool, SessionCheckpoint, EnrichedSession } from '@prizm/client-core'
 import { ToolCallCard } from './ToolCallCard'
 import { ToolCallBadge } from './ToolCallBadge'
 import { ToolGroup } from './ToolGroup'
 import { AssistantMessageExtra } from './AssistantMessageExtra'
 import { ReasoningBlock } from './ReasoningBlock'
 import { ThinkingDots } from './ThinkingDots'
-import { InteractActionPanel } from './InteractActionPanel'
 import { ScrollToBottom } from './ScrollToBottom'
+import { RoundDebugTrigger } from './RoundDebugTrigger'
+import { EmptyConversation } from './EmptyConversation'
 import { useSessionChat } from '../../context/SessionChatContext'
+import { useNavigation } from '../../context/NavigationContext'
 import { useAgentSessionStore } from '../../store/agentSessionStore'
 import { EASE_SMOOTH } from '../../theme/motionPresets'
+import { getSessionTypeHeader, type SessionTypeHeaderInfo } from './sessionTypeHeader'
+
+/* ── 会话类型 Header 块（含引用信息与「查看工作流」链接） ── */
+function SessionTypeHeaderBlock({
+  info,
+  onOpenWorkflowDef
+}: {
+  info: SessionTypeHeaderInfo
+  onOpenWorkflowDef: (defId: string, name?: string) => void
+}) {
+  const { type, label, subLabel, refs } = info
+  const hasRefs = refs && (refs.workflowName ?? refs.workflowDefId ?? refs.runId ?? refs.label)
+  return (
+    <div
+      className={`session-type-header session-type-header--${type}`}
+      role="status"
+      aria-label={
+        hasRefs
+          ? `会话类型：${label} · ${subLabel}；${refs.workflowName ?? refs.workflowDefId ?? ''} ${refs.runId ?? ''} ${refs.label ?? ''}`.trim()
+          : `会话类型：${label} · ${subLabel}`
+      }
+    >
+      <div className="session-type-header__main">
+        <span className="session-type-header__label">{label}</span>
+        <span className="session-type-header__sub">{subLabel}</span>
+      </div>
+      {hasRefs && (
+        <div className="session-type-header__refs">
+          {refs.label && (
+            <span className="session-type-header__ref-item">
+              <span className="session-type-header__ref-key">标签</span>
+              <span className="session-type-header__ref-value">{refs.label}</span>
+            </span>
+          )}
+          {(refs.workflowName ?? refs.workflowDefId) && (
+            <span className="session-type-header__ref-item">
+              <span className="session-type-header__ref-key">引用</span>
+              <span className="session-type-header__ref-value">
+                {refs.workflowName ?? refs.workflowDefId}
+              </span>
+              {refs.workflowDefId && (
+                <Button
+                  type="link"
+                  size="small"
+                  className="session-type-header__link"
+                  onClick={() => onOpenWorkflowDef(refs.workflowDefId!, refs.workflowName)}
+                >
+                  查看工作流
+                </Button>
+              )}
+            </span>
+          )}
+          {refs.runId && (
+            <span className="session-type-header__ref-item">
+              <span className="session-type-header__ref-key">运行</span>
+              <code className="session-type-header__ref-value session-type-header__ref-code">
+                {refs.runId.slice(0, 12)}
+                {refs.runId.length > 12 ? '…' : ''}
+              </code>
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 /* ── 按角色区分的 ActionBar（统一操作入口） ── */
 
@@ -159,9 +228,11 @@ function groupPartsForCompact(parts: MessagePart[]): PartSegment[] {
 }
 
 const AssistantPartsMessage = memo(function AssistantPartsMessage({
-  parts
+  parts,
+  session
 }: {
   parts: MessagePart[]
+  session: EnrichedSession | null
 }) {
   const compact = useAgentSessionStore((s) => s.toolCardCompact)
 
@@ -174,7 +245,7 @@ const AssistantPartsMessage = memo(function AssistantPartsMessage({
               <Markdown>{p.content}</Markdown>
             </div>
           ) : (
-            <ToolCallCard key={p.id} tc={p as MessagePartTool} />
+            <ToolCallCard key={p.id} tc={p as MessagePartTool} session={session} />
           )
         )}
       </div>
@@ -194,14 +265,9 @@ const AssistantPartsMessage = memo(function AssistantPartsMessage({
           )
         }
         if (seg.kind === 'tool-group') {
-          return (
-            <ToolGroup
-              key={`tg-${seg.startIndex}`}
-              tools={seg.tools}
-            />
-          )
+          return <ToolGroup key={`tg-${seg.startIndex}`} tools={seg.tools} />
         }
-        return <ToolCallCard key={seg.part.id} tc={seg.part} />
+        return <ToolCallCard key={seg.part.id} tc={seg.part} session={session} />
       })}
     </div>
   )
@@ -214,10 +280,12 @@ export const SessionChatPanel = memo(function SessionChatPanel() {
     active,
     session,
     sessionId,
+    loading,
     sending,
     thinking,
     pendingInteract,
     chatData,
+    sendMessage,
     messagesContainerRef,
     messagesEndRef,
     showScrollBtn,
@@ -307,30 +375,29 @@ export const SessionChatPanel = memo(function SessionChatPanel() {
         return props.editableContent ?? null
       },
       assistant: (props: ChatMessage & { editableContent: React.ReactNode }) => {
-        const extra = props.extra as {
-          parts?: MessagePart[]
-          reasoning?: string
-          streaming?: boolean
-        } | undefined
+        const extra = props.extra as
+          | {
+              parts?: MessagePart[]
+              reasoning?: string
+              streaming?: boolean
+            }
+          | undefined
         const parts = extra?.parts
         const reasoning = extra?.reasoning
         const isStreaming = !!extra?.streaming
 
         const hasReasoning = !!reasoning?.trim()
-        const hasContent = Array.isArray(parts) && parts.length > 0
-          ? true
-          : !!props.content?.trim?.()
+        const hasContent =
+          Array.isArray(parts) && parts.length > 0 ? true : !!props.content?.trim?.()
 
         return (
           <>
+            {import.meta.env.DEV && <RoundDebugTrigger messageId={props.id} />}
             {hasReasoning && (
-              <ReasoningBlock
-                reasoning={reasoning!}
-                streaming={isStreaming && !hasContent}
-              />
+              <ReasoningBlock reasoning={reasoning!} streaming={isStreaming && !hasContent} />
             )}
             {hasContent && Array.isArray(parts) && parts.length > 0 ? (
-              <AssistantPartsMessage parts={parts} />
+              <AssistantPartsMessage parts={parts} session={session} />
             ) : (
               props.editableContent ?? null
             )}
@@ -338,7 +405,7 @@ export const SessionChatPanel = memo(function SessionChatPanel() {
         )
       }
     }),
-    [editingMessageId, handleEditConfirm, handleEditCancel]
+    [editingMessageId, handleEditConfirm, handleEditCancel, session]
   )
 
   const renderMessagesExtraObj = useMemo(
@@ -357,6 +424,14 @@ export const SessionChatPanel = memo(function SessionChatPanel() {
       ? chatData[chatData.length - 1].id
       : undefined
 
+  const sessionTypeHeader = useMemo(
+    () => getSessionTypeHeader(session),
+    [session]
+  )
+  const { navigateToWorkflowDef } = useNavigation()
+
+  const isEmptySession = chatData.length === 0 && !sending && !loading
+
   const _renderEnd = performance.now()
   console.log(
     `[perf] SessionChatPanel render(${sessionId.slice(0, 8)}) %c${(
@@ -366,6 +441,27 @@ export const SessionChatPanel = memo(function SessionChatPanel() {
     { active, msgs: chatData.length }
   )
 
+  if (isEmptySession) {
+    return (
+      <div
+        className="agent-messages"
+        ref={messagesContainerRef}
+        style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
+      >
+        {sessionTypeHeader && (
+          <SessionTypeHeaderBlock
+            info={sessionTypeHeader}
+            onOpenWorkflowDef={navigateToWorkflowDef}
+          />
+        )}
+        <EmptyConversation
+          onSendPrompt={(text) => void sendMessage(text)}
+          loading={loading}
+        />
+      </div>
+    )
+  }
+
   return (
     <div
       className="agent-messages"
@@ -373,6 +469,12 @@ export const SessionChatPanel = memo(function SessionChatPanel() {
       onScroll={handleMessagesScroll}
       style={{ position: 'relative' }}
     >
+      {sessionTypeHeader && (
+        <SessionTypeHeaderBlock
+          info={sessionTypeHeader}
+          onOpenWorkflowDef={navigateToWorkflowDef}
+        />
+      )}
       <ChatList
         data={chatData}
         variant="bubble"
@@ -386,21 +488,6 @@ export const SessionChatPanel = memo(function SessionChatPanel() {
       />
 
       <AnimatePresence>
-        {pendingInteract && sending && (
-          <motion.div
-            key="interact-panel"
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.25, ease: EASE_SMOOTH }}
-            style={{ padding: '8px 48px' }}
-          >
-            <InteractActionPanel
-              pendingInteract={pendingInteract}
-              onRespond={ctx.respondToInteract}
-            />
-          </motion.div>
-        )}
         {thinking && sending && !pendingInteract && (
           <motion.div
             key="thinking-indicator"

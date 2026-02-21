@@ -143,6 +143,9 @@ export const EditorToolbar = memo(function EditorToolbar({
       </div>
 
       <div className="wfe-toolbar__center">
+        <Tooltip title="连线表示执行顺序与数据依赖">
+          <Tag color="default" style={{ marginRight: 8 }}>串行流水线</Tag>
+        </Tooltip>
         {workflowName && (
           <span className="wfe-toolbar__name">{workflowName}</span>
         )}

@@ -6,6 +6,7 @@
  */
 
 import type { MemoryItem } from '@prizm/shared'
+import type { InteractDetails } from '../toolPermission/types'
 
 /** Hook 事件类型枚举 */
 export type AgentHookEvent =
@@ -33,7 +34,9 @@ export interface PreToolUseDecision {
   decision: HookDecisionType
   /** deny 时给 LLM 的错误消息 */
   denyMessage?: string
-  /** ask 时需要授权的路径列表 */
+  /** ask 时需要用户交互确认的详情 */
+  interactDetails?: InteractDetails
+  /** @deprecated 使用 interactDetails 代替 */
   interactPaths?: string[]
   /** 修改后的参数（undefined 表示不修改） */
   updatedArguments?: Record<string, unknown>

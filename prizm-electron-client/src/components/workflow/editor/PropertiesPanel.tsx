@@ -23,6 +23,7 @@ import type {
   WorkflowWorkspaceMode
 } from '@prizm/shared'
 import { useWorkflowEditorStore } from '../../../store/workflowEditorStore'
+import { usePrizmContext } from '../../../context/PrizmContext'
 import { INPUT_NODE_ID, OUTPUT_NODE_ID, type StepNodeData, type IONodeData } from './workflowEditorUtils'
 
 const { TextArea } = Input
@@ -385,6 +386,23 @@ function StepProperties({ nodeId, data }: { nodeId: string; data: StepNodeData }
             tokenSeparators={[',']}
           />
 
+          <FieldLabel label="允许的 Skills（留空=全部）" />
+          <Select
+            mode="tags"
+            size="small"
+            style={{ width: '100%' }}
+            value={sc.allowedSkills ?? []}
+            onChange={(v) => updateSessionConfig({ allowedSkills: v.length > 0 ? v : undefined })}
+            placeholder="留空=全部"
+            tokenSeparators={[',']}
+          />
+
+          <FieldLabel label="允许的 MCP 服务器（留空=全部）" />
+          <McpServerIdsSelect
+            value={sc.allowedMcpServerIds ?? []}
+            onChange={(v) => updateSessionConfig({ allowedMcpServerIds: v.length > 0 ? v : undefined })}
+          />
+
           <FieldLabel label="工具组" />
           <ToolGroupSelector
             value={sc.toolGroups}
@@ -662,10 +680,15 @@ function GlobalProperties() {
       key: 'args',
       label: <CollapseLabel icon={<Lightbulb size={12} />} text="参数 (args)" />,
       children: (
-        <ArgsEditor
-          args={workflowArgs}
-          onChange={(args) => setWorkflowMeta({ args })}
-        />
+        <>
+          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 8 }}>
+            有默认值的参数在运行时可留空，将使用此处默认值；不填默认值即为必填。
+          </Text>
+          <ArgsEditor
+            args={workflowArgs}
+            onChange={(args) => setWorkflowMeta({ args })}
+          />
+        </>
       )
     },
     {
@@ -764,12 +787,16 @@ function ArgsEditor({
   args,
   onChange
 }: {
-  args: Record<string, { default?: unknown; description?: string }> | undefined
-  onChange: (args: Record<string, { default?: unknown; description?: string }> | undefined) => void
+  args: Record<string, { default?: unknown; description?: string; type?: string }> | undefined
+  onChange: (args: Record<string, { default?: unknown; description?: string; type?: string }> | undefined) => void
 }) {
   const entries = useMemo(() => Object.entries(args ?? {}), [args])
 
-  const updateEntry = useCallback((oldKey: string, newKey: string, value: { default?: unknown; description?: string }) => {
+  const updateEntry = useCallback((
+    oldKey: string,
+    newKey: string,
+    value: { default?: unknown; description?: string; type?: string }
+  ) => {
     const next = { ...(args ?? {}) }
     if (newKey !== oldKey) delete next[oldKey]
     next[newKey] = value
@@ -812,7 +839,7 @@ function ArgsEditor({
             size="small"
             value={String(val.default ?? '')}
             onChange={(e) => updateEntry(key, key, { ...val, default: e.target.value || undefined })}
-            placeholder="默认值"
+            placeholder="默认值（不填即必填；填了即可选，不填时用此值）"
             addonBefore="默认"
           />
           <Input
@@ -1086,6 +1113,57 @@ function LinkedActionsEditor({
         <Plus size={12} /> 添加联动操作
       </button>
     </div>
+  )
+}
+
+// ─── MCP Server IDs Select (workflow sessionConfig) ───
+
+function McpServerIdsSelect({
+  value,
+  onChange
+}: {
+  value: string[]
+  onChange: (v: string[]) => void
+}) {
+  const { manager } = usePrizmContext()
+  const http = manager?.getHttpClient() ?? null
+  const [servers, setServers] = useState<Array<{ id: string; name: string }>>([])
+
+  useEffect(() => {
+    if (!http) {
+      setServers([])
+      return
+    }
+    http
+      .listMcpServers()
+      .then((list) => setServers(list.map((s) => ({ id: s.id, name: s.name }))))
+      .catch(() => setServers([]))
+  }, [http])
+
+  if (servers.length === 0) {
+    return (
+      <Select
+        mode="tags"
+        size="small"
+        style={{ width: '100%' }}
+        value={value}
+        onChange={(v) => onChange(v)}
+        placeholder="输入 MCP 服务器 ID，留空=全部"
+        tokenSeparators={[',']}
+      />
+    )
+  }
+  return (
+    <Select
+      mode="multiple"
+      size="small"
+      style={{ width: '100%' }}
+      value={value}
+      onChange={(v) => onChange(v)}
+      placeholder="留空=全部"
+      options={servers.map((s) => ({ label: s.name, value: s.id }))}
+      maxTagCount="responsive"
+    />
   )
 }
 

@@ -7,28 +7,106 @@ import nodePath from 'path'
 import type { Router, Request, Response } from 'express'
 import { toErrorResponse } from '../errors'
 import { createLogger } from '../logger'
-import { requireScopeForList, getScopeForCreate } from '../scopeUtils'
+import {
+  requireScopeForList,
+  getScopeForCreate,
+  getScopeFromQuery,
+  hasScopeAccess,
+  ensureStringParam
+} from '../scopeUtils'
 import { getWorkflowRunner, parseWorkflowDef, WorkflowParseError } from '../core/workflowEngine'
 import * as resumeStore from '../core/workflowEngine/resumeStore'
 import * as defStore from '../core/workflowEngine/workflowDefStore'
 import { scopeStore } from '../core/ScopeStore'
 import {
+  ensureWorkflowWorkspace,
   getWorkflowPersistentWorkspace,
   getWorkflowRunWorkspace,
-  getWorkflowRunWorkspacesDir
+  getWorkflowRunWorkspacesDir,
+  getWorkflowRunMetaPath,
+  getSessionWorkspaceDir
 } from '../core/PathProviderCore'
-import type { WorkflowRunStatus } from '@prizm/shared'
+import {
+  type WorkflowRunStatus,
+  WORKFLOW_MANAGEMENT_SOURCE,
+  WORKFLOW_MANAGEMENT_SESSION_LABEL_PENDING,
+  isWorkflowManagementSession
+} from '@prizm/shared'
+import type { IAgentAdapter } from '../adapters/interfaces'
+import { emit } from '../core/eventBus'
 
 const log = createLogger('Workflow')
 
-export function createWorkflowRoutes(router: Router): void {
+export function createWorkflowRoutes(router: Router, agentAdapter?: IAgentAdapter): void {
   // ─── 工作流定义 ───
 
-  router.get('/workflow/defs', (req: Request, res: Response) => {
+  router.get('/workflow/defs', async (req: Request, res: Response) => {
     try {
       const scope = requireScopeForList(req, res)
       if (!scope) return
-      const defs = defStore.listDefs(scope)
+      let defs = defStore.listDefs(scope)
+
+      // 自动修复单向引用：def→session 存在但 session 不指回 def，或 session 已删除
+      if (agentAdapter?.getSession) {
+        defs = await Promise.all(
+          defs.map(async (d) => {
+            const sessionId = d.workflowManagementSessionId
+            if (!sessionId) return d
+            const session = await agentAdapter.getSession!(scope, sessionId)
+            if (!session) {
+              defStore.updateDefMetaByDefId(d.id, { workflowManagementSessionId: undefined })
+              log.info('Cleared dead workflowManagementSessionId for def', d.name, 'was', sessionId)
+              return { ...d, workflowManagementSessionId: undefined }
+            }
+            const sessionDefId =
+              (
+                session as {
+                  toolMeta?: { workflowDefId?: string }
+                  bgMeta?: { workflowDefId?: string }
+                }
+              ).toolMeta?.workflowDefId ??
+              (session as { bgMeta?: { workflowDefId?: string } }).bgMeta?.workflowDefId
+            if (sessionDefId !== d.id) {
+              defStore.updateDefMetaByDefId(d.id, { workflowManagementSessionId: undefined })
+              log.info(
+                'Cleared one-way ref: def pointed to session but session does not point back; def',
+                d.name,
+                'was',
+                sessionId
+              )
+              return { ...d, workflowManagementSessionId: undefined }
+            }
+            return d
+          })
+        )
+      }
+
+      // 自动修复单向引用：session→def 存在但 def 无 workflowManagementSessionId，从会话侧补全
+      if (agentAdapter?.listSessions) {
+        const sessions = await agentAdapter.listSessions(scope)
+        for (const session of sessions) {
+          if (!isWorkflowManagementSession(session)) continue
+          const defId =
+            (
+              session as {
+                toolMeta?: { workflowDefId?: string }
+                bgMeta?: { workflowDefId?: string }
+              }
+            ).toolMeta?.workflowDefId ??
+            (session as { bgMeta?: { workflowDefId?: string } }).bgMeta?.workflowDefId
+          if (!defId) continue
+          const def = defStore.getDefById(defId)
+          if (!def || def.scope !== scope || def.workflowManagementSessionId) continue
+          defStore.updateDefMetaByDefId(defId, { workflowManagementSessionId: session.id })
+          log.info(
+            'Repaired one-way ref: def had no session ref, set from session',
+            def.name,
+            session.id
+          )
+        }
+        defs = defStore.listDefs(scope)
+      }
+
       res.json(defs)
     } catch (err) {
       log.error('GET /workflow/defs error:', err)
@@ -53,6 +131,7 @@ export function createWorkflowRoutes(router: Router): void {
         description ?? def.description,
         triggersJson
       )
+      void emit('workflow:def.registered', { scope, defId: record.id, name: record.name })
       res.status(201).json(record)
     } catch (err) {
       if (err instanceof WorkflowParseError) {
@@ -65,7 +144,9 @@ export function createWorkflowRoutes(router: Router): void {
 
   router.get('/workflow/defs/:id', (req: Request, res: Response) => {
     try {
-      const defRecord = defStore.getDefById(req.params.id as string)
+      const id = ensureStringParam(req.params.id)
+      if (!id) return res.status(400).json({ error: 'definition id is required' })
+      const defRecord = defStore.getDefById(id)
       if (!defRecord) return res.status(404).json({ error: 'Definition not found' })
       res.json(defRecord)
     } catch (err) {
@@ -74,14 +155,241 @@ export function createWorkflowRoutes(router: Router): void {
     }
   })
 
-  router.delete('/workflow/defs/:id', (req: Request, res: Response) => {
+  /** 列出流水线版本列表（按时间倒序，无记忆功能） */
+  router.get('/workflow/defs/:id/versions', (req: Request, res: Response) => {
     try {
-      const ok = defStore.deleteDef(req.params.id)
+      const id = ensureStringParam(req.params.id)
+      if (!id) return res.status(400).json({ error: 'definition id is required' })
+      const defRecord = defStore.getDefById(id)
+      if (!defRecord) return res.status(404).json({ error: 'Definition not found' })
+      if (!hasScopeAccess(req, defRecord.scope)) {
+        return res.status(403).json({ error: 'scope access denied' })
+      }
+      const versions = defStore.listDefVersions(id)
+      res.json(versions)
+    } catch (err) {
+      log.error('GET /workflow/defs/:id/versions error:', err)
+      res.status(500).json(toErrorResponse(err))
+    }
+  })
+
+  /** 获取指定版本快照的 YAML 内容 */
+  router.get('/workflow/defs/:id/versions/:versionId', (req: Request, res: Response) => {
+    try {
+      const id = ensureStringParam(req.params.id)
+      const versionId = ensureStringParam(req.params.versionId)
+      if (!id || !versionId) {
+        return res.status(400).json({ error: 'definition id and versionId are required' })
+      }
+      const defRecord = defStore.getDefById(id)
+      if (!defRecord) return res.status(404).json({ error: 'Definition not found' })
+      if (!hasScopeAccess(req, defRecord.scope)) {
+        return res.status(403).json({ error: 'scope access denied' })
+      }
+      const yamlContent = defStore.getDefVersionContent(id, versionId)
+      if (yamlContent === null) return res.status(404).json({ error: 'Version not found' })
+      res.json({ id: versionId, yamlContent })
+    } catch (err) {
+      log.error('GET /workflow/defs/:id/versions/:versionId error:', err)
+      res.status(500).json(toErrorResponse(err))
+    }
+  })
+
+  /** 一键回溯到指定版本（将当前定义替换为该版本内容，当前内容会先被保存为快照） */
+  router.post('/workflow/defs/:id/rollback', (req: Request, res: Response) => {
+    try {
+      const id = ensureStringParam(req.params.id)
+      if (!id) return res.status(400).json({ error: 'definition id is required' })
+      const defRecord = defStore.getDefById(id)
+      if (!defRecord) return res.status(404).json({ error: 'Definition not found' })
+      if (!hasScopeAccess(req, defRecord.scope)) {
+        return res.status(403).json({ error: 'scope access denied' })
+      }
+      const versionId = (req.body && typeof req.body === 'object' && req.body.versionId) as string | undefined
+      if (!versionId || typeof versionId !== 'string') {
+        return res.status(400).json({ error: 'versionId is required in body' })
+      }
+      const updated = defStore.rollbackDefToVersion(id, versionId)
+      if (!updated) return res.status(404).json({ error: 'Version not found or rollback failed' })
+      void emit('workflow:def.registered', { scope: updated.scope, defId: updated.id, name: updated.name })
+      res.json(updated)
+    } catch (err) {
+      log.error('POST /workflow/defs/:id/rollback error:', err)
+      res.status(500).json(toErrorResponse(err))
+    }
+  })
+
+  /** 更新工作流定义元数据（如 descriptionDocumentId） */
+  router.patch('/workflow/defs/:id', (req: Request, res: Response) => {
+    try {
+      const id = ensureStringParam(req.params.id)
+      if (!id) return res.status(400).json({ error: 'definition id is required' })
+      const defRecord = defStore.getDefById(id)
+      if (!defRecord) return res.status(404).json({ error: 'Definition not found' })
+      if (!hasScopeAccess(req, defRecord.scope)) {
+        return res.status(403).json({ error: 'scope access denied' })
+      }
+      const body = (req.body ?? {}) as { descriptionDocumentId?: string | null }
+      const patch: { descriptionDocumentId?: string } = {}
+      if (body.descriptionDocumentId !== undefined) {
+        patch.descriptionDocumentId =
+          typeof body.descriptionDocumentId === 'string' && body.descriptionDocumentId.trim()
+            ? body.descriptionDocumentId.trim()
+            : undefined
+      }
+      if (Object.keys(patch).length === 0) {
+        return res.json(defRecord)
+      }
+      defStore.updateDefMeta(defRecord.name, defRecord.scope, patch)
+      const updated = defStore.getDefById(id)
+      const result = updated ?? defRecord
+      void emit('workflow:def.registered', {
+        scope: result.scope,
+        defId: result.id,
+        name: result.name
+      })
+      res.json(result)
+    } catch (err) {
+      log.error('PATCH /workflow/defs/:id error:', err)
+      res.status(500).json(toErrorResponse(err))
+    }
+  })
+
+  router.delete('/workflow/defs/:id', async (req: Request, res: Response) => {
+    try {
+      const id = ensureStringParam(req.params.id)
+      if (!id) return res.status(400).json({ error: 'definition id is required' })
+      const defRecord = defStore.getDefById(id)
+      if (!defRecord) return res.status(404).json({ error: 'Definition not found' })
+      const { scope, name } = defRecord
+
+      // 删除 def 前清除对应管理会话上的 workflowDefId/workflowName，避免孤儿引用
+      const meta = defStore.getDefMetaByDefId(id)
+      const sessionId = meta?.workflowManagementSessionId
+      if (sessionId && agentAdapter?.getSession && agentAdapter?.updateSession) {
+        try {
+          const session = await agentAdapter.getSession(scope, sessionId)
+          if (session) {
+            if (session.kind === 'tool' && session.toolMeta) {
+              await agentAdapter.updateSession(scope, sessionId, {
+                toolMeta: {
+                  ...session.toolMeta,
+                  workflowDefId: undefined,
+                  workflowName: undefined
+                }
+              })
+            } else if (session.bgMeta) {
+              await agentAdapter.updateSession(scope, sessionId, {
+                bgMeta: {
+                  ...session.bgMeta,
+                  workflowDefId: undefined,
+                  workflowName: undefined
+                }
+              })
+            }
+            log.info('Cleared session workflow ref for deleted def:', name, 'session:', sessionId)
+          }
+        } catch (err) {
+          log.warn('Clear session ref before def delete failed:', err)
+        }
+      }
+
+      const ok = defStore.deleteDef(id)
       if (!ok) return res.status(404).json({ error: 'Definition not found' })
+      void emit('workflow:def.deleted', { scope, defId: id, name })
       res.json({ deleted: true })
     } catch (err) {
       log.error('DELETE /workflow/defs/:id error:', err)
       res.status(500).json(toErrorResponse(err))
+    }
+  })
+
+  /** 仅创建「待创建」工作流管理会话（不调 LLM），供工作流页「新建工作流会话」或导航卡片带入 initialPrompt 使用 */
+  router.post('/workflow/management-session', async (req: Request, res: Response) => {
+    try {
+      const scope = getScopeFromQuery(req) ?? 'default'
+      if (!hasScopeAccess(req, scope)) {
+        return res.status(403).json({ error: 'scope access denied' })
+      }
+      const { initialPrompt } = req.body ?? {}
+      if (!agentAdapter?.createSession || !agentAdapter?.updateSession) {
+        return res.status(503).json({ error: 'Agent adapter not available' })
+      }
+      const session = await agentAdapter.createSession(scope)
+      await agentAdapter.updateSession(scope, session.id, {
+        kind: 'tool',
+        toolMeta: {
+          source: WORKFLOW_MANAGEMENT_SOURCE,
+          label: WORKFLOW_MANAGEMENT_SESSION_LABEL_PENDING
+        }
+      })
+      if (typeof initialPrompt === 'string' && initialPrompt.trim() && agentAdapter.appendMessage) {
+        await agentAdapter.appendMessage(scope, session.id, {
+          role: 'user',
+          parts: [{ type: 'text', content: initialPrompt.trim() }]
+        })
+      }
+      log.info('Workflow management session created (pending):', session.id)
+      res.status(201).json({ sessionId: session.id })
+    } catch (err) {
+      log.error('POST /workflow/management-session error:', err)
+      const { status, body } = toErrorResponse(err)
+      res.status(status).json(body)
+    }
+  })
+
+  /** 为已有工作流新建工作流管理会话（双向引用，幂等：已有则返回现有 sessionId） */
+  router.post('/workflow/defs/:id/management-session', async (req: Request, res: Response) => {
+    try {
+      const id = ensureStringParam(req.params.id)
+      if (!id) return res.status(400).json({ error: 'definition id is required' })
+      const defRecord = defStore.getDefById(id)
+      if (!defRecord) return res.status(404).json({ error: 'Definition not found' })
+      const defScope = defRecord.scope
+      const scopeFromReq = getScopeFromQuery(req) ?? null
+      if (scopeFromReq != null && scopeFromReq !== defScope) {
+        return res.status(403).json({ error: 'scope does not match definition' })
+      }
+      if (!hasScopeAccess(req, defScope)) {
+        return res.status(403).json({ error: 'scope access denied' })
+      }
+      const meta = defStore.getDefMetaByDefId(id)
+      const existingSessionId = meta?.workflowManagementSessionId
+      if (existingSessionId && agentAdapter?.getSession) {
+        const existingSession = await agentAdapter.getSession(defScope, existingSessionId)
+        if (existingSession) {
+          return res.status(200).json({ sessionId: existingSessionId })
+        }
+        // 引用指向的会话已被删除（如用户「重建对话」），需新建并更新 def 引用
+      } else if (existingSessionId) {
+        return res.status(200).json({ sessionId: existingSessionId })
+      }
+      if (!agentAdapter?.createSession || !agentAdapter?.updateSession) {
+        return res.status(503).json({ error: 'Agent adapter not available' })
+      }
+      const scopeRoot = scopeStore.getScopeRootPath(defScope)
+      ensureWorkflowWorkspace(scopeRoot, defRecord.name)
+      const persistentWorkspaceDir = getWorkflowPersistentWorkspace(scopeRoot, defRecord.name)
+      const session = await agentAdapter.createSession(defScope)
+      await agentAdapter.updateSession(defScope, session.id, {
+        kind: 'tool',
+        toolMeta: {
+          source: WORKFLOW_MANAGEMENT_SOURCE,
+          label: `工作流管理：${defRecord.name}`,
+          workflowDefId: id,
+          workflowName: defRecord.name,
+          persistentWorkspaceDir
+        }
+      })
+      const updated = defStore.updateDefMetaByDefId(id, { workflowManagementSessionId: session.id })
+      if (!updated)
+        log.warn('Failed to update def meta workflowManagementSessionId for def id:', id)
+      log.info('Workflow management session created:', defRecord.name, session.id)
+      res.status(201).json({ sessionId: session.id })
+    } catch (err) {
+      log.error('POST /workflow/defs/:id/management-session error:', err)
+      const { status, body } = toErrorResponse(err)
+      res.status(status).json(body)
     }
   })
 
@@ -156,8 +464,13 @@ export function createWorkflowRoutes(router: Router): void {
 
   router.get('/workflow/runs/:id', (req: Request, res: Response) => {
     try {
-      const run = resumeStore.getRunById(req.params.id)
+      const id = ensureStringParam(req.params.id)
+      if (!id) return res.status(400).json({ error: 'run id is required' })
+      const run = resumeStore.getRunById(id)
       if (!run) return res.status(404).json({ error: 'Run not found' })
+      if (!hasScopeAccess(req, run.scope)) {
+        return res.status(403).json({ error: 'scope access denied' })
+      }
       res.json(run)
     } catch (err) {
       log.error('GET /workflow/runs/:id error:', err)
@@ -165,14 +478,64 @@ export function createWorkflowRoutes(router: Router): void {
     }
   })
 
+  /** 完整 run 记录：run + .meta 文件内容 + 工作区路径（供管理会话审计/授权用） */
+  router.get('/workflow/runs/:id/full', (req: Request, res: Response) => {
+    try {
+      const id = ensureStringParam(req.params.id)
+      if (!id) return res.status(400).json({ error: 'run id is required' })
+      const run = resumeStore.getRunById(id)
+      if (!run) return res.status(404).json({ error: 'Run not found' })
+      if (!hasScopeAccess(req, run.scope)) {
+        return res.status(403).json({ error: 'scope access denied' })
+      }
+      const scopeRoot = scopeStore.getScopeRootPath(run.scope)
+      const workflowWorkspace = getWorkflowPersistentWorkspace(scopeRoot, run.workflowName)
+      const runWorkspace = getWorkflowRunWorkspace(scopeRoot, run.workflowName, run.id)
+      const metaPath = getWorkflowRunMetaPath(scopeRoot, run.workflowName, run.id)
+      let runMetaMarkdown: string | null = null
+      if (fs.existsSync(metaPath)) {
+        try {
+          runMetaMarkdown = fs.readFileSync(metaPath, 'utf-8')
+        } catch {
+          // ignore read error
+        }
+      }
+      const stepSessionWorkspaces: { stepId: string; sessionId: string; workspacePath: string }[] =
+        []
+      for (const [stepId, result] of Object.entries(run.stepResults)) {
+        if (result.sessionId) {
+          stepSessionWorkspaces.push({
+            stepId,
+            sessionId: result.sessionId,
+            workspacePath: getSessionWorkspaceDir(scopeRoot, result.sessionId)
+          })
+        }
+      }
+      res.json({
+        run,
+        runMetaMarkdown,
+        paths: {
+          workflowWorkspace,
+          runWorkspace,
+          stepSessionWorkspaces
+        }
+      })
+    } catch (err) {
+      log.error('GET /workflow/runs/:id/full error:', err)
+      res.status(500).json(toErrorResponse(err))
+    }
+  })
+
   router.delete('/workflow/runs/:id', (req: Request, res: Response) => {
     try {
+      const id = ensureStringParam(req.params.id)
+      if (!id) return res.status(400).json({ error: 'run id is required' })
       const runner = getWorkflowRunner()
-      const cancelled = runner.cancelWorkflow(req.params.id)
+      const cancelled = runner.cancelWorkflow(id)
       if (cancelled) {
         return res.json({ cancelled: true })
       }
-      const deleted = resumeStore.deleteRun(req.params.id)
+      const deleted = resumeStore.deleteRun(id)
       if (!deleted) return res.status(404).json({ error: 'Run not found' })
       res.json({ deleted: true })
     } catch (err) {

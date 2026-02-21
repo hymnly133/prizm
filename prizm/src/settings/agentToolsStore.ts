@@ -6,10 +6,17 @@
 
 import fs from 'fs'
 import { createLogger } from '../logger'
-import { getAgentToolsPath, getMcpServersPath, ensureDataDir } from '../core/PathProviderCore'
+import {
+  getAgentToolsPath,
+  getMcpServersPath,
+  ensureDataDir,
+  getDataDir
+} from '../core/PathProviderCore'
+import { getBuiltinMcpServerDefaults } from '../mcp-client/builtinMcpServers'
 import type {
   AgentToolsSettings,
   TavilySettings,
+  SkillsMPSettings,
   AgentLLMSettings,
   DocumentSummarySettings,
   DocumentMemorySettings,
@@ -59,7 +66,16 @@ function loadRaw(): AgentToolsSettings {
   if (!fs.existsSync(filePath)) {
     const migrated = migrateFromLegacy()
     if (migrated) return migrated
-    return { builtin: {}, agent: {}, mcpServers: [], updatedAt: Date.now() }
+    const data: AgentToolsSettings = {
+      builtin: {},
+      agent: {},
+      mcpServers: getBuiltinMcpServerDefaults(getDataDir()),
+      updatedAt: Date.now()
+    }
+    if (data.mcpServers.length > 0) {
+      saveRaw(data)
+    }
+    return data
   }
   try {
     const content = fs.readFileSync(filePath, 'utf-8')
@@ -99,6 +115,19 @@ export function updateTavilySettings(update: Partial<TavilySettings>): void {
   data.builtin.tavily = { ...data.builtin.tavily, ...update }
   saveRaw(data)
   log.info('Tavily settings updated')
+}
+
+export function getSkillsMPSettings(): SkillsMPSettings | null {
+  const s = loadRaw().builtin?.skillsmp
+  return s ?? null
+}
+
+export function updateSkillsMPSettings(update: Partial<SkillsMPSettings>): void {
+  const data = loadRaw()
+  data.builtin = data.builtin ?? {}
+  data.builtin.skillsmp = { ...data.builtin.skillsmp, ...update }
+  saveRaw(data)
+  log.info('SkillsMP settings updated')
 }
 
 // ============ MCP 服务器（兼容 configStore 接口） ============

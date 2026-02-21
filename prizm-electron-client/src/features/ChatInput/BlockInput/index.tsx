@@ -1,13 +1,38 @@
 /**
- * 纯文本输入：contenteditable + 换行支持
- * 不再内联渲染 chip——所有引用通过 RefChipsBar 在输入框外展示
+ * BlockInput — contenteditable 输入框
+ * 支持纯文本输入 + 资源引用 inline chip（`@(type:id)` 以 chip 形式显示）
  */
 import { memo, useCallback, useEffect, useRef } from 'react'
 
 import { useClientSettings } from '../../../context/ClientSettingsContext'
 import { useChatInputStore, useStoreApi } from '../store'
+import { REF_CHIP_META, FALLBACK_CHIP_STYLE } from '../../../utils/refChipMeta'
 
-/** 获取纯文本内容（保留换行） */
+const CHIP_CLS = 'chat-input-chip'
+
+function createChipElement(typeKey: string, label: string, markdown: string): HTMLSpanElement {
+  const chip = document.createElement('span')
+  chip.className = CHIP_CLS
+  chip.contentEditable = 'false'
+  chip.dataset.markdown = markdown
+  chip.dataset.refType = typeKey
+
+  const meta = REF_CHIP_META[typeKey]
+  const c = meta ?? FALLBACK_CHIP_STYLE
+  chip.style.color = c.color
+  chip.style.background = c.bg
+
+  const tag = document.createElement('span')
+  tag.className = 'chat-input-chip__tag'
+  tag.textContent = meta?.label ?? typeKey
+  chip.appendChild(tag)
+
+  const shortLabel = label.length > 20 ? label.slice(0, 20) + '…' : label
+  chip.appendChild(document.createTextNode(shortLabel))
+  return chip
+}
+
+/** 获取文本内容，将 chip 元素替换为其 markdown data 属性 */
 function getPlainText(root: HTMLElement): string {
   let out = ''
   const walk = (node: Node) => {
@@ -17,6 +42,10 @@ function getPlainText(root: HTMLElement): string {
     }
     if (node.nodeType !== Node.ELEMENT_NODE) return
     const el = node as HTMLElement
+    if (el.classList.contains(CHIP_CLS)) {
+      out += el.dataset.markdown ?? ''
+      return
+    }
     const tag = el.tagName
     if (tag === 'BR') {
       out += '\n'
@@ -31,7 +60,7 @@ function getPlainText(root: HTMLElement): string {
   return out
 }
 
-/** 在 contentEditable 中根据序列化偏移量定位文本范围 */
+/** 在 contentEditable 中根据序列化偏移量定位文本范围（跳过 chip 元素） */
 function findTextRange(root: HTMLElement, startOffset: number, endOffset: number): Range | null {
   let current = 0
   let startNode: Node | null = null
@@ -56,6 +85,20 @@ function findTextRange(root: HTMLElement, startOffset: number, endOffset: number
     }
     if (node.nodeType !== Node.ELEMENT_NODE) return false
     const el = node as HTMLElement
+    if (el.classList.contains(CHIP_CLS)) {
+      const mdLen = (el.dataset.markdown ?? '').length
+      if (current + mdLen > startOffset && startNode === null) {
+        startNode = node.parentNode!
+        startOff = Array.from(node.parentNode!.childNodes).indexOf(node as ChildNode)
+      }
+      current += mdLen
+      if (current >= endOffset && endNode === null) {
+        endNode = node.parentNode!
+        endOff = Array.from(node.parentNode!.childNodes).indexOf(node as ChildNode) + 1
+        return true
+      }
+      return false
+    }
     if (el.tagName === 'BR') {
       if (current >= startOffset && startNode === null) {
         startNode = node.parentNode!
@@ -89,7 +132,7 @@ function findTextRange(root: HTMLElement, startOffset: number, endOffset: number
   return range
 }
 
-/** 将纯文本渲染到 DOM（保留换行） */
+/** 将纯文本渲染到 DOM（保留换行，不包含 chip） */
 function renderTextToDOM(root: HTMLElement, text: string): void {
   root.innerHTML = ''
   if (!text) {
@@ -151,12 +194,52 @@ const BlockInput = memo(() => {
     [setMarkdownContent]
   )
 
+  /** 在指定偏移范围插入 inline chip 元素 */
+  const applyChipInsert = useCallback(
+    (
+      replaceStart: number,
+      replaceEnd: number,
+      typeKey: string,
+      _id: string,
+      label: string,
+      mdText: string
+    ) => {
+      const root = rootRef.current
+      if (!root) return
+      const range = findTextRange(root, replaceStart, replaceEnd)
+      if (!range) return
+      range.deleteContents()
+
+      const chip = createChipElement(typeKey, label, mdText)
+      range.insertNode(chip)
+
+      const spacer = document.createTextNode('\u00A0')
+      chip.after(spacer)
+
+      const sel = window.getSelection()
+      if (sel) {
+        sel.removeAllRanges()
+        const r = document.createRange()
+        r.setStartAfter(spacer)
+        r.collapse(true)
+        sel.addRange(r)
+      }
+
+      lastSerializedRef.current = getPlainText(root)
+      setMarkdownContent(lastSerializedRef.current)
+      root.focus()
+    },
+    [setMarkdownContent]
+  )
+
   useEffect(() => {
     storeApi.getState().setApplyOverlayTextReplace(applyTextReplace)
+    storeApi.getState().setApplyOverlayChipInsert(applyChipInsert)
     return () => {
       storeApi.getState().setApplyOverlayTextReplace(null)
+      storeApi.getState().setApplyOverlayChipInsert(null)
     }
-  }, [storeApi, applyTextReplace])
+  }, [storeApi, applyTextReplace, applyChipInsert])
 
   useEffect(() => {
     const focus = () => rootRef.current?.focus()

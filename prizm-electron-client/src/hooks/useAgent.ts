@@ -70,17 +70,29 @@ export function useAgent(scope: string) {
   )
 
   const updateSession = useCallback(
-    (id: string, update: { llmSummary?: string }) =>
-      useAgentSessionStore.getState().updateSession(id, update, scope),
+    (
+      id: string,
+      update: {
+        llmSummary?: string
+        allowedTools?: string[]
+        allowedSkills?: string[]
+        allowedMcpServerIds?: string[]
+      }
+    ) => useAgentSessionStore.getState().updateSession(id, update, scope),
     [scope]
   )
 
   const sendMessage = useCallback(
-    (content: string, sessionOverride?: EnrichedSession | null, fileRefs?: FilePathRef[]) => {
+    (
+      content: string,
+      sessionOverride?: EnrichedSession | null,
+      fileRefs?: FilePathRef[],
+      runRefIds?: string[]
+    ) => {
       const state = useAgentSessionStore.getState()
       const sid = sessionOverride?.id ?? state.currentSessionId
       if (!sid) return Promise.resolve(null)
-      return state.sendMessage(sid, content, scope, fileRefs)
+      return state.sendMessage(sid, content, scope, fileRefs, undefined, runRefIds)
     },
     [scope]
   )

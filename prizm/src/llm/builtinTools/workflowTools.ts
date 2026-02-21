@@ -8,14 +8,17 @@ import {
   getWorkflowRunner,
   parseWorkflowDef,
   serializeWorkflowDef,
-  WorkflowParseError
+  WorkflowParseError,
+  buildRunRefContent
 } from '../../core/workflowEngine'
 import * as resumeStore from '../../core/workflowEngine/resumeStore'
 import * as defStore from '../../core/workflowEngine/workflowDefStore'
-import { toolLLMManager } from '../toolLLM'
+import { isWorkflowManagementSession } from '@prizm/shared'
 import type { BuiltinToolContext, BuiltinToolResult } from './types'
 
-export function dispatchWorkflow(ctx: BuiltinToolContext): BuiltinToolResult | Promise<BuiltinToolResult> {
+export function dispatchWorkflow(
+  ctx: BuiltinToolContext
+): BuiltinToolResult | Promise<BuiltinToolResult> {
   const action = ctx.args.action as string
   switch (action) {
     case 'run':
@@ -48,7 +51,11 @@ async function executeRun(ctx: BuiltinToolContext): Promise<BuiltinToolResult> {
 
     let args: Record<string, unknown> | undefined
     if (argsStr) {
-      try { args = JSON.parse(argsStr) } catch { args = undefined }
+      try {
+        args = JSON.parse(argsStr)
+      } catch {
+        args = undefined
+      }
     }
 
     let def
@@ -100,8 +107,24 @@ async function executeResume(ctx: BuiltinToolContext): Promise<BuiltinToolResult
   }
 }
 
+const DEFAULT_LIST_LIMIT = 50
+
 function executeList(ctx: BuiltinToolContext): BuiltinToolResult {
-  const runs = resumeStore.listRuns(ctx.scope)
+  const limit = Math.min(Number(ctx.args.limit) || DEFAULT_LIST_LIMIT, 100)
+  let runs = resumeStore.listRuns(ctx.scope, undefined, limit)
+
+  const session = ctx.sessionId
+    ? ctx.data.agentSessions.find((s) => s.id === ctx.sessionId)
+    : undefined
+  const boundWorkflowName =
+    session && isWorkflowManagementSession(session)
+      ? (session as { toolMeta?: { workflowName?: string } }).toolMeta?.workflowName
+      : undefined
+  const workflowName = (ctx.args.workflow_name as string) || boundWorkflowName
+  if (workflowName) {
+    runs = runs.filter((r) => r.workflowName === workflowName)
+  }
+
   const summary = runs.map((r) => ({
     id: r.id,
     name: r.workflowName,
@@ -124,8 +147,11 @@ function executeStatus(ctx: BuiltinToolContext): BuiltinToolResult {
   if (!run) {
     return { text: `运行记录 "${runId}" 不存在`, isError: true }
   }
+  if (run.scope !== ctx.scope) {
+    return { text: `运行记录 "${runId}" 不在当前 scope`, isError: true }
+  }
 
-  return { text: JSON.stringify(run, null, 2) }
+  return { text: buildRunRefContent(ctx.scopeRoot, run) }
 }
 
 function executeCancel(ctx: BuiltinToolContext): BuiltinToolResult {
@@ -221,136 +247,73 @@ function executeGetDef(ctx: BuiltinToolContext): BuiltinToolResult {
     const def = parseWorkflowDef(defRecord.yamlContent)
     const argsSchema = extractArgsSchema(def)
     return {
-      text: JSON.stringify({
-        id: defRecord.id,
-        name: defRecord.name,
-        description: defRecord.description,
-        scope: defRecord.scope,
-        yamlContent: defRecord.yamlContent,
-        argsSchema,
-        steps: def.steps.map((s) => ({ id: s.id, type: s.type, description: s.description })),
-        triggers: def.triggers
-      }, null, 2)
+      text: JSON.stringify(
+        {
+          id: defRecord.id,
+          name: defRecord.name,
+          description: defRecord.description,
+          scope: defRecord.scope,
+          yamlContent: defRecord.yamlContent,
+          argsSchema,
+          steps: def.steps.map((s) => ({ id: s.id, type: s.type, description: s.description })),
+          triggers: def.triggers
+        },
+        null,
+        2
+      )
     }
   } catch {
     return {
-      text: JSON.stringify({
-        id: defRecord.id,
-        name: defRecord.name,
-        yamlContent: defRecord.yamlContent
-      }, null, 2)
-    }
-  }
-}
-
-/** 工作流构建器（桥接到 Tool LLM） */
-export async function dispatchWorkflowBuilder(ctx: BuiltinToolContext): Promise<BuiltinToolResult> {
-  const action = ctx.args.action as string
-  const intent = ctx.args.intent as string
-  const workflowName = ctx.args.workflow_name as string | undefined
-  const context = ctx.args.context as string | undefined
-
-  if (!intent) {
-    return { text: '需要提供 intent 参数', isError: true }
-  }
-
-  try {
-    if (action === 'build') {
-      const result = await toolLLMManager.start(
-        ctx.scope,
-        { domain: 'workflow', intent, context },
-        () => {} // 内置工具调用时不做流式传输，结果通过 tool_result 返回
-      )
-      return {
-        text: JSON.stringify({
-          sessionId: result.sessionId,
-          status: result.status,
-          version: result.version,
-          workflowDef: result.workflowDef,
-          yamlContent: result.yamlContent,
-          _toolLLM: true,
-          message: '工作流已生成预览，请在构建器卡片中确认或继续修改'
-        })
-      }
-    }
-
-    if (action === 'edit') {
-      if (!workflowName) {
-        return { text: 'edit action 需要提供 workflow_name', isError: true }
-      }
-
-      const defRecord = defStore.getDefByName(workflowName, ctx.scope)
-      if (!defRecord) {
-        return { text: `工作流 "${workflowName}" 未找到`, isError: true }
-      }
-
-      const existingSessionId = toolLLMManager.getSessionIdForWorkflow(ctx.scope, workflowName)
-
-      if (existingSessionId) {
-        const result = await toolLLMManager.resume(
-          ctx.scope,
-          existingSessionId,
-          intent + (context ? `\n补充上下文：${context}` : ''),
-          () => {}
-        )
-        return {
-          text: JSON.stringify({
-            sessionId: result.sessionId,
-            status: result.status,
-            version: result.version,
-            workflowDef: result.workflowDef,
-            yamlContent: result.yamlContent,
-            _toolLLM: true,
-            message: '工作流已更新预览（复用已有对话），请在构建器卡片中确认或继续修改'
-          })
-        }
-      }
-
-      const result = await toolLLMManager.start(
-        ctx.scope,
+      text: JSON.stringify(
         {
-          domain: 'workflow',
-          intent,
-          workflowName,
-          existingYaml: defRecord.yamlContent,
-          context
+          id: defRecord.id,
+          name: defRecord.name,
+          yamlContent: defRecord.yamlContent
         },
-        () => {}
+        null,
+        2
       )
-      return {
-        text: JSON.stringify({
-          sessionId: result.sessionId,
-          status: result.status,
-          version: result.version,
-          workflowDef: result.workflowDef,
-          yamlContent: result.yamlContent,
-          _toolLLM: true,
-          message: '工作流已更新预览（新建对话），请在构建器卡片中确认或继续修改'
-        })
-      }
-    }
-
-    return { text: `未知 action: ${action}，仅支持 build/edit`, isError: true }
-  } catch (err) {
-    return {
-      text: `工作流构建器错误: ${err instanceof Error ? err.message : String(err)}`,
-      isError: true
     }
   }
 }
 
-/** 从工作流定义中提取 $args.xxx 引用作为参数 schema */
+/** 导航卡片：不执行实际操作，仅返回导航参数供前端展示 */
+export function dispatchNavigate(ctx: BuiltinToolContext): BuiltinToolResult {
+  const target = ctx.args.target as string
+  const initialPrompt = ctx.args.initialPrompt as string | undefined
+  const title = ctx.args.title as string | undefined
+  const description = ctx.args.description as string | undefined
+  const payload = {
+    navigation: {
+      target: target ?? 'workflow-create',
+      initialPrompt: initialPrompt ?? '',
+      title: title ?? '去工作流创建会话',
+      description: description ?? ''
+    }
+  }
+  return { text: JSON.stringify(payload) }
+}
+
+/** 从工作流定义中合并 def.args 与步骤内 $args.xxx 引用，得到完整参数 schema */
 function extractArgsSchema(def: import('@prizm/shared').WorkflowDef): Record<string, string> {
   const schema: Record<string, string> = {}
-  const argsPattern = /\$args\.([a-zA-Z_][a-zA-Z0-9_.]*)/g
 
+  if (def.args && typeof def.args === 'object') {
+    for (const [key, arg] of Object.entries(def.args)) {
+      const desc = (arg as { description?: string }).description
+      schema[key] = desc ? desc : `工作流输入参数 (def.args)`
+    }
+  }
+
+  const argsPattern = /\$args\.([a-zA-Z_][a-zA-Z0-9_.]*)/g
   for (const step of def.steps) {
     for (const field of [step.prompt, step.input, step.transform]) {
       if (!field) continue
+      argsPattern.lastIndex = 0
       let match
       while ((match = argsPattern.exec(field)) !== null) {
         const key = match[1]
-        schema[key] = `Referenced in step "${step.id}" (${step.type})`
+        if (!schema[key]) schema[key] = `Referenced in step "${step.id}" (${step.type})`
       }
     }
   }

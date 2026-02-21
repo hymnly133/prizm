@@ -1,42 +1,58 @@
 /**
- * WorkflowRunDetailPanel — 运行详情面板（内联展示，替代 Modal）
+ * WorkflowRunDetailPanel — 运行详情面板
  *
- * 面包屑返回、审批提示、Pipeline 可视化、步骤时间线、操作按钮。
- * 支持内联查看步骤关联的 Agent 会话（不跳转页面）。
+ * 面包屑返回、审批提示、Pipeline 可视化、总输入/总输出视图、每步 I/O 卡片。
+ * 步骤会话：若传入 onOpenStepSession 则在侧边栏标签打开；否则内联展示（兼容）。
  */
 
-import { useCallback, useEffect, useState } from 'react'
-import { Tag, Button, Space, Alert, Typography, Timeline, Descriptions, Collapse, Progress } from 'antd'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Tag, Button, Space, Alert, Typography, Collapse, Progress } from 'antd'
 import { Icon } from '@lobehub/ui'
-import { FolderOpen, MessageSquare, X } from 'lucide-react'
+import {
+  FolderOpen,
+  MessageSquare,
+  X,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  ListOrdered
+} from 'lucide-react'
 import {
   ArrowLeftOutlined,
-  CheckCircleOutlined,
   CloseCircleOutlined,
-  ClockCircleOutlined,
-  ThunderboltOutlined,
   PauseCircleOutlined,
-  MinusCircleOutlined,
-  ReloadOutlined
+  ReloadOutlined,
+  CopyOutlined
 } from '@ant-design/icons'
 import type { WorkflowRun, WorkflowStepResult } from '@prizm/shared'
 import { WorkflowPipelineView } from './WorkflowPipelineView'
+import {
+  WORKFLOW_RUN_STATUS_META,
+  getWorkflowRunStatusTagColor,
+  WorkflowErrorDetailBlock
+} from './workflowRunStatus'
 import { WorkflowWorkspacePanel } from './WorkflowWorkspacePanel'
 import { useWorkflowStore } from '../../store/workflowStore'
 import { useAgentSessionStore } from '../../store/agentSessionStore'
 import { useScope } from '../../hooks/useScope'
 import { SessionChatProvider } from '../../context/SessionChatContext'
 import { SessionChatPanel } from '../agent/SessionChatPanel'
+import { LoadingPlaceholder } from '../ui/LoadingPlaceholder'
+import { SectionHeader } from '../ui/SectionHeader'
+import { ContentCard, ContentCardHeader, ContentCardBody } from '../ui/ContentCard'
+import { PrizmMarkdown } from '../agent/PrizmMarkdown'
 
-const { Text, Paragraph } = Typography
+const { Text } = Typography
 
-const STATUS_LABELS: Record<string, { color: string; label: string; icon: React.ReactNode }> = {
-  pending: { color: 'default', label: '等待中', icon: <ClockCircleOutlined /> },
-  running: { color: 'processing', label: '运行中', icon: <ThunderboltOutlined /> },
-  paused: { color: 'warning', label: '待审批', icon: <PauseCircleOutlined /> },
-  completed: { color: 'success', label: '已完成', icon: <CheckCircleOutlined /> },
-  failed: { color: 'error', label: '失败', icon: <CloseCircleOutlined /> },
-  cancelled: { color: 'default', label: '已取消', icon: <MinusCircleOutlined /> }
+/** 判断字符串是否像 Markdown（可交给 PrizmMarkdown 渲染） */
+function looksLikeMarkdown(s: string): boolean {
+  const t = s.trim()
+  return (
+    t.startsWith('#') ||
+    /^\s*[-*]\s/m.test(t) ||
+    /\[.+\]\(.+\)/.test(t) ||
+    /```[\s\S]*```/.test(t) ||
+    /^\s*>\s/m.test(t)
+  )
 }
 
 export interface WorkflowRunDetailPanelProps {
@@ -45,14 +61,20 @@ export interface WorkflowRunDetailPanelProps {
   onGoBack: () => void
   onLoadSession?: (sessionId: string) => void
   onRerun?: (workflowName: string, args?: Record<string, unknown>) => void
+  /** 在侧边栏打开步骤会话（与主内容区+侧边 tab 架构对齐）；不传则内联展示 */
+  onOpenStepSession?: (sessionId: string, label: string) => void
+  /** 在管理会话中打开此次 run（预填 @run 引用） */
+  onOpenRunInManagementSession?: (workflowName: string, runId: string, runLabel: string) => void
 }
 
-export function WorkflowRunDetailPanel({
+function WorkflowRunDetailPanel({
   runId,
   defName,
   onGoBack,
   onLoadSession,
-  onRerun
+  onRerun,
+  onOpenStepSession,
+  onOpenRunInManagementSession
 }: WorkflowRunDetailPanelProps) {
   const [run, setRun] = useState<WorkflowRun | null>(null)
   const [inlineSessionId, setInlineSessionId] = useState<string | null>(null)
@@ -72,6 +94,17 @@ export function WorkflowRunDetailPanel({
     })
   }, [runId, getRunDetail, storeRuns])
 
+  // run 为 running 时轮询详情，以便后端写入当前步骤 sessionId 后能立即显示「查看会话」
+  useEffect(() => {
+    if (!run || (run.status !== 'running' && run.status !== 'pending')) return
+    const t = setInterval(() => {
+      void getRunDetail(runId).then((detail) => {
+        if (detail) setRun(detail)
+      })
+    }, 2000)
+    return () => clearInterval(t)
+  }, [runId, run?.id, run?.status, getRunDetail])
+
   useEffect(() => {
     setInlineSessionId(null)
     setInlineStepId(null)
@@ -85,14 +118,18 @@ export function WorkflowRunDetailPanel({
   )
 
   const handleViewSession = useCallback(
-    (sessionId: string, stepId?: string) => {
-      if (currentScope) {
-        void loadSession(sessionId, currentScope)
+    async (sessionId: string, stepId?: string) => {
+      if (onOpenStepSession) {
+        if (currentScope) await loadSession(sessionId, currentScope)
+        const label = stepId ? `步骤会话 — ${stepId}` : '步骤会话'
+        onOpenStepSession(sessionId, label)
+      } else {
+        if (currentScope) void loadSession(sessionId, currentScope)
+        setInlineSessionId(sessionId)
+        setInlineStepId(stepId ?? null)
       }
-      setInlineSessionId(sessionId)
-      setInlineStepId(stepId ?? null)
     },
-    [currentScope, loadSession]
+    [currentScope, loadSession, onOpenStepSession]
   )
 
   if (!run) {
@@ -101,18 +138,17 @@ export function WorkflowRunDetailPanel({
         <div className="wfp-breadcrumb" onClick={onGoBack}>
           <ArrowLeftOutlined /> 返回
         </div>
-        <div className="wfp-skeleton">
-          <div className="wfp-skeleton__bar" style={{ width: '40%' }} />
-          <div className="wfp-skeleton__bar" style={{ width: '60%' }} />
-          <div className="wfp-skeleton__bar" style={{ width: '80%' }} />
-        </div>
+        <LoadingPlaceholder text="加载运行详情…" />
       </div>
     )
   }
 
-  const statusInfo = STATUS_LABELS[run.status] ?? STATUS_LABELS.pending
-  const steps = Object.values(run.stepResults)
-  const totalDuration = steps.reduce((sum, s) => sum + (s.durationMs ?? 0), 0)
+  const statusInfo = WORKFLOW_RUN_STATUS_META[run.status] ?? WORKFLOW_RUN_STATUS_META.pending
+  const steps: WorkflowStepResult[] = Object.values(run.stepResults)
+  const totalDuration: number = steps.reduce(
+    (sum, s: WorkflowStepResult) => sum + (s.durationMs ?? 0),
+    0
+  )
   const isActive = run.status === 'running' || run.status === 'pending' || run.status === 'paused'
 
   return (
@@ -144,11 +180,22 @@ export function WorkflowRunDetailPanel({
             </Button>
           )}
           {onRerun && run.status !== 'running' && (
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={() => onRerun(run.workflowName, run.args)}
-            >
+            <Button icon={<ReloadOutlined />} onClick={() => onRerun(run.workflowName, run.args)}>
               重新运行
+            </Button>
+          )}
+          {onOpenRunInManagementSession && (
+            <Button
+              icon={<Icon icon={MessageSquare} size={16} />}
+              onClick={() =>
+                onOpenRunInManagementSession(
+                  run.workflowName,
+                  run.id,
+                  `${run.workflowName} #${run.id.slice(0, 8)}`
+                )
+              }
+            >
+              在管理会话中打开此次 run
             </Button>
           )}
         </Space>
@@ -178,82 +225,78 @@ export function WorkflowRunDetailPanel({
       {/* Pipeline */}
       <WorkflowPipelineView run={run} onApprove={handleApprove} />
 
-      {/* Descriptions */}
-      <Descriptions size="small" column={2} style={{ marginTop: 16 }}>
-        <Descriptions.Item label="运行 ID">
-          <Text copyable style={{ fontSize: 12 }}>{run.id}</Text>
-        </Descriptions.Item>
-        <Descriptions.Item label="触发方式">{run.triggerType ?? 'manual'}</Descriptions.Item>
-        <Descriptions.Item label="创建时间">
-          {new Date(run.createdAt).toLocaleString()}
-        </Descriptions.Item>
-        <Descriptions.Item label="总耗时">
-          {totalDuration > 0 ? `${(totalDuration / 1000).toFixed(1)}s` : '-'}
-        </Descriptions.Item>
-        {run.error && (
-          <Descriptions.Item label="错误" span={2}>
-            <Text type="danger">{run.error}</Text>
-          </Descriptions.Item>
-        )}
-      </Descriptions>
+      {/* 总输入 / 总输出 视图 */}
+      <RunSummaryCard run={run} steps={steps} totalDuration={totalDuration} />
 
-      {/* Run params */}
-      {run.args && Object.keys(run.args).length > 0 && (
-        <>
-          <Typography.Title level={5} style={{ marginTop: 16, marginBottom: 8 }}>
-            运行参数
-          </Typography.Title>
-          <div className="wfp-run-params">
-            {JSON.stringify(run.args, null, 2)}
-          </div>
-        </>
+      {/* Run 级错误 */}
+      {run.error && (
+        <Alert
+          type="error"
+          showIcon
+          icon={<CloseCircleOutlined />}
+          style={{ marginTop: 16 }}
+          message={run.error}
+          description={
+            run.errorDetail ? (
+              <WorkflowErrorDetailBlock content={run.errorDetail} />
+            ) : undefined
+          }
+        />
       )}
 
-      {/* Step timeline with duration bars */}
-      <Typography.Title level={5} style={{ marginTop: 20, marginBottom: 12 }}>
-        步骤时间线
-      </Typography.Title>
+      {/* 步骤详情：每步输入/输出 */}
+      <SectionHeader
+        icon={ListOrdered}
+        title="步骤详情"
+        count={steps.length}
+        className="wfp-run-detail__section"
+      />
       {steps.length === 0 ? (
-        <Text type="secondary">暂无步骤结果</Text>
+        <Text type="secondary" className="wfp-run-detail__empty-steps">
+          暂无步骤结果
+        </Text>
       ) : (
-        <Timeline
-          items={steps.map((step) => ({
-            color: timelineColor(step.status),
-            children: (
-              <StepTimelineItem
-                step={step}
-                maxDuration={totalDuration}
-                onViewSession={handleViewSession}
-                activeSessionId={inlineSessionId}
-              />
-            )
-          }))}
-        />
+        <div className="wfp-step-cards">
+          {steps.map((step, index) => (
+            <StepCard
+              key={step.stepId}
+              step={step}
+              index={index}
+              totalSteps={steps.length}
+              maxDuration={totalDuration}
+              onViewSession={handleViewSession}
+              activeSessionId={onOpenStepSession ? null : inlineSessionId}
+            />
+          ))}
+        </div>
       )}
 
       {/* Run Workspace */}
       <Collapse
         ghost
         style={{ marginTop: 16 }}
-        items={[{
-          key: 'workspace',
-          label: (
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Icon icon={FolderOpen} size={14} />
-              Run 工作空间
-            </span>
-          ),
-          children: (
-            <WorkflowWorkspacePanel
-              workflowName={run.workflowName}
-              activeRunId={run.id}
-            />
-          )
-        }]}
+        items={[
+          {
+            key: 'workspace',
+            label: (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Icon icon={FolderOpen} size={14} />
+                Run 工作空间
+              </span>
+            ),
+            children: (
+              <WorkflowWorkspacePanel
+                workflowName={run.workflowName}
+                mode="run-detail"
+                activeRunId={run.id}
+              />
+            )
+          }
+        ]}
       />
 
-      {/* Inline session viewer */}
-      {inlineSessionId && currentScope && (
+      {/* Inline session viewer（仅当未提供 onOpenStepSession 时展示） */}
+      {!onOpenStepSession && inlineSessionId && currentScope && (
         <div className="wfp-inline-session">
           <div className="wfp-inline-session__header">
             <Space size={8}>
@@ -269,7 +312,10 @@ export function WorkflowRunDetailPanel({
               type="text"
               size="small"
               icon={<Icon icon={X} size={14} />}
-              onClick={() => { setInlineSessionId(null); setInlineStepId(null) }}
+              onClick={() => {
+                setInlineSessionId(null)
+                setInlineStepId(null)
+              }}
             />
           </div>
           <div className="wfp-inline-session__body">
@@ -283,91 +329,278 @@ export function WorkflowRunDetailPanel({
   )
 }
 
-function StepTimelineItem({
+export { WorkflowRunDetailPanel }
+
+/** 总输入（运行参数）+ 总输出（最后一步或各步摘要） */
+function RunSummaryCard({
+  run,
+  steps,
+  totalDuration
+}: {
+  run: WorkflowRun
+  steps: WorkflowStepResult[]
+  totalDuration: number
+}) {
+  const hasArgs = run.args && Object.keys(run.args).length > 0
+  const lastOutput = steps.length > 0 ? steps[steps.length - 1]?.output : undefined
+  const hasAnyOutput = steps.some((s) => s.output || s.structuredData)
+
+  const summaryItems = useMemo(() => {
+    return [
+      { label: '运行 ID', value: run.id, copyable: true },
+      { label: '触发方式', value: run.triggerType ?? 'manual' },
+      { label: '创建时间', value: new Date(run.createdAt).toLocaleString() },
+      { label: '总耗时', value: totalDuration > 0 ? `${(totalDuration / 1000).toFixed(1)}s` : '-' }
+    ]
+  }, [run.id, run.triggerType, run.createdAt, totalDuration])
+
+  return (
+    <div className="wfp-run-summary">
+      <div className="wfp-run-summary__meta">
+        {summaryItems.map(({ label, value, copyable }) => (
+          <div key={label} className="wfp-run-summary__meta-item">
+            <span className="wfp-run-summary__meta-label">{label}</span>
+            {copyable ? (
+              <Text copyable className="wfp-run-summary__meta-value">
+                {value}
+              </Text>
+            ) : (
+              <span className="wfp-run-summary__meta-value">{value}</span>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="wfp-run-summary__io">
+        {/* 总输入 */}
+        <ContentCard variant="subtle" hoverable={false} className="wfp-run-summary__card">
+          <ContentCardHeader>
+            <Space size={6}>
+              <Icon icon={ArrowDownToLine} size={14} />
+              <span>总输入（运行参数）</span>
+            </Space>
+          </ContentCardHeader>
+          <ContentCardBody>
+            {hasArgs ? (
+              <pre className="wfp-run-pre wfp-run-pre--compact">
+                {JSON.stringify(run.args, null, 2)}
+              </pre>
+            ) : (
+              <Text type="secondary">无参数</Text>
+            )}
+          </ContentCardBody>
+        </ContentCard>
+
+        {/* 总输出 */}
+        <ContentCard variant="subtle" hoverable={false} className="wfp-run-summary__card">
+          <ContentCardHeader>
+            <Space size={6}>
+              <Icon icon={ArrowUpFromLine} size={14} />
+              <span>总输出</span>
+            </Space>
+          </ContentCardHeader>
+          <ContentCardBody>
+            {!hasAnyOutput ? (
+              <Text type="secondary">暂无输出</Text>
+            ) : (
+              <div className="wfp-run-summary__output">
+                {lastOutput && <PrizmMarkdown variant="chat">{lastOutput}</PrizmMarkdown>}
+                {steps.length > 1 && (
+                  <Collapse
+                    ghost
+                    size="small"
+                    style={{ marginTop: lastOutput ? 8 : 0 }}
+                    items={[
+                      {
+                        key: 'all',
+                        label: `查看全部 ${steps.length} 步输出`,
+                        children: (
+                          <div className="wfp-run-summary__steps-output">
+                            {steps.map((s) => (
+                              <div key={s.stepId} className="wfp-run-summary__step-output-item">
+                                <Text strong style={{ fontSize: 12 }}>
+                                  {s.stepId}
+                                </Text>
+                                {s.output ? (
+                                  <div className="wfp-run-summary__step-output-body">
+                                    <PrizmMarkdown variant="chat">{s.output}</PrizmMarkdown>
+                                  </div>
+                                ) : (
+                                  <Text type="secondary" style={{ fontSize: 12 }}>
+                                    —
+                                  </Text>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )
+                      }
+                    ]}
+                  />
+                )}
+                {!lastOutput && steps.length <= 1 && (
+                  <Text type="secondary">运行中或暂无最终输出</Text>
+                )}
+              </div>
+            )}
+          </ContentCardBody>
+        </ContentCard>
+      </div>
+    </div>
+  )
+}
+
+/** 步骤结果折叠：单一「结果」区块，内部按需区分主结果/结构化数据 */
+function StepResultCollapse({
   step,
+  looksLikeMarkdown
+}: {
+  step: WorkflowStepResult
+  looksLikeMarkdown: (s: string) => boolean
+}) {
+  const { output, structuredData } = step
+  const onlyOutput = output && !structuredData
+  const onlyStructured = structuredData && !output
+  let showBothAsTwo = false
+  if (output && structuredData) {
+    try {
+      const parsed = JSON.parse(structuredData) as Record<string, unknown>
+      const keys = Object.keys(parsed)
+      if (keys.length === 1 && keys[0] === 'output' && String(parsed.output) === output) {
+        showBothAsTwo = false
+      } else {
+        showBothAsTwo = true
+      }
+    } catch {
+      showBothAsTwo = true
+    }
+  }
+
+  const content = (
+    <div className="wfp-step-card__output-inner">
+      {(onlyOutput || (output && !showBothAsTwo)) && (
+        <div className="wfp-step-card__output">
+          {showBothAsTwo && (
+            <Text type="secondary" className="wfp-step-card__output-label">
+              主结果
+            </Text>
+          )}
+          <div className="wfp-step-card__output-content">
+            {output &&
+              (looksLikeMarkdown(output) ? (
+                <PrizmMarkdown variant="chat">{output}</PrizmMarkdown>
+              ) : (
+                <pre className="wfp-run-pre wfp-run-pre--compact">{output}</pre>
+              ))}
+          </div>
+        </div>
+      )}
+      {(onlyStructured || (structuredData && showBothAsTwo)) && (
+        <div className="wfp-step-card__structured">
+          {showBothAsTwo && (
+            <Text type="secondary" className="wfp-step-card__output-label">
+              结构化数据
+            </Text>
+          )}
+          <pre className="wfp-run-pre wfp-run-pre--compact">{structuredData}</pre>
+        </div>
+      )}
+    </div>
+  )
+
+  return (
+    <Collapse
+      ghost
+      size="small"
+      defaultActiveKey={[]}
+      className="wfp-step-card__output-collapse"
+      items={[{ key: 'result', label: <span className="wfp-step-card__output-collapse-label">结果</span>, children: content }]}
+    />
+  )
+}
+
+/** 单步卡片：输入/输出、错误、审批、会话链接 */
+function StepCard({
+  step,
+  index,
+  totalSteps,
   maxDuration,
   onViewSession,
   activeSessionId
 }: {
   step: WorkflowStepResult
+  index: number
+  totalSteps: number
   maxDuration: number
   onViewSession?: (sessionId: string, stepId?: string) => void
   activeSessionId?: string | null
 }) {
   const duration = step.durationMs ? `${(step.durationMs / 1000).toFixed(1)}s` : ''
-  const pct = maxDuration > 0 && step.durationMs ? Math.round((step.durationMs / maxDuration) * 100) : 0
+  const pct =
+    maxDuration > 0 && step.durationMs ? Math.round((step.durationMs / maxDuration) * 100) : 0
   const isViewing = step.sessionId != null && step.sessionId === activeSessionId
 
   return (
-    <div className="wf-step-timeline-item">
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <Text strong>{step.stepId}</Text>
-        <Tag color={statusToTagColor(step.status)} style={{ fontSize: 11 }}>
-          {step.status}
-        </Tag>
-        {duration && <Text type="secondary" style={{ fontSize: 11 }}>{duration}</Text>}
-        {step.sessionId && onViewSession && (
-          <Button
-            type="link"
-            size="small"
-            style={{
-              padding: 0,
-              height: 'auto',
-              fontSize: 11,
-              fontWeight: isViewing ? 600 : undefined
-            }}
-            onClick={() => onViewSession(step.sessionId!, step.stepId)}
+    <ContentCard variant="default" hoverable={false} className="wfp-step-card">
+      <ContentCardHeader className="wfp-step-card__header">
+        <div className="wfp-step-card__title-row">
+          <span className="wfp-step-card__step-index">#{index + 1}</span>
+          <Text strong className="wfp-step-card__step-id">
+            {step.stepId}
+          </Text>
+          <Tag
+            color={getWorkflowRunStatusTagColor(step.status)}
+            className="wfp-step-card__tag"
           >
-            {isViewing ? '正在查看' : '查看会话'}
-          </Button>
+            {step.status}
+          </Tag>
+          {duration && (
+            <Text type="secondary" className="wfp-step-card__duration">
+              {duration}
+            </Text>
+          )}
+          {step.sessionId && onViewSession && (
+            <Button
+              type="link"
+              size="small"
+              className={`wfp-step-card__session-btn${
+                isViewing ? ' wfp-step-card__session-btn--active' : ''
+              }`}
+              onClick={() => onViewSession(step.sessionId!, step.stepId)}
+            >
+              {isViewing ? '正在查看' : '查看会话'}
+            </Button>
+          )}
+        </div>
+        {pct > 0 && (
+          <Progress
+            percent={pct}
+            size="small"
+            showInfo={false}
+            strokeColor={step.status === 'failed' ? 'var(--ant-color-error)' : undefined}
+            className="wfp-step-card__progress"
+          />
         )}
-      </div>
-      {pct > 0 && (
-        <Progress
-          percent={pct}
-          size="small"
-          showInfo={false}
-          strokeColor={step.status === 'failed' ? 'var(--ant-color-error)' : undefined}
-          style={{ marginTop: 4, marginBottom: 2, maxWidth: 240 }}
-        />
-      )}
-      {step.error && (
-        <Text type="danger" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
-          {step.error}
-        </Text>
-      )}
-      {step.output && (
-        <Paragraph
-          ellipsis={{ rows: 3, expandable: 'collapsible' }}
-          style={{ fontSize: 12, marginTop: 4, marginBottom: 0, color: '#666' }}
-        >
-          {step.output}
-        </Paragraph>
-      )}
-      {step.approved !== undefined && (
-        <Tag color={step.approved ? 'green' : 'red'} style={{ marginTop: 4 }}>
-          {step.approved ? '已批准' : '已拒绝'}
-        </Tag>
-      )}
-    </div>
+      </ContentCardHeader>
+      <ContentCardBody className="wfp-step-card__body">
+        {step.error && (
+          <div className="wfp-step-card__error">
+            <Text type="danger">{step.error}</Text>
+            {step.errorDetail && (
+            <WorkflowErrorDetailBlock content={step.errorDetail} compact />
+          )}
+          </div>
+        )}
+        {step.approved !== undefined && (
+          <Tag color={step.approved ? 'green' : 'red'} className="wfp-step-card__approve-tag">
+            {step.approved ? '已批准' : '已拒绝'}
+          </Tag>
+        )}
+        {(step.output || step.structuredData) && (
+          <StepResultCollapse step={step} looksLikeMarkdown={looksLikeMarkdown} />
+        )}
+      </ContentCardBody>
+    </ContentCard>
   )
 }
 
-function timelineColor(status: string): string {
-  switch (status) {
-    case 'completed': return 'green'
-    case 'running': return 'blue'
-    case 'failed': return 'red'
-    case 'skipped': return 'gray'
-    default: return 'gray'
-  }
-}
-
-function statusToTagColor(status: string): string {
-  switch (status) {
-    case 'completed': return 'success'
-    case 'running': return 'processing'
-    case 'failed': return 'error'
-    default: return 'default'
-  }
-}

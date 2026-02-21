@@ -1,95 +1,30 @@
 /**
  * Agent 工具配置 UI：内置工具（Tavily）+ MCP 服务器
- * 参照 LobeChat：MCP 支持 API Key / headers / env 配置
+ * 标签页：内置工具 | MCP 服务器；页内卡片式布局。
  */
 import {
-  ActionIcon,
   Alert,
   Button,
   Flexbox,
   Form,
-  Icon,
   Input,
   Modal,
   Text,
   TextArea,
   toast
 } from '@lobehub/ui'
+import { Spin } from 'antd'
+import { Segmented } from './ui/Segmented'
 import { Select } from './ui/Select'
+import { ContentCard, ContentCardHeader, ContentCardBody } from './ui/ContentCard'
+import { EmptyState } from './ui/EmptyState'
 import type { McpServerConfig } from '@prizm/client-core'
-import { createStaticStyles } from 'antd-style'
-import { ClipboardPaste, Edit, Link, Plus, Terminal, Trash2 } from 'lucide-react'
+import { ClipboardPaste, Plus, Plug, Server } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import type { PrizmClient } from '@prizm/client-core'
 import { parseMcpJson, ParseMcpErrorCode, type ParseMcpSuccessResult } from '../utils/parseMcpJson'
 import { BuiltinToolsSettings } from './BuiltinToolsSettings'
-
-const styles = createStaticStyles(({ css, cssVar }) => ({
-  connectionForm: css`
-    padding: ${cssVar.paddingMD};
-    border: 1px solid ${cssVar.colorBorder};
-    border-radius: ${cssVar.borderRadiusLG};
-    background: ${cssVar.colorFillAlter};
-  `,
-  emptyState: css`
-    padding: ${cssVar.paddingXL};
-    border: 1px dashed ${cssVar.colorBorder};
-    border-radius: ${cssVar.borderRadiusLG};
-    color: ${cssVar.colorTextTertiary};
-    text-align: center;
-    background: ${cssVar.colorFillQuaternary};
-  `,
-  previewItem: css`
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding-block: ${cssVar.paddingXS};
-    padding-inline: 0;
-    &:not(:last-child) {
-      border-block-end: 1px solid ${cssVar.colorBorderSecondary};
-    }
-  `,
-  previewLabel: css`
-    display: flex;
-    gap: ${cssVar.marginXS};
-    align-items: center;
-    font-size: ${cssVar.fontSizeSM};
-    font-weight: 500;
-    color: ${cssVar.colorTextSecondary};
-  `,
-  previewValue: css`
-    padding-block: ${cssVar.paddingXXS};
-    padding-inline: ${cssVar.paddingXS};
-    font-family: ${cssVar.fontFamilyCode};
-    font-size: ${cssVar.fontSizeSM};
-    font-weight: 600;
-    color: ${cssVar.colorText};
-    background: ${cssVar.colorFillQuaternary};
-  `,
-  sectionTitle: css`
-    position: relative;
-    display: flex;
-    gap: ${cssVar.marginXS};
-    align-items: center;
-    height: 32px;
-    font-size: ${cssVar.fontSizeLG};
-    font-weight: 600;
-    color: ${cssVar.colorTextHeading};
-    &::after {
-      content: '';
-      flex: 1;
-      height: 1px;
-      margin-inline-start: ${cssVar.marginMD};
-      background: linear-gradient(to right, ${cssVar.colorBorder}, transparent);
-    }
-  `,
-  serverCardHeader: css`
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: ${cssVar.marginSM};
-  `
-}))
+import { McpServerCard } from './mcp/McpServerCard'
 
 interface McpSettingsProps {
   http: PrizmClient | null
@@ -102,7 +37,10 @@ const TRANSPORT_OPTIONS: { label: string; value: McpServerConfig['transport'] }[
   { label: 'Stdio', value: 'stdio' }
 ]
 
+type McpSubTabKey = 'builtin' | 'servers'
+
 export function McpSettings({ http, onLog }: McpSettingsProps) {
+  const [subTab, setSubTab] = useState<McpSubTabKey>('builtin')
   const [servers, setServers] = useState<McpServerConfig[]>([])
   const [loading, setLoading] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
@@ -303,48 +241,74 @@ export function McpSettings({ http, onLog }: McpSettingsProps) {
   const isHttp = form.transport === 'streamable-http' || form.transport === 'sse'
 
   return (
-    <div className="settings-section">
-      <div className="settings-section-header">
-        <h2>Agent 工具配置</h2>
-        <p className="form-hint">
-          内置联网搜索与 MCP 服务器，Agent 对话时可调用。Tavily 需 API Key；MCP 支持 headers/env
-          鉴权。
-        </p>
+    <div className="settings-section" role="region" aria-label="MCP 设置">
+      <div style={{ marginBottom: 16 }}>
+        <Segmented
+          value={subTab}
+          onChange={(v) => setSubTab(v as McpSubTabKey)}
+          options={[
+            { label: '内置工具', value: 'builtin' },
+            { label: `MCP 服务器${servers.length > 0 ? ` (${servers.length})` : ''}`, value: 'servers' }
+          ]}
+          role="tablist"
+          aria-label="内置工具与 MCP 服务器切换"
+        />
       </div>
 
-      <BuiltinToolsSettings http={http} onLog={onLog} />
-
-      <Flexbox gap={12} style={{ marginTop: 16 }}>
-        <div className={styles.sectionTitle}>
-          <Link size={16} />
-          MCP 服务器列表
+      {subTab === 'builtin' && (
+        <div role="tabpanel" id="mcp-builtin-tabpanel" aria-labelledby="mcp-builtin-tab">
+          <ContentCard variant="default" hoverable={false} className="settings-card">
+            <ContentCardHeader>
+              <Flexbox horizontal align="center" gap={8}>
+                <Server size={16} aria-hidden />
+                <span>内置工具</span>
+              </Flexbox>
+            </ContentCardHeader>
+            <ContentCardBody>
+              <BuiltinToolsSettings http={http} onLog={onLog} />
+            </ContentCardBody>
+          </ContentCard>
         </div>
+      )}
 
-        <Flexbox gap={10} horizontal wrap="wrap">
-          <Button icon={<Plus size={14} />} onClick={openAdd} type="primary">
-            添加 MCP 服务器
-          </Button>
-          <Button
-            icon={<ClipboardPaste size={14} />}
-            onClick={() => {
-              setImportExpanded(!importExpanded)
-              setImportError(null)
-            }}
-            type="dashed"
-          >
-            快速导入 JSON
-          </Button>
-
-          {importExpanded && (
-            <Flexbox gap={8} style={{ width: '100%', flexBasis: '100%', marginTop: 6 }}>
-              {importError && <Alert showIcon title={importError} type="error" />}
-              <TextArea
-                autoSize={{ maxRows: 15, minRows: 8 }}
-                onChange={(e) => {
-                  setJsonInput(e.target.value)
-                  if (importError) setImportError(null)
-                }}
-                placeholder={`支持 LobeChat / Cursor 格式，例如：
+      {subTab === 'servers' && (
+        <div role="tabpanel" id="mcp-servers-tabpanel" aria-labelledby="mcp-servers-tab">
+          <ContentCard variant="default" hoverable={false} className="settings-card" style={{ marginBottom: 16 }}>
+            <ContentCardHeader>
+              <Flexbox horizontal align="center" justify="space-between" gap={8} style={{ flexWrap: 'wrap' }}>
+                <Flexbox horizontal align="center" gap={8}>
+                  <Plug size={16} aria-hidden />
+                  <span>MCP 服务器列表</span>
+                </Flexbox>
+                <Flexbox horizontal gap={8}>
+                  <Button icon={<Plus size={14} />} onClick={openAdd} type="primary" size="small">
+                    添加服务器
+                  </Button>
+                  <Button
+                    icon={<ClipboardPaste size={14} />}
+                    onClick={() => {
+                      setImportExpanded(!importExpanded)
+                      setImportError(null)
+                    }}
+                    type="dashed"
+                    size="small"
+                  >
+                    快速导入 JSON
+                  </Button>
+                </Flexbox>
+              </Flexbox>
+            </ContentCardHeader>
+            <ContentCardBody>
+              {importExpanded && (
+                <Flexbox gap={8} style={{ marginBottom: 12 }}>
+                  {importError && <Alert showIcon title={importError} type="error" />}
+                  <TextArea
+                    autoSize={{ maxRows: 15, minRows: 8 }}
+                    onChange={(e) => {
+                      setJsonInput(e.target.value)
+                      if (importError) setImportError(null)
+                    }}
+                    placeholder={`支持 LobeChat / Cursor 格式，例如：
 {
   "mcpServers": {
     "github": {
@@ -361,117 +325,60 @@ export function McpSettings({ http, onLog }: McpSettingsProps) {
     { "id": "github", "name": "GitHub", "transport": "streamable-http", "url": "https://...", "enabled": true }
   ]
 }`}
-                value={jsonInput}
-              />
-              <Flexbox horizontal justify="flex-end" gap={8}>
-                <Button
-                  onClick={() => {
-                    setImportExpanded(false)
-                    setJsonInput('')
-                    setImportError(null)
-                  }}
-                >
-                  取消
-                </Button>
-                <Button onClick={() => void handleImportJson()} type="primary">
-                  导入
-                </Button>
-              </Flexbox>
-            </Flexbox>
-          )}
+                    value={jsonInput}
+                  />
+                  <Flexbox horizontal justify="flex-end" gap={8}>
+                    <Button
+                      onClick={() => {
+                        setImportExpanded(false)
+                        setJsonInput('')
+                        setImportError(null)
+                      }}
+                    >
+                      取消
+                    </Button>
+                    <Button onClick={() => void handleImportJson()} type="primary">
+                      导入
+                    </Button>
+                  </Flexbox>
+                </Flexbox>
+              )}
 
-          {loading ? (
-            <Text type="secondary" style={{ width: '100%', flexBasis: '100%' }}>
-              加载中...
-            </Text>
-          ) : servers.length === 0 ? (
-            <div className={styles.emptyState} style={{ width: '100%', flexBasis: '100%' }}>
-              <Text type="secondary">暂无 MCP 服务器，点击上方按钮添加</Text>
-            </div>
-          ) : (
-            <Flexbox gap={8} style={{ width: '100%', flexBasis: '100%' }}>
-              {servers.map((r) => (
-                <div key={r.id} className="settings-card">
-                  <div className={styles.serverCardHeader}>
-                    <Flexbox horizontal align="center" gap={8}>
-                      <Text strong>{r.name}</Text>
-                      <Text style={{ fontSize: 12 }} type="secondary">
-                        {r.id}
-                      </Text>
-                    </Flexbox>
-                    <Flexbox horizontal gap={4}>
-                      <ActionIcon
-                        icon={Edit}
-                        onClick={() => openEdit(r)}
-                        size="small"
-                        title="编辑"
-                      />
-                      <ActionIcon
-                        icon={Trash2}
-                        onClick={() => handleDelete(r.id)}
-                        size="small"
-                        title="删除"
-                      />
-                      <Button onClick={() => handleTest(r.id)} size="small" disabled={!http}>
-                        测试
+              {loading ? (
+                <Flexbox horizontal align="center" gap={8} style={{ padding: 24 }}>
+                  <Spin size="small" />
+                  <Text type="secondary">加载中...</Text>
+                </Flexbox>
+              ) : servers.length === 0 ? (
+                <EmptyState
+                  icon={Plug}
+                  description="暂无 MCP 服务器，点击上方「添加服务器」或「快速导入 JSON」"
+                  actions={
+                    <Flexbox gap={8} horizontal>
+                      <Button size="small" type="primary" onClick={openAdd}>
+                        添加 MCP 服务器
                       </Button>
                     </Flexbox>
-                  </div>
-                  <Flexbox paddingInline={8}>
-                    <div className={styles.previewItem}>
-                      <span className={styles.previewLabel}>传输类型</span>
-                      <Flexbox horizontal align="center" gap={4}>
-                        <Icon icon={r.transport === 'stdio' ? Terminal : Link} size={14} />
-                        <Text className={styles.previewValue}>
-                          {r.transport === 'stdio'
-                            ? 'STDIO'
-                            : r.transport === 'streamable-http'
-                            ? 'Streamable HTTP'
-                            : 'SSE'}
-                        </Text>
-                      </Flexbox>
-                    </div>
-                    {r.url && (
-                      <div className={styles.previewItem}>
-                        <span className={styles.previewLabel}>URL</span>
-                        <span className={styles.previewValue}>{r.url}</span>
-                      </div>
-                    )}
-                    {r.stdio && (
-                      <>
-                        {r.stdio.command && (
-                          <div className={styles.previewItem}>
-                            <span className={styles.previewLabel}>命令</span>
-                            <span className={styles.previewValue}>{r.stdio.command}</span>
-                          </div>
-                        )}
-                        {r.stdio.args && r.stdio.args.length > 0 && (
-                          <div className={styles.previewItem}>
-                            <span className={styles.previewLabel}>参数</span>
-                            <span className={styles.previewValue}>{r.stdio.args.join(' ')}</span>
-                          </div>
-                        )}
-                        {r.stdio.env && Object.keys(r.stdio.env).length > 0 && (
-                          <div className={styles.previewItem}>
-                            <span className={styles.previewLabel}>环境变量</span>
-                            <span className={styles.previewValue}>已配置</span>
-                          </div>
-                        )}
-                      </>
-                    )}
-                    {r.headers && Object.keys(r.headers).length > 0 && (
-                      <div className={styles.previewItem}>
-                        <span className={styles.previewLabel}>鉴权</span>
-                        <span className={styles.previewValue}>已配置</span>
-                      </div>
-                    )}
-                  </Flexbox>
-                </div>
-              ))}
-            </Flexbox>
-          )}
-        </Flexbox>
-      </Flexbox>
+                  }
+                />
+              ) : (
+                <Flexbox gap={8} style={{ flexDirection: 'column' }} role="list" aria-label="MCP 服务器列表">
+                  {servers.map((r) => (
+                    <McpServerCard
+                      key={r.id}
+                      server={r}
+                      onEdit={() => openEdit(r)}
+                      onDelete={() => handleDelete(r.id)}
+                      onTest={() => handleTest(r.id)}
+                      testDisabled={!http}
+                    />
+                  ))}
+                </Flexbox>
+              )}
+            </ContentCardBody>
+          </ContentCard>
+        </div>
+      )}
 
       {/* 添加/编辑 Modal - 参照 LobeChat McpSettingsModal */}
       <Modal
@@ -489,7 +396,7 @@ export function McpSettings({ http, onLog }: McpSettingsProps) {
         title={editing ? '编辑 MCP 服务器' : '添加 MCP 服务器'}
         width={520}
       >
-        <div className={styles.connectionForm} style={{ marginTop: 12 }}>
+        <ContentCard variant="subtle" hoverable={false} style={{ marginTop: 12, padding: 16 }}>
           <Form className="compact-form" gap={8} layout="vertical">
             <Form.Item label="ID" required>
               <Input
@@ -539,9 +446,7 @@ export function McpSettings({ http, onLog }: McpSettingsProps) {
                         : '可选'
                     }
                     value={mcpApiKeyInput}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                      setMcpApiKeyInput(e.target.value)
-                    }
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setMcpApiKeyInput(e.target.value)}
                   />
                 </Form.Item>
               </>
@@ -592,7 +497,7 @@ export function McpSettings({ http, onLog }: McpSettingsProps) {
               </>
             )}
           </Form>
-        </div>
+        </ContentCard>
       </Modal>
     </div>
   )

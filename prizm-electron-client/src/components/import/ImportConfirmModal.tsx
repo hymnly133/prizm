@@ -4,7 +4,8 @@
  * 纯 UI 组件，通过 ImportContext 驱动，与触发方式无关
  */
 import { memo, useMemo, useCallback } from 'react'
-import { Button, Markdown, Tag } from '@lobehub/ui'
+import { Button, Tag } from '@lobehub/ui'
+import { PrizmMarkdown as Markdown } from '../agent/PrizmMarkdown'
 import { Modal, Progress } from 'antd'
 import { createStyles } from 'antd-style'
 import {

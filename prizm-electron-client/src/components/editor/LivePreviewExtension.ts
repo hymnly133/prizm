@@ -19,6 +19,7 @@ import {
 } from '@codemirror/view'
 import { type Range } from '@codemirror/state'
 import { syntaxTree, ensureSyntaxTree } from '@codemirror/language'
+import { REF_CHIP_META, FALLBACK_CHIP_STYLE } from '../../utils/refChipMeta'
 
 /** CSS 类前缀 */
 const CLS = 'cm-lp'
@@ -375,7 +376,79 @@ function buildDecorations(view: EditorView): DecorationSet {
     })
   }
 
+  decs.push(...buildAtRefDecorations(view, activeBlock))
+
   return Decoration.set(decs, true)
+}
+
+/* ═══════════════════════════════════════════
+   @(type:id) 资源引用 Widget
+   ═══════════════════════════════════════════ */
+
+const AT_REF_TYPE_META = REF_CHIP_META
+
+class AtRefWidget extends WidgetType {
+  constructor(readonly typeKey: string, readonly id: string) {
+    super()
+  }
+
+  toDOM(): HTMLElement {
+    const chip = document.createElement('span')
+    chip.className = 'prizm-ref-chip'
+    const meta = AT_REF_TYPE_META[this.typeKey]
+    const c = meta ?? FALLBACK_CHIP_STYLE
+    chip.style.color = c.color
+    chip.style.background = c.bg
+    chip.title = `@(${this.typeKey}:${this.id})`
+
+    if (meta) {
+      const tag = document.createElement('span')
+      tag.className = 'prizm-ref-chip__tag'
+      tag.textContent = meta.label
+      chip.appendChild(tag)
+    }
+
+    const shortId = this.id.length > 16 ? this.id.slice(0, 16) + '…' : this.id
+    chip.appendChild(document.createTextNode(shortId))
+    return chip
+  }
+
+  eq(other: AtRefWidget): boolean {
+    return this.typeKey === other.typeKey && this.id === other.id
+  }
+}
+
+const AT_REF_PATTERN = /@\(([\w\u4e00-\u9fa5]+):([^)]+)\)/g
+
+function buildAtRefDecorations(view: EditorView, activeBlock: { from: number; to: number } | null): Range<Decoration>[] {
+  const decs: Range<Decoration>[] = []
+  for (const { from, to } of view.visibleRanges) {
+    const text = view.state.sliceDoc(from, to)
+    AT_REF_PATTERN.lastIndex = 0
+    let m: RegExpExecArray | null
+    while ((m = AT_REF_PATTERN.exec(text)) !== null) {
+      const matchFrom = from + m.index
+      const matchTo = matchFrom + m[0].length
+      if (isInActiveBlock(matchFrom, matchTo, activeBlock)) continue
+
+      const rawType = m[1]
+      const rawId = m[2]
+      let typeKey = rawType
+      let id = rawId
+      const colonIdx = rawId.indexOf(':')
+      if (colonIdx > 0 && AT_REF_TYPE_META[rawId.slice(0, colonIdx)]) {
+        typeKey = rawId.slice(0, colonIdx)
+        id = rawId.slice(colonIdx + 1)
+      }
+
+      decs.push(
+        Decoration.replace({
+          widget: new AtRefWidget(typeKey, id)
+        }).range(matchFrom, matchTo)
+      )
+    }
+  }
+  return decs
 }
 
 /* ═══════════════════════════════════════════

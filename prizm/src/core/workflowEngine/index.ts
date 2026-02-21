@@ -19,6 +19,7 @@ export { executeLinkedActions } from './linkedActionExecutor'
 export { registerWorkflowTriggerHandlers } from './triggerHandlers'
 export { writeRunMeta, readRunMeta, listRecentRuns } from './runMetaWriter'
 export type { RunMetaData, RunMetaSummary } from './runMetaWriter'
+export { buildRunRefContent } from './runRefContent'
 
 // 工作流定义 — 文件系统存储
 export {

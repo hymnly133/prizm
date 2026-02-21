@@ -16,6 +16,11 @@ export interface TavilySettings {
   searchDepth?: 'basic' | 'advanced' | 'fast' | 'ultra-fast'
 }
 
+/** 内置 Skill 源：SkillsMP 市场（需 API Key，skillsmp.com 获取） */
+export interface SkillsMPSettings {
+  apiKey?: string
+}
+
 /**
  * 文档记忆设置：文档内容通过记忆系统抽取三层记忆（总览 + 原子事实 + 迁移）
  * 替代原 DocumentSummarySettings
@@ -74,6 +79,7 @@ export interface AgentLLMSettings {
 /** 内置工具集合（可扩展） */
 export interface BuiltinToolsSettings {
   tavily?: TavilySettings
+  skillsmp?: SkillsMPSettings
 }
 
 /** 自定义命令全局设置 */

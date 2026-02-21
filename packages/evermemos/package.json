@@ -1,8 +1,8 @@
 {
   "name": "@prizm/evermemos",
   "version": "0.1.0",
-  "description": "EverMemOS core logic ported to TypeScript",
-  "license": "MIT",
+  "description": "EverMemOS 的 TypeScript 移植与修改，原项目 Apache-2.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {

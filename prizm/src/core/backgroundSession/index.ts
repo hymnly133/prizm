@@ -1,5 +1,5 @@
 export { BackgroundSessionManager, bgSessionManager } from './manager'
-export { needsResultGuard, RESULT_GUARD_PROMPT, extractFallbackResult } from './resultGuard'
+export { needsResultGuard, RESULT_GUARD_PROMPT, getResultGuardPrompt, extractFallbackResult } from './resultGuard'
 export { observerRegistry } from './observerRegistry'
 export { buildBgSystemPreamble } from './preambleBuilder'
 export { validateJsonSchema } from './schemaValidation'

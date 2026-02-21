@@ -339,6 +339,33 @@
   text-align: center;
 }
 
+/* ── CodeMirror 内的 @(type:id) 资源引用 chip ── */
+
+.cm-editor .prizm-ref-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-weight: 500;
+  font-family: inherit;
+  line-height: 1.5;
+  white-space: nowrap;
+  vertical-align: baseline;
+  cursor: default;
+  transition: opacity 150ms ease;
+}
+.cm-editor .prizm-ref-chip:hover {
+  opacity: 0.85;
+}
+.cm-editor .prizm-ref-chip__tag {
+  font-size: 0.8em;
+  font-weight: 600;
+  opacity: 0.7;
+  margin-right: 1px;
+}
+
 /* ── Spin animation for status bar ── */
 
 @keyframes spin {

@@ -1,7 +1,7 @@
 /**
  * DefaultRules 单元测试
  *
- * 覆盖：各 PermissionMode 的规则集生成
+ * 覆盖：各 PermissionMode 的规则集生成（复合工具版本）
  */
 
 import { describe, it, expect } from 'vitest'
@@ -12,9 +12,18 @@ describe('getDefaultRules', () => {
     const rules = getDefaultRules('default')
     expect(rules.length).toBeGreaterThan(0)
 
-    const writeRule = rules.find((r) => r.toolPattern === 'prizm_write_file')
-    expect(writeRule).toBeDefined()
-    expect(writeRule!.behavior).toBe('ask')
+    const fileRule = rules.find((r) => r.toolPattern === 'prizm_file')
+    expect(fileRule).toBeDefined()
+    expect(fileRule!.behavior).toBe('ask')
+    expect(fileRule!.actionFilter).toEqual(['write', 'move', 'delete'])
+  })
+
+  it('should include document write rules in default mode', () => {
+    const rules = getDefaultRules('default')
+    const docRule = rules.find((r) => r.toolPattern === 'prizm_document')
+    expect(docRule).toBeDefined()
+    expect(docRule!.behavior).toBe('ask')
+    expect(docRule!.actionFilter).toEqual(['create', 'update', 'delete'])
   })
 
   it('should include terminal rules in default mode', () => {
@@ -22,6 +31,14 @@ describe('getDefaultRules', () => {
     const terminalRule = rules.find((r) => r.toolPattern.includes('terminal'))
     expect(terminalRule).toBeDefined()
     expect(terminalRule!.behavior).toBe('ask')
+  })
+
+  it('should include cron write rules in default mode', () => {
+    const rules = getDefaultRules('default')
+    const cronRule = rules.find((r) => r.toolPattern === 'prizm_cron')
+    expect(cronRule).toBeDefined()
+    expect(cronRule!.behavior).toBe('ask')
+    expect(cronRule!.actionFilter).toEqual(['create', 'delete'])
   })
 
   it('should return deny rules for plan mode', () => {
@@ -34,16 +51,14 @@ describe('getDefaultRules', () => {
     }
   })
 
-  it('should deny write/update/create/delete/terminal in plan mode', () => {
+  it('should deny file write/doc write/terminal/cron in plan mode', () => {
     const rules = getDefaultRules('plan')
     const patterns = rules.map((r) => r.toolPattern)
 
-    expect(patterns).toContain('prizm_write_file')
-    expect(patterns).toContain('prizm_move_file')
-    expect(patterns).toContain('prizm_delete_file')
-    expect(patterns).toContain('prizm_update_document')
-    expect(patterns).toContain('prizm_create_document')
+    expect(patterns).toContain('prizm_file')
+    expect(patterns).toContain('prizm_document')
     expect(patterns).toContain('prizm_terminal_*')
+    expect(patterns).toContain('prizm_cron')
   })
 
   it('should return empty rules for acceptEdits mode', () => {

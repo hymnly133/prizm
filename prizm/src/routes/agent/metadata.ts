@@ -9,8 +9,16 @@ import { buildScopeContextSummary } from '../../llm/scopeContext'
 import { buildSystemPrompt } from '../../llm/systemPrompt'
 import { listRefItems } from '../../llm/scopeItemRegistry'
 import { listAtReferences, registerBuiltinAtReferences } from '../../llm/atReferenceRegistry'
+import { RESOURCE_TYPE_META, isResourceType } from '@prizm/shared'
+import type { ResourceType } from '@prizm/shared'
+import { registerBuiltinResourceRefs, listAllResources } from '../../core/resourceRef'
 import { registerBuiltinSlashCommands } from '../../llm/slashCommands'
-import { loadAllSkillMetadata, getActiveSkills } from '../../llm/skillManager'
+import {
+  loadAllSkillMetadata,
+  getSkillsToInject,
+  getSkillsMetadataForDiscovery
+} from '../../llm/skillManager'
+import type { IAgentAdapter } from '../../adapters/interfaces'
 import { loadRules, listDiscoveredRules } from '../../llm/rulesLoader'
 import { loadActiveRules } from '../../llm/agentRulesManager'
 import { loadAllCustomCommands } from '../../llm/customCommandLoader'
@@ -22,7 +30,7 @@ import { getToolGroupConfig } from '../../settings/agentToolsStore'
 import { listAllUserProfiles, isMemoryEnabled } from '../../llm/EverMemService'
 import { log, getScopeFromQuery } from './_shared'
 
-export function registerMetadataRoutes(router: Router): void {
+export function registerMetadataRoutes(router: Router, adapter?: IAgentAdapter): void {
   // GET /agent/tools/metadata
   router.get('/agent/tools/metadata', async (_req: Request, res: Response) => {
     try {
@@ -63,12 +71,23 @@ export function registerMetadataRoutes(router: Router): void {
           ? req.query.sessionId.trim()
           : undefined
 
-      // 加载 Skills（与 chat.ts 同逻辑）
-      const activeSkills = sessionId ? getActiveSkills(scope, sessionId) : []
+      // 加载 Skills（与 chatCore 一致：仅用 allowedSkills；渐进式与 chatCore 同开关）
+      let allowedSkills: string[] | undefined
+      if (sessionId && adapter?.getSession) {
+        const session = await adapter.getSession(scope, sessionId)
+        allowedSkills = session?.allowedSkills
+      }
+      const useProgressive =
+        process.env.PRIZM_PROGRESSIVE_SKILL_DISCOVERY !== '0'
+      const skillMetadataForDiscovery =
+        useProgressive ? getSkillsMetadataForDiscovery(scope, allowedSkills) : undefined
+      const activeSkillInstructionsList = useProgressive
+        ? undefined
+        : getSkillsToInject(scope, allowedSkills)
+      const skillMetadataForDiscoveryOrUndefined =
+        skillMetadataForDiscovery?.length ? skillMetadataForDiscovery : undefined
       const activeSkillInstructions =
-        activeSkills.length > 0
-          ? activeSkills.map((a) => ({ name: a.skillName, instructions: a.instructions }))
-          : undefined
+        activeSkillInstructionsList?.length ? activeSkillInstructionsList : undefined
 
       // 加载 Rules
       let rulesContent: string | undefined
@@ -88,6 +107,7 @@ export function registerMetadataRoutes(router: Router): void {
         scope,
         sessionId,
         includeScopeContext: true,
+        skillMetadataForDiscovery: skillMetadataForDiscoveryOrUndefined,
         activeSkillInstructions,
         rulesContent,
         customRulesContent
@@ -138,7 +158,7 @@ export function registerMetadataRoutes(router: Router): void {
     }
   })
 
-  // GET /agent/scope-items
+  // GET /agent/scope-items — 返回所有可引用资源（支持 ?types= 过滤）
   router.get('/agent/scope-items', async (req: Request, res: Response) => {
     try {
       const scope = getScopeFromQuery(req)
@@ -146,19 +166,82 @@ export function registerMetadataRoutes(router: Router): void {
         return res.status(403).json({ error: 'scope access denied' })
       }
       registerBuiltinAtReferences()
+      registerBuiltinResourceRefs()
+
+      // 解析 ?types=doc,todo,workflow 过滤参数
+      let filterTypes: ResourceType[] | undefined
+      if (typeof req.query.types === 'string' && req.query.types.trim()) {
+        filterTypes = req.query.types
+          .split(',')
+          .map((t) => t.trim())
+          .filter(isResourceType) as ResourceType[]
+      }
+
+      const limit = typeof req.query.limit === 'string' ? Math.min(Number(req.query.limit) || 50, 200) : 50
+
+      // 使用新的 resourceRefRegistry 获取全量资源
+      const items = await listAllResources(scope, { types: filterTypes, limit })
+
+      // 资源类型元数据
+      const typeMetadata = Object.values(RESOURCE_TYPE_META).map((m) => ({
+        type: m.type,
+        label: m.label,
+        icon: m.icon,
+        listable: m.listable,
+        aliases: m.aliases ?? []
+      }))
+
+      // 兼容旧版 refTypes 字段
       const refTypes = listAtReferences().map((d) => ({
         key: d.key,
         label: d.label,
         aliases: d.aliases ?? []
       }))
-      const items = listRefItems(scope)
-      res.json({ refTypes, items })
+
+      res.json({ refTypes, typeMetadata, items })
     } catch (error) {
       log.error('get scope-items error:', error)
       const { status, body } = toErrorResponse(error)
       res.status(status).json(body)
     }
   })
+
+  /** 合并 registry 命令与已安装 skills 的虚拟 slash 项（去重：registry 优先） */
+  function getMergedSlashCommands(): Array<{
+    name: string
+    aliases: string[]
+    description: string
+    builtin?: boolean
+    mode?: string
+    subCommands?: { name: string; description: string }[]
+    argHints?: string[]
+    category?: string
+  }> {
+    registerBuiltinSlashCommands()
+    const fromRegistry = listSlashCommands().map((c) => ({
+      name: c.name,
+      aliases: c.aliases ?? [],
+      description: c.description,
+      builtin: c.builtin,
+      mode: c.mode ?? 'action',
+      subCommands: c.subCommands,
+      argHints: c.argHints ? c.argHints() : undefined,
+      category: c.category
+    }))
+    const names = new Set(fromRegistry.map((x) => x.name.toLowerCase()))
+    const skills = loadAllSkillMetadata()
+    const fromSkills = skills
+      .filter((s) => !names.has(s.name.toLowerCase()))
+      .map((s) => ({
+        name: s.name,
+        aliases: [] as string[],
+        description: s.description,
+        builtin: false,
+        mode: 'prompt' as const,
+        category: 'skill' as const
+      }))
+    return [...fromRegistry, ...fromSkills]
+  }
 
   // GET /agent/slash-commands
   router.get('/agent/slash-commands', async (req: Request, res: Response) => {
@@ -167,14 +250,7 @@ export function registerMetadataRoutes(router: Router): void {
       if (!hasScopeAccess(req, scope)) {
         return res.status(403).json({ error: 'scope access denied' })
       }
-      registerBuiltinSlashCommands()
-      const commands = listSlashCommands().map((c) => ({
-        name: c.name,
-        aliases: c.aliases ?? [],
-        description: c.description,
-        builtin: c.builtin,
-        mode: c.mode ?? 'action'
-      }))
+      const commands = getMergedSlashCommands()
       res.json({ commands })
     } catch (error) {
       log.error('get slash-commands error:', error)
@@ -186,14 +262,7 @@ export function registerMetadataRoutes(router: Router): void {
   // GET /agent/capabilities
   router.get('/agent/capabilities', async (_req: Request, res: Response) => {
     try {
-      registerBuiltinSlashCommands()
-      const slashCommands = listSlashCommands().map((c) => ({
-        name: c.name,
-        aliases: c.aliases ?? [],
-        description: c.description,
-        builtin: c.builtin,
-        mode: c.mode ?? 'action'
-      }))
+      const slashCommands = getMergedSlashCommands()
       const customCommands = loadAllCustomCommands().map((c) => ({
         id: c.id,
         name: c.name,

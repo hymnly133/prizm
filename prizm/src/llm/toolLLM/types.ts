@@ -13,8 +13,10 @@ export type ToolLLMDomain = 'workflow'
 /** 启动新 Tool LLM 会话的请求 */
 export interface ToolLLMStartRequest {
   domain: ToolLLMDomain
-  /** 用户的需求描述 */
-  intent: string
+  /** 用户的需求描述（可选：待创建会话首条消息时可由会话内已有消息提供） */
+  intent?: string
+  /** 已有工作流管理会话 ID（传入则复用该会话发起首轮，不创建新会话） */
+  sessionId?: string
   /** 已有工作流名称（编辑模式） */
   workflowName?: string
   /** 已有工作流 YAML 内容（编辑模式自动注入） */

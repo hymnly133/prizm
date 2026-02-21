@@ -1,15 +1,12 @@
 /**
  * useCollabLayout — manages the session-first collaboration page layout.
  *
- * Main area always shows Session chat.
- * Right panel can be opened/closed with Document / Task / Workflow tabs.
- * Split resize is handled via pointer events on the divider.
+ * Simplified: only tracks right panel open/close state and split percentage.
+ * Tab state (which tab, which entity) is now managed by collabTabStore.
  */
 import { useState, useCallback, useRef, useEffect } from 'react'
-import type { RightPanelTab, CollabLayoutState } from '../components/collaboration/collabTypes'
 
 const STORAGE_KEY_RIGHT_OPEN = 'prizm-collab-right-open'
-const STORAGE_KEY_RIGHT_TAB = 'prizm-collab-right-tab'
 const STORAGE_KEY_SPLIT_PCT = 'prizm-collab-split-pct'
 
 function loadBool(key: string, fallback: boolean): boolean {
@@ -40,79 +37,45 @@ function persist(key: string, value: string) {
   }
 }
 
-const VALID_TABS = new Set<string>(['document', 'task', 'workflow'])
-
-function parseTab(raw: string, fallback: RightPanelTab): RightPanelTab {
-  return VALID_TABS.has(raw) ? (raw as RightPanelTab) : fallback
+export interface CollabLayoutResult {
+  rightPanelOpen: boolean
+  splitPct: number
+  splitContainerRef: React.RefObject<HTMLDivElement | null>
+  handleSplitPointerDown: (e: React.PointerEvent) => void
+  openRightPanel(): void
+  closeRightPanel(): void
+  toggleRightPanel(): void
 }
 
-function loadInitial(): CollabLayoutState {
-  return {
-    rightPanelOpen: loadBool(STORAGE_KEY_RIGHT_OPEN, false),
-    rightPanelTab: parseTab(localStorage.getItem(STORAGE_KEY_RIGHT_TAB) ?? '', 'document'),
-    rightPanelEntityId: null,
-    splitPct: loadNumber(STORAGE_KEY_SPLIT_PCT, 55, 20, 80)
-  }
-}
+export function useCollabLayout(): CollabLayoutResult {
+  const [rightPanelOpen, setRightPanelOpen] = useState(() => loadBool(STORAGE_KEY_RIGHT_OPEN, false))
+  const [splitPct, _setSplitPct] = useState(() => loadNumber(STORAGE_KEY_SPLIT_PCT, 55, 20, 80))
 
-export function useCollabLayout() {
-  const [state, setState] = useState<CollabLayoutState>(loadInitial)
-
-  const openRightPanel = useCallback((tab: RightPanelTab, entityId?: string) => {
-    setState((prev) => {
-      persist(STORAGE_KEY_RIGHT_OPEN, 'true')
-      persist(STORAGE_KEY_RIGHT_TAB, tab)
-      return {
-        ...prev,
-        rightPanelOpen: true,
-        rightPanelTab: tab,
-        rightPanelEntityId: entityId ?? null
-      }
-    })
+  const openRightPanel = useCallback(() => {
+    setRightPanelOpen(true)
+    persist(STORAGE_KEY_RIGHT_OPEN, 'true')
   }, [])
 
   const closeRightPanel = useCallback(() => {
-    setState((prev) => {
-      persist(STORAGE_KEY_RIGHT_OPEN, 'false')
-      return { ...prev, rightPanelOpen: false, rightPanelEntityId: null }
-    })
+    setRightPanelOpen(false)
+    persist(STORAGE_KEY_RIGHT_OPEN, 'false')
   }, [])
 
-  const toggleRightPanel = useCallback((tab?: RightPanelTab) => {
-    setState((prev) => {
-      if (prev.rightPanelOpen && (!tab || tab === prev.rightPanelTab)) {
-        persist(STORAGE_KEY_RIGHT_OPEN, 'false')
-        return { ...prev, rightPanelOpen: false, rightPanelEntityId: null }
-      }
-      const nextTab = tab ?? prev.rightPanelTab
-      persist(STORAGE_KEY_RIGHT_OPEN, 'true')
-      persist(STORAGE_KEY_RIGHT_TAB, nextTab)
-      return { ...prev, rightPanelOpen: true, rightPanelTab: nextTab }
+  const toggleRightPanel = useCallback(() => {
+    setRightPanelOpen((prev) => {
+      const next = !prev
+      persist(STORAGE_KEY_RIGHT_OPEN, String(next))
+      return next
     })
-  }, [])
-
-  const switchRightTab = useCallback((tab: RightPanelTab, entityId?: string) => {
-    setState((prev) => {
-      persist(STORAGE_KEY_RIGHT_TAB, tab)
-      return {
-        ...prev,
-        rightPanelTab: tab,
-        rightPanelEntityId: entityId ?? null
-      }
-    })
-  }, [])
-
-  const clearRightEntityId = useCallback(() => {
-    setState((prev) => ({ ...prev, rightPanelEntityId: null }))
   }, [])
 
   const setSplitPct = useCallback((pct: number) => {
-    setState((prev) => ({ ...prev, splitPct: pct }))
+    _setSplitPct(pct)
   }, [])
 
   const persistSplitPct = useCallback(() => {
-    setState((prev) => {
-      persist(STORAGE_KEY_SPLIT_PCT, String(prev.splitPct))
+    _setSplitPct((prev) => {
+      persist(STORAGE_KEY_SPLIT_PCT, String(prev))
       return prev
     })
   }, [])
@@ -160,15 +123,12 @@ export function useCollabLayout() {
   }, [setSplitPct, persistSplitPct])
 
   return {
-    ...state,
+    rightPanelOpen,
+    splitPct,
+    splitContainerRef,
+    handleSplitPointerDown,
     openRightPanel,
     closeRightPanel,
-    toggleRightPanel,
-    switchRightTab,
-    clearRightEntityId,
-    setSplitPct,
-    persistSplitPct,
-    splitContainerRef,
-    handleSplitPointerDown
+    toggleRightPanel
   }
 }

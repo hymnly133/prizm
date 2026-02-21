@@ -3,6 +3,7 @@ import type {
   McpServerConfig,
   McpTool,
   TavilySettings,
+  SkillsMPSettings,
   AgentToolsSettings,
   AvailableModel,
   ShellInfo,
@@ -29,6 +30,9 @@ declare module '../client' {
     updateTavilySettings(
       update: Partial<TavilySettings>
     ): Promise<{ tavily: TavilySettings | null }>
+    updateSkillsMPSettings(
+      update: Partial<SkillsMPSettings>
+    ): Promise<{ skillsmp: SkillsMPSettings | null }>
     listCustomCommands(): Promise<{ commands: unknown[] }>
     createCustomCommand(cmd: {
       id: string
@@ -93,6 +97,61 @@ declare module '../client' {
         installed?: boolean
       }>
     }>
+    getCollectionSkills(
+      owner: string,
+      repo: string,
+      path?: string
+    ): Promise<{
+      skills: Array<{
+        name: string
+        description: string
+        owner: string
+        repo: string
+        skillPath: string
+        license?: string
+        source: string
+        htmlUrl?: string
+        installed?: boolean
+      }>
+    }>
+    searchSkillKitRegistry(
+      query: string,
+      limit?: number
+    ): Promise<{
+      items: Array<{
+        name: string
+        description: string
+        owner: string
+        repo: string
+        skillPath: string
+        license?: string
+        source: string
+        htmlUrl?: string
+        installed?: boolean
+        score?: number
+      }>
+      totalCount: number
+      query: string
+    }>
+    searchSkillsMPRegistry(
+      query: string,
+      limit?: number,
+      page?: number
+    ): Promise<{
+      items: Array<{
+        name: string
+        description: string
+        owner: string
+        repo: string
+        skillPath: string
+        license?: string
+        source: string
+        htmlUrl?: string
+        installed?: boolean
+      }>
+      totalCount: number
+      query: string
+    }>
     previewRegistrySkill(
       owner: string,
       repo: string,
@@ -101,7 +160,8 @@ declare module '../client' {
     installRegistrySkill(
       owner: string,
       repo: string,
-      skillPath: string
+      skillPath: string,
+      source?: 'github' | 'curated' | 'skillkit' | 'skillsmp'
     ): Promise<unknown>
     importMcpConfig(
       source: 'cursor' | 'claude-code' | 'vscode',
@@ -186,6 +246,19 @@ PrizmClient.prototype.updateTavilySettings = async function (
     method: 'PUT',
     body: JSON.stringify(update)
   })
+}
+
+PrizmClient.prototype.updateSkillsMPSettings = async function (
+  this: PrizmClient,
+  update: Partial<SkillsMPSettings>
+) {
+  return this.request<{ skillsmp: SkillsMPSettings | null }>(
+    '/settings/agent-tools/builtin/skillsmp',
+    {
+      method: 'PUT',
+      body: JSON.stringify(update)
+    }
+  )
 }
 
 PrizmClient.prototype.listCustomCommands = async function (this: PrizmClient) {
@@ -303,6 +376,39 @@ PrizmClient.prototype.getFeaturedSkills = async function (this: PrizmClient) {
   return this.request('/skills/registry/featured')
 }
 
+PrizmClient.prototype.getCollectionSkills = async function (
+  this: PrizmClient,
+  owner: string,
+  repo: string,
+  path?: string
+) {
+  const params = new URLSearchParams({ owner, repo })
+  if (path) params.set('path', path)
+  return this.request(`/skills/registry/collection?${params.toString()}`)
+}
+
+PrizmClient.prototype.searchSkillKitRegistry = async function (
+  this: PrizmClient,
+  query: string,
+  limit?: number
+) {
+  const params = new URLSearchParams({ q: query })
+  if (limit != null) params.set('limit', String(limit))
+  return this.request(`/skills/registry/skillkit/search?${params.toString()}`)
+}
+
+PrizmClient.prototype.searchSkillsMPRegistry = async function (
+  this: PrizmClient,
+  query: string,
+  limit?: number,
+  page?: number
+) {
+  const params = new URLSearchParams({ q: query })
+  if (limit != null) params.set('limit', String(limit))
+  if (page != null) params.set('page', String(page))
+  return this.request(`/skills/registry/skillsmp/search?${params.toString()}`)
+}
+
 PrizmClient.prototype.previewRegistrySkill = async function (
   this: PrizmClient,
   owner: string,
@@ -317,11 +423,12 @@ PrizmClient.prototype.installRegistrySkill = async function (
   this: PrizmClient,
   owner: string,
   repo: string,
-  skillPath: string
+  skillPath: string,
+  source?: 'github' | 'curated' | 'skillkit' | 'skillsmp'
 ) {
   return this.request('/skills/registry/install', {
     method: 'POST',
-    body: JSON.stringify({ owner, repo, skillPath })
+    body: JSON.stringify({ owner, repo, skillPath, ...(source != null ? { source } : {}) })
   })
 }
 

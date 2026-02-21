@@ -5,6 +5,7 @@
  * 保持原有接口不变，消费者无需修改。
  */
 import { useMemo, useCallback } from 'react'
+import { isChatListSession } from '@prizm/shared'
 import { useScopeDataStore } from '../store/scopeDataStore'
 import { useAgentSessionStore } from '../store/agentSessionStore'
 
@@ -69,7 +70,7 @@ export function useScopeStats(): ScopeStatsResult {
 
   const stats = useMemo<ScopeStats>(
     () => ({
-      sessionsCount: sessions.length,
+      sessionsCount: sessions.filter((s) => isChatListSession(s)).length,
       documentsCount: documents.length,
       userMemoryCount: memoryCounts.userCount,
       scopeMemoryCount: memoryCounts.scopeCount,
@@ -79,7 +80,7 @@ export function useScopeStats(): ScopeStatsResult {
       memoryEnabled: memoryCounts.enabled,
       memoryByType: parseByType(memoryCounts.byType)
     }),
-    [sessions.length, documents.length, memoryCounts]
+    [sessions, documents.length, memoryCounts]
   )
 
   const refresh = useCallback(() => {

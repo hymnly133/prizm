@@ -10,7 +10,8 @@ import type {
   WorkflowUploadResult,
   WorkflowResolvedPath
 } from '@prizm/client-core'
-import type { WorkflowRun, WorkflowDefRecord, WorkflowStepResult } from '@prizm/shared'
+import { isWorkflowManagementSession } from '@prizm/shared'
+import type { WorkflowRun, WorkflowDefRecord, WorkflowStepResult, EnrichedSession } from '@prizm/shared'
 import { subscribeSyncEvents, type SyncEventPayload } from '../events/syncEventEmitter'
 import { createClientLogger } from '@prizm/client-core'
 
@@ -22,14 +23,18 @@ export interface WorkflowRunPayload {
   args?: Record<string, unknown>
 }
 
+
 export interface WorkflowStoreState {
   runs: WorkflowRun[]
   defs: WorkflowDefRecord[]
+  /** 工作流管理会话（待创建 + 已绑定） */
+  managementSessions: EnrichedSession[]
   loading: boolean
   currentScope: string | null
 
   refreshRuns(): Promise<void>
   refreshDefs(): Promise<void>
+  refreshManagementSessions(): Promise<void>
   getRunDetail(runId: string): Promise<WorkflowRun | null>
   resumeWorkflow(resumeToken: string, approved: boolean): Promise<void>
   cancelRun(runId: string): Promise<void>
@@ -38,6 +43,10 @@ export interface WorkflowStoreState {
   /** Alias for registerDef — upserts by name+scope */
   updateDef(name: string, yaml: string, description?: string): Promise<WorkflowDefRecord | null>
   deleteDef(defId: string): Promise<void>
+  /** 仅创建「待创建」工作流管理会话，返回 sessionId */
+  createPendingManagementSession(initialPrompt?: string): Promise<string | null>
+  /** 为已有工作流新建工作流管理会话（幂等），返回 sessionId */
+  createManagementSession(defId: string): Promise<string | null>
 
   getWorkspaceFiles(workflowName: string): Promise<WorkflowFileEntry[]>
   getRunWorkspaceFiles(runId: string): Promise<WorkflowFileEntry[]>
@@ -64,6 +73,7 @@ let _http: PrizmClient | null = null
 export const useWorkflowStore = create<WorkflowStoreState>()((set, get) => ({
   runs: [],
   defs: [],
+  managementSessions: [],
   loading: false,
   currentScope: null,
 
@@ -89,6 +99,18 @@ export const useWorkflowStore = create<WorkflowStoreState>()((set, get) => ({
       set({ defs })
     } catch (err) {
       log.warn('Refresh workflow defs failed:', err)
+    }
+  },
+
+  async refreshManagementSessions() {
+    const scope = get().currentScope
+    if (!_http || !scope) return
+    try {
+      const list = await _http.listAgentSessions(scope)
+      set({ managementSessions: list.filter((s) => isWorkflowManagementSession(s)) })
+    } catch (err) {
+      log.warn('Refresh workflow management sessions failed:', err)
+      set({ managementSessions: [] })
     }
   },
 
@@ -158,6 +180,33 @@ export const useWorkflowStore = create<WorkflowStoreState>()((set, get) => ({
       void get().refreshDefs()
     } catch (err) {
       log.warn('Delete workflow def failed:', err)
+    }
+  },
+
+  async createPendingManagementSession(initialPrompt?: string): Promise<string | null> {
+    const scope = get().currentScope
+    if (!_http || !scope) return null
+    try {
+      const { sessionId } = await _http.createPendingWorkflowManagementSession(initialPrompt, scope)
+      void get().refreshManagementSessions()
+      return sessionId
+    } catch (err) {
+      log.warn('Create pending workflow management session failed:', err)
+      return null
+    }
+  },
+
+  async createManagementSession(defId: string): Promise<string | null> {
+    const scope = get().currentScope
+    if (!_http || !scope) return null
+    try {
+      const { sessionId } = await _http.createWorkflowManagementSession(defId, scope)
+      void get().refreshDefs()
+      void get().refreshManagementSessions()
+      return sessionId
+    } catch (err) {
+      log.warn('Create workflow management session failed:', err)
+      return null
     }
   },
 
@@ -234,15 +283,16 @@ export const useWorkflowStore = create<WorkflowStoreState>()((set, get) => ({
     const prev = get().currentScope
     _http = http
     if (prev !== scope) {
-      set({ currentScope: scope, runs: [], defs: [] })
+      set({ currentScope: scope, runs: [], defs: [], managementSessions: [] })
       void get().refreshRuns()
       void get().refreshDefs()
+      void get().refreshManagementSessions()
     }
   },
 
   reset() {
     _http = null
-    set({ currentScope: null, runs: [], defs: [], loading: false })
+    set({ currentScope: null, runs: [], defs: [], managementSessions: [], loading: false })
   }
 }))
 
@@ -306,6 +356,10 @@ export function subscribeWorkflowEvents(): () => void {
       case 'workflow:completed':
       case 'workflow:failed':
         scheduleFlush()
+        break
+      case 'workflow:def.registered':
+      case 'workflow:def.deleted':
+        void store.refreshDefs()
         break
     }
   })

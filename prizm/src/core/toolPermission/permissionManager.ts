@@ -2,10 +2,11 @@
  * Permission Manager — 统一权限引擎
  *
  * 作为 PreToolUse hook 注册到 HookRegistry，根据 PermissionMode 和规则链决策。
+ * 支持复合工具的 actionFilter 匹配。
  */
 
 import { createLogger } from '../../logger'
-import { matchToolPattern, extractToolPaths } from '../../utils/toolMatcher'
+import { matchToolPattern, extractToolAction, extractInteractDetails } from '../../utils/toolMatcher'
 import type { PermissionMode, PermissionRule, PermissionResult } from './types'
 import { getDefaultRules } from './defaultRules'
 import type { PreToolUsePayload, PreToolUseDecision } from '../agentHooks/types'
@@ -51,6 +52,16 @@ export function addSessionRules(sessionId: string, rules: PermissionRule[]): voi
   sessionCustomRules.set(sessionId, [...existing, ...rules])
 }
 
+/** 检查规则是否匹配（工具名 + actionFilter） */
+function matchesRule(rule: PermissionRule, toolName: string, args: Record<string, unknown>): boolean {
+  if (!matchToolPattern(rule.toolPattern, toolName)) return false
+  if (rule.actionFilter && rule.actionFilter.length > 0) {
+    const action = extractToolAction(args)
+    return rule.actionFilter.includes(action)
+  }
+  return true
+}
+
 /**
  * 检查工具权限
  */
@@ -72,18 +83,21 @@ export function checkPermission(
   ].sort((a, b) => a.priority - b.priority)
 
   for (const rule of rules) {
-    if (!matchToolPattern(rule.toolPattern, toolName)) continue
+    if (!matchesRule(rule, toolName, args)) continue
 
     if (rule.behavior === 'deny') {
       return { allowed: false, denyMessage: rule.denyMessage ?? `Denied by rule ${rule.id}` }
     }
     if (rule.behavior === 'ask') {
-      const paths = extractToolPaths(args)
-      const uncoveredPaths = paths.filter((p) => !grantedPaths.includes(p))
-      if (uncoveredPaths.length > 0) {
-        return { allowed: false, interactPaths: uncoveredPaths }
+      const details = extractInteractDetails(toolName, args)
+      if (details.kind === 'file_access') {
+        const uncoveredPaths = details.paths.filter((p) => !grantedPaths.includes(p))
+        if (uncoveredPaths.length > 0) {
+          return { allowed: false, interactDetails: { kind: 'file_access', paths: uncoveredPaths } }
+        }
+        return { allowed: true }
       }
-      return { allowed: true }
+      return { allowed: false, interactDetails: details }
     }
     if (rule.behavior === 'allow') {
       return { allowed: true }
@@ -109,8 +123,8 @@ export function registerPermissionHook(): void {
         payload.grantedPaths
       )
       if (!result.allowed) {
-        if (result.interactPaths?.length) {
-          return { decision: 'ask', interactPaths: result.interactPaths }
+        if (result.interactDetails) {
+          return { decision: 'ask', interactDetails: result.interactDetails }
         }
         return { decision: 'deny', denyMessage: result.denyMessage }
       }

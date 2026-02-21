@@ -16,11 +16,13 @@ import {
   getWorkflowsDir,
   getWorkflowDefPath,
   getWorkflowDefMetaPath,
+  getWorkflowDefVersionsDir,
+  getWorkflowDefVersionPath,
   ensureWorkflowWorkspace,
   workflowDirName
 } from '../PathProviderCore'
 import { scopeStore } from '../ScopeStore'
-import type { WorkflowDefRecord } from '@prizm/shared'
+import type { WorkflowDefRecord, WorkflowDefVersionItem } from '@prizm/shared'
 
 const log = createLogger('WorkflowDefStore')
 
@@ -28,8 +30,10 @@ interface DefMeta {
   id: string
   createdAt: number
   updatedAt: number
-  /** 关联的 Tool LLM 对话会话 ID（AI 创建/编辑时写入） */
-  toolLLMSessionId?: string
+  /** 关联的工作流管理会话 ID（AI 创建/编辑时写入） */
+  workflowManagementSessionId?: string
+  /** 工作流描述/使用说明文档 ID（管理会话内至多一份指导文档可标记为此） */
+  descriptionDocumentId?: string
 }
 
 // ─── 内部辅助 ───
@@ -55,7 +59,14 @@ function migrateWorkflowDir(scopeRoot: string, oldDirName: string, newDirName: s
 function readMeta(metaPath: string): DefMeta | null {
   try {
     if (!fs.existsSync(metaPath)) return null
-    return JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as DefMeta
+    const raw = JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as Record<string, unknown>
+    return {
+      id: raw.id,
+      createdAt: raw.createdAt,
+      updatedAt: raw.updatedAt,
+      workflowManagementSessionId: raw.workflowManagementSessionId ?? raw.toolLLMSessionId,
+      descriptionDocumentId: raw.descriptionDocumentId
+    } as DefMeta
   } catch {
     return null
   }
@@ -118,7 +129,9 @@ function readDefFromDisk(
       description: extracted.description,
       triggersJson: extracted.triggersJson,
       createdAt,
-      updatedAt
+      updatedAt,
+      workflowManagementSessionId: meta?.workflowManagementSessionId,
+      descriptionDocumentId: meta?.descriptionDocumentId
     }
   } catch (err) {
     log.warn('Failed to read workflow def:', dirName, err)
@@ -148,12 +161,32 @@ export function registerDef(
   const defPath = getWorkflowDefPath(scopeRoot, name)
   const metaPath = getWorkflowDefMetaPath(scopeRoot, name)
 
+  // 版本管理：更新前将当前内容保存为版本快照（仅当存在且与新内容不同时）
+  if (fs.existsSync(defPath)) {
+    try {
+      const currentYaml = fs.readFileSync(defPath, 'utf-8')
+      if (currentYaml.trim() && currentYaml.trim() !== yamlContent.trim()) {
+        const versionsDir = getWorkflowDefVersionsDir(scopeRoot, name)
+        if (!fs.existsSync(versionsDir)) fs.mkdirSync(versionsDir, { recursive: true })
+        const versionId = String(Date.now())
+        const versionPath = getWorkflowDefVersionPath(scopeRoot, name, versionId)
+        fs.writeFileSync(versionPath, currentYaml, 'utf-8')
+        log.info('Saved workflow def version:', name, 'versionId:', versionId)
+      }
+    } catch (err) {
+      log.warn('Failed to save workflow def version snapshot:', name, err)
+    }
+  }
+
   const existingMeta = readMeta(metaPath)
   const now = Date.now()
   const meta: DefMeta = {
     id: existingMeta?.id ?? genUniqueId(),
     createdAt: existingMeta?.createdAt ?? now,
-    updatedAt: now
+    updatedAt: now,
+    // 保留与定义内容无关的 meta 字段，避免 upsert 时丢失（如管理会话更新工作流 YAML 后仍保持双向引用）
+    workflowManagementSessionId: existingMeta?.workflowManagementSessionId,
+    descriptionDocumentId: existingMeta?.descriptionDocumentId
   }
 
   fs.writeFileSync(defPath, yamlContent, 'utf-8')
@@ -169,7 +202,9 @@ export function registerDef(
     description: description ?? extracted.description,
     triggersJson: triggersJson ?? extracted.triggersJson,
     createdAt: meta.createdAt,
-    updatedAt: meta.updatedAt
+    updatedAt: meta.updatedAt,
+    workflowManagementSessionId: meta.workflowManagementSessionId,
+    descriptionDocumentId: meta.descriptionDocumentId
   }
 }
 
@@ -247,7 +282,7 @@ export function listDefs(scope?: string): WorkflowDefRecord[] {
 }
 
 /**
- * 获取工作流的 DefMeta 元数据
+ * 获取工作流的 DefMeta 元数据（按 name+scope 定位，name 会经 workflowDirName 转目录名）
  */
 export function getDefMeta(name: string, scope: string): DefMeta | null {
   const scopeRoot = scopeStore.getScopeRootPath(scope)
@@ -257,12 +292,96 @@ export function getDefMeta(name: string, scope: string): DefMeta | null {
 }
 
 /**
- * 更新工作流的 DefMeta 部分字段（merge 语义）
+ * 按定义 ID 查找 DefMeta（避免 defRecord.name 与磁盘目录名不一致导致读错 meta）
+ */
+export function getDefMetaByDefId(id: string): DefMeta | null {
+  for (const scope of scopeStore.getAllScopes()) {
+    const scopeRoot = scopeStore.getScopeRootPath(scope)
+    const workflowsDir = getWorkflowsDir(scopeRoot)
+    if (!fs.existsSync(workflowsDir)) continue
+    try {
+      const dirs = fs.readdirSync(workflowsDir, { withFileTypes: true })
+      for (const d of dirs) {
+        if (!d.isDirectory()) continue
+        const metaPath = getWorkflowDefMetaPath(scopeRoot, d.name)
+        const meta = readMeta(metaPath)
+        if (meta?.id === id) return meta
+      }
+    } catch {
+      /* skip */
+    }
+  }
+  return null
+}
+
+/**
+ * 按定义 ID 更新 DefMeta（保证更新的是该 def 实际对应的 meta 文件，保持双向引用一致）
+ */
+export function updateDefMetaByDefId(
+  id: string,
+  patch: Partial<Pick<DefMeta, 'workflowManagementSessionId' | 'descriptionDocumentId'>>
+): boolean {
+  for (const scope of scopeStore.getAllScopes()) {
+    const scopeRoot = scopeStore.getScopeRootPath(scope)
+    const workflowsDir = getWorkflowsDir(scopeRoot)
+    if (!fs.existsSync(workflowsDir)) continue
+    try {
+      const dirs = fs.readdirSync(workflowsDir, { withFileTypes: true })
+      for (const d of dirs) {
+        if (!d.isDirectory()) continue
+        const metaPath = getWorkflowDefMetaPath(scopeRoot, d.name)
+        const existing = readMeta(metaPath)
+        if (existing?.id !== id) continue
+        const updated: DefMeta = { ...existing, ...patch, updatedAt: Date.now() }
+        writeMeta(metaPath, updated)
+        return true
+      }
+    } catch {
+      /* skip */
+    }
+  }
+  return false
+}
+
+/**
+ * 删除会话时清除所有指向该 sessionId 的 def meta 引用，避免死数据（工作流指向已删除的管理会话）
+ */
+export function clearDefMetaSessionRef(sessionId: string): number {
+  let cleared = 0
+  for (const scope of scopeStore.getAllScopes()) {
+    const scopeRoot = scopeStore.getScopeRootPath(scope)
+    const workflowsDir = getWorkflowsDir(scopeRoot)
+    if (!fs.existsSync(workflowsDir)) continue
+    try {
+      const dirs = fs.readdirSync(workflowsDir, { withFileTypes: true })
+      for (const d of dirs) {
+        if (!d.isDirectory()) continue
+        const metaPath = getWorkflowDefMetaPath(scopeRoot, d.name)
+        const existing = readMeta(metaPath)
+        if (existing?.workflowManagementSessionId !== sessionId) continue
+        const updated: DefMeta = {
+          ...existing,
+          workflowManagementSessionId: undefined,
+          updatedAt: Date.now()
+        }
+        writeMeta(metaPath, updated)
+        cleared++
+        log.info('Cleared workflow def meta session ref:', d.name, 'was', sessionId)
+      }
+    } catch {
+      /* skip */
+    }
+  }
+  return cleared
+}
+
+/**
+ * 更新工作流的 DefMeta 部分字段（merge 语义，按 name+scope）
  */
 export function updateDefMeta(
   name: string,
   scope: string,
-  patch: Partial<Pick<DefMeta, 'toolLLMSessionId'>>
+  patch: Partial<Pick<DefMeta, 'workflowManagementSessionId' | 'descriptionDocumentId'>>
 ): void {
   const scopeRoot = scopeStore.getScopeRootPath(scope)
   const dirName = workflowDirName(name)
@@ -274,6 +393,73 @@ export function updateDefMeta(
   }
   const updated: DefMeta = { ...existing, ...patch, updatedAt: Date.now() }
   writeMeta(metaPath, updated)
+}
+
+// ─── 版本管理（无记忆功能，仅快照与回溯） ───
+
+/**
+ * 列出某工作流定义的版本列表（按时间倒序，最新在前）
+ */
+export function listDefVersions(defId: string): WorkflowDefVersionItem[] {
+  const def = getDefById(defId)
+  if (!def) return []
+
+  const scopeRoot = scopeStore.getScopeRootPath(def.scope)
+  const versionsDir = getWorkflowDefVersionsDir(scopeRoot, def.name)
+  if (!fs.existsSync(versionsDir)) return []
+
+  try {
+    const files = fs.readdirSync(versionsDir, { withFileTypes: true })
+    const items: WorkflowDefVersionItem[] = []
+    for (const f of files) {
+      if (!f.isFile() || !f.name.endsWith('.yaml')) continue
+      const id = f.name.slice(0, -5)
+      const num = parseInt(id, 10)
+      const createdAt = Number.isFinite(num)
+        ? num
+        : fs.statSync(path.join(versionsDir, f.name)).mtimeMs
+      items.push({ id, createdAt })
+    }
+    items.sort((a, b) => b.createdAt - a.createdAt)
+    return items
+  } catch (err) {
+    log.warn('Failed to list workflow def versions:', defId, err)
+    return []
+  }
+}
+
+/**
+ * 获取指定版本快照的 YAML 内容
+ */
+export function getDefVersionContent(defId: string, versionId: string): string | null {
+  const def = getDefById(defId)
+  if (!def) return null
+
+  const versionPath = getWorkflowDefVersionPath(
+    scopeStore.getScopeRootPath(def.scope),
+    def.name,
+    versionId
+  )
+  if (!fs.existsSync(versionPath)) return null
+
+  try {
+    return fs.readFileSync(versionPath, 'utf-8')
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 回溯到指定版本：将该版本的 YAML 写回当前定义（会触发一次版本快照，当前内容被保存）
+ */
+export function rollbackDefToVersion(defId: string, versionId: string): WorkflowDefRecord | null {
+  const def = getDefById(defId)
+  if (!def) return null
+
+  const yamlContent = getDefVersionContent(defId, versionId)
+  if (!yamlContent) return null
+
+  return registerDef(def.name, def.scope, yamlContent, def.description, def.triggersJson)
 }
 
 export function deleteDef(id: string): boolean {
@@ -290,14 +476,15 @@ export function deleteDef(id: string): boolean {
         const meta = readMeta(metaPath)
         if (meta?.id !== id) continue
 
-        const defPath = getWorkflowDefPath(scopeRoot, d.name)
-        if (fs.existsSync(defPath)) fs.unlinkSync(defPath)
-        if (fs.existsSync(metaPath)) fs.unlinkSync(metaPath)
-        log.info('Deleted workflow def:', d.name, 'scope:', scope)
+        const workflowDir = path.join(workflowsDir, d.name)
+        if (fs.existsSync(workflowDir)) {
+          fs.rmSync(workflowDir, { recursive: true, force: true })
+        }
+        log.info('Deleted workflow def (dir removed):', d.name, 'scope:', scope)
         return true
       }
-    } catch {
-      /* skip */
+    } catch (err) {
+      log.warn('deleteDef failed for scope:', scope, err)
     }
   }
   return false

@@ -5,6 +5,10 @@
  * 参考 v0 TodoManager、Notion update-page、Replit str_replace_editor 模式。
  */
 
+import {
+  WORKFLOW_MANAGEMENT_TOOL_CREATE_WORKFLOW,
+  WORKFLOW_MANAGEMENT_TOOL_UPDATE_WORKFLOW
+} from '@prizm/shared'
 import type { LLMTool } from '../../adapters/interfaces'
 
 /** 工具参数属性定义（支持 array 类型的 items） */
@@ -41,8 +45,8 @@ export function tool(
 export const WORKSPACE_PARAM: ToolPropertyDef = {
   type: 'string',
   description:
-    '"main"（默认）/ "session"（临时工作区）/ "workflow"（工作流工作区，仅在工作流上下文中有效）',
-  enum: ['main', 'session', 'workflow']
+    '"main"（默认）/ "session"（临时工作区）/ "run"（运行工作区，步骤间数据传递）/ "workflow"（工作流工作区，跨 run 共享）',
+  enum: ['main', 'session', 'run', 'workflow']
 }
 
 /**
@@ -281,10 +285,13 @@ export function getBuiltinTools(): LLMTool[] {
     // ── 后台任务工具 ──
     tool(
       'prizm_set_result',
-      '提交当前后台会话的执行结果。在工作流中，output 会自动传递给下一步骤作为输入。仅在后台任务/工作流会话中有效。',
+      '提交当前后台会话的执行结果。请先确认要提交的结果内容无误后再调用；仅填入本步要求产出的结果内容，不要填入总结、过渡语或描述性文字。调用后对话即结束。在工作流中 output 会传递给下一步骤。仅在后台任务/工作流会话中有效。',
       {
         properties: {
-          output: { type: 'string', description: '执行结果内容（文本/Markdown）' },
+          output: {
+            type: 'string',
+            description: '本步产出的结果内容（仅结果本身，勿含总结、过渡语或描述性文字；可为文本/Markdown）'
+          },
           status: {
             type: 'string',
             description: '结果状态',
@@ -423,31 +430,25 @@ export function getBuiltinTools(): LLMTool[] {
       }
     ),
 
-    // ── 工作流构建器（Tool LLM 桥接） ──
+    // ── 导航卡片（通用会话中引导到工作流创建等） ──
     tool(
-      'prizm_workflow_builder',
-      '启动工作流构建器。创建新工作流用 build，修改已有工作流用 edit。结果通过内联卡片展示给用户，用户可在卡片内多轮微调。',
+      'prizm_navigate',
+      '在通用对话中引导用户跳转到专项会话（如工作流创建）。不执行实际操作，仅返回导航参数供前端展示卡片。当用户需求涉及创建/设计工作流且较复杂时使用，并给出简短引导语。',
       {
         properties: {
-          action: {
+          target: {
             type: 'string',
-            description: '操作类型',
-            enum: ['build', 'edit']
+            description: '导航目标',
+            enum: ['workflow-create']
           },
-          intent: {
+          initialPrompt: {
             type: 'string',
-            description: '用户的需求描述（创建什么工作流/如何修改）'
+            description: '从当前对话提炼的初步需求摘要，将作为工作流创建会话的首条提示'
           },
-          workflow_name: {
-            type: 'string',
-            description: '工作流名称（edit 时必需，指定要修改的已有工作流）'
-          },
-          context: {
-            type: 'string',
-            description: '来自当前对话的相关上下文信息'
-          }
+          title: { type: 'string', description: '卡片标题' },
+          description: { type: 'string', description: '卡片描述' }
         },
-        required: ['action', 'intent']
+        required: ['target']
       }
     ),
 
@@ -464,13 +465,14 @@ export function getBuiltinTools(): LLMTool[] {
           },
           workflow_name: {
             type: 'string',
-            description: '工作流名称 (run/get_def: 已注册工作流名/register: 新定义名)'
+            description:
+              '工作流名称。run/get_def: 已注册工作流名；register: 新定义名。list 时可选：传入则只列该工作流的 run；在工作流管理会话中不传则默认列出当前绑定工作流的 run。'
           },
           def_id: { type: 'string', description: '工作流定义 ID (get_def)' },
           yaml: {
             type: 'string',
             description:
-              '工作流 YAML 定义。顶层: name, steps[], description?, args?, outputs?, triggers?, config?({errorStrategy,workspaceMode,maxTotalTimeoutMs,notifyOnComplete,notifyOnFail})。每个 step 必须含 type(agent/approve/transform)，id 可省略。agent 需 prompt，approve 需 approvePrompt，transform 需 transform 表达式。step 可选: description, input, condition, model, timeoutMs, sessionConfig({thinking,skills,allowedTools,outputSchema}), retryConfig({maxRetries,retryDelayMs}), linkedActions。input 省略时自动继承上一步输出（隐式管道）；显式引用: $prev.output 或 $stepId.output'
+              '工作流 YAML 定义。顶层: name, steps[], description?, args?, outputs?, triggers?, config?。step 必须含 type(agent/approve/transform)；agent 需 prompt，approve 需 approvePrompt，transform 需 transform。step 可选: description, input, condition, model, timeoutMs, sessionConfig, retryConfig, linkedActions。工作流管理会话中详见当前会话注入的 schema。'
           },
           run_id: { type: 'string', description: '运行 ID (status/cancel)' },
           resume_token: { type: 'string', description: '恢复令牌 (resume)' },
@@ -479,6 +481,21 @@ export function getBuiltinTools(): LLMTool[] {
           description: { type: 'string', description: '工作流描述 (register)' }
         },
         required: ['action']
+      }
+    ),
+
+    // ── 技能渐进式发现：按需加载完整说明 ──
+    tool(
+      'prizm_get_skill_instructions',
+      '获取指定技能的完整操作说明（Markdown）。当 <available_skills> 中仅有 name+description 时，若需按该技能执行请先调用本工具获取全文再遵循说明操作。',
+      {
+        properties: {
+          skill_name: {
+            type: 'string',
+            description: '技能名称，与 <available_skills> 中的 name 一致（小写连字符）'
+          }
+        },
+        required: ['skill_name']
       }
     )
   ]
@@ -502,5 +519,8 @@ export const BUILTIN_TOOL_NAMES = new Set([
   'prizm_schedule',
   'prizm_cron',
   'prizm_workflow',
-  'prizm_workflow_builder'
+  'prizm_navigate',
+  'prizm_get_skill_instructions',
+  WORKFLOW_MANAGEMENT_TOOL_CREATE_WORKFLOW,
+  WORKFLOW_MANAGEMENT_TOOL_UPDATE_WORKFLOW
 ])

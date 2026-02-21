@@ -30,19 +30,19 @@ beforeEach(() => {
   clearSessionPermission('integration-sess')
 })
 
-// ─── 场景 1：PermissionHook 作为 PreToolUse 拦截 ───
+// ─── 场景 1：PermissionHook 作为 PreToolUse 拦截（复合工具） ───
 
 describe('Permission hook as PreToolUse interceptor', () => {
-  it('should deny write tool in plan mode via hook chain', async () => {
+  it('should deny compound file write in plan mode via hook chain', async () => {
     setSessionPermissionMode('integration-sess', 'plan')
     registerPermissionHook()
 
     const payload: PreToolUsePayload = {
       scope: 'default',
       sessionId: 'integration-sess',
-      toolName: 'prizm_write_file',
+      toolName: 'prizm_file',
       toolCallId: 'tc-1',
-      arguments: { path: '/test.txt', content: 'hello' },
+      arguments: { action: 'write', path: '/test.txt', content: 'hello' },
       grantedPaths: []
     }
 
@@ -51,16 +51,16 @@ describe('Permission hook as PreToolUse interceptor', () => {
     expect(result.denyMessage).toContain('Plan mode')
   })
 
-  it('should allow read tool in plan mode via hook chain', async () => {
+  it('should allow file read action in plan mode via hook chain', async () => {
     setSessionPermissionMode('integration-sess', 'plan')
     registerPermissionHook()
 
     const payload: PreToolUsePayload = {
       scope: 'default',
       sessionId: 'integration-sess',
-      toolName: 'prizm_read_file',
+      toolName: 'prizm_file',
       toolCallId: 'tc-2',
-      arguments: { path: '/test.txt' },
+      arguments: { action: 'read', path: '/test.txt' },
       grantedPaths: []
     }
 
@@ -75,7 +75,7 @@ describe('Permission hook as PreToolUse interceptor', () => {
     const payload: PreToolUsePayload = {
       scope: 'default',
       sessionId: 'integration-sess',
-      toolName: 'prizm_terminal_exec',
+      toolName: 'prizm_terminal_execute',
       toolCallId: 'tc-3',
       arguments: { command: 'rm -rf /' },
       grantedPaths: []
@@ -104,9 +104,9 @@ describe('Multi-hook chain execution', () => {
     const payload: PreToolUsePayload = {
       scope: 'default',
       sessionId: 'integration-sess',
-      toolName: 'prizm_delete_file',
+      toolName: 'prizm_file',
       toolCallId: 'tc-4',
-      arguments: { path: '/important.txt' },
+      arguments: { action: 'delete', path: '/important.txt' },
       grantedPaths: []
     }
 
@@ -141,33 +141,22 @@ describe('Multi-hook chain execution', () => {
     expect(result.denyMessage).toBe('search blocked')
   })
 
-  it('should merge ask interactPaths from permission and custom hook', async () => {
+  it('should return ask with interactDetails from permission hook for compound tools', async () => {
     registerPermissionHook()
-
-    hookRegistry.register({
-      id: 'path-suggest',
-      event: 'PreToolUse',
-      priority: 50,
-      toolMatcher: 'prizm_write_file',
-      callback: async () => ({
-        decision: 'ask' as const,
-        interactPaths: ['/workspace/config.json']
-      })
-    })
 
     const payload: PreToolUsePayload = {
       scope: 'default',
       sessionId: 'integration-sess',
-      toolName: 'prizm_write_file',
+      toolName: 'prizm_file',
       toolCallId: 'tc-6',
-      arguments: { path: '/workspace/test.txt' },
+      arguments: { action: 'write', path: '/workspace/test.txt' },
       grantedPaths: []
     }
 
     const result = await executePreToolUseHooks(payload)
     expect(result.decision).toBe('ask')
-    expect(result.interactPaths).toContain('/workspace/test.txt')
-    expect(result.interactPaths).toContain('/workspace/config.json')
+    expect(result.interactDetails).toBeDefined()
+    expect(result.interactDetails!.kind).toBe('file_access')
   })
 })
 

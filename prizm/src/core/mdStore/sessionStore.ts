@@ -148,13 +148,31 @@ function parseAgentSession(
   const grantedPaths = Array.isArray(d.grantedPaths)
     ? (d.grantedPaths as unknown[]).filter((p): p is string => typeof p === 'string')
     : undefined
+  const allowedTools = Array.isArray(d.allowedTools)
+    ? (d.allowedTools as unknown[]).filter((t): t is string => typeof t === 'string')
+    : undefined
+  const allowedSkills = Array.isArray(d.allowedSkills)
+    ? (d.allowedSkills as unknown[]).filter((s): s is string => typeof s === 'string')
+    : undefined
+  const allowedMcpServerIds = Array.isArray(d.allowedMcpServerIds)
+    ? (d.allowedMcpServerIds as unknown[]).filter((m): m is string => typeof m === 'string')
+    : undefined
   const checkpoints = Array.isArray(d.checkpoints)
     ? (d.checkpoints as unknown[])
         .map(parseCheckpoint)
         .filter((cp): cp is SessionCheckpoint => cp !== null)
     : undefined
 
-  const kind = d.kind === 'background' ? ('background' as const) : undefined
+  const kind =
+    d.kind === 'background'
+      ? ('background' as const)
+      : d.kind === 'tool'
+      ? ('tool' as const)
+      : undefined
+  const toolMeta =
+    kind === 'tool' && d.toolMeta && typeof d.toolMeta === 'object'
+      ? (d.toolMeta as AgentSession['toolMeta'])
+      : undefined
   const bgMeta =
     kind === 'background' && d.bgMeta && typeof d.bgMeta === 'object'
       ? (d.bgMeta as AgentSession['bgMeta'])
@@ -178,8 +196,12 @@ function parseAgentSession(
     ...(llmSummary != null && { llmSummary }),
     ...(compressedThroughRound != null && { compressedThroughRound }),
     ...(grantedPaths && grantedPaths.length > 0 && { grantedPaths }),
+    ...(allowedTools && allowedTools.length > 0 && { allowedTools }),
+    ...(allowedSkills && allowedSkills.length > 0 && { allowedSkills }),
+    ...(allowedMcpServerIds && allowedMcpServerIds.length > 0 && { allowedMcpServerIds }),
     ...(checkpoints && checkpoints.length > 0 && { checkpoints }),
     ...(kind && { kind }),
+    ...(toolMeta && { toolMeta }),
     ...(bgMeta && { bgMeta }),
     ...(bgStatus && { bgStatus }),
     ...(bgResult != null && { bgResult }),
@@ -268,8 +290,12 @@ export function writeAgentSessions(
       updatedAt: s.updatedAt,
       ...(s.compressedThroughRound != null && { compressedThroughRound: s.compressedThroughRound }),
       ...(s.grantedPaths?.length && { grantedPaths: s.grantedPaths }),
+      ...(s.allowedTools?.length && { allowedTools: s.allowedTools }),
+      ...(s.allowedSkills?.length && { allowedSkills: s.allowedSkills }),
+      ...(s.allowedMcpServerIds?.length && { allowedMcpServerIds: s.allowedMcpServerIds }),
       ...(s.checkpoints?.length && { checkpoints: s.checkpoints }),
       ...(s.kind && { kind: s.kind }),
+      ...(s.toolMeta && { toolMeta: s.toolMeta }),
       ...(s.bgMeta && { bgMeta: s.bgMeta }),
       ...(s.bgStatus && { bgStatus: s.bgStatus }),
       ...(s.bgResult != null && { bgResult: s.bgResult }),

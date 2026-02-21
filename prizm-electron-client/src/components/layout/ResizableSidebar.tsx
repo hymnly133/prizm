@@ -9,7 +9,6 @@
  *   - 展开/折叠使用 CSS transition 实现平滑动画
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Flexbox } from '@lobehub/ui'
 
 const DEFAULT_MIN = 160
 const DEFAULT_MAX = 800
@@ -30,6 +29,10 @@ export interface ResizableSidebarProps {
   onCollapsedChange?: (collapsed: boolean) => void
   className?: string
   style?: React.CSSProperties
+  /** 拖拽手柄宽度（可点击区域），默认 10 */
+  handleWidth?: number
+  /** 手柄向侧栏外侧伸出的像素（便于在边界处拖拽），默认 0 */
+  handleOverflow?: number
 }
 
 export function ResizableSidebar({
@@ -42,7 +45,9 @@ export function ResizableSidebar({
   collapsed: controlledCollapsed,
   onCollapsedChange,
   className,
-  style
+  style,
+  handleWidth = 10,
+  handleOverflow = 0
 }: ResizableSidebarProps) {
   const isControlled = controlledCollapsed !== undefined
 
@@ -175,12 +180,14 @@ export function ResizableSidebar({
 
   const sidebarStyle: React.CSSProperties = {
     width: effectiveWidth,
+    maxWidth: 'none', // 避免被全局或父级 max-width 限制，保证可拖到 maxWidth 设定值
     flexShrink: 0,
     minWidth: 0,
     position: 'relative',
     display: 'flex',
     flexDirection: 'column',
-    overflow: 'hidden',
+    // overflow: visible 以便拖拽手柄可伸出右/左侧，不被裁剪（内容区由内层 overflow: hidden 裁剪）
+    overflow: 'visible',
     height: '100%',
     background: collapsed ? 'transparent' : 'var(--ant-color-bg-layout)',
     borderRight: side === 'left' && !collapsed ? '1px solid var(--ant-color-border)' : undefined,
@@ -193,9 +200,10 @@ export function ResizableSidebar({
   }
 
   const contentStyle: React.CSSProperties = {
+    display: 'flex',
+    flexDirection: 'column',
     minHeight: 0,
     overflow: 'hidden',
-    flexDirection: 'column',
     // 折叠时隐藏内容但保持挂载
     visibility: collapsed ? 'hidden' : 'visible',
     opacity: collapsed ? 0 : 1,
@@ -203,10 +211,8 @@ export function ResizableSidebar({
   }
 
   return (
-    <Flexbox className={className} style={sidebarStyle}>
-      <Flexbox flex={1} style={contentStyle}>
-        {children}
-      </Flexbox>
+    <div className={className} style={sidebarStyle}>
+      <div style={{ flex: 1, minHeight: 0, ...contentStyle }}>{children}</div>
       {!collapsed && (
         <div
           role="separator"
@@ -219,12 +225,12 @@ export function ResizableSidebar({
             position: 'absolute',
             top: 0,
             bottom: 0,
-            [side === 'left' ? 'right' : 'left']: 0,
-            width: 6,
+            [side === 'left' ? 'right' : 'left']: -handleOverflow,
+            width: handleWidth,
             zIndex: 1
           }}
         />
       )}
-    </Flexbox>
+    </div>
   )
 }

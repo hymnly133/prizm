@@ -23,14 +23,17 @@ import {
   GitBranch,
   Database,
   Calendar,
-  Zap
+  Zap,
+  ShieldCheck,
+  AlertTriangle
 } from 'lucide-react'
 import { useLogsContext } from '../context/LogsContext'
 import { usePrizmContext, useSyncEventContext } from '../context/PrizmContext'
 import { useScope } from '../hooks/useScope'
 import { useScheduleStore } from '../store/scheduleStore'
-import type { EventType } from '@prizm/client-core'
+import type { EventType, InteractRequestPayload } from '@prizm/client-core'
 import { buildServerUrl } from '@prizm/client-core'
+import { useAgentSessionStore, PLAYGROUND_SESSION_ID } from '../store/agentSessionStore'
 import { setLastSyncEvent } from '../events/syncEventStore'
 import EditorPlayground from '../components/EditorPlayground'
 import { WorkflowPlayground } from '../components/workflow/WorkflowPlayground'
@@ -47,6 +50,7 @@ type DevCategory =
   | 'workflow'
   | 'workflow-editor'
   | 'editor'
+  | 'interact'
 
 interface CategoryItem {
   key: DevCategory
@@ -62,7 +66,8 @@ const CATEGORIES: CategoryItem[] = [
   { key: 'refresh', label: '手动刷新', icon: <RefreshCw size={16} /> },
   { key: 'workflow', label: 'Workflow', icon: <GitBranch size={16} /> },
   { key: 'workflow-editor', label: '流程编辑器', icon: <Zap size={16} /> },
-  { key: 'editor', label: '编辑器', icon: <Code size={16} /> }
+  { key: 'editor', label: '编辑器', icon: <Code size={16} /> },
+  { key: 'interact', label: '用户交互', icon: <ShieldCheck size={16} /> }
 ]
 
 interface HealthInfo {
@@ -111,6 +116,12 @@ function DevToolsPage() {
     ok: boolean
     msg: string
   } | null>(null)
+
+  const playgroundPending = useAgentSessionStore(
+    (s) => s.streamingStates[PLAYGROUND_SESSION_ID]?.pendingInteract ?? null
+  )
+  const injectPlayground = useAgentSessionStore((s) => s.injectPlaygroundInteract)
+  const clearPlayground = useAgentSessionStore((s) => s.clearPlaygroundInteract)
 
   const fetchHealth = useCallback(async () => {
     if (!config) return
@@ -748,6 +759,108 @@ function DevToolsPage() {
             </div>
           </div>
         )
+
+      case 'interact': {
+        const genId = () => `playground-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+        return (
+          <div className="settings-section">
+            <div className="settings-section-header">
+              <h2>用户交互 Playground</h2>
+              <p className="form-hint">
+                真实模拟审批：点击预设后，待审批会出现在<strong>页面顶部的全局审批条</strong>，
+                与真实 Agent 流式审批一致。批准/拒绝仅本地清除，不请求服务端。
+              </p>
+            </div>
+            <div className="settings-card">
+              <div className="notif-playground">
+                <h3 className="notif-playground__subtitle">注入审批场景</h3>
+                <div className="notif-playground__grid">
+                  <Button
+                    icon={<FileText size={14} />}
+                    onClick={() =>
+                      injectPlayground({
+                        requestId: genId(),
+                        toolCallId: genId(),
+                        toolName: 'prizm_file',
+                        kind: 'file_access',
+                        paths: ['C:/workspace/readme.md', 'D:/other/config.json']
+                      })
+                    }
+                  >
+                    文件访问
+                  </Button>
+                  <Button
+                    icon={<Code size={14} />}
+                    onClick={() =>
+                      injectPlayground({
+                        requestId: genId(),
+                        toolCallId: genId(),
+                        toolName: 'prizm_terminal_execute',
+                        kind: 'terminal_command',
+                        command: 'npm run build',
+                        cwd: 'C:/project'
+                      })
+                    }
+                  >
+                    终端命令
+                  </Button>
+                  <Button
+                    icon={<AlertTriangle size={14} />}
+                    onClick={() =>
+                      injectPlayground({
+                        requestId: genId(),
+                        toolCallId: genId(),
+                        toolName: 'prizm_document',
+                        kind: 'destructive_operation',
+                        resourceType: 'document',
+                        resourceId: 'doc-1',
+                        description: '将永久删除文档「重要说明.md」'
+                      })
+                    }
+                  >
+                    危险操作
+                  </Button>
+                  <Button
+                    icon={<ShieldCheck size={14} />}
+                    onClick={() =>
+                      injectPlayground({
+                        requestId: genId(),
+                        toolCallId: genId(),
+                        toolName: 'custom_approval',
+                        kind: 'custom',
+                        title: '自定义确认',
+                        description: '工具需要您的确认才能继续执行此操作。'
+                      })
+                    }
+                  >
+                    自定义
+                  </Button>
+                </div>
+                <div style={{ marginTop: 16 }}>
+                  {playgroundPending ? (
+                    <p className="form-hint" style={{ marginBottom: 8 }}>
+                      已注入：<strong>{playgroundPending.toolName}</strong> — 请到
+                      <strong>页面顶部</strong>的审批条中操作允许/拒绝，或在此清除模拟。
+                    </p>
+                  ) : (
+                    <p className="form-hint" style={{ marginBottom: 8 }}>
+                      当前无模拟审批。点击上方任一场景后，顶部会出现全局审批条。
+                    </p>
+                  )}
+                  <Button
+                    type="default"
+                    size="small"
+                    disabled={!playgroundPending}
+                    onClick={() => clearPlayground()}
+                  >
+                    清除模拟
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      }
 
       default:
         return null

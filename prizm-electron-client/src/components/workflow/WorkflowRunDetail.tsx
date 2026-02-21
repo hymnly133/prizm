@@ -6,28 +6,18 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { Modal, Tag, Typography, Descriptions, Timeline, Empty, Button, Space, Alert } from 'antd'
-import {
-  CheckCircleOutlined,
-  CloseCircleOutlined,
-  ClockCircleOutlined,
-  ThunderboltOutlined,
-  PauseCircleOutlined,
-  MinusCircleOutlined
-} from '@ant-design/icons'
+import { PauseCircleOutlined } from '@ant-design/icons'
 import { WorkflowPipelineView } from './WorkflowPipelineView'
+import {
+  WORKFLOW_RUN_STATUS_META,
+  getWorkflowRunStatusTagColor,
+  getWorkflowRunTimelineColor,
+  WorkflowErrorDetailBlock
+} from './workflowRunStatus'
 import { useWorkflowStore } from '../../store/workflowStore'
 import type { WorkflowRun, WorkflowStepResult } from '@prizm/shared'
 
 const { Text, Paragraph } = Typography
-
-const STATUS_LABELS: Record<string, { color: string; label: string; icon: React.ReactNode }> = {
-  pending: { color: 'default', label: '等待中', icon: <ClockCircleOutlined /> },
-  running: { color: 'processing', label: '运行中', icon: <ThunderboltOutlined /> },
-  paused: { color: 'warning', label: '待审批', icon: <PauseCircleOutlined /> },
-  completed: { color: 'success', label: '已完成', icon: <CheckCircleOutlined /> },
-  failed: { color: 'error', label: '失败', icon: <CloseCircleOutlined /> },
-  cancelled: { color: 'default', label: '已取消', icon: <MinusCircleOutlined /> }
-}
 
 export interface WorkflowRunDetailProps {
   runId: string | null
@@ -72,7 +62,7 @@ export function WorkflowRunDetail({ runId, open, onClose, onLoadSession }: Workf
     )
   }
 
-  const statusInfo = STATUS_LABELS[run.status] ?? STATUS_LABELS.pending
+  const statusInfo = WORKFLOW_RUN_STATUS_META[run.status] ?? WORKFLOW_RUN_STATUS_META.pending
   const steps = Object.values(run.stepResults)
   const totalDuration = steps.reduce((sum, s) => sum + (s.durationMs ?? 0), 0)
 
@@ -129,7 +119,12 @@ export function WorkflowRunDetail({ runId, open, onClose, onLoadSession }: Workf
         </Descriptions.Item>
         {run.error && (
           <Descriptions.Item label="错误" span={2}>
-            <Text type="danger">{run.error}</Text>
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <Text type="danger">{run.error}</Text>
+              {run.errorDetail && (
+                <WorkflowErrorDetailBlock content={run.errorDetail} />
+              )}
+            </Space>
           </Descriptions.Item>
         )}
       </Descriptions>
@@ -137,7 +132,7 @@ export function WorkflowRunDetail({ runId, open, onClose, onLoadSession }: Workf
       <Typography.Title level={5} style={{ marginTop: 16 }}>步骤时间线</Typography.Title>
       <Timeline
         items={steps.map((step) => ({
-          color: timelineColor(step.status),
+          color: getWorkflowRunTimelineColor(step.status),
           children: (
             <StepTimelineItem step={step} onLoadSession={onLoadSession} />
           )
@@ -160,7 +155,7 @@ function StepTimelineItem({
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <Text strong>{step.stepId}</Text>
-        <Tag color={statusToTagColor(step.status)} style={{ fontSize: 11 }}>
+        <Tag color={getWorkflowRunStatusTagColor(step.status)} style={{ fontSize: 11 }}>
           {step.status}
         </Tag>
         {duration && <Text type="secondary" style={{ fontSize: 11 }}>{duration}</Text>}
@@ -176,9 +171,14 @@ function StepTimelineItem({
         )}
       </div>
       {step.error && (
-        <Text type="danger" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
-          {step.error}
-        </Text>
+        <div style={{ marginTop: 4 }}>
+          <Text type="danger" style={{ fontSize: 12, display: 'block' }}>
+            {step.error}
+          </Text>
+          {step.errorDetail && (
+            <WorkflowErrorDetailBlock content={step.errorDetail} compact />
+          )}
+        </div>
       )}
       {step.output && (
         <Paragraph
@@ -204,23 +204,3 @@ function getPausedStepId(run: WorkflowRun): string {
   return `#${run.currentStepIndex + 1}`
 }
 
-function timelineColor(status: string): string {
-  switch (status) {
-    case 'completed': return 'green'
-    case 'running': return 'blue'
-    case 'failed': return 'red'
-    case 'skipped': return 'gray'
-    default: return 'gray'
-  }
-}
-
-function statusToTagColor(status: string): string {
-  switch (status) {
-    case 'completed': return 'success'
-    case 'running': return 'processing'
-    case 'failed': return 'error'
-    case 'skipped': return 'default'
-    case 'pending': return 'default'
-    default: return 'default'
-  }
-}

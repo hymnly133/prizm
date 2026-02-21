@@ -27,12 +27,21 @@ import type {
   OperationActor,
   TokenUsageCategory
 } from '@prizm/shared'
-import { getTextContent, getMessageContent } from '@prizm/shared'
+import {
+  getTextContent,
+  getMessageContent,
+  isWorkflowManagementSession,
+  CHAT_CATEGORY_WORKFLOW_MANAGEMENT
+} from '@prizm/shared'
 import { scopeStore } from '../../../core/ScopeStore'
 import { scheduleTurnSummary } from '../../../llm/conversationSummaryService'
 import { getAgentLLMSettings, getContextWindowSettings } from '../../../settings/agentToolsStore'
 import { tryRunSlashCommand } from '../../../llm/slashCommands'
-import { autoActivateSkills, getActiveSkills } from '../../../llm/skillManager'
+import {
+  loadAllSkillMetadata,
+  getSkillsToInject,
+  getSkillsMetadataForDiscovery
+} from '../../../llm/skillManager'
 import { loadRules } from '../../../llm/rulesLoader'
 import { loadActiveRules } from '../../../llm/agentRulesManager'
 import {
@@ -46,11 +55,9 @@ import { memLog } from '../../../llm/memoryLogger'
 import { deriveScopeActivities } from '../../../llm/scopeInteractionParser'
 import { appendSessionActivities } from '../../../core/mdStore'
 import { emit } from '../../../core/eventBus'
-import {
-  createContextBudget,
-  BUDGET_AREAS,
-  TRIM_PRIORITIES
-} from '../../../llm/contextBudget'
+import * as resumeStore from '../../../core/workflowEngine/resumeStore'
+import { getWorkflowRunWorkspace, getSessionWorkspaceDir } from '../../../core/PathProviderCore'
+import { createContextBudget, BUDGET_AREAS, TRIM_PRIORITIES } from '../../../llm/contextBudget'
 import {
   createCheckpoint,
   completeCheckpoint,
@@ -68,7 +75,12 @@ import type {
   ChatCoreResult
 } from './types'
 
-export { type ChatCoreOptions, type ChatCoreChunkHandler, type ChatCoreReadyHandler, type ChatCoreResult }
+export {
+  type ChatCoreOptions,
+  type ChatCoreChunkHandler,
+  type ChatCoreReadyHandler,
+  type ChatCoreResult
+}
 
 /**
  * 执行一轮完整的 Chat 对话（不含 SSE 传输层）。
@@ -87,6 +99,7 @@ export async function chatCore(
     mcpEnabled,
     includeScopeContext,
     systemPreamble,
+    workflowEditContext,
     skipMemory = false,
     skipCheckpoint = false,
     skipSummary = false,
@@ -119,6 +132,39 @@ export async function chatCore(
     if (changed && adapter.updateSession) {
       session.grantedPaths = Array.from(existing)
       await adapter.updateSession(scope, id, { grantedPaths: session.grantedPaths })
+    }
+  }
+
+  if (
+    isWorkflowManagementSession(session) &&
+    options.runRefIds?.length &&
+    adapter.updateSession
+  ) {
+    const scopeRoot = scopeStore.getScopeRootPath(scope)
+    const toGrant: string[] = []
+    for (const runId of options.runRefIds) {
+      const run = resumeStore.getRunById(runId)
+      if (!run || run.scope !== scope) continue
+      toGrant.push(getWorkflowRunWorkspace(scopeRoot, run.workflowName, run.id))
+      for (const result of Object.values(run.stepResults)) {
+        if (result.sessionId) {
+          toGrant.push(getSessionWorkspaceDir(scopeRoot, result.sessionId))
+        }
+      }
+    }
+    if (toGrant.length > 0) {
+      const existing = new Set(session.grantedPaths ?? [])
+      let changed = false
+      for (const p of toGrant) {
+        if (!existing.has(p)) {
+          existing.add(p)
+          changed = true
+        }
+      }
+      if (changed) {
+        session.grantedPaths = Array.from(existing)
+        await adapter.updateSession(scope, id, { grantedPaths: session.grantedPaths })
+      }
     }
   }
 
@@ -158,16 +204,35 @@ export async function chatCore(
 
   // Slash 命令处理
   let promptInjection: string | null = null
+  let commandAllowedTools: string[] | undefined
   if (!skipSlashCommands && content.trim().startsWith('/')) {
-    const cmdResult = await tryRunSlashCommand(scope, id, content.trim())
+    const cmdResult = await tryRunSlashCommand(scope, id, content.trim(), {
+      allowedSkills: session.allowedSkills
+    })
     if (cmdResult != null) {
       if (cmdResult.mode === 'prompt') {
         promptInjection = cmdResult.text
+        commandAllowedTools = cmdResult.allowedTools
       } else {
         await adapter.appendMessage(scope, id, {
           role: 'system',
           parts: [{ type: 'text', content: cmdResult.text }]
         })
+
+        // action 模式无 LLM 调用，直接完成 checkpoint（无文件变更）
+        if (turnCheckpoint) {
+          const completedCp = completeCheckpoint(turnCheckpoint, [])
+          const cpScopeData = scopeStore.getScopeData(scope)
+          const cpSession = cpScopeData.agentSessions.find((s) => s.id === id)
+          if (cpSession?.checkpoints) {
+            const cpIdx = cpSession.checkpoints.findIndex((cp) => cp.id === turnCheckpoint!.id)
+            if (cpIdx >= 0) {
+              cpSession.checkpoints[cpIdx] = completedCp
+              scopeStore.saveScope(scope)
+            }
+          }
+        }
+
         return {
           appendedMsg: {
             id: '',
@@ -292,7 +357,11 @@ export async function chatCore(
     session.bgMeta?.memoryInjectPolicy ?? session.bgMeta?.inlineAgentDef?.memoryInjectPolicy
   const isFirstMessage = session.messages.length === 0
 
-  const { injectedMemories: injectedMemoriesForClient, injectedIds, memorySystemTexts } = await injectMemories({
+  const {
+    injectedMemories: injectedMemoriesForClient,
+    injectedIds,
+    memorySystemTexts
+  } = await injectMemories({
     scope,
     sessionId: id,
     content,
@@ -302,14 +371,69 @@ export async function chatCore(
     memInjectPolicy
   })
 
-  // Skill 自动激活 + Rules 加载
-  const trimmedContent = content.trim()
-  autoActivateSkills(scope, id, trimmedContent)
-  const activeSkills = getActiveSkills(scope, id)
+  // 会话级允许列表（BG 来自 inlineAgentDef，交互会话来自 session 自身）；空/未设置 = 全选
+  const sessionAllowedTools =
+    session.bgMeta?.inlineAgentDef?.allowedTools ?? session.allowedTools
+  const sessionAllowedSkills =
+    session.bgMeta?.inlineAgentDef?.allowedSkills ?? session.allowedSkills
+  const sessionAllowedMcpServerIds =
+    session.bgMeta?.inlineAgentDef?.allowedMcpServerIds ?? session.allowedMcpServerIds
+  const resolvedThinking =
+    session.bgMeta?.inlineAgentDef?.thinking ?? thinking
+
+  // 渐进式发现：默认仅注入技能元数据，模型按需用 prizm_get_skill_instructions 拉取全文；设 PRIZM_PROGRESSIVE_SKILL_DISCOVERY=0 恢复旧行为（一次性注入全文）
+  const useProgressiveSkillDiscovery = process.env.PRIZM_PROGRESSIVE_SKILL_DISCOVERY !== '0'
+  const skillMetadataForDiscovery =
+    useProgressiveSkillDiscovery ?
+      getSkillsMetadataForDiscovery(scope, sessionAllowedSkills)
+    : undefined
   const activeSkillInstructions =
-    activeSkills.length > 0
-      ? activeSkills.map((a) => ({ name: a.skillName, instructions: a.instructions }))
+    useProgressiveSkillDiscovery
+      ? undefined
+      : getSkillsToInject(scope, sessionAllowedSkills)
+  const activeSkillInstructionsOrUndefined =
+    activeSkillInstructions && activeSkillInstructions.length > 0 ? activeSkillInstructions : undefined
+  const skillMetadataForDiscoveryOrUndefined =
+    skillMetadataForDiscovery && skillMetadataForDiscovery.length > 0
+      ? skillMetadataForDiscovery
       : undefined
+
+  // 技能路径自动授权：本会话允许的技能目录加入 grantedPaths，便于 prizm_file 访问 scripts/references/assets
+  const allMeta = loadAllSkillMetadata()
+  const enabledMeta = allMeta.filter((s) => s.enabled)
+  const allowedSkillNames =
+    !sessionAllowedSkills || sessionAllowedSkills.length === 0
+      ? new Set(enabledMeta.map((s) => s.name))
+      : new Set(sessionAllowedSkills)
+  const skillPathsToGrant = enabledMeta
+    .filter((s) => allowedSkillNames.has(s.name))
+    .map((s) => s.path)
+  if (skillPathsToGrant.length > 0 && adapter.updateSession) {
+    const existing = new Set(session.grantedPaths ?? [])
+    let changed = false
+    for (const p of skillPathsToGrant) {
+      if (!existing.has(p)) {
+        existing.add(p)
+        changed = true
+      }
+    }
+    if (changed) {
+      session.grantedPaths = Array.from(existing)
+      await adapter.updateSession(scope, id, { grantedPaths: session.grantedPaths })
+    }
+  }
+
+  let finalAllowedTools: string[] | undefined
+  if (commandAllowedTools != null) {
+    if (sessionAllowedTools?.length) {
+      const sessionSet = new Set(sessionAllowedTools)
+      finalAllowedTools = commandAllowedTools.filter((t) => sessionSet.has(t))
+    } else {
+      finalAllowedTools = commandAllowedTools
+    }
+  } else {
+    finalAllowedTools = sessionAllowedTools
+  }
 
   let rulesContent: string | undefined
   try {
@@ -337,7 +461,9 @@ export async function chatCore(
     setSessionChatStatus(scope, id, 'chatting', actor)
   }
 
-  onReady?.({ injectedMemories: injectedMemoriesForClient })
+  onReady?.({
+    injectedMemories: injectedMemoriesForClient
+  })
 
   // ---- 流式调用 + 持久化 ----
   let fullReasoning = ''
@@ -505,23 +631,29 @@ export async function chatCore(
       signal: ac.signal,
       mcpEnabled: mcpEnabled !== false,
       includeScopeContext: includeScopeContext !== false,
-      activeSkillInstructions,
+      skillMetadataForDiscovery: skillMetadataForDiscoveryOrUndefined,
+      activeSkillInstructions: activeSkillInstructionsOrUndefined,
       rulesContent,
       customRulesContent,
       grantedPaths: session.grantedPaths,
-      thinking,
+      allowedTools: finalAllowedTools,
+      allowedMcpServerIds: sessionAllowedMcpServerIds,
+      thinking: resolvedThinking,
       memoryTexts: memorySystemTexts.length > 0 ? memorySystemTexts : undefined,
       systemPreamble: systemPreamble || undefined,
-      promptInjection: promptInjection ? `[命令指令]\n${promptInjection}` : undefined
+      promptInjection: promptInjection ? `[命令指令]\n${promptInjection}` : undefined,
+      workflowEditContext: workflowEditContext ?? undefined
     })) {
       if (ac.signal.aborted) break
       if (chunk.usage) lastUsage = chunk.usage
       if (chunk.text) segmentContent += chunk.text
       if (chunk.reasoning) fullReasoning += chunk.reasoning
       if (chunk.toolCallArgsDelta) {
-        const existing = parts.find((p) => p.type === 'tool' && p.id === chunk.toolCallArgsDelta!.id)
+        const existing = parts.find(
+          (p) => p.type === 'tool' && p.id === chunk.toolCallArgsDelta!.id
+        )
         if (existing && existing.type === 'tool') {
-          (existing as MessagePartTool).arguments = chunk.toolCallArgsDelta.argumentsSoFar
+          ;(existing as MessagePartTool).arguments = chunk.toolCallArgsDelta.argumentsSoFar
         }
       }
       if (chunk.toolResultChunk) flushSegment()
@@ -636,7 +768,9 @@ function buildCompressionSummary(
     const asstText = assistantMsg
       ? (getTextContent(assistantMsg)?.slice(0, SUMMARY_MAX_CHARS_PER_MSG) ?? '')
       : ''
-    lines.push(`R${roundIdx}: ${userText}${userText.length >= SUMMARY_MAX_CHARS_PER_MSG ? '…' : ''} → ${asstText}${asstText.length >= SUMMARY_MAX_CHARS_PER_MSG ? '…' : ''}`)
+    lines.push(
+      `R${roundIdx}: ${userText}${userText.length >= SUMMARY_MAX_CHARS_PER_MSG ? '…' : ''} → ${asstText}${asstText.length >= SUMMARY_MAX_CHARS_PER_MSG ? '…' : ''}`
+    )
     roundIdx++
   }
   return lines.join('\n')
@@ -663,18 +797,17 @@ function capSummaryChain(
 /**
  * 根据 actor 和 session 上下文推导 chat token 使用的子类别。
  */
-function deriveChatCategory(
-  actor?: OperationActor,
-  session?: AgentSession
-): TokenUsageCategory {
+function deriveChatCategory(actor?: OperationActor, session?: AgentSession): TokenUsageCategory {
   if (actor?.source?.includes('guard') || actor?.source?.includes('schema-retry')) {
     return 'chat:guard'
   }
+  if (session && isWorkflowManagementSession(session)) return CHAT_CATEGORY_WORKFLOW_MANAGEMENT
   if (session?.kind === 'background' && session.bgMeta) {
     if (session.bgMeta.source === 'workflow') return 'chat:workflow'
     if (session.bgMeta.source === 'task') return 'chat:task'
     if (session.bgMeta.triggerType === 'cron') return 'chat:task'
-    return 'chat:task'
+    // 未能识别 source 的后台 session，归为"后台系统"而非误报为"任务"
+    return 'chat:background'
   }
   return 'chat:user'
 }

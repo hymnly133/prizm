@@ -17,7 +17,11 @@ import {
   getDynamicContextMode
 } from '../../settings/agentToolsStore'
 import { filterToolsByGroups } from '../../llm/builtinTools/toolGroups'
-import { buildSystemPromptParts } from '../../llm/systemPrompt'
+import {
+  resolveScenario,
+  buildPromptContext,
+  buildPromptForScenario
+} from '../../llm/promptPipeline'
 import { processMessageAtRefs } from '../../llm/atReferenceParser'
 import { registerBuiltinAtReferences } from '../../llm/atReferenceRegistry'
 import { getBuiltinTools } from '../../llm/builtinTools'
@@ -25,6 +29,11 @@ import { clearSessionGuides } from '../../llm/toolInstructions'
 import { logLLMCall, buildMessagesSummary, formatUsage } from '../../llm/llmCallLogger'
 import { TOOL_RESULT_STREAM_THRESHOLD, TOOL_RESULT_CHUNK_SIZE } from './chatHelpers'
 import { executeToolCalls, handleInteractions, type ToolExecContext } from './toolExecution'
+import { filterWorkflowBuilderForSession, isWorkflowManagementSession } from './sessionToolFilter'
+import {
+  WORKFLOW_MANAGEMENT_CREATE_DEF,
+  WORKFLOW_MANAGEMENT_UPDATE_DEF
+} from '../../llm/toolLLM/workflowSubmitTool'
 
 const log = createLogger('Adapter')
 
@@ -80,7 +89,11 @@ export class DefaultAgentAdapter implements IAgentAdapter {
       compressedThroughRound?: number
       compressionSummaries?: Array<{ throughRound: number; text: string }>
       grantedPaths?: string[]
+      allowedTools?: string[]
+      allowedSkills?: string[]
+      allowedMcpServerIds?: string[]
       kind?: AgentSession['kind']
+      toolMeta?: AgentSession['toolMeta']
       bgMeta?: AgentSession['bgMeta']
       bgStatus?: AgentSession['bgStatus']
       bgResult?: string
@@ -100,7 +113,12 @@ export class DefaultAgentAdapter implements IAgentAdapter {
     if (update.compressionSummaries !== undefined)
       session.compressionSummaries = update.compressionSummaries
     if (update.grantedPaths !== undefined) session.grantedPaths = update.grantedPaths
+    if (update.allowedTools !== undefined) session.allowedTools = update.allowedTools
+    if (update.allowedSkills !== undefined) session.allowedSkills = update.allowedSkills
+    if (update.allowedMcpServerIds !== undefined)
+      session.allowedMcpServerIds = update.allowedMcpServerIds
     if (update.kind !== undefined) session.kind = update.kind
+    if (update.toolMeta !== undefined) session.toolMeta = update.toolMeta
     if (update.bgMeta !== undefined) session.bgMeta = update.bgMeta
     if (update.bgStatus !== undefined) session.bgStatus = update.bgStatus
     if (update.bgResult !== undefined) session.bgResult = update.bgResult
@@ -220,15 +238,18 @@ export class DefaultAgentAdapter implements IAgentAdapter {
       signal?: AbortSignal
       mcpEnabled?: boolean
       includeScopeContext?: boolean
+      skillMetadataForDiscovery?: Array<{ name: string; description: string }>
       activeSkillInstructions?: Array<{ name: string; instructions: string }>
       rulesContent?: string
       customRulesContent?: string
       grantedPaths?: string[]
       allowedTools?: string[]
+      allowedMcpServerIds?: string[]
       thinking?: boolean
       memoryTexts?: string[]
       systemPreamble?: string
       promptInjection?: string
+      workflowEditContext?: string
     }
   ): AsyncIterable<LLMStreamChunk> {
     const provider = getLLMProvider()
@@ -236,14 +257,26 @@ export class DefaultAgentAdapter implements IAgentAdapter {
     const includeScopeContext = options?.includeScopeContext !== false
 
     registerBuiltinAtReferences()
-    const { sessionStatic, perTurnDynamic } = await buildSystemPromptParts({
+
+    const sessionData = scopeStore.getScopeData(scope).agentSessions.find((s) => s.id === sessionId)
+    const session = sessionData ?? null
+    const scenario = resolveScenario(scope, sessionId, session)
+    const ctx = buildPromptContext({
       scope,
       sessionId,
+      session,
       includeScopeContext,
-      activeSkillInstructions: options?.activeSkillInstructions,
       rulesContent: options?.rulesContent,
-      customRulesContent: options?.customRulesContent
+      customRulesContent: options?.customRulesContent,
+      skillMetadataForDiscovery: options?.skillMetadataForDiscovery,
+      activeSkillInstructions: options?.activeSkillInstructions,
+      memoryTexts: options?.memoryTexts,
+      promptInjection: options?.promptInjection,
+      grantedPaths: options?.grantedPaths,
+      callerPreamble: options?.systemPreamble,
+      workflowEditContext: options?.workflowEditContext
     })
+    const { sessionStatic, perTurnDynamic } = await buildPromptForScenario(scenario, ctx)
 
     // Cache-optimized message ordering (arXiv:2601.06007):
     // [0]     system: SESSION-STATIC (stable prefix, ~2000-3500 tokens)
@@ -251,25 +284,18 @@ export class DefaultAgentAdapter implements IAgentAdapter {
     // [n+1]   system: PER-TURN DYNAMIC (workspace_context, locks, memories, @refs)
     // [n+2]   user: current message
 
-    // Session-static prefix: system prompt + optional bg-session preamble
-    const staticContent = options?.systemPreamble
-      ? sessionStatic + '\n\n' + options.systemPreamble
-      : sessionStatic
+    const staticContent = sessionStatic
 
     const baseMessages: Array<{ role: string; content: string }> = [
       { role: 'system', content: staticContent }
     ]
 
-    // 'system' = 独立 system 消息（方式 A），'user_prefix' = user 消息前缀（方式 B）
     const dynamicMode = getDynamicContextMode()
 
-    // 收集所有动态上下文片段
     const collectDynamic = (injectedPrefix?: string): string[] => {
       const parts: string[] = []
       if (perTurnDynamic) parts.push(perTurnDynamic)
-      if (options?.memoryTexts?.length) parts.push(...options.memoryTexts)
       if (injectedPrefix) parts.push(injectedPrefix)
-      if (options?.promptInjection) parts.push(options.promptInjection)
       return parts
     }
 
@@ -317,8 +343,6 @@ export class DefaultAgentAdapter implements IAgentAdapter {
 
     let llmTools: LLMTool[] = getBuiltinTools()
 
-    const sessionData = scopeStore.getScopeData(scope).agentSessions.find((s) => s.id === sessionId)
-
     // 按分组配置过滤工具（全局配置 + 会话级覆盖）
     const globalGroupConfig = getToolGroupConfig()
     const sessionToolGroups = sessionData?.bgMeta?.toolGroups
@@ -335,10 +359,32 @@ export class DefaultAgentAdapter implements IAgentAdapter {
       llmTools = llmTools.map((t) => (t.function.name === 'prizm_set_result' ? dynamicTool : t))
     }
 
+    llmTools = filterWorkflowBuilderForSession(llmTools, sessionData)
+
+    if (isWorkflowManagementSession(sessionData)) {
+      const boundId =
+        (
+          sessionData as {
+            toolMeta?: { workflowDefId?: string }
+            bgMeta?: { workflowDefId?: string }
+          }
+        ).toolMeta?.workflowDefId ??
+        (sessionData as { bgMeta?: { workflowDefId?: string } }).bgMeta?.workflowDefId
+      if (boundId) {
+        llmTools = [...llmTools, WORKFLOW_MANAGEMENT_UPDATE_DEF]
+      } else {
+        llmTools = [...llmTools, WORKFLOW_MANAGEMENT_CREATE_DEF]
+      }
+    }
+
     if (mcpEnabled) {
       const manager = getMcpClientManager()
       await manager.connectAll()
-      const mcpTools = await manager.listAllTools()
+      let mcpTools = await manager.listAllTools()
+      if (options?.allowedMcpServerIds && options.allowedMcpServerIds.length > 0) {
+        const allowSet = new Set(options.allowedMcpServerIds)
+        mcpTools = mcpTools.filter((t) => allowSet.has(t.serverId))
+      }
 
       const tavilySettings = getTavilySettings()
       const webSearchEnabled =
@@ -607,7 +653,7 @@ export class DefaultAgentAdapter implements IAgentAdapter {
         signal: options?.signal
       }
 
-      const execResults = await executeToolCalls(toolCalls, ctx, progressBuffer)
+      const execResults = await executeToolCalls(toolCalls, ctx, progressBuffer, this)
 
       for (const progress of progressBuffer) {
         yield progress
@@ -615,7 +661,8 @@ export class DefaultAgentAdapter implements IAgentAdapter {
 
       const { chunks: interactChunks, updatedGrantedPaths } = await handleInteractions(
         execResults,
-        ctx
+        ctx,
+        this
       )
       runtimeGrantedPaths = updatedGrantedPaths
 
@@ -650,6 +697,16 @@ export class DefaultAgentAdapter implements IAgentAdapter {
           tool_call_id: tc.id,
           content: text
         })
+      }
+
+      // 后台会话中一旦成功调用 prizm_set_result 即结束对话，避免模型继续回复或重复调用
+      const setResultCall = toolCalls.find((tc) => tc.name === 'prizm_set_result')
+      const setResultExec = setResultCall
+        ? execResults.find((r) => r.tc.id === setResultCall.id)
+        : null
+      if (sessionData?.kind === 'background' && setResultExec && !setResultExec.isError) {
+        yield { done: true, usage: lastUsage }
+        return
       }
     }
   }

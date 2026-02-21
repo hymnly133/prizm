@@ -150,6 +150,11 @@
   overflow: hidden;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
+@media (prefers-reduced-motion: reduce) {
+  .content-card {
+    transition: none;
+  }
+}
 .content-card--default {
   background: var(--ant-color-bg-container);
 }
@@ -165,6 +170,11 @@
 }
 .content-card--clickable {
   cursor: pointer;
+}
+.content-card--clickable:focus-visible,
+.content-card__header[role='button']:focus-visible {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: 2px;
 }
 
 .content-card__header {
@@ -183,6 +193,134 @@
   flex: 1;
   padding: 12px 16px 16px;
   min-height: 0;
+}
+
+/* 统一条目卡片：单条 Skill（已安装 / 浏览 中每条一致） */
+.skill-entry-card {
+  padding: 12px 16px;
+  min-height: 96px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  .skill-entry-card {
+    transition: none;
+  }
+}
+.skill-entry-card__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  cursor: pointer;
+  min-width: 0;
+}
+.skill-entry-card__row > *:first-child {
+  flex-shrink: 0;
+}
+.skill-entry-card__title {
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--ant-color-text);
+  word-break: break-word;
+}
+.skill-entry-card__desc {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+  margin-top: 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.4;
+}
+.skill-entry-card__body {
+  margin-top: 0;
+}
+
+/* 卡片右侧元信息与操作：允许换行，避免被挤出视口 */
+.skill-entry-card__meta {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  row-gap: 6px;
+}
+
+/* 浏览区：每列 3 个 */
+.skill-entry-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.skill-entry-list--grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+/* 已安装：每列 2 个 */
+.skill-entry-list--grid-installed {
+  grid-template-columns: repeat(2, 1fr);
+}
+@media (max-width: 1024px) {
+  .skill-entry-list--grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .skill-entry-list--grid-installed {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 640px) {
+  .skill-entry-list--grid,
+  .skill-entry-list--grid-installed {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 统一条目卡片：MCP 服务器 */
+.mcp-server-entry {
+  padding: 12px 16px;
+  cursor: default;
+}
+.mcp-server-entry__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.mcp-server-entry__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-block: 4px;
+  padding-inline: 0;
+}
+.mcp-server-entry__row:not(:last-child) {
+  border-block-end: 1px solid var(--ant-color-border-secondary, var(--ant-color-fill-quaternary));
+}
+.mcp-server-entry__label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ant-color-text-secondary);
+}
+.mcp-server-entry__value {
+  padding-block: 2px;
+  padding-inline: 8px;
+  font-family: var(--ant-font-family-code);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+  background: var(--ant-color-fill-quaternary);
+  border-radius: 4px;
 }
 
 /* ── Loading Placeholder ── */

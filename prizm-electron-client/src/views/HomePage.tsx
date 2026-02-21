@@ -40,6 +40,7 @@ import HomeStatsSection, { type StatItem } from './HomeStatsSection'
 import RecentSessionsSection from './RecentSessionsSection'
 import HomeTodoSection, { type TodoListGroup } from './HomeTodoSection'
 import type { TodoList, Document as PrizmDocument } from '@prizm/client-core'
+import { isChatListSession } from '@prizm/shared'
 import type { FileItem } from '../hooks/useFileList'
 
 type DashboardTab = 'overview' | 'usage' | 'memory'
@@ -93,7 +94,10 @@ function HomePage({
 
   /* ── 数据处理 ── */
   const recentSessions = useMemo(() => {
-    return [...data.sessions].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 5)
+    return [...data.sessions]
+      .filter((s) => isChatListSession(s))
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, 5)
   }, [data.sessions])
 
   const todoLists = useMemo<TodoListGroup[]>(() => {

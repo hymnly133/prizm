@@ -1,25 +1,24 @@
 /**
- * 默认权限规则 — 从 workspaceResolver / interactManager 行为迁移而来
+ * 默认权限规则 — 复合工具 (prizm_file, prizm_document 等) 版本
  *
- * 定义了写操作类工具在 default 模式下需要 ask 的规则。
+ * 使用 toolPattern + actionFilter 匹配复合工具的写操作 action。
  */
 
 import type { PermissionRule } from './types'
 
-/** 文件写操作工具 — default 模式下需要 ask */
-const FILE_WRITE_TOOLS: PermissionRule[] = [
-  'prizm_write_file',
-  'prizm_move_file',
-  'prizm_delete_file'
-].map((tool, i) => ({
-  id: `default:file-write:${tool}`,
-  toolPattern: tool,
-  behavior: 'ask' as const,
-  priority: 50 + i
-}))
+/** 文件写操作 — prizm_file action: write/move/delete */
+const FILE_WRITE_RULES: PermissionRule[] = [
+  {
+    id: 'default:file-write',
+    toolPattern: 'prizm_file',
+    actionFilter: ['write', 'move', 'delete'],
+    behavior: 'ask' as const,
+    priority: 50
+  }
+]
 
-/** 终端执行工具 — default 模式下需要 ask */
-const TERMINAL_TOOLS: PermissionRule[] = [
+/** 终端执行工具 */
+const TERMINAL_RULES: PermissionRule[] = [
   {
     id: 'default:terminal',
     toolPattern: 'prizm_terminal_*',
@@ -28,41 +27,52 @@ const TERMINAL_TOOLS: PermissionRule[] = [
   }
 ]
 
+/** 文档写操作 — prizm_document action: create/update/delete */
+const DOCUMENT_WRITE_RULES: PermissionRule[] = [
+  {
+    id: 'default:doc-write',
+    toolPattern: 'prizm_document',
+    actionFilter: ['create', 'update', 'delete'],
+    behavior: 'ask' as const,
+    priority: 52
+  }
+]
+
+/** 定时任务写操作 — prizm_cron action: create/delete */
+const CRON_WRITE_RULES: PermissionRule[] = [
+  {
+    id: 'default:cron-write',
+    toolPattern: 'prizm_cron',
+    actionFilter: ['create', 'delete'],
+    behavior: 'ask' as const,
+    priority: 54
+  }
+]
+
+/** default 模式全部 ask 规则 */
+const DEFAULT_ASK_RULES: PermissionRule[] = [
+  ...FILE_WRITE_RULES,
+  ...DOCUMENT_WRITE_RULES,
+  ...CRON_WRITE_RULES,
+  ...TERMINAL_RULES
+]
+
 /** plan 模式专用：拒绝所有写操作 */
-const PLAN_MODE_DENY_TOOLS: PermissionRule[] = [
+const PLAN_MODE_DENY_RULES: PermissionRule[] = [
   {
-    id: 'plan:deny-write',
-    toolPattern: 'prizm_write_file',
+    id: 'plan:deny-file-write',
+    toolPattern: 'prizm_file',
+    actionFilter: ['write', 'move', 'delete'],
     behavior: 'deny' as const,
-    denyMessage: 'Plan mode: write operations are not allowed',
+    denyMessage: 'Plan mode: file write operations are not allowed',
     priority: 10
   },
   {
-    id: 'plan:deny-move',
-    toolPattern: 'prizm_move_file',
+    id: 'plan:deny-doc-write',
+    toolPattern: 'prizm_document',
+    actionFilter: ['create', 'update', 'delete'],
     behavior: 'deny' as const,
-    denyMessage: 'Plan mode: file move operations are not allowed',
-    priority: 10
-  },
-  {
-    id: 'plan:deny-delete-file',
-    toolPattern: 'prizm_delete_file',
-    behavior: 'deny' as const,
-    denyMessage: 'Plan mode: file delete operations are not allowed',
-    priority: 10
-  },
-  {
-    id: 'plan:deny-update-doc',
-    toolPattern: 'prizm_update_document',
-    behavior: 'deny' as const,
-    denyMessage: 'Plan mode: document update operations are not allowed',
-    priority: 10
-  },
-  {
-    id: 'plan:deny-create-doc',
-    toolPattern: 'prizm_create_document',
-    behavior: 'deny' as const,
-    denyMessage: 'Plan mode: document create operations are not allowed',
+    denyMessage: 'Plan mode: document write operations are not allowed',
     priority: 10
   },
   {
@@ -71,6 +81,14 @@ const PLAN_MODE_DENY_TOOLS: PermissionRule[] = [
     behavior: 'deny' as const,
     denyMessage: 'Plan mode: terminal operations are not allowed',
     priority: 10
+  },
+  {
+    id: 'plan:deny-cron-write',
+    toolPattern: 'prizm_cron',
+    actionFilter: ['create', 'delete'],
+    behavior: 'deny' as const,
+    denyMessage: 'Plan mode: cron write operations are not allowed',
+    priority: 10
   }
 ]
 
@@ -78,25 +96,19 @@ const PLAN_MODE_DENY_TOOLS: PermissionRule[] = [
 export function getDefaultRules(mode: string): PermissionRule[] {
   switch (mode) {
     case 'plan':
-      return [...PLAN_MODE_DENY_TOOLS]
+      return [...PLAN_MODE_DENY_RULES]
     case 'default':
-      return [...FILE_WRITE_TOOLS, ...TERMINAL_TOOLS]
+      return [...DEFAULT_ASK_RULES]
     case 'acceptEdits':
     case 'bypassPermissions':
       return []
     case 'dontAsk':
-      return [
-        ...FILE_WRITE_TOOLS.map((r) => ({
-          ...r,
-          behavior: 'deny' as const,
-          denyMessage: 'dontAsk mode: operation requires approval but auto-deny is enabled'
-        })),
-        ...TERMINAL_TOOLS.map((r) => ({
-          ...r,
-          behavior: 'deny' as const,
-          denyMessage: 'dontAsk mode: terminal operations auto-denied'
-        }))
-      ]
+      return DEFAULT_ASK_RULES.map((r) => ({
+        ...r,
+        id: r.id.replace('default:', 'dontAsk:'),
+        behavior: 'deny' as const,
+        denyMessage: `dontAsk mode: ${r.toolPattern} operation auto-denied`
+      }))
     default:
       return []
   }

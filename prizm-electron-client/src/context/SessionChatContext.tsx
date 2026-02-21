@@ -59,7 +59,7 @@ export interface SessionChatContextValue {
   scrollToBottom: () => void
   handleMessagesScroll: () => void
 
-  sendMessage: (content: string, fileRefs?: FilePathRef[]) => Promise<string | null>
+  sendMessage: (content: string, fileRefs?: FilePathRef[], runRefIds?: string[]) => Promise<string | null>
   stopGeneration: () => Promise<void>
   respondToInteract: (requestId: string, approved: boolean, paths?: string[]) => Promise<void>
   rollbackToCheckpoint: (
@@ -206,8 +206,10 @@ export const SessionChatProvider = memo(function SessionChatProvider({ sessionId
 
   // --- Actions (bound to sessionId + scope) ---
   const sendMessage = useCallback(
-    (content: string, fileRefs?: FilePathRef[]) => {
-      return useAgentSessionStore.getState().sendMessage(sessionId, content, scope, fileRefs)
+    (content: string, fileRefs?: FilePathRef[], runRefIds?: string[]) => {
+      return useAgentSessionStore
+        .getState()
+        .sendMessage(sessionId, content, scope, fileRefs, undefined, runRefIds)
     },
     [sessionId, scope]
   )

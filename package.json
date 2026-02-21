@@ -37,5 +37,13 @@
     "workspace"
   ],
   "author": "Prizm Team",
-  "license": "MIT"
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hymnly133/prizm.git"
+  },
+  "homepage": "https://github.com/hymnly133/prizm#readme",
+  "bugs": {
+    "url": "https://github.com/hymnly133/prizm/issues"
+  }
 }

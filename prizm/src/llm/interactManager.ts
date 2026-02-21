@@ -12,11 +12,14 @@
 
 import { createLogger } from '../logger'
 import { genUniqueId } from '../id'
+import type { InteractKind, InteractDetails } from '../core/toolPermission/types'
 
 const log = createLogger('InteractManager')
 
 /** 交互请求的状态 */
 export type InteractStatus = 'pending' | 'approved' | 'denied' | 'timeout'
+
+export type { InteractKind, InteractDetails }
 
 /** 交互请求描述 */
 export interface InteractRequest {
@@ -26,8 +29,10 @@ export interface InteractRequest {
   toolCallId: string
   /** 工具名称 */
   toolName: string
-  /** 需要授权的路径列表 */
-  paths: string[]
+  /** 交互类型 */
+  kind: InteractKind
+  /** 交互详情 */
+  details: InteractDetails
   /** 会话 ID */
   sessionId: string
   /** scope */
@@ -40,7 +45,7 @@ export interface InteractRequest {
 export interface InteractResponse {
   requestId: string
   approved: boolean
-  /** 用户批准的路径（可能是 paths 的子集） */
+  /** 用户批准的路径（file_access 时使用） */
   grantedPaths?: string[]
 }
 
@@ -69,7 +74,7 @@ class InteractManagerImpl {
     scope: string,
     toolCallId: string,
     toolName: string,
-    paths: string[],
+    details: InteractDetails,
     timeoutMs = DEFAULT_TIMEOUT_MS
   ): { request: InteractRequest; promise: Promise<InteractResponse> } {
     const requestId = genUniqueId()
@@ -77,7 +82,8 @@ class InteractManagerImpl {
       requestId,
       toolCallId,
       toolName,
-      paths,
+      kind: details.kind,
+      details,
       sessionId,
       scope,
       createdAt: Date.now()
@@ -94,10 +100,10 @@ class InteractManagerImpl {
     })
 
     log.info(
-      'Created interact request: %s (tool=%s, paths=%s)',
+      'Created interact request: %s (tool=%s, kind=%s)',
       requestId,
       toolName,
-      paths.join(', ')
+      details.kind
     )
 
     return { request, promise }
@@ -124,10 +130,13 @@ class InteractManagerImpl {
       entry.request.toolName
     )
 
+    const defaultPaths = entry.request.details.kind === 'file_access'
+      ? (entry.request.details as { paths: string[] }).paths
+      : undefined
     entry.resolve({
       requestId,
       approved,
-      grantedPaths: approved ? grantedPaths ?? entry.request.paths : undefined
+      grantedPaths: approved ? grantedPaths ?? defaultPaths : undefined
     })
     return true
   }

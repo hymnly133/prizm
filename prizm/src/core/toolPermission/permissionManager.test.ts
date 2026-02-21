@@ -1,10 +1,10 @@
 /**
  * PermissionManager 单元测试
  *
- * 覆盖：权限模式切换/规则匹配/会话隔离/checkPermission/hook注册
+ * 覆盖：权限模式切换/复合工具规则匹配/会话隔离/checkPermission/hook注册
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import {
   setSessionPermissionMode,
   getSessionPermissionMode,
@@ -49,78 +49,41 @@ describe('PermissionManager', () => {
     })
   })
 
-  // ─── checkPermission ───
+  // ─── checkPermission — 复合工具 ───
 
-  describe('checkPermission', () => {
+  describe('checkPermission — compound tools', () => {
     it('should allow all tools in bypassPermissions mode', () => {
       setSessionPermissionMode('sess-a', 'bypassPermissions')
 
-      const result = checkPermission('sess-a', 'prizm_write_file', { path: '/x' }, [])
+      const result = checkPermission('sess-a', 'prizm_file', { action: 'write', path: '/x' }, [])
       expect(result.allowed).toBe(true)
     })
 
-    it('should deny write tools in plan mode', () => {
+    it('should deny prizm_file write in plan mode', () => {
       setSessionPermissionMode('sess-a', 'plan')
 
-      const result = checkPermission('sess-a', 'prizm_write_file', { path: '/x' }, [])
+      const result = checkPermission('sess-a', 'prizm_file', { action: 'write', path: '/x' }, [])
       expect(result.allowed).toBe(false)
       expect(result.denyMessage).toContain('Plan mode')
     })
 
-    it('should deny update_document in plan mode', () => {
+    it('should deny prizm_document create in plan mode', () => {
       setSessionPermissionMode('sess-a', 'plan')
 
-      const result = checkPermission('sess-a', 'prizm_update_document', { id: 'd1' }, [])
+      const result = checkPermission('sess-a', 'prizm_document', { action: 'create', title: 'doc' }, [])
       expect(result.allowed).toBe(false)
+      expect(result.denyMessage).toContain('Plan mode')
     })
 
     it('should deny terminal tools in plan mode', () => {
       setSessionPermissionMode('sess-a', 'plan')
 
-      const result = checkPermission('sess-a', 'prizm_terminal_exec', {}, [])
+      const result = checkPermission('sess-a', 'prizm_terminal_execute', { command: 'ls' }, [])
       expect(result.allowed).toBe(false)
     })
 
-    it('should allow read tools in plan mode', () => {
-      setSessionPermissionMode('sess-a', 'plan')
-
-      const result = checkPermission('sess-a', 'prizm_read_file', { path: '/x' }, [])
-      expect(result.allowed).toBe(true)
-    })
-
-    it('should allow all tools in acceptEdits mode', () => {
-      setSessionPermissionMode('sess-a', 'acceptEdits')
-
-      const result = checkPermission('sess-a', 'prizm_write_file', { path: '/x' }, [])
-      expect(result.allowed).toBe(true)
-    })
-
-    it('should deny tools in dontAsk mode', () => {
-      setSessionPermissionMode('sess-a', 'dontAsk')
-
-      const result = checkPermission('sess-a', 'prizm_write_file', { path: '/x' }, [])
-      expect(result.allowed).toBe(false)
-      expect(result.denyMessage).toContain('dontAsk')
-    })
-
-    it('should require interact for write tools in default mode with uncovered paths', () => {
-      const result = checkPermission(
-        'sess-a',
-        'prizm_write_file',
-        { path: '/outside/file.txt' },
-        []
-      )
-      expect(result.allowed).toBe(false)
-      expect(result.interactPaths).toContain('/outside/file.txt')
-    })
-
-    it('should allow write tools in default mode when paths are granted', () => {
-      const result = checkPermission(
-        'sess-a',
-        'prizm_write_file',
-        { path: '/granted/file.txt' },
-        ['/granted/file.txt']
-      )
+    it('should allow prizm_file read action (not in actionFilter)', () => {
+      const result = checkPermission('sess-a', 'prizm_file', { action: 'read', path: '/x' }, [])
       expect(result.allowed).toBe(true)
     })
 
@@ -129,17 +92,84 @@ describe('PermissionManager', () => {
       expect(result.allowed).toBe(true)
     })
 
-    it('should extract multiple paths from tool args', () => {
+    it('should allow all tools in acceptEdits mode', () => {
+      setSessionPermissionMode('sess-a', 'acceptEdits')
+
+      const result = checkPermission('sess-a', 'prizm_file', { action: 'write', path: '/x' }, [])
+      expect(result.allowed).toBe(true)
+    })
+
+    it('should deny tools in dontAsk mode', () => {
+      setSessionPermissionMode('sess-a', 'dontAsk')
+
+      const result = checkPermission('sess-a', 'prizm_file', { action: 'delete', path: '/x' }, [])
+      expect(result.allowed).toBe(false)
+      expect(result.denyMessage).toContain('dontAsk')
+    })
+
+    it('should require interact for file write with uncovered paths', () => {
       const result = checkPermission(
         'sess-a',
-        'prizm_move_file',
-        { from: '/a.txt', to: '/b.txt' },
+        'prizm_file',
+        { action: 'write', path: '/outside/file.txt' },
         []
       )
       expect(result.allowed).toBe(false)
-      expect(result.interactPaths).toEqual(
-        expect.arrayContaining(['/a.txt', '/b.txt'])
+      expect(result.interactDetails).toBeDefined()
+      expect(result.interactDetails!.kind).toBe('file_access')
+      if (result.interactDetails!.kind === 'file_access') {
+        expect(result.interactDetails!.paths).toContain('/outside/file.txt')
+      }
+    })
+
+    it('should allow file write when paths are granted', () => {
+      const result = checkPermission(
+        'sess-a',
+        'prizm_file',
+        { action: 'write', path: '/granted/file.txt' },
+        ['/granted/file.txt']
       )
+      expect(result.allowed).toBe(true)
+    })
+
+    it('should require interact for terminal_execute', () => {
+      const result = checkPermission(
+        'sess-a',
+        'prizm_terminal_execute',
+        { command: 'rm -rf /' },
+        []
+      )
+      expect(result.allowed).toBe(false)
+      expect(result.interactDetails).toBeDefined()
+      expect(result.interactDetails!.kind).toBe('terminal_command')
+    })
+
+    it('should require interact for document delete', () => {
+      const result = checkPermission(
+        'sess-a',
+        'prizm_document',
+        { action: 'delete', documentId: 'doc-1', title: 'My Doc' },
+        []
+      )
+      expect(result.allowed).toBe(false)
+      expect(result.interactDetails).toBeDefined()
+      expect(result.interactDetails!.kind).toBe('destructive_operation')
+    })
+
+    it('should extract file paths for move action', () => {
+      const result = checkPermission(
+        'sess-a',
+        'prizm_file',
+        { action: 'move', from: '/a.txt', to: '/b.txt' },
+        []
+      )
+      expect(result.allowed).toBe(false)
+      expect(result.interactDetails).toBeDefined()
+      if (result.interactDetails?.kind === 'file_access') {
+        expect(result.interactDetails.paths).toEqual(
+          expect.arrayContaining(['/a.txt', '/b.txt'])
+        )
+      }
     })
   })
 
@@ -208,22 +238,42 @@ describe('PermissionManager', () => {
       expect(permHook?.priority).toBe(10)
     })
 
-    it('should deny via hook in plan mode', async () => {
+    it('should deny via hook in plan mode for compound tools', async () => {
       setSessionPermissionMode('sess-a', 'plan')
       registerPermissionHook()
 
-      const hooks = hookRegistry.getMatchingHooks('PreToolUse', 'prizm_write_file')
+      const hooks = hookRegistry.getMatchingHooks('PreToolUse', 'prizm_file')
       const permHook = hooks.find((h) => h.id === 'builtin:permission-manager')!
       const result = await permHook.callback({
         scope: 'default',
         sessionId: 'sess-a',
-        toolName: 'prizm_write_file',
+        toolName: 'prizm_file',
         toolCallId: 'tc-1',
-        arguments: { path: '/test' },
+        arguments: { action: 'write', path: '/test' },
         grantedPaths: []
       })
       expect(result).toBeDefined()
-      expect((result as any).decision).toBe('deny')
+      expect((result as { decision: string }).decision).toBe('deny')
+    })
+
+    it('should return ask with interactDetails via hook in default mode', async () => {
+      registerPermissionHook()
+
+      const hooks = hookRegistry.getMatchingHooks('PreToolUse', 'prizm_file')
+      const permHook = hooks.find((h) => h.id === 'builtin:permission-manager')!
+      const result = await permHook.callback({
+        scope: 'default',
+        sessionId: 'sess-a',
+        toolName: 'prizm_file',
+        toolCallId: 'tc-2',
+        arguments: { action: 'write', path: '/uncovered.txt' },
+        grantedPaths: []
+      })
+      expect(result).toBeDefined()
+      const decision = result as { decision: string; interactDetails?: { kind: string } }
+      expect(decision.decision).toBe('ask')
+      expect(decision.interactDetails).toBeDefined()
+      expect(decision.interactDetails!.kind).toBe('file_access')
     })
   })
 })

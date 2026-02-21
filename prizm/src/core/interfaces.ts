@@ -27,6 +27,7 @@ export interface ChatCoreOptions {
   mcpEnabled?: boolean
   includeScopeContext?: boolean
   systemPreamble?: string
+  workflowEditContext?: string
   skipMemory?: boolean
   skipCheckpoint?: boolean
   skipSummary?: boolean

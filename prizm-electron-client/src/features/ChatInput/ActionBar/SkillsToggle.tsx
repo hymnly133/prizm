@@ -26,19 +26,6 @@ const SkillsToggle = memo(() => {
     setOpen((v) => !v)
   }, [])
 
-  if (!sessionId) {
-    return (
-      <Tooltip title="Skills（需要活跃会话）">
-        <ActionIcon
-          icon={Sparkles}
-          size={{ blockSize: 36, size: 20 }}
-          style={{ opacity: 0.3 }}
-          disabled
-        />
-      </Tooltip>
-    )
-  }
-
   return (
     <Popover
       open={open}
@@ -48,21 +35,21 @@ const SkillsToggle = memo(() => {
       arrow={false}
       content={
         <SkillManagerPanel
-          sessionId={sessionId}
+          sessionId={sessionId || ''}
           scope={scope}
           onClose={() => setOpen(false)}
         />
       }
       overlayInnerStyle={{ padding: 0, background: 'transparent', boxShadow: 'none' }}
     >
-      <Tooltip title="Skills 管理">
+      <Tooltip title={sessionId ? 'Skills 管理' : 'Skills（激活需在会话中）'}>
         <ActionIcon
           icon={Sparkles}
           size={{ blockSize: 36, size: 20 }}
           onClick={handleToggle}
           style={{
             color: open ? 'var(--ant-color-warning)' : undefined,
-            opacity: open ? 1 : 0.55
+            opacity: open ? 1 : sessionId ? 0.55 : 0.4
           }}
         />
       </Tooltip>

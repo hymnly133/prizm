@@ -1,8 +1,8 @@
 /**
- * Tool LLM HTTP 客户端 mixin
+ * 工作流管理会话 HTTP 客户端 mixin（遗留）
  *
- * 提供 Tool LLM 会话管理的 HTTP API 方法。
- * SSE 流式接口返回 EventSource URL，具体消费在前端 store 处理。
+ * @deprecated 工作流管理会话已改为走通用 Agent 聊天（POST /agent/sessions/:id/chat），
+ * 服务端不再提供 /agent/tool-llm/* 路由。以下方法保留仅为类型兼容，调用将失败。
  */
 
 import { PrizmClient } from '../client'
@@ -25,6 +25,7 @@ export interface ToolLLMResultPayload {
 
 export interface ToolLLMConfirmResult {
   sessionId: string
+  defId?: string
   status: string
   workflowDef?: Record<string, unknown>
   yamlContent?: string
@@ -33,13 +34,13 @@ export interface ToolLLMConfirmResult {
 
 declare module '../client' {
   interface PrizmClient {
-    /** 获取 Tool LLM start 的 SSE URL（前端直接 fetch） */
+    /** @deprecated 已废弃，工作流管理改用 POST /agent/sessions/:id/chat */
     getToolLLMStartUrl(scope?: string): string
-    /** 获取 Tool LLM refine 的 SSE URL */
+    /** @deprecated 已废弃，工作流管理改用 POST /agent/sessions/:id/chat */
     getToolLLMRefineUrl(sessionId: string, scope?: string): string
-    /** 确认 Tool LLM 产出 */
+    /** @deprecated 已废弃，工作流管理改用 create-workflow 工具提交 */
     confirmToolLLM(sessionId: string, workflowName?: string, scope?: string): Promise<ToolLLMConfirmResult>
-    /** 取消 Tool LLM 会话 */
+    /** @deprecated 已废弃 */
     cancelToolLLM(sessionId: string): Promise<void>
   }
 }

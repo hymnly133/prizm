@@ -4,7 +4,12 @@
 
 import { describe, it, expect } from 'vitest'
 import type { AgentSession } from '@prizm/shared'
-import { needsResultGuard, extractFallbackResult, RESULT_GUARD_PROMPT } from './resultGuard'
+import {
+  needsResultGuard,
+  extractFallbackResult,
+  RESULT_GUARD_PROMPT,
+  getResultGuardPrompt
+} from './resultGuard'
 
 function makeSession(overrides: Partial<AgentSession> = {}): AgentSession {
   return {
@@ -150,5 +155,24 @@ describe('extractFallbackResult', () => {
 describe('RESULT_GUARD_PROMPT', () => {
   it('包含 prizm_set_result 关键词', () => {
     expect(RESULT_GUARD_PROMPT).toContain('prizm_set_result')
+  })
+})
+
+describe('getResultGuardPrompt', () => {
+  it('workflow 步骤返回专用提示（强调传给下一步或流水线结果）', () => {
+    const session = {
+      kind: 'background' as const,
+      bgMeta: { source: 'workflow' as const }
+    }
+    const prompt = getResultGuardPrompt(session as import('@prizm/shared').AgentSession)
+    expect(prompt).toContain('prizm_set_result')
+    expect(prompt).toContain('下一步')
+  })
+
+  it('非 workflow 后台会话返回默认提示', () => {
+    const session = { kind: 'background' as const, bgMeta: { source: 'api' as const } }
+    expect(getResultGuardPrompt(session as import('@prizm/shared').AgentSession)).toBe(
+      RESULT_GUARD_PROMPT
+    )
   })
 })

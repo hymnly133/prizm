@@ -1,14 +1,20 @@
 /**
  * @ 引用可扩展注册表
- * 开发时注册内置类型；生产时可从配置加载用户自定义引用类型
- * 内置类型：note, doc, todo, file
+ * 自动从 resourceRefRegistry 同步所有已注册资源类型
+ * 保留 note/doc/todo/file 的向后兼容别名
  */
 
-import * as fs from 'fs'
-import * as path from 'path'
 import type { ScopeRefItem, ScopeRefItemDetail } from './scopeItemRegistry'
-import { getScopeRefItem, listRefItems } from './scopeItemRegistry'
 import type { ScopeRefKind } from './scopeItemRegistry'
+import { RESOURCE_TYPE_META } from '@prizm/shared'
+import type { ResourceType } from '@prizm/shared'
+import {
+  registerBuiltinResourceRefs,
+  listRegisteredTypes,
+  getResourceRefDef,
+  listResources,
+  resolveResource
+} from '../core/resourceRef'
 
 export interface AtReferenceDef {
   key: string
@@ -69,131 +75,105 @@ export function resolveKey(keyOrAlias: string): string | null {
   return def ? def.key : null
 }
 
-// ---------- 内置引用类型 ----------
+// ---------- 从 resourceRefRegistry 自动同步 ----------
 
-function builtinNoteResolve(scope: string, id: string) {
-  const detail = getScopeRefItem(scope, 'document', id)
-  return Promise.resolve(detail)
+/** ResourceRefDetail → 旧版 ScopeRefItemDetail 适配 */
+const TYPE_TO_KIND: Record<string, ScopeRefKind> = {
+  doc: 'document',
+  todo: 'todo',
+  file: 'document'
 }
 
-function builtinNoteList(scope: string, query?: string) {
-  let items = listRefItems(scope, 'document')
-  if (query?.trim()) {
-    const q = query.trim().toLowerCase()
-    items = items.filter((r) => r.title.toLowerCase().includes(q) || r.id.includes(q))
-  }
-  return Promise.resolve(items)
-}
-
-function builtinTodoResolve(scope: string, id: string) {
-  const detail = getScopeRefItem(scope, 'todo', id)
-  return Promise.resolve(detail)
-}
-
-function builtinTodoList(scope: string, query?: string) {
-  let items = listRefItems(scope, 'todo')
-  if (query?.trim()) {
-    const q = query.trim().toLowerCase()
-    items = items.filter((r) => r.title.toLowerCase().includes(q) || r.id.includes(q))
-  }
-  return Promise.resolve(items)
-}
-
-function builtinDocResolve(scope: string, id: string) {
-  const detail = getScopeRefItem(scope, 'document', id)
-  return Promise.resolve(detail)
-}
-
-function builtinDocList(scope: string, query?: string) {
-  let items = listRefItems(scope, 'document')
-  if (query?.trim()) {
-    const q = query.trim().toLowerCase()
-    items = items.filter((r) => r.title.toLowerCase().includes(q) || r.id.includes(q))
-  }
-  return Promise.resolve(items)
-}
-
-/** file 引用解析：id 为文件路径（可能经过 %29 编码） */
-function builtinFileResolve(
-  _scope: string,
-  encodedPath: string
-): Promise<ScopeRefItemDetail | null> {
-  const filePath = encodedPath.replace(/%29/g, ')')
-  try {
-    const resolved = path.resolve(filePath)
-    if (!fs.existsSync(resolved)) {
-      return Promise.resolve(null)
-    }
-    const stat = fs.statSync(resolved)
-    const baseName = path.basename(resolved)
-    const baseDetail: Omit<ScopeRefItemDetail, 'content'> = {
-      id: encodedPath,
-      kind: 'document' as ScopeRefKind,
-      title: baseName,
-      charCount: 0,
-      isShort: false,
-      updatedAt: stat.mtimeMs
-    }
-    if (stat.isDirectory()) {
-      const entries = fs.readdirSync(resolved)
-      const content = `目录 ${resolved} 内容：\n${entries.join('\n')}`
-      return Promise.resolve({ ...baseDetail, content, charCount: content.length })
-    }
-    const MAX_SIZE = 512 * 1024
-    if (stat.size > MAX_SIZE) {
-      const content =
-        `[文件过大，仅读取前 ${MAX_SIZE} 字节]\n` +
-        fs.readFileSync(resolved, 'utf-8').slice(0, MAX_SIZE)
-      return Promise.resolve({ ...baseDetail, content, charCount: content.length })
-    }
-    const content = fs.readFileSync(resolved, 'utf-8')
-    return Promise.resolve({
-      ...baseDetail,
-      content,
-      charCount: content.length,
-      isShort: content.length < 500
-    })
-  } catch {
-    return Promise.resolve(null)
+function refDetailToScopeDetail(
+  type: ResourceType,
+  detail: { id: string; title: string; charCount: number; updatedAt: number; content: string; groupOrStatus?: string }
+): ScopeRefItemDetail {
+  const kind = TYPE_TO_KIND[type] ?? (type as ScopeRefKind)
+  return {
+    id: detail.id,
+    kind,
+    title: detail.title,
+    charCount: detail.charCount,
+    isShort: detail.charCount < 500,
+    updatedAt: detail.updatedAt,
+    groupOrStatus: detail.groupOrStatus,
+    content: detail.content
   }
 }
 
-/** 是否已注册内置引用 */
+function refItemToScopeItem(
+  type: ResourceType,
+  item: { id: string; title: string; charCount: number; updatedAt: number; groupOrStatus?: string }
+): ScopeRefItem {
+  const kind = TYPE_TO_KIND[type] ?? (type as ScopeRefKind)
+  return {
+    id: item.id,
+    kind,
+    title: item.title,
+    charCount: item.charCount,
+    isShort: item.charCount < 500,
+    updatedAt: item.updatedAt,
+    groupOrStatus: item.groupOrStatus
+  }
+}
+
+function makeAtRefFromResourceType(type: ResourceType): AtReferenceDef {
+  const meta = RESOURCE_TYPE_META[type]
+  const def = getResourceRefDef(type)
+
+  const resolveRef = async (scope: string, id: string): Promise<ScopeRefItemDetail | null> => {
+    const detail = await resolveResource(scope, type, id)
+    return detail ? refDetailToScopeDetail(type, detail) : null
+  }
+
+  const listCandidates = def?.list
+    ? async (scope: string, query?: string): Promise<ScopeRefItem[]> => {
+        const items = await listResources(scope, type, 100)
+        const mapped = items.map((it) => refItemToScopeItem(type, it))
+        if (!query?.trim()) return mapped
+        const q = query.trim().toLowerCase()
+        return mapped.filter(
+          (r) =>
+            r.title.toLowerCase().includes(q) ||
+            r.id.toLowerCase().includes(q)
+        )
+      }
+    : undefined
+
+  return {
+    key: type,
+    aliases: meta.aliases,
+    label: meta.label,
+    resolveRef,
+    listCandidates,
+    builtin: true
+  }
+}
+
 let builtinAtRefsRegistered = false
 
-/** 注册内置 @ 引用类型（note、doc、todo、file）；首次调用时执行 */
+/**
+ * 注册内置 @ 引用类型 — 从 resourceRefRegistry 自动同步所有已注册类型
+ * 同时保留 note alias → doc 的兼容映射
+ */
 export function registerBuiltinAtReferences(): void {
   if (builtinAtRefsRegistered) return
   builtinAtRefsRegistered = true
-  registerAtReference({
-    key: 'note',
-    aliases: ['便签'],
-    label: '便签',
-    resolveRef: builtinNoteResolve,
-    listCandidates: builtinNoteList,
-    builtin: true
-  })
-  registerAtReference({
-    key: 'doc',
-    aliases: ['文档'],
-    label: '文档',
-    resolveRef: builtinDocResolve,
-    listCandidates: builtinDocList,
-    builtin: true
-  })
-  registerAtReference({
-    key: 'todo',
-    aliases: ['待办'],
-    label: '待办',
-    resolveRef: builtinTodoResolve,
-    listCandidates: builtinTodoList,
-    builtin: true
-  })
-  registerAtReference({
-    key: 'file',
-    aliases: ['文件'],
-    label: '文件路径',
-    resolveRef: builtinFileResolve,
-    builtin: true
-  })
+
+  registerBuiltinResourceRefs()
+
+  for (const type of listRegisteredTypes()) {
+    registerAtReference(makeAtRefFromResourceType(type))
+  }
+
+  // note → doc 兼容别名（note 不是独立类型，只是 doc 的别名）
+  const docDef = getAtReference('doc')
+  if (docDef) {
+    registerAtReference({
+      ...docDef,
+      key: 'note',
+      aliases: ['便签'],
+      label: '便签'
+    })
+  }
 }

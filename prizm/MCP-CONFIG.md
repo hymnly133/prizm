@@ -215,6 +215,10 @@ Scope 用于隔离不同工作场景的数据（便签、任务、剪贴板等�
 
 Prizm Agent 对话支持**调用**用户配置的外部 MCP 服务器，使 LLM 能够使用 GitHub、文件系统、搜索等外部工具。
 
+### 内置 MCP 框架（可选扩展）
+
+服务端在 `mcp-client/builtinMcpServers.ts` 提供内置 MCP 扩展点：`getBuiltinMcpServerDefaults(dataDir?)` 与 `BUILTIN_MCP_IDS`。当前**不注入任何预设**，MCP 服务器列表完全由用户自行在设置或 API 中配置；若后续在此处返回默认配置，首次创建 `agent-tools.json` 时会自动写入并持久化。
+
 ### 配置方式
 
 **方式一：Electron 客户端设置页**
@@ -272,7 +276,7 @@ Prizm Agent 对话支持**调用**用户配置的外部 MCP 服务器，使 LLM 
 
 ### 存储位置
 
-配置持久化于 `.prizm-data/mcp-servers.json`。
+配置持久化于 `.prizm-data/agent-tools.json`（`mcpServers` 字段）。旧版 `.prizm-data/mcp-servers.json` 会在首次加载时自动迁移到 `agent-tools.json`。
 
 ### 对话中的使用
 

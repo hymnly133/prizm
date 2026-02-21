@@ -6,8 +6,10 @@
  * 从 useDocumentDetail() context 读取文档数据。
  * 被 DocumentEditorView 和 DocumentPane 共享。
  */
-import { memo, useMemo } from 'react'
-import { Alert, Button, Flexbox, Markdown, Skeleton } from '@lobehub/ui'
+import { memo, useMemo, useState, useCallback } from 'react'
+import { Alert, Button, Flexbox, Skeleton } from '@lobehub/ui'
+import { PrizmMarkdown as Markdown } from '../agent/PrizmMarkdown'
+import ImagePreviewModal from '../ImagePreviewModal'
 import { createStyles } from 'antd-style'
 import { useDocumentDetailSafe } from '../../context/DocumentDetailContext'
 import { MarkdownEditor, EditorToolbar, SplitEditor, EditorStatusBar } from './index'
@@ -60,6 +62,8 @@ export const DocumentEditorZone = memo(function DocumentEditorZone({
 }: DocumentEditorZoneProps) {
   const ctx = useDocumentDetailSafe()
   const { styles } = useStyles()
+  const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
+  const handleImageClick = useCallback((src: string) => setPreviewImageSrc(src), [])
 
   const centeredStyle = useMemo(
     () => ({
@@ -128,7 +132,7 @@ export const DocumentEditorZone = memo(function DocumentEditorZone({
           <div className="doc-preview-pane">
             <div style={centeredStyle}>
               {headerElement}
-              <Markdown>{ctx.content || ' '}</Markdown>
+              <Markdown onImageClick={handleImageClick}>{ctx.content || ' '}</Markdown>
             </div>
           </div>
         ) : editorMode === 'split' ? (
@@ -159,6 +163,13 @@ export const DocumentEditorZone = memo(function DocumentEditorZone({
         charCount={ctx.charCount}
         wordCount={ctx.wordCount}
         editorRef={ctx.editorRef}
+      />
+
+      <ImagePreviewModal
+        open={!!previewImageSrc}
+        src={previewImageSrc}
+        title="图片预览"
+        onClose={() => setPreviewImageSrc(null)}
       />
     </div>
   )

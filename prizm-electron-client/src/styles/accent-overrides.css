@@ -17,7 +17,9 @@ textarea.ant-input,
 .ant-picker,
 .ant-input-number,
 .ant-mentions {
-  transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease !important;
 }
 
 /* ── Input focus ── */
@@ -151,7 +153,9 @@ textarea.ant-input:focus {
 .agent-right-section-icon {
   color: var(--ant-color-primary) !important;
   opacity: 1 !important;
-  transition: color 0.2s ease, opacity 0.2s ease;
+  transition:
+    color 0.2s ease,
+    opacity 0.2s ease;
 }
 
 /* ── Data card hover 时图标变主题色 ── */
@@ -169,7 +173,9 @@ textarea.ant-input:focus {
 .search-result-item {
   border-left: 3px solid transparent;
   padding-left: 11px;
-  transition: border-color 0.2s ease, background 0.15s ease;
+  transition:
+    border-color 0.2s ease,
+    background 0.15s ease;
 }
 
 .search-result-item.focused {
@@ -181,11 +187,16 @@ textarea.ant-input:focus {
 /* ── Home 待办组 hover 时左侧强调线（inset shadow 不破坏圆角） ── */
 
 .home-todolist-group {
-  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.2s ease;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.2s ease;
 }
 
 .home-todolist-group:hover {
-  box-shadow: inset 3px 0 0 var(--ant-color-primary), 0 2px 8px rgba(0, 0, 0, 0.04);
+  box-shadow:
+    inset 3px 0 0 var(--ant-color-primary),
+    0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
 /* ── Agent 总览标签图标 ── */
@@ -220,7 +231,9 @@ textarea.ant-input:focus {
 
 .notification-item {
   border-left: 3px solid var(--ant-color-primary);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 /* ── Overview card hover 时边框微变 accent ── */
@@ -244,7 +257,9 @@ textarea.ant-input:focus {
 .agent-empty svg:first-child {
   color: var(--ant-color-primary);
   opacity: 0.6;
-  transition: color 0.2s ease, opacity 0.2s ease;
+  transition:
+    color 0.2s ease,
+    opacity 0.2s ease;
 }
 
 /* workspace-folders-section__item 已迁移至 LobeUI List */
@@ -264,7 +279,9 @@ textarea.ant-input:focus {
 /* ── Checkbox 选中态 ── */
 
 .ant-checkbox-inner {
-  transition: background-color 0.2s ease, border-color 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease;
 }
 
 .ant-checkbox-wrapper:not(.ant-checkbox-wrapper-disabled)
@@ -297,7 +314,9 @@ textarea.ant-input:focus {
 }
 
 .ant-radio-inner::after {
-  transition: background-color 0.2s ease, transform 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    transform 0.2s ease;
 }
 
 .ant-radio-wrapper:not(.ant-radio-wrapper-disabled) .ant-radio-checked .ant-radio-inner {
@@ -354,7 +373,9 @@ textarea.ant-input:focus {
 /* ── Steps 当前步骤 ── */
 
 .ant-steps-item-icon {
-  transition: background-color 0.2s ease, border-color 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease;
 }
 
 .ant-steps-item-process .ant-steps-item-icon {
@@ -382,7 +403,10 @@ textarea.ant-input:focus {
 /* ── 列表容器：所有子项基础过渡 ── */
 
 .accent-list > * {
-  transition: background 0.12s ease, transform 0.1s ease, opacity 0.1s ease;
+  transition:
+    background 0.12s ease,
+    transform 0.1s ease,
+    opacity 0.1s ease;
 }
 
 .accent-list > *:active {

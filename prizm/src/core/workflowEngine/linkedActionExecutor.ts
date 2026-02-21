@@ -21,21 +21,42 @@ import type { TodoList, Document, ScheduleItem } from '@prizm/shared'
 
 const log = createLogger('LinkedActionExecutor')
 
-/** 解析 $stepId.output 等变量引用 */
+/** 与 runner.resolveReference 一致的引用匹配（支持 $args.foo.bar dot-path） */
+const REF_PATTERN = /\$([a-zA-Z_][a-zA-Z0-9_]*)\.(\w+(?:\.\w+)*)/g
+
+/** 解析 $stepId.output / $args.key 等变量引用；$args 支持 dot-path，与 runner 一致 */
 function resolveVars(
   template: string,
   stepResults: Record<string, WorkflowStepResult>,
   args?: Record<string, unknown>
 ): string {
-  return template.replace(/\$([a-zA-Z_][a-zA-Z0-9_]*)\.(\w+)/g, (_m, stepId, prop) => {
+  REF_PATTERN.lastIndex = 0
+  return template.replace(REF_PATTERN, (_m, stepId, propPath) => {
     if (stepId === 'args' && args) {
-      return String(args[prop] ?? '')
+      const keys = propPath.split('.')
+      let current: unknown = args
+      for (const key of keys) {
+        if (
+          current != null &&
+          typeof current === 'object' &&
+          key in (current as Record<string, unknown>)
+        ) {
+          current = (current as Record<string, unknown>)[key]
+        } else {
+          return ''
+        }
+      }
+      return typeof current === 'string'
+        ? current
+        : current != null
+          ? JSON.stringify(current)
+          : ''
     }
     const result = stepResults[stepId]
     if (!result) return ''
-    if (prop === 'output') return result.output ?? ''
-    if (prop === 'approved') return String(result.approved ?? '')
-    if (prop === 'sessionId') return result.sessionId ?? ''
+    if (propPath === 'output') return result.output ?? ''
+    if (propPath === 'approved') return String(result.approved ?? '')
+    if (propPath === 'sessionId') return result.sessionId ?? ''
     return ''
   })
 }

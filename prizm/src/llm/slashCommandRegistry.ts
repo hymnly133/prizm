@@ -7,6 +7,14 @@ export interface SlashCommandRunOptions {
   scope: string
   sessionId?: string
   args: string[]
+  /** 会话允许的 skills（仅用 allowedSkills 时由 chatCore 传入） */
+  allowedSkills?: string[]
+}
+
+/** Sub-command hint for auto-complete */
+export interface SlashSubCommandHint {
+  name: string
+  description: string
 }
 
 export interface SlashCommandDef {
@@ -19,6 +27,12 @@ export interface SlashCommandDef {
   mode?: 'prompt' | 'action'
   /** 允许的工具列表（兼容 Claude Code allowed-tools） */
   allowedTools?: string[]
+  /** Sub-command hints for auto-complete UI */
+  subCommands?: SlashSubCommandHint[]
+  /** Dynamic argument provider (e.g., skill names) */
+  argHints?: () => string[]
+  /** 分类：data | search | session | skill | custom，用于客户端分组展示 */
+  category?: string
 }
 
 const registry = new Map<string, SlashCommandDef>()
@@ -66,11 +80,31 @@ export function listSlashCommands(): SlashCommandDef[] {
   return Array.from(registry.values())
 }
 
-/** 解析消息首 token 是否为 slash 命令；返回命令名与剩余 args */
+/** 移除所有非内置命令（用于 reload 前清理） */
+export function clearNonBuiltinCommands(): void {
+  for (const [name, def] of registry) {
+    if (!def.builtin) {
+      unregisterAliases(name, def)
+      registry.delete(name)
+    }
+  }
+}
+
+/** 解析消息首 token 是否为 slash 命令；返回命令名与剩余 args。
+ *  支持两种格式：`/cmd arg1 arg2` 和 `/(cmd arg1 arg2)`（客户端 overlay 生成） */
 export function parseSlashMessage(message: string): { name: string; args: string[] } | null {
   const trimmed = message.trim()
   if (!trimmed.startsWith('/')) return null
   const rest = trimmed.slice(1).trim()
+
+  // 客户端 overlay 生成的括号格式: /(cmd args)
+  if (rest.startsWith('(') && rest.includes(')')) {
+    const inner = rest.slice(1, rest.indexOf(')'))
+    const tokens = inner.split(/\s+/).filter(Boolean)
+    const name = tokens[0]
+    return name ? { name: name.toLowerCase(), args: tokens.slice(1) } : null
+  }
+
   const idx = rest.search(/\s/)
   const name = idx >= 0 ? rest.slice(0, idx) : rest
   const args = idx >= 0 ? rest.slice(idx).trim().split(/\s+/).filter(Boolean) : []

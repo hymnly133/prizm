@@ -78,6 +78,7 @@ export function createMemoryRoutes(router: Router): void {
       }
 
       const memories = await getAllMemories(scope)
+      log.info('GET /agent/memories scope=%s returned %d memories', scope, memories.length)
       res.json({ enabled: true, memories })
     } catch (error) {
       log.error('list memories error:', error)

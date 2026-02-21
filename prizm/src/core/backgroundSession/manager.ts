@@ -15,7 +15,7 @@ import type { AgentSession, BgSessionMeta, BgStatus, SessionMemoryPolicy } from 
 import type { IAgentAdapter } from '../../adapters/interfaces'
 import type { IChatService } from '../interfaces'
 import type { ActiveRunEntry, BgConcurrencyLimits, BgRunResult, BgTriggerPayload } from './types'
-import { needsResultGuard, RESULT_GUARD_PROMPT, extractFallbackResult } from './resultGuard'
+import { needsResultGuard, getResultGuardPrompt, extractFallbackResult } from './resultGuard'
 import { observerRegistry } from './observerRegistry'
 import { buildBgSystemPreamble } from './preambleBuilder'
 import { validateJsonSchema } from './schemaValidation'
@@ -288,7 +288,7 @@ export class BackgroundSessionManager {
           {
             scope,
             sessionId,
-            content: RESULT_GUARD_PROMPT,
+            content: getResultGuardPrompt(updatedSession),
             model: meta.model,
             signal,
             includeScopeContext: false,
@@ -322,8 +322,9 @@ export class BackgroundSessionManager {
     } catch (err: unknown) {
       if (signal.aborted) return
       const errMsg = err instanceof Error ? err.message : String(err)
+      const errorDetail = err instanceof Error ? err.stack : undefined
       log.error('BG session execution failed:', sessionId, errMsg)
-      await this.failRun(scope, sessionId, errMsg)
+      await this.failRun(scope, sessionId, errMsg, errorDetail)
     }
   }
 
@@ -431,7 +432,12 @@ export class BackgroundSessionManager {
     log.info('BG session completed:', sessionId, `(${durationMs}ms)`)
   }
 
-  private async failRun(scope: string, sessionId: string, error: string): Promise<void> {
+  private async failRun(
+    scope: string,
+    sessionId: string,
+    error: string,
+    errorDetail?: string
+  ): Promise<void> {
     const entry = this.activeRuns.get(sessionId)
     const session = await this.adapter?.getSession?.(scope, sessionId)
 
@@ -447,7 +453,8 @@ export class BackgroundSessionManager {
       sessionId,
       status: 'failed',
       output: `错误：${error}`,
-      durationMs
+      durationMs,
+      ...(errorDetail ? { errorDetail } : {})
     }
 
     if (entry) {

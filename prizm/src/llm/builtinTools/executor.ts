@@ -8,7 +8,12 @@ import { createWorkspaceContext } from '../workspaceResolver'
 import { recordActivity } from '../contextTracker'
 import { emit } from '../../core/eventBus'
 import type { AuditEntryInput } from '../../core/agentAuditLog'
-import type { ScopeActivityItemKind, ScopeActivityAction } from '@prizm/shared'
+import {
+  type ScopeActivityItemKind,
+  type ScopeActivityAction,
+  WORKFLOW_MANAGEMENT_TOOL_CREATE_WORKFLOW,
+  WORKFLOW_MANAGEMENT_TOOL_UPDATE_WORKFLOW
+} from '@prizm/shared'
 import type { BuiltinToolContext, BuiltinToolResult } from './types'
 import * as fileTools from './fileTools'
 import * as todoTools from './todoTools'
@@ -21,11 +26,15 @@ import * as taskTools from './taskTools'
 import * as scheduleTools from './scheduleTools'
 import * as cronTools from './cronTools'
 import * as workflowTools from './workflowTools'
+import * as skillTools from './skillTools'
+import { executeCreateWorkflow, executeUpdateWorkflow } from '../toolLLM/workflowSubmitTool'
+import type { IAgentAdapter } from '../../adapters/interfaces'
 
 /**
  * 执行内置工具；sessionId 可选，用于记录修改到 ContextTracker
  * userId 可选，用于记忆检索的真实用户 ID
  * grantedPaths 可选，用户授权的外部文件路径列表
+ * adapter 可选，工作流创建/更新工具需要用于会话双向绑定
  */
 export async function executeBuiltinTool(
   scope: string,
@@ -33,13 +42,19 @@ export async function executeBuiltinTool(
   args: Record<string, unknown>,
   sessionId?: string,
   _userId?: string,
-  grantedPaths?: string[]
+  grantedPaths?: string[],
+  adapter?: IAgentAdapter
 ): Promise<BuiltinToolResult> {
   const data = scopeStore.getScopeData(scope)
   const scopeRoot = scopeStore.getScopeRootPath(scope)
   const session = sessionId ? data.agentSessions.find((s) => s.id === sessionId) : undefined
-  const workflowWsDir = session?.bgMeta?.workspaceDir
-  const wsCtx = createWorkspaceContext(scopeRoot, sessionId, workflowWsDir)
+  const runWsDir =
+    session?.bgMeta?.workspaceDir ??
+    (session as { toolMeta?: { runWorkspaceDir?: string } })?.toolMeta?.runWorkspaceDir
+  const workflowWsDir =
+    session?.bgMeta?.persistentWorkspaceDir ??
+    (session as { toolMeta?: { persistentWorkspaceDir?: string } })?.toolMeta?.persistentWorkspaceDir
+  const wsCtx = createWorkspaceContext(scopeRoot, sessionId, runWsDir, workflowWsDir)
 
   const record = (itemId: string, itemKind: ScopeActivityItemKind, action: ScopeActivityAction) => {
     if (sessionId)
@@ -115,8 +130,24 @@ export async function executeBuiltinTool(
         return dispatchCron(ctx)
       case 'prizm_workflow':
         return workflowTools.dispatchWorkflow(ctx)
-      case 'prizm_workflow_builder':
-        return workflowTools.dispatchWorkflowBuilder(ctx)
+      case 'prizm_navigate':
+        return workflowTools.dispatchNavigate(ctx)
+      case 'prizm_get_skill_instructions':
+        return skillTools.executeGetSkillInstructions(ctx)
+      case WORKFLOW_MANAGEMENT_TOOL_CREATE_WORKFLOW: {
+        const wfJson =
+          typeof args.workflow_json === 'string'
+            ? args.workflow_json
+            : JSON.stringify(args.workflow_json ?? '{}')
+        return executeCreateWorkflow(scope, sessionId ?? '', wfJson, adapter)
+      }
+      case WORKFLOW_MANAGEMENT_TOOL_UPDATE_WORKFLOW: {
+        const wfJson =
+          typeof args.workflow_json === 'string'
+            ? args.workflow_json
+            : JSON.stringify(args.workflow_json ?? '{}')
+        return executeUpdateWorkflow(scope, sessionId ?? '', wfJson, adapter)
+      }
       default:
         return { text: `未知内置工具: ${toolName}`, isError: true }
     }

@@ -1,6 +1,6 @@
 # 布局组件库
 
-复刻 LobeHub 页面布局的可复用组件。详见 [LOBEHUB_LAYOUT_SUMMARY.md](../../../docs/LOBEHUB_LAYOUT_SUMMARY.md)。
+复刻 LobeHub 页面布局的可复用组件。
 
 ## 组件列表
 

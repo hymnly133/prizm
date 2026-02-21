@@ -110,22 +110,43 @@ export const AgentChatZone = memo(function AgentChatZone({
         )}
       </AnimatePresence>
 
-      {/* Input area */}
+      {/* Input area：有当前会话时包在 SessionChatProvider 内，以便 ActionBar（如 SkillsToggle）能拿到 sessionId */}
       <div className="agent-input-wrap agent-input-floating">
-        <DraftCacheManager sessionId={currentSession?.id ?? DRAFT_KEY_NEW} />
-        <PendingChatPayloadApplicator />
-        {extraInputChildren}
-        <DesktopChatInput
-          onClear={onClear}
-          inputContainerProps={{
-            minHeight,
-            style: {
-              borderRadius,
-              boxShadow,
-              transition: 'box-shadow 0.3s, border-color 0.3s'
-            }
-          }}
-        />
+        {currentSession ? (
+          <SessionChatProvider sessionId={currentSession.id} scope={scope} active={true}>
+            <DraftCacheManager sessionId={currentSession.id} />
+            <PendingChatPayloadApplicator />
+            {extraInputChildren}
+            <DesktopChatInput
+              onClear={onClear}
+              inputContainerProps={{
+                minHeight,
+                style: {
+                  borderRadius,
+                  boxShadow,
+                  transition: 'box-shadow 0.3s, border-color 0.3s'
+                }
+              }}
+            />
+          </SessionChatProvider>
+        ) : (
+          <>
+            <DraftCacheManager sessionId={DRAFT_KEY_NEW} />
+            <PendingChatPayloadApplicator />
+            {extraInputChildren}
+            <DesktopChatInput
+              onClear={onClear}
+              inputContainerProps={{
+                minHeight,
+                style: {
+                  borderRadius,
+                  boxShadow,
+                  transition: 'box-shadow 0.3s, border-color 0.3s'
+                }
+              }}
+            />
+          </>
+        )}
       </div>
     </>
   )

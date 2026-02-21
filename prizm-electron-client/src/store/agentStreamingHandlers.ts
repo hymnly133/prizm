@@ -203,6 +203,8 @@ export function processStreamChunk(chunk: StreamChatChunk, ctx: ProcessChunkCont
       acc.segmentContent = ''
     }
     const existing = acc.parts.find((p): p is MessagePartTool => p.type === 'tool' && p.id === id)
+    // 若该工具调用已由 tool_call 标记为 done，不再追加 chunk，避免破坏完整 result（如工作流更新成功后被误显示为失败）
+    if (existing?.status === 'done') return
     const newParts: MessagePart[] = existing
       ? acc.parts.map((p) =>
           p.type === 'tool' && p.id === id ? { ...p, result: p.result + chunkText } : p

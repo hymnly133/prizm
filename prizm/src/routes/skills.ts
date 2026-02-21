@@ -11,20 +11,21 @@ import { createLogger } from '../logger'
 import {
   loadAllSkillMetadata,
   loadSkillFull,
+  getSkillFileTree,
   createSkill,
   updateSkill,
   deleteSkill,
   importSkillsFromDir,
   discoverImportableSkillSources,
   listSkillResources,
-  readSkillResource,
-  activateSkill,
-  deactivateSkill,
-  getActiveSkills
+  readSkillResource
 } from '../llm/skillManager'
 import {
   searchRegistrySkills,
-  getFeaturedSkills,
+  getFeaturedSkillsAsync,
+  listCollectionSkills,
+  searchSkillKit,
+  searchSkillsMP,
   fetchSkillPreview,
   installSkillFromRegistry
 } from '../llm/skillRegistry'
@@ -87,7 +88,7 @@ export function createSkillsRoutes(router: Router): void {
     }
   })
 
-  // GET /skills/:name - 获取 skill 完整内容（Level 2）
+  // GET /skills/:name - 获取 skill 完整内容（Level 2）+ path 与 fileTree
   router.get('/skills/:name', (req: Request, res: Response) => {
     try {
       const name = ensureStringParam(req.params.name)
@@ -95,7 +96,8 @@ export function createSkillsRoutes(router: Router): void {
       if (!skill) {
         return res.status(404).json({ error: 'Skill not found' })
       }
-      res.json(skill)
+      const fileTree = getSkillFileTree(name)
+      res.json({ ...skill, fileTree: fileTree ?? undefined })
     } catch (error) {
       log.error('get skill error:', error)
       const { status, body } = toErrorResponse(error)
@@ -212,45 +214,6 @@ export function createSkillsRoutes(router: Router): void {
     }
   })
 
-  // POST /skills/:name/activate - 手动激活 skill（会话级）
-  router.post('/skills/:name/activate', (req: Request, res: Response) => {
-    try {
-      const name = ensureStringParam(req.params.name)
-      const { scope, sessionId } = req.body ?? {}
-      if (!scope || !sessionId) {
-        return res.status(400).json({ error: 'scope and sessionId are required' })
-      }
-
-      const activation = activateSkill(scope, sessionId, name)
-      if (!activation) {
-        return res.status(404).json({ error: 'Skill not found' })
-      }
-      res.json(activation)
-    } catch (error) {
-      log.error('activate skill error:', error)
-      const { status, body } = toErrorResponse(error)
-      res.status(status).json(body)
-    }
-  })
-
-  // POST /skills/:name/deactivate - 取消激活
-  router.post('/skills/:name/deactivate', (req: Request, res: Response) => {
-    try {
-      const name = ensureStringParam(req.params.name)
-      const { scope, sessionId } = req.body ?? {}
-      if (!scope || !sessionId) {
-        return res.status(400).json({ error: 'scope and sessionId are required' })
-      }
-
-      const result = deactivateSkill(scope, sessionId, name)
-      res.json({ deactivated: result })
-    } catch (error) {
-      log.error('deactivate skill error:', error)
-      const { status, body } = toErrorResponse(error)
-      res.status(status).json(body)
-    }
-  })
-
   // ============ Registry Routes ============
 
   // GET /skills/registry/search?q=<query>&page=1
@@ -269,12 +232,66 @@ export function createSkillsRoutes(router: Router): void {
   })
 
   // GET /skills/registry/featured
-  router.get('/skills/registry/featured', (_req: Request, res: Response) => {
+  router.get('/skills/registry/featured', async (_req: Request, res: Response) => {
     try {
-      const skills = getFeaturedSkills()
+      const skills = await getFeaturedSkillsAsync()
       res.json({ skills })
     } catch (error) {
       log.error('registry featured error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // GET /skills/registry/skillsmp/search?q=&limit=&page=
+  router.get('/skills/registry/skillsmp/search', async (req: Request, res: Response) => {
+    try {
+      const q = typeof req.query.q === 'string' ? req.query.q : ''
+      const limit =
+        typeof req.query.limit === 'string'
+          ? Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20))
+          : 20
+      const page =
+        typeof req.query.page === 'string' ? Math.max(1, parseInt(req.query.page, 10) || 1) : 1
+      const result = await searchSkillsMP(q, { limit, page })
+      res.json(result)
+    } catch (error) {
+      log.error('skillsmp search error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // GET /skills/registry/skillkit/search?q=&limit=
+  router.get('/skills/registry/skillkit/search', async (req: Request, res: Response) => {
+    try {
+      const q = typeof req.query.q === 'string' ? req.query.q : ''
+      const limit =
+        typeof req.query.limit === 'string'
+          ? Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20))
+          : 20
+      const result = await searchSkillKit(q, { limit })
+      res.json(result)
+    } catch (error) {
+      log.error('skillkit search error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // GET /skills/registry/collection?owner=&repo=&path=
+  router.get('/skills/registry/collection', async (req: Request, res: Response) => {
+    try {
+      const owner = typeof req.query.owner === 'string' ? req.query.owner : ''
+      const repo = typeof req.query.repo === 'string' ? req.query.repo : ''
+      const path = typeof req.query.path === 'string' ? req.query.path : 'skills'
+      if (!owner || !repo) {
+        return res.status(400).json({ error: 'owner and repo are required' })
+      }
+      const skills = await listCollectionSkills(owner, repo, path)
+      res.json({ skills })
+    } catch (error) {
+      log.error('registry collection error:', error)
       const { status, body } = toErrorResponse(error)
       res.status(status).json(body)
     }
@@ -304,35 +321,18 @@ export function createSkillsRoutes(router: Router): void {
   // POST /skills/registry/install
   router.post('/skills/registry/install', async (req: Request, res: Response) => {
     try {
-      const { owner, repo, skillPath } = req.body ?? {}
-      if (
-        typeof owner !== 'string' ||
-        typeof repo !== 'string' ||
-        typeof skillPath !== 'string'
-      ) {
+      const { owner, repo, skillPath, source } = req.body ?? {}
+      if (typeof owner !== 'string' || typeof repo !== 'string' || typeof skillPath !== 'string') {
         return res.status(400).json({ error: 'owner, repo, and skillPath are required' })
       }
-      const skill = await installSkillFromRegistry(owner, repo, skillPath)
+      const validSource =
+        typeof source === 'string' && ['github', 'curated', 'skillkit', 'skillsmp'].includes(source)
+          ? (source as 'github' | 'curated' | 'skillkit' | 'skillsmp')
+          : undefined
+      const skill = await installSkillFromRegistry(owner, repo, skillPath, validSource ?? 'github')
       res.status(201).json(skill)
     } catch (error) {
       log.error('registry install error:', error)
-      const { status, body } = toErrorResponse(error)
-      res.status(status).json(body)
-    }
-  })
-
-  // GET /skills/active - 获取会话中已激活的 skills
-  router.get('/skills/active', (req: Request, res: Response) => {
-    try {
-      const scope = typeof req.query.scope === 'string' ? req.query.scope : ''
-      const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : ''
-      if (!scope || !sessionId) {
-        return res.status(400).json({ error: 'scope and sessionId query params are required' })
-      }
-      const active = getActiveSkills(scope, sessionId)
-      res.json({ skills: active })
-    } catch (error) {
-      log.error('get active skills error:', error)
       const { status, body } = toErrorResponse(error)
       res.status(status).json(body)
     }

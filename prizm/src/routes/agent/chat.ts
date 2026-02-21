@@ -37,7 +37,7 @@ export function registerChatRoutes(router: Router, adapter?: IAgentAdapter): voi
         return res.status(404).json({ error: 'Session not found' })
       }
 
-      const { content, fileRefs: bodyFileRefs } = req.body ?? {}
+      const { content, fileRefs: bodyFileRefs, runRefIds: bodyRunRefIds } = req.body ?? {}
       if (typeof content !== 'string' || !content.trim()) {
         return res.status(400).json({ error: 'content is required' })
       }
@@ -46,6 +46,10 @@ export function registerChatRoutes(router: Router, adapter?: IAgentAdapter): voi
         ? bodyFileRefs
             .filter((r: unknown) => r && typeof (r as Record<string, unknown>).path === 'string')
             .map((r: { path: string }) => r.path)
+        : []
+
+      const runRefIds: string[] = Array.isArray(bodyRunRefIds)
+        ? bodyRunRefIds.filter((id: unknown) => typeof id === 'string' && id.trim())
         : []
 
       const bodyModel = req.body?.model
@@ -83,7 +87,12 @@ export function registerChatRoutes(router: Router, adapter?: IAgentAdapter): voi
 
       let usageSent = false
       let lastUsage:
-        | { totalTokens?: number; totalInputTokens?: number; totalOutputTokens?: number; cachedInputTokens?: number }
+        | {
+            totalTokens?: number
+            totalInputTokens?: number
+            totalOutputTokens?: number
+            cachedInputTokens?: number
+          }
         | undefined
 
       try {
@@ -95,6 +104,7 @@ export function registerChatRoutes(router: Router, adapter?: IAgentAdapter): voi
             content: content.trim(),
             model: typeof bodyModel === 'string' && bodyModel.trim() ? bodyModel.trim() : undefined,
             fileRefPaths,
+            runRefIds: runRefIds.length > 0 ? runRefIds : undefined,
             mcpEnabled: mcpEnabled !== false,
             includeScopeContext: includeScopeContext !== false,
             fullContextTurns: typeof fullContextTurns === 'number' ? fullContextTurns : undefined,
@@ -295,16 +305,31 @@ export function registerChatRoutes(router: Router, adapter?: IAgentAdapter): voi
           res.write(`data: ${JSON.stringify({ type: 'reasoning', value: chunk.reasoning })}\n\n`)
         }
         if (chunk.toolCallArgsDelta) {
-          res.write(`data: ${JSON.stringify({ type: 'tool_call_args_delta', value: chunk.toolCallArgsDelta })}\n\n`)
+          res.write(
+            `data: ${JSON.stringify({
+              type: 'tool_call_args_delta',
+              value: chunk.toolCallArgsDelta
+            })}\n\n`
+          )
         }
         if (chunk.toolResultChunk) {
-          res.write(`data: ${JSON.stringify({ type: 'tool_result_chunk', value: chunk.toolResultChunk })}\n\n`)
+          res.write(
+            `data: ${JSON.stringify({
+              type: 'tool_result_chunk',
+              value: chunk.toolResultChunk
+            })}\n\n`
+          )
         }
         if (chunk.toolCall) {
           res.write(`data: ${JSON.stringify({ type: 'tool_call', value: chunk.toolCall })}\n\n`)
         }
         if (chunk.interactRequest) {
-          res.write(`data: ${JSON.stringify({ type: 'interact_request', value: chunk.interactRequest })}\n\n`)
+          res.write(
+            `data: ${JSON.stringify({
+              type: 'interact_request',
+              value: chunk.interactRequest
+            })}\n\n`
+          )
         }
         res.flush?.()
       }
@@ -326,7 +351,9 @@ export function registerChatRoutes(router: Router, adapter?: IAgentAdapter): voi
         clearInterval(heartbeatTimer)
         if (!res.writableEnded) {
           const terminalStatus = session.bgStatus
-          res.write(`data: ${JSON.stringify({ type: 'done', bgStatus: terminalStatus ?? 'unknown' })}\n\n`)
+          res.write(
+            `data: ${JSON.stringify({ type: 'done', bgStatus: terminalStatus ?? 'unknown' })}\n\n`
+          )
           res.flush?.()
           res.end()
         }

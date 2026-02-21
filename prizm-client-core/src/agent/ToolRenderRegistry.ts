@@ -4,9 +4,12 @@
  */
 
 import type { ReactNode } from 'react'
-import type { ToolCallRecord } from '../types'
+import type { ToolCallRecord, EnrichedSession } from '../types'
 
-export type ToolRenderFn = (props: { tc: ToolCallRecord }) => ReactNode
+export type ToolRenderFn = (props: {
+  tc: ToolCallRecord
+  session?: EnrichedSession | null
+}) => ReactNode
 
 const registry = new Map<string, ToolRenderFn>()
 

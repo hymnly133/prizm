@@ -1,11 +1,13 @@
 /**
- * 文件内嵌预览面板：便签 / 文档 / 待办列表内容预览
+ * 文件内嵌预览面板：便签 / 文档 / 待办列表内容预览，支持点击图片放大
  */
-import { ActionIcon, Flexbox, Markdown, Tag } from '@lobehub/ui'
+import { ActionIcon, Flexbox, Tag } from '@lobehub/ui'
+import { PrizmMarkdown as Markdown } from './PrizmMarkdown'
 import type { Document as PrizmDocument, TodoList } from '@prizm/client-core'
 import { X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { usePrizmContext } from '../../context/PrizmContext'
+import ImagePreviewModal from '../ImagePreviewModal'
 import type { FileKind } from '../../hooks/useFileList'
 
 const KIND_LABELS: Record<FileKind, string> = {
@@ -27,6 +29,8 @@ export function FilePreviewPanel({ fileRef, scope, onClose }: FilePreviewPanelPr
   const [error, setError] = useState<string | null>(null)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
+  const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
+  const handleImageClick = useCallback((src: string) => setPreviewImageSrc(src), [])
 
   useEffect(() => {
     if (!http) return
@@ -85,10 +89,16 @@ export function FilePreviewPanel({ fileRef, scope, onClose }: FilePreviewPanelPr
           </div>
         ) : (
           <div className="md-preview-wrap">
-            <Markdown>{content || '(空)'}</Markdown>
+            <Markdown onImageClick={handleImageClick}>{content || '(空)'}</Markdown>
           </div>
         )}
       </div>
+      <ImagePreviewModal
+        open={!!previewImageSrc}
+        src={previewImageSrc}
+        title="图片预览"
+        onClose={() => setPreviewImageSrc(null)}
+      />
     </div>
   )
 }

@@ -31,9 +31,10 @@ const GUIDES: ToolGuide[] = [
     toolNames: ['prizm_file', 'prizm_document', 'prizm_todo', 'prizm_promote_file'],
     firstCallHint: [
       '[工作区注意事项]',
-      '· workspace 参数: "main"（默认主工作区）/ "session"（临时工作区）/ "workflow"（工作流工作区）',
-      '· 工作流上下文中默认操作在工作流工作区，需访问主工作区请显式传 workspace:"main"',
-      '· 使用 prizm_promote_file 可将临时/工作流工作区的文件提升到主工作区'
+      '· workspace 参数: "main"（默认主工作区）/ "session"（临时工作区）/ "run"（运行工作区，步骤间数据传递）/ "workflow"（工作流工作区，跨 run 共享）',
+      '· 工作流上下文中默认操作在运行工作区，需访问主工作区请显式传 workspace:"main"',
+      '· workflow 工作区存放跨 run 保留的数据（明确要求、注意事项、经验总结等），run 工作区存放本次运行临时数据',
+      '· 使用 prizm_promote_file 可将临时/运行工作区的文件提升到主工作区'
     ].join('\n')
   },
   {
@@ -42,7 +43,7 @@ const GUIDES: ToolGuide[] = [
     firstCallHint: [
       '[注意事项]',
       '· send_keys: pressEnter 控制回车，不要在 input 中手动添加 \\n 或 \\r',
-      '· workspace: "main"（默认，项目根目录）/ "session"（临时目录）/ "workflow"（工作流目录）',
+      '· workspace: "main"（默认，项目根目录）/ "session"（临时目录）/ "run"（运行工作区）/ "workflow"（工作流工作区）',
       '· 禁止执行 rm -rf /、删除系统文件等危险操作'
     ].join('\n')
   },
@@ -72,14 +73,23 @@ const GUIDES: ToolGuide[] = [
     ].join('\n')
   },
   {
-    category: 'workflow_builder',
-    toolNames: ['prizm_workflow_builder'],
+    category: 'workflow_management',
+    toolNames: ['workflow-management-create-workflow', 'workflow-management-update-workflow'],
+    firstCallHint: [
+      '[工作流管理会话]',
+      '· 未绑定时使用 workflow-management-create-workflow 提交一次，成功后会话自动绑定该工作流',
+      '· 已绑定后仅使用 workflow-management-update-workflow 增量修改，保留用户未提及部分不变',
+      '· 参数为完整 WorkflowDef JSON，服务端校验失败会返回具体错误便于修正'
+    ].join('\n')
+  },
+  {
+    category: 'navigate',
+    toolNames: ['prizm_navigate'],
     firstCallHint: [
       '[注意事项]',
-      '· build: 创建新工作流，edit: 修改已有工作流',
-      '· edit 时 workflow_name 必填，指定要修改的工作流',
-      '· 结果通过内联卡片展示，用户可在卡片内多轮微调并确认',
-      '· intent 要详细描述用户需求，context 传递当前对话上下文'
+      '· 当用户需求涉及「创建/设计工作流」且较复杂时，使用 prizm_navigate 引导到工作流创建会话',
+      '· 先给出简短引导语（如：这个问题比较复杂，交给我的工作流分身来帮你一步步设计吧）',
+      '· target 填 workflow-create，initialPrompt 填入从当前对话提炼的初步需求摘要'
     ].join('\n')
   },
   {

@@ -68,12 +68,16 @@ export interface ScopeDataState {
   upsertDocument(doc: EnrichedDocument): void
   /** 按 id 移除文档 */
   removeDocument(id: string): void
+  /** 按 id 列表批量移除文档（单次 set，避免批量删除时多次重渲染） */
+  removeDocuments(ids: string[]): void
   /** patch 文档的 lockInfo 字段 */
   patchDocumentLock(resourceId: string, lockInfo: EnrichedDocument['lockInfo']): void
   /** 单条 upsert TodoList */
   upsertTodoList(list: TodoList): void
   /** 按 id 移除 TodoList */
   removeTodoList(id: string): void
+  /** 按 id 列表批量移除 TodoList（单次 set，避免批量删除时多次重渲染） */
+  removeTodoLists(ids: string[]): void
   /** patch TodoList 内的单个 item */
   patchTodoItem(listId: string, itemId: string, patch: Partial<TodoItem>): void
   /** 向 TodoList 添加 item */
@@ -191,6 +195,15 @@ export const useScopeDataStore = create<ScopeDataState>()((set, get) => ({
     })
   },
 
+  removeDocuments(ids: string[]) {
+    if (ids.length === 0) return
+    const idSet = new Set(ids)
+    set((s) => {
+      const next = s.documents.filter((d) => !idSet.has(d.id))
+      return next.length !== s.documents.length ? { documents: next } : s
+    })
+  },
+
   patchDocumentLock(resourceId: string, lockInfo: EnrichedDocument['lockInfo']) {
     set((s) => {
       const idx = s.documents.findIndex((d) => d.id === resourceId)
@@ -216,6 +229,15 @@ export const useScopeDataStore = create<ScopeDataState>()((set, get) => ({
   removeTodoList(id: string) {
     set((s) => {
       const next = s.todoLists.filter((t) => t.id !== id)
+      return next.length !== s.todoLists.length ? { todoLists: next } : s
+    })
+  },
+
+  removeTodoLists(ids: string[]) {
+    if (ids.length === 0) return
+    const idSet = new Set(ids)
+    set((s) => {
+      const next = s.todoLists.filter((t) => !idSet.has(t.id))
       return next.length !== s.todoLists.length ? { todoLists: next } : s
     })
   },

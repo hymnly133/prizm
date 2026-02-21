@@ -11,6 +11,8 @@ import {
   saveAgentTools,
   getTavilySettings,
   updateTavilySettings,
+  getSkillsMPSettings,
+  updateSkillsMPSettings,
   updateAgentLLMSettings,
   updateCommandsSettings,
   updateSkillsSettings,
@@ -24,6 +26,7 @@ import { getAvailableShells } from '../terminal/shellDetector'
 import type {
   AgentToolsSettings,
   TavilySettings,
+  SkillsMPSettings,
   AgentLLMSettings,
   CommandsSettings,
   SkillsSettings,
@@ -35,7 +38,7 @@ import { resolveGroupStates } from '../llm/builtinTools/toolGroups'
 
 const log = createLogger('Settings')
 
-/** 脱敏：Tavily apiKey 不返回原文，仅标记 configured */
+/** 脱敏：Tavily / SkillsMP apiKey 不返回原文，仅标记 configured */
 function sanitizeForGet(settings: AgentToolsSettings): AgentToolsSettings {
   const out = { ...settings }
   if (out.builtin?.tavily) {
@@ -44,6 +47,14 @@ function sanitizeForGet(settings: AgentToolsSettings): AgentToolsSettings {
     if (out.builtin.tavily.apiKey) {
       ;(out.builtin.tavily as { apiKey?: string; configured?: boolean }).apiKey = undefined
       ;(out.builtin.tavily as { configured?: boolean }).configured = true
+    }
+  }
+  if (out.builtin?.skillsmp) {
+    out.builtin = out.builtin ?? {}
+    out.builtin.skillsmp = { ...out.builtin.skillsmp }
+    if (out.builtin.skillsmp.apiKey) {
+      ;(out.builtin.skillsmp as { apiKey?: string; configured?: boolean }).apiKey = undefined
+      ;(out.builtin.skillsmp as { configured?: boolean }).configured = true
     }
   }
   return out
@@ -97,6 +108,9 @@ export function createSettingsRoutes(router: Router): void {
       if (patch.builtin?.tavily !== undefined) {
         updateTavilySettings(patch.builtin.tavily as Partial<TavilySettings>)
       }
+      if (patch.builtin?.skillsmp !== undefined) {
+        updateSkillsMPSettings(patch.builtin.skillsmp as Partial<SkillsMPSettings>)
+      }
       if (patch.agent !== undefined) {
         updateAgentLLMSettings(patch.agent as Partial<AgentLLMSettings>)
       }
@@ -144,6 +158,30 @@ export function createSettingsRoutes(router: Router): void {
       })
     } catch (error) {
       log.error('put tavily settings error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // PUT /settings/agent-tools/builtin/skillsmp - 直接更新 SkillsMP API Key
+  router.put('/settings/agent-tools/builtin/skillsmp', (req: Request, res: Response) => {
+    try {
+      const body = req.body as Partial<SkillsMPSettings>
+      if (body && typeof body === 'object') {
+        updateSkillsMPSettings(body)
+      }
+      const skillsmp = getSkillsMPSettings()
+      res.json({
+        skillsmp: skillsmp
+          ? {
+              ...skillsmp,
+              apiKey: skillsmp.apiKey ? '(已配置)' : undefined,
+              configured: !!skillsmp.apiKey
+            }
+          : null
+      })
+    } catch (error) {
+      log.error('put skillsmp settings error:', error)
       const { status, body } = toErrorResponse(error)
       res.status(status).json(body)
     }

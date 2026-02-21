@@ -10,15 +10,14 @@ import {
   RetrievalManager,
   SQLiteAdapter,
   LanceDBAdapter,
-  StorageAdapter,
   MemoryType,
   getLayerForType,
   USER_GROUP_ID,
   DEFAULT_USER_ID,
   UnifiedExtractor,
-  DefaultQueryExpansionProvider,
-  ICompletionProvider
+  DefaultQueryExpansionProvider
 } from '@prizm/evermemos'
+import type { StorageAdapter, ICompletionProvider } from '@prizm/evermemos'
 import fs from 'fs'
 import { createLogger } from '../../logger'
 import { memLog } from '../memoryLogger'
@@ -52,10 +51,18 @@ export let _testRetrievalOverride: RetrievalManager | null = null
 export let _localEmbeddingProvider: LocalEmbeddingFn | null = null
 export let _mockEmbeddingWarned = false
 
-export function setUserManagers(m: typeof _userManagers): void { _userManagers = m }
-export function setTestRetrievalOverride(m: RetrievalManager | null): void { _testRetrievalOverride = m }
-export function setLocalEmbeddingProvider(fn: LocalEmbeddingFn | null): void { _localEmbeddingProvider = fn }
-export function setMockEmbeddingWarned(v: boolean): void { _mockEmbeddingWarned = v }
+export function setUserManagers(m: typeof _userManagers): void {
+  _userManagers = m
+}
+export function setTestRetrievalOverride(m: RetrievalManager | null): void {
+  _testRetrievalOverride = m
+}
+export function setLocalEmbeddingProvider(fn: LocalEmbeddingFn | null): void {
+  _localEmbeddingProvider = fn
+}
+export function setMockEmbeddingWarned(v: boolean): void {
+  _mockEmbeddingWarned = v
+}
 
 // ─── PrizmLLMAdapter ───
 
@@ -250,7 +257,6 @@ export {
   RetrievalManager,
   SQLiteAdapter,
   LanceDBAdapter,
-  StorageAdapter,
   MemoryType,
   MemorySourceType,
   DocumentSubType,
@@ -260,11 +266,14 @@ export {
   RetrieveMethod,
   UnifiedExtractor,
   DefaultQueryExpansionProvider,
-  MemoryRoutingContext,
-  MemCell,
   RawDataType
 } from '@prizm/evermemos'
-export type { ICompletionProvider } from '@prizm/evermemos'
+export type {
+  ICompletionProvider,
+  StorageAdapter,
+  MemoryRoutingContext,
+  MemCell
+} from '@prizm/evermemos'
 export type { MemoryItem, MemoryIdsByLayer } from '@prizm/shared'
 export type { DedupLogEntry } from '@prizm/evermemos'
 export type { LocalEmbeddingFn } from '../prizmLLMAdapter'

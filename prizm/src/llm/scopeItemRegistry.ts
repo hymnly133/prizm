@@ -1,7 +1,9 @@
 /**
  * Scope 统一项目注册表
- * 顶层元素：便签列表(notes)、待办列表(todoList)、文档(document)、会话列表(sessions)
- * 可引用项：便签项(note)、待办项(todo)、文档(document)，具备统一 id 结构
+ *
+ * @deprecated 新代码应使用 core/resourceRef 注册表替代。
+ * 此模块保留以兼容现有消费者，内部实现不变（直接读 ScopeStore），
+ * 后续迁移完成后将删除。
  */
 
 import { scopeStore } from '../core/ScopeStore'
@@ -153,6 +155,7 @@ export function listTopLevel(scope: string): ScopeTopLevelItem[] {
 
 /**
  * 返回可引用项列表（待办项、文档），用于 @ 补全与工具
+ * @deprecated 使用 core/resourceRef 的 listResources / listAllResources 替代
  */
 export function listRefItems(scope: string, kind?: ScopeRefKind): ScopeRefItem[] {
   const data = getData(scope)
@@ -175,7 +178,8 @@ export function listRefItems(scope: string, kind?: ScopeRefKind): ScopeRefItem[]
 }
 
 /**
- * 获取单条可引用项详情；sessions 不提供详情（TODO）
+ * 获取单条可引用项详情；sessions 不提供详情
+ * @deprecated 使用 core/resourceRef 的 resolveResource 替代
  */
 export function getScopeRefItem(
   scope: string,
@@ -244,6 +248,7 @@ export function getScopeStats(scope: string): ScopeStats {
 
 /**
  * 全文搜索（便签项、待办、文档）
+ * @deprecated 使用 core/resourceRef 的 searchResources 替代
  */
 export function searchScopeItems(scope: string, query: string): ScopeRefItem[] {
   if (!query?.trim()) return listRefItems(scope)

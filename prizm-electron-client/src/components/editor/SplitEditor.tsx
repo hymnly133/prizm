@@ -5,9 +5,10 @@
  */
 import type { ReactNode } from 'react'
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
-import { Markdown } from '@lobehub/ui'
+import { PrizmMarkdown as Markdown } from '../agent/PrizmMarkdown'
 import type { ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import MarkdownEditor from './MarkdownEditor'
+import ImagePreviewModal from '../ImagePreviewModal'
 
 interface SplitEditorProps {
   value: string
@@ -53,9 +54,11 @@ export default function SplitEditor({
 }: SplitEditorProps) {
   const [splitRatio, setSplitRatio] = useState(loadSplitRatio)
   const [isDragging, setIsDragging] = useState(false)
+  const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const previewRef = useRef<HTMLDivElement>(null)
   const scrollLockRef = useRef(false)
+  const handleImageClick = useCallback((src: string) => setPreviewImageSrc(src), [])
 
   /** debounce 预览内容，300ms 延迟 */
   const [debouncedValue, setDebouncedValue] = useState(value)
@@ -190,8 +193,15 @@ export default function SplitEditor({
           minWidth: 0
         }}
       >
-        <Markdown>{previewContent}</Markdown>
+        <Markdown onImageClick={handleImageClick}>{previewContent}</Markdown>
       </div>
+
+      <ImagePreviewModal
+        open={!!previewImageSrc}
+        src={previewImageSrc}
+        title="图片预览"
+        onClose={() => setPreviewImageSrc(null)}
+      />
     </div>
   )
 }

@@ -50,6 +50,7 @@ import {
 } from '../components/schedule'
 import type { ScheduleViewMode } from '../components/schedule'
 import { useScope } from '../hooks/useScope'
+import { useScopeDataStore } from '../store/scopeDataStore'
 import { useFileList, docToFileItem, todoToFileItem } from '../hooks/useFileList'
 import { usePrizmContext } from '../context/PrizmContext'
 import { useLogsContext } from '../context/LogsContext'
@@ -58,6 +59,7 @@ import { useDocumentNavigation, useChatWithFile } from '../context/NavigationCon
 import { useImportContext } from '../context/ImportContext'
 import { useScheduleStore } from '../store/scheduleStore'
 import { formatRelativeTime } from '../utils/formatRelativeTime'
+import { isImageFileName } from '../utils/fileUtils'
 import { WorkFolderView } from '../components/WorkFolderView'
 import type { FileKind, FileItem } from '../hooks/useFileList'
 import type { TodoItemStatus, TodoList, Document as PrizmDocument } from '@prizm/client-core'
@@ -619,42 +621,87 @@ function WorkPage() {
     path: string
     name: string
     content?: string
+    /** 图片预览时使用（object URL），关闭时需 revoke */
+    imageUrl?: string
     loading?: boolean
   } | null>(null)
   const filePreviewFetchingRef = useRef<string | null>(null)
+  const filePreviewObjectUrlRef = useRef<string | null>(null)
+
+  const closeGenericFilePreview = useCallback(() => {
+    if (filePreviewObjectUrlRef.current) {
+      URL.revokeObjectURL(filePreviewObjectUrlRef.current)
+      filePreviewObjectUrlRef.current = null
+    }
+    setGenericFilePreview(null)
+  }, [])
 
   useEffect(() => {
     setSelectedFile(null)
-    setGenericFilePreview(null)
-  }, [currentScope])
+    closeGenericFilePreview()
+  }, [currentScope, closeGenericFilePreview])
 
   useEffect(() => {
-    if (!genericFilePreview || genericFilePreview.content !== undefined) return
+    if (!genericFilePreview) return
+    if (genericFilePreview.content !== undefined || genericFilePreview.imageUrl !== undefined)
+      return
     if (filePreviewFetchingRef.current === genericFilePreview.path) return
     const http = manager?.getHttpClient()
     if (!http) return
     const targetPath = genericFilePreview.path
+    if (filePreviewObjectUrlRef.current) {
+      URL.revokeObjectURL(filePreviewObjectUrlRef.current)
+      filePreviewObjectUrlRef.current = null
+    }
+    const isImage = isImageFileName(genericFilePreview.name)
     filePreviewFetchingRef.current = targetPath
-    setGenericFilePreview((prev) => prev && { ...prev, loading: true })
-    http
-      .fileRead(targetPath, currentScope)
-      .then((result) => {
-        setGenericFilePreview((prev) =>
-          prev && prev.path === targetPath
-            ? { ...prev, content: result.content, loading: false }
-            : prev
-        )
-      })
-      .catch(() => {
-        setGenericFilePreview((prev) =>
-          prev && prev.path === targetPath
-            ? { ...prev, content: '(无法读取文件内容)', loading: false }
-            : prev
-        )
-      })
-      .finally(() => {
-        if (filePreviewFetchingRef.current === targetPath) filePreviewFetchingRef.current = null
-      })
+    setGenericFilePreview((prev) => prev && { ...prev, loading: true, imageUrl: undefined })
+
+    if (isImage) {
+      http
+        .fileServeBlob(targetPath, currentScope)
+        .then((blob) => {
+          if (filePreviewObjectUrlRef.current) {
+            URL.revokeObjectURL(filePreviewObjectUrlRef.current)
+            filePreviewObjectUrlRef.current = null
+          }
+          const url = URL.createObjectURL(blob)
+          filePreviewObjectUrlRef.current = url
+          setGenericFilePreview((prev) =>
+            prev && prev.path === targetPath ? { ...prev, imageUrl: url, loading: false } : prev
+          )
+        })
+        .catch(() => {
+          setGenericFilePreview((prev) =>
+            prev && prev.path === targetPath
+              ? { ...prev, content: '(无法加载图片)', loading: false }
+              : prev
+          )
+        })
+        .finally(() => {
+          if (filePreviewFetchingRef.current === targetPath) filePreviewFetchingRef.current = null
+        })
+    } else {
+      http
+        .fileRead(targetPath, currentScope)
+        .then((result) => {
+          setGenericFilePreview((prev) =>
+            prev && prev.path === targetPath
+              ? { ...prev, content: result.content, loading: false }
+              : prev
+          )
+        })
+        .catch(() => {
+          setGenericFilePreview((prev) =>
+            prev && prev.path === targetPath
+              ? { ...prev, content: '(无法读取文件内容)', loading: false }
+              : prev
+          )
+        })
+        .finally(() => {
+          if (filePreviewFetchingRef.current === targetPath) filePreviewFetchingRef.current = null
+        })
+    }
   }, [genericFilePreview, manager, currentScope])
 
   useEffect(() => {
@@ -804,14 +851,43 @@ function WorkPage() {
       okType: 'danger',
       cancelText: '取消',
       onOk: async () => {
-        const results = await Promise.allSettled(files.map((f) => doDeleteFile(f)))
-        const failed = results.filter((r) => r.status === 'rejected').length
+        const http = manager?.getHttpClient()
+        if (!http) return
+        if (files.length > 10) toast.loading(`正在删除 ${files.length} 项…`)
+        const store = useScopeDataStore.getState()
+        const docIds = files.filter((f) => f.kind === 'document').map((f) => f.id)
+        const todoIds = files.filter((f) => f.kind === 'todoList').map((f) => f.id)
+        store.removeDocuments(docIds)
+        store.removeTodoLists(todoIds)
+        if (
+          selectedFile &&
+          files.some((f) => f.kind === selectedFile.kind && f.id === selectedFile.id)
+        )
+          setSelectedFile(null)
+        cardSelection.exitSelectionMode()
+        const CONCURRENCY = 5
+        let failed = 0
+        for (let i = 0; i < files.length; i += CONCURRENCY) {
+          const chunk = files.slice(i, i + CONCURRENCY)
+          const results = await Promise.allSettled(
+            chunk.map(async (file) => {
+              try {
+                if (file.kind === 'todoList') await http.deleteTodoList(currentScope, file.id)
+                else await http.deleteDocument(file.id, currentScope)
+              } catch {
+                if (file.kind === 'todoList') store.upsertTodoList(file.raw as TodoList)
+                else store.upsertDocument(file.raw as PrizmDocument)
+                throw new Error('delete failed')
+              }
+            })
+          )
+          failed += results.filter((r) => r.status === 'rejected').length
+        }
         if (failed > 0) addLog(`${files.length - failed} 项已删除，${failed} 项失败`, 'warning')
         else addLog(`已删除 ${files.length} 项`, 'success')
-        cardSelection.exitSelectionMode()
       }
     })
-  }, [cardSelection, fileList, modal, doDeleteFile, addLog])
+  }, [cardSelection, fileList, modal, manager, currentScope, selectedFile, setSelectedFile, addLog])
 
   const handleBatchChat = useCallback(() => {
     const ids = Array.from(cardSelection.selectedIds)
@@ -1052,16 +1128,16 @@ function WorkPage() {
         )}
       </Modal>
 
-      {/* ── 通用文件预览模态 ── */}
+      {/* ── 通用文件预览模态（含图片查看） ── */}
       <Modal
         destroyOnHidden
         open={!!genericFilePreview}
         title={genericFilePreview?.name ?? '文件预览'}
-        width={800}
-        onCancel={() => setGenericFilePreview(null)}
+        width={genericFilePreview?.imageUrl ? 900 : 800}
+        onCancel={closeGenericFilePreview}
         footer={
           <Flexbox horizontal justify="flex-end">
-            <Button type="primary" onClick={() => setGenericFilePreview(null)}>
+            <Button type="primary" onClick={closeGenericFilePreview}>
               关闭
             </Button>
           </Flexbox>
@@ -1071,6 +1147,19 @@ function WorkPage() {
           <div style={{ paddingTop: 16, maxHeight: '80vh', overflowY: 'auto' }}>
             {genericFilePreview.loading ? (
               <div style={{ padding: 24, textAlign: 'center', opacity: 0.5 }}>加载中…</div>
+            ) : genericFilePreview.imageUrl ? (
+              <div style={{ textAlign: 'center' }}>
+                <img
+                  src={genericFilePreview.imageUrl}
+                  alt={genericFilePreview.name}
+                  style={{
+                    maxWidth: '100%',
+                    height: 'auto',
+                    objectFit: 'contain',
+                    borderRadius: 8
+                  }}
+                />
+              </div>
             ) : genericFilePreview.name.endsWith('.md') ? (
               <Markdown>{genericFilePreview.content ?? '(空)'}</Markdown>
             ) : (

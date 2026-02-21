@@ -227,7 +227,13 @@ const FALLBACK_METADATA: Record<string, ToolMetadata> = {
   prizm_notice: { name: 'prizm_notice', displayName: '发送通知', category: 'notice' },
   prizm_spawn_task: { name: 'prizm_spawn_task', displayName: '派发子任务', category: 'other' },
   prizm_task_status: { name: 'prizm_task_status', displayName: '查询任务状态', category: 'other' },
-  prizm_set_result: { name: 'prizm_set_result', displayName: '提交任务结果', category: 'other' },
+  prizm_set_result: {
+    name: 'prizm_set_result',
+    displayName: '提交任务结果',
+    description:
+      '在后台/工作流会话中，实际参数由会话 schema 决定，可能仅包含当前步骤要求的单字段（如 output），与默认的「内容 + 结构化」不同。',
+    category: 'other'
+  },
   prizm_workflow: { name: 'prizm_workflow', displayName: '工作流', category: 'other' },
   prizm_web_search: {
     name: 'prizm_web_search',

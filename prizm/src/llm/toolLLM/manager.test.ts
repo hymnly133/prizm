@@ -10,7 +10,11 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import type { AgentSession } from '@prizm/shared'
+import {
+  type AgentSession,
+  WORKFLOW_MANAGEMENT_TOOL_CREATE_WORKFLOW,
+  WORKFLOW_MANAGEMENT_TOOL_UPDATE_WORKFLOW
+} from '@prizm/shared'
 import type { IAgentAdapter, LLMStreamChunk } from '../../adapters/interfaces'
 import type { IChatService, ChatCoreResult, ChatCoreChunkHandler } from '../../core/interfaces'
 import { ToolLLMManager } from './manager'
@@ -136,7 +140,7 @@ describe('ToolLLMManager', () => {
   describe('start', () => {
     it('should create session and execute first round', async () => {
       const chatService = createMockChatService({
-        name: 'toolllm_submit_workflow',
+        name: WORKFLOW_MANAGEMENT_TOOL_CREATE_WORKFLOW,
         arguments: JSON.stringify({ workflow_json: VALID_WORKFLOW_JSON }),
         result: 'ok'
       })
@@ -163,7 +167,7 @@ describe('ToolLLMManager', () => {
 
     it('should handle invalid workflow JSON from LLM', async () => {
       const chatService = createMockChatService({
-        name: 'toolllm_submit_workflow',
+        name: WORKFLOW_MANAGEMENT_TOOL_CREATE_WORKFLOW,
         arguments: JSON.stringify({ workflow_json: '{"invalid": true}' }),
         result: 'ok'
       })
@@ -183,7 +187,7 @@ describe('ToolLLMManager', () => {
   describe('resume', () => {
     it('should append message to existing session', async () => {
       const chatService = createMockChatService({
-        name: 'toolllm_submit_workflow',
+        name: WORKFLOW_MANAGEMENT_TOOL_CREATE_WORKFLOW,
         arguments: JSON.stringify({ workflow_json: VALID_WORKFLOW_JSON }),
         result: 'ok'
       })
@@ -211,7 +215,7 @@ describe('ToolLLMManager', () => {
   describe('confirm', () => {
     it('should register workflow and update DefMeta', async () => {
       const chatService = createMockChatService({
-        name: 'toolllm_submit_workflow',
+        name: WORKFLOW_MANAGEMENT_TOOL_CREATE_WORKFLOW,
         arguments: JSON.stringify({ workflow_json: VALID_WORKFLOW_JSON }),
         result: 'ok'
       })
@@ -225,7 +229,7 @@ describe('ToolLLMManager', () => {
         () => {}
       )
 
-      const confirmResult = manager.confirm('default', startResult.sessionId, 'test_workflow')
+      const confirmResult = await manager.confirm('default', startResult.sessionId, 'test_workflow')
 
       expect(confirmResult.status).toBe('confirmed')
       expect(mockRegisterDef).toHaveBeenCalledWith(
@@ -235,24 +239,95 @@ describe('ToolLLMManager', () => {
         expect.any(String)
       )
       expect(mockUpdateDefMeta).toHaveBeenCalledWith('test_workflow', 'default', {
-        toolLLMSessionId: startResult.sessionId
+        workflowManagementSessionId: startResult.sessionId
       })
     })
 
-    it('should throw if no pending def', () => {
+    it('should throw if no pending def', async () => {
       const chatService = createMockChatService()
       manager.init(adapter, chatService)
 
-      expect(() => manager.confirm('default', 'nonexistent', 'test')).toThrow(
+      await expect(manager.confirm('default', 'nonexistent', 'test')).rejects.toThrow(
         'No pending workflow definition to confirm'
       )
+    })
+
+    it('should write toolMeta.workflowDefId and workflowName to session (bidirectional link)', async () => {
+      const chatService = createMockChatService({
+        name: WORKFLOW_MANAGEMENT_TOOL_CREATE_WORKFLOW,
+        arguments: JSON.stringify({ workflow_json: VALID_WORKFLOW_JSON }),
+        result: 'ok'
+      })
+      manager.init(adapter, chatService)
+
+      mockRegisterDef.mockReturnValue({
+        id: 'def-bidirectional',
+        name: 'test_workflow'
+      })
+
+      const startResult = await manager.start(
+        'default',
+        { domain: 'workflow', intent: '创建工作流' },
+        () => {}
+      )
+
+      await manager.confirm('default', startResult.sessionId, 'test_workflow')
+
+      expect(adapter.updateSession).toHaveBeenCalledWith(
+        'default',
+        startResult.sessionId,
+        expect.objectContaining({
+          toolMeta: expect.objectContaining({
+            workflowDefId: 'def-bidirectional',
+            workflowName: 'test_workflow'
+          })
+        })
+      )
+    })
+
+    it('should include triggerType in bgMeta when updating legacy background session', async () => {
+      const chatService = createMockChatService({
+        name: WORKFLOW_MANAGEMENT_TOOL_CREATE_WORKFLOW,
+        arguments: JSON.stringify({ workflow_json: VALID_WORKFLOW_JSON }),
+        result: 'ok'
+      })
+      manager.init(adapter, chatService)
+      mockRegisterDef.mockReturnValue({ id: 'def-1', name: 'test_workflow' })
+      ;(adapter.getSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: 'tl-sess-1',
+        kind: 'background',
+        bgMeta: { source: 'workflow-management' }
+      } as AgentSession)
+
+      const startResult = await manager.start(
+        'default',
+        { domain: 'workflow', intent: '创建工作流' },
+        () => {}
+      )
+      await manager.confirm('default', startResult.sessionId, 'test_workflow')
+
+      const updateCalls = (adapter.updateSession as ReturnType<typeof vi.fn>).mock.calls
+      const confirmUpdate = updateCalls.find(
+        (c: unknown[]) =>
+          c[1] === startResult.sessionId &&
+          (c[2] as { bgMeta?: { workflowDefId?: string } })?.bgMeta?.workflowDefId
+      )
+      expect(confirmUpdate).toBeDefined()
+      const bgMeta = (
+        confirmUpdate![2] as {
+          bgMeta?: { triggerType?: string; workflowDefId?: string; workflowName?: string }
+        }
+      ).bgMeta
+      expect(bgMeta?.triggerType).toBeDefined()
+      expect(bgMeta?.workflowDefId).toBe('def-1')
+      expect(bgMeta?.workflowName).toBe('test_workflow')
     })
   })
 
   describe('cancel', () => {
     it('should mark session as cancelled', async () => {
       const chatService = createMockChatService({
-        name: 'toolllm_submit_workflow',
+        name: WORKFLOW_MANAGEMENT_TOOL_CREATE_WORKFLOW,
         arguments: JSON.stringify({ workflow_json: VALID_WORKFLOW_JSON }),
         result: 'ok'
       })
@@ -275,7 +350,7 @@ describe('ToolLLMManager', () => {
       manager.init(adapter, chatService)
 
       mockGetDefByName.mockReturnValue({ id: 'def-1', name: 'my_wf' })
-      mockGetDefMeta.mockReturnValue({ id: 'def-1', toolLLMSessionId: 'session-42' })
+      mockGetDefMeta.mockReturnValue({ id: 'def-1', workflowManagementSessionId: 'session-42' })
 
       const result = manager.getSessionIdForWorkflow('default', 'my_wf')
       expect(result).toBe('session-42')

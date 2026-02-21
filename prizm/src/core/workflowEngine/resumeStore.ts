@@ -77,6 +77,11 @@ function getDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_taskrun_scope ON task_runs(scope);
     CREATE INDEX IF NOT EXISTS idx_taskrun_status ON task_runs(status);
   `)
+  // 一次性迁移：为 workflow_runs 增加 error_detail 列（若不存在）
+  const tableInfo = _db.prepare('PRAGMA table_info(workflow_runs)').all() as { name: string }[]
+  if (!tableInfo.some((c) => c.name === 'error_detail')) {
+    _db.exec('ALTER TABLE workflow_runs ADD COLUMN error_detail TEXT')
+  }
   return _db
 }
 
@@ -118,6 +123,7 @@ function rowToRun(row: Record<string, unknown>): WorkflowRun {
     linkedScheduleId: (row.linked_schedule_id as string) || undefined,
     linkedTodoId: (row.linked_todo_id as string) || undefined,
     error: (row.error as string) || undefined,
+    errorDetail: (row.error_detail as string) || undefined,
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number
   }
@@ -177,11 +183,16 @@ export function listRuns(scope?: string, status?: WorkflowRunStatus, limit = 50,
   return rows.map(rowToRun)
 }
 
-export function updateRunStatus(id: string, status: WorkflowRunStatus, error?: string): void {
+export function updateRunStatus(
+  id: string,
+  status: WorkflowRunStatus,
+  error?: string,
+  errorDetail?: string
+): void {
   const db = getDb()
   db.prepare(`
-    UPDATE workflow_runs SET status = ?, error = ?, updated_at = ? WHERE id = ?
-  `).run(status, error ?? null, Date.now(), id)
+    UPDATE workflow_runs SET status = ?, error = ?, error_detail = ?, updated_at = ? WHERE id = ?
+  `).run(status, error ?? null, errorDetail ?? null, Date.now(), id)
 }
 
 export function updateRunStep(

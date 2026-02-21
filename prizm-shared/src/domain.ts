@@ -2,6 +2,8 @@
  * 领域数据类型 - 与服务器 API 结构对齐
  */
 
+import { WORKFLOW_MANAGEMENT_SOURCE, WORKFLOW_MANAGEMENT_SESSION_LABEL_PENDING } from './constants'
+
 // ============ 便签（已废弃，保留类型用于迁移兼容） ============
 
 /** @deprecated 已合并到 Document，仅用于迁移兼容 */
@@ -299,8 +301,82 @@ export function getMessageContent(
 
 // ============ Background Session 类型 ============
 
-/** 会话使用场景：interactive=用户对话驱动 background=触发器驱动 */
-export type SessionKind = 'interactive' | 'background'
+/** 会话使用场景：interactive=用户对话 background=触发器驱动 tool=工具会话（如工作流管理） */
+export type SessionKind = 'interactive' | 'background' | 'tool'
+
+/** 工具会话来源（派生类型），当前仅工作流管理 */
+export type ToolSessionSource = typeof WORKFLOW_MANAGEMENT_SOURCE
+
+/** 工具会话元数据 — 仅 kind='tool' 时有值；source 区分具体派生 */
+export interface ToolSessionMeta {
+  /** 派生类型，见 WORKFLOW_MANAGEMENT_SOURCE */
+  source: ToolSessionSource
+  /** 人类可读标签 */
+  label?: string
+  /** 所属工作流定义 ID（已绑定时有值） */
+  workflowDefId?: string
+  /** 所属工作流名称（已绑定时有值） */
+  workflowName?: string
+  /** 工作流工作区路径（跨 run 共享，已绑定工作流时有值） */
+  persistentWorkspaceDir?: string
+  /** 某次 run 的工作区路径（引用 run 并授权后可选设置，便于工具解析 workspace:"run"） */
+  runWorkspaceDir?: string
+}
+
+/** 仅读取时兼容的旧 source 值（不再写入） */
+const LEGACY_WORKFLOW_SOURCE_READ = 'workflow_management' as const
+
+function isWorkflowManagementSource(source: string | undefined): boolean {
+  return source === WORKFLOW_MANAGEMENT_SOURCE || source === LEGACY_WORKFLOW_SOURCE_READ
+}
+
+/** 判断是否为工具会话（与交互、背景并列的 session 类，可被下游派生为工作流管理等） */
+export function isToolSession(
+  s: { kind?: SessionKind; bgMeta?: { source?: string }; toolMeta?: { source?: string } } | null
+): boolean {
+  if (!s) return false
+  if (s.kind === 'tool') return true
+  if (s.kind === 'background' && isWorkflowManagementSource(s.bgMeta?.source)) return true
+  return false
+}
+
+/** 判断是否为工作流管理会话（tool 派生或兼容的 legacy background） */
+export function isWorkflowManagementSession(
+  s: { kind?: SessionKind; bgMeta?: { source?: string }; toolMeta?: { source?: string } } | null
+): boolean {
+  if (!s) return false
+  if (s.kind === 'tool' && isWorkflowManagementSource(s.toolMeta?.source)) return true
+  if (s.kind === 'background' && isWorkflowManagementSource(s.bgMeta?.source)) return true
+  return false
+}
+
+/** 工作流管理会话展示名：workflowName 优先，否则 label，否则使用待创建默认名 */
+export function getWorkflowManagementSessionLabel(
+  session: {
+    workflowName?: string
+    toolMeta?: { workflowName?: string; label?: string }
+    bgMeta?: { workflowName?: string; label?: string }
+  } | null,
+  fallback: string = WORKFLOW_MANAGEMENT_SESSION_LABEL_PENDING
+): string {
+  if (!session) return fallback
+  const name =
+    session.workflowName ?? session.toolMeta?.workflowName ?? session.bgMeta?.workflowName
+  const label = session.toolMeta?.label ?? session.bgMeta?.label
+  return name || label || fallback
+}
+
+/** 是否在「聊天会话列表」中展示（排除工具会话与 task/workflow 触发的 background） */
+export function isChatListSession(
+  s: { kind?: SessionKind; bgMeta?: { source?: string }; toolMeta?: { source?: string } } | null
+): boolean {
+  if (!s) return false
+  if (isToolSession(s)) return false
+  if (s.toolMeta != null) return false
+  if (s.kind !== 'background') return true
+  const src = s.bgMeta?.source
+  return !src || src === 'direct'
+}
 
 /**
  * 权限模式：
@@ -318,8 +394,8 @@ export type SessionChatStatus = 'idle' | 'chatting'
 /** BG Session 触发方式 */
 export type BgTriggerType = 'tool_spawn' | 'api' | 'cron' | 'event_hook'
 
-/** BG Session 上层来源：direct=直接触发 task=TaskRunner workflow=WorkflowRunner tool-llm=ToolLLM会话 */
-export type BgSessionSource = 'direct' | 'task' | 'workflow' | 'tool-llm'
+/** BG Session 上层来源：direct=直接触发 task=TaskRunner workflow=WorkflowRunner；workflow-management 仅用于兼容旧数据，新会话请用 kind=tool */
+export type BgSessionSource = 'direct' | 'task' | 'workflow' | 'workflow-management'
 
 /** BG Session 运行状态 */
 export type BgStatus =
@@ -355,8 +431,14 @@ export interface AgentDefinition {
   description?: string
   /** 系统提示词覆盖 */
   systemPrompt?: string
-  /** 工具白名单（undefined 表示使用全部工具） */
+  /** 启用深度思考（reasoning chain），默认 true。 */
+  thinking?: boolean
+  /** 工具白名单（undefined 表示使用全部工具）。用户未显式指定时保持留空，避免模型执行时误改导致工作流异常。 */
   allowedTools?: string[]
+  /** 可用的 Skill 名称白名单（空/未设置 = 全部）。用户未显式指定时保持留空，避免模型执行时误改导致工作流异常。 */
+  allowedSkills?: string[]
+  /** 可用的 MCP 服务器 ID 白名单（空/未设置 = 全部）。用户未显式指定时保持留空，避免模型执行时误改导致工作流异常。 */
+  allowedMcpServerIds?: string[]
   /** 指定 LLM 模型 */
   model?: string
   /** 最大工具调用轮次 */
@@ -420,8 +502,10 @@ export interface BgSessionMeta {
   inlineAgentDef?: Omit<AgentDefinition, 'id' | 'name'>
   /** 记忆注入策略覆盖 */
   memoryInjectPolicy?: MemoryInjectPolicy
-  /** 工作区目录覆盖（Workflow 步骤执行时指向 workflow 工作区） */
+  /** 工作区目录覆盖（Workflow 步骤执行时指向当前 run 工作区） */
   workspaceDir?: string
+  /** 工作流工作区路径（跨 run 共享，存放长期数据） */
+  persistentWorkspaceDir?: string
   /** 上层来源：direct=直接触发 task=TaskRunner workflow=WorkflowRunner（默认 direct） */
   source?: BgSessionSource
   /** 关联的上层记录 ID（TaskRun.id 或 WorkflowRun.id） */
@@ -430,6 +514,14 @@ export interface BgSessionMeta {
   ioConfig?: SessionIOConfig
   /** 工具组开关覆盖：groupId → enabled */
   toolGroups?: Record<string, boolean>
+  /** 所属工作流定义 ID（工作流管理会话：kind=tool 或 旧 background+workflow-management 时，双向引用） */
+  workflowDefId?: string
+  /** 所属工作流名称（工作流管理会话，用于展示与跳转） */
+  workflowName?: string
+  /** 工作流步骤 id 序列（仅 workflow 步骤，用于 workflow_context 片段） */
+  workflowStepIds?: string[]
+  /** 下一步步骤 id（仅 workflow 步骤，无则 null） */
+  workflowNextStepId?: string | null
 }
 
 export interface AgentSession {
@@ -444,10 +536,18 @@ export interface AgentSession {
   compressionSummaries?: Array<{ throughRound: number; text: string }>
   /** 用户授权的外部文件/文件夹路径列表（仅当前会话有效） */
   grantedPaths?: string[]
+  /** 工具白名单（undefined = 全部）。用户未显式指定时保持留空，避免模型执行时误改导致工作流异常。 */
+  allowedTools?: string[]
+  /** 可用的 Skill 名称白名单（空/未设置 = 全部）。用户未显式指定时保持留空，避免模型执行时误改导致工作流异常。 */
+  allowedSkills?: string[]
+  /** 可用的 MCP 服务器 ID 白名单（空/未设置 = 全部）。用户未显式指定时保持留空，避免模型执行时误改导致工作流异常。 */
+  allowedMcpServerIds?: string[]
   /** 会话 checkpoint 列表（按时间序，每轮对话前自动创建） */
   checkpoints?: SessionCheckpoint[]
   /** 会话使用场景，默认 'interactive'（向后兼容：无此字段 = interactive） */
   kind?: SessionKind
+  /** 工具会话元数据（仅 kind='tool' 时有值） */
+  toolMeta?: ToolSessionMeta
   /** 后台会话元数据 */
   bgMeta?: BgSessionMeta
   /** 后台运行状态 */
@@ -733,6 +833,9 @@ export type TokenUsageCategory =
   | 'chat:user' // 用户交互对话
   | 'chat:workflow' // 工作流步骤执行
   | 'chat:task' // 任务 / Cron 定时任务执行
+  | 'chat:tool-llm' // 已废弃，兼容旧 token 记录
+  | 'chat:workflow-management' // 工作流管理会话
+  | 'chat:background' // 未知后台系统操作（无法分类的 background session）
   | 'chat:guard' // 系统守卫（BG 结果检查 / Schema 重试）
   | 'conversation_summary' // 对话轮次摘要
   | 'memory:conversation_extract' // 对话记忆提取（unified: profile+narrative+foresight+event_log）
@@ -755,6 +858,9 @@ export const TOKEN_CATEGORY_LABELS: Partial<Record<TokenUsageCategory, string>> 
   'chat:user': '对话',
   'chat:workflow': '工作流',
   'chat:task': '任务',
+  'chat:tool-llm': '工具 LLM（旧）',
+  'chat:workflow-management': '工作流管理',
+  'chat:background': '后台系统',
   'chat:guard': '系统守卫',
   conversation_summary: '对话摘要',
   'memory:per_round_extract': '记忆提取（每轮·P1）',
@@ -778,6 +884,9 @@ export const TOKEN_CATEGORY_COLORS: Partial<Record<TokenUsageCategory, string>> 
   'chat:user': '#1677ff',
   'chat:workflow': '#0958d9',
   'chat:task': '#531dab',
+  'chat:tool-llm': '#d46b08',
+  'chat:workflow-management': '#d46b08',
+  'chat:background': '#8c8c8c',
   'chat:guard': '#c41d7f',
   conversation_summary: '#722ed1',
   'memory:per_round_extract': '#08979c',
@@ -800,6 +909,9 @@ export const TOKEN_CATEGORY_ORDER: TokenUsageCategory[] = [
   'chat:user',
   'chat:workflow',
   'chat:task',
+  'chat:workflow-management',
+  'chat:tool-llm',
+  'chat:background',
   'chat:guard',
   'chat',
   'conversation_summary',
@@ -1105,14 +1217,18 @@ export interface WorkflowTriggerDef {
 
 /** Agent 步骤的 Session 高级配置 */
 export interface WorkflowStepSessionConfig {
-  /** 启用深度思考（reasoning chain） */
+  /** 启用深度思考（reasoning chain），默认 true。 */
   thinking?: boolean
   /** 激活的技能名称列表 */
   skills?: string[]
   /** 系统提示词覆盖/追加 */
   systemPrompt?: string
-  /** 工具白名单（undefined = 使用全部工具） */
+  /** 工具白名单（undefined = 使用全部工具）。用户未显式指定时保持留空，避免模型执行时误改导致工作流异常。 */
   allowedTools?: string[]
+  /** 可用的 Skill 名称白名单（空/未设置 = 全部）。用户未显式指定时保持留空，避免模型执行时误改导致工作流异常。 */
+  allowedSkills?: string[]
+  /** 可用的 MCP 服务器 ID 白名单（空/未设置 = 全部）。用户未显式指定时保持留空，避免模型执行时误改导致工作流异常。 */
+  allowedMcpServerIds?: string[]
   /** 指定 LLM 模型（覆盖步骤级 model） */
   model?: string
   /** 最大工具调用轮次 */
@@ -1193,6 +1309,8 @@ export interface WorkflowDefConfig {
   notifyOnComplete?: boolean
   /** 失败时发送通知 */
   notifyOnFail?: boolean
+  /** 单步文本 output 最大字符数，超出截断并追加 "... (truncated)"；不配置则不限制 */
+  maxStepOutputChars?: number
   /** 标签/分类 */
   tags?: string[]
   /** 版本号 */
@@ -1204,8 +1322,9 @@ export interface WorkflowDef {
   name: string
   description?: string
   steps: WorkflowStepDef[]
-  args?: Record<string, { default?: unknown; description?: string }>
-  /** 工作流输出 schema（定义最终输出的结构化字段） */
+  /** 流水线输入 schema，与 run.args 配合；每参数可带 description、default、type。有 default（含空）即可选，不填时用 default */
+  args?: Record<string, { default?: unknown; description?: string; type?: string }>
+  /** 工作流输出 schema（与 args 形态对称：description + type），传入最后一步做结构化对齐输出 */
   outputs?: Record<string, { type?: string; description?: string }>
   /** 声明式触发条件 */
   triggers?: WorkflowTriggerDef[]
@@ -1239,7 +1358,10 @@ export interface WorkflowStepResult {
   startedAt?: number
   finishedAt?: number
   durationMs?: number
+  /** 简短错误消息 */
   error?: string
+  /** 堆栈或完整错误详情（便于排查） */
+  errorDetail?: string
 }
 
 /** 工作流运行实例 */
@@ -1260,7 +1382,10 @@ export interface WorkflowRun {
   runWorkspaceDir?: string
   createdAt: number
   updatedAt: number
+  /** Run 级简短错误消息 */
   error?: string
+  /** Run 级堆栈或完整错误详情（便于排查） */
+  errorDetail?: string
 }
 
 /** 已注册的工作流定义（持久化形态） */
@@ -1273,6 +1398,16 @@ export interface WorkflowDefRecord {
   triggersJson?: string
   createdAt: number
   updatedAt: number
+  /** 关联的工作流管理会话 ID（双向引用，一个工作流一个） */
+  workflowManagementSessionId?: string
+  /** 工作流描述/使用说明文档 ID（管理会话内至多一份指导文档可标记为此） */
+  descriptionDocumentId?: string
+}
+
+/** 流水线版本快照项（列表用，无记忆功能） */
+export interface WorkflowDefVersionItem {
+  id: string
+  createdAt: number
 }
 
 // ============ 通知 ============

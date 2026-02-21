@@ -17,12 +17,24 @@ export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | '
 /** 权限规则行为 */
 export type PermissionBehavior = 'allow' | 'deny' | 'ask'
 
+/** 交互请求的类型标识 */
+export type InteractKind = 'file_access' | 'terminal_command' | 'destructive_operation' | 'custom'
+
+/** 交互详情 — 按 kind 区分不同数据结构 */
+export type InteractDetails =
+  | { kind: 'file_access'; paths: string[] }
+  | { kind: 'terminal_command'; command: string; cwd?: string }
+  | { kind: 'destructive_operation'; resourceType: string; resourceId: string; description: string }
+  | { kind: 'custom'; title: string; description: string; data?: Record<string, unknown> }
+
 /** 单条权限规则 */
 export interface PermissionRule {
   /** 规则 ID */
   id: string
   /** 工具名 glob 匹配（支持 * 通配） */
   toolPattern: string
+  /** 复合工具的 action 过滤（仅在匹配到复合工具时检查） */
+  actionFilter?: string[]
   /** 此规则产生的行为 */
   behavior: PermissionBehavior
   /** deny 时的错误消息 */
@@ -34,8 +46,8 @@ export interface PermissionRule {
 /** 权限检查结果 */
 export interface PermissionResult {
   allowed: boolean
-  /** 如果 ask，需要交互的路径列表 */
-  interactPaths?: string[]
+  /** 需要用户交互确认的详情 */
+  interactDetails?: InteractDetails
   /** 拒绝原因 */
   denyMessage?: string
 }

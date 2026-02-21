@@ -17,10 +17,10 @@ import {
   type LucideIcon
 } from 'lucide-react'
 import { memo, useEffect, useRef } from 'react'
-import { Button } from 'antd'
+import { Button, Typography } from 'antd'
 import { createStyles } from 'antd-style'
 import { useToolCardExpanded, useToolCardExpandedKeyboard } from './useToolCardExpanded'
-import type { ToolCallRecord } from '@prizm/client-core'
+import type { ToolCallRecord, EnrichedSession } from '@prizm/client-core'
 import { getToolDisplayName, registerToolRender } from '@prizm/client-core'
 import { useAgentSessionStore } from '../../store/agentSessionStore'
 import type { CollabInteractionAPI } from '../../hooks/useCollabInteraction'
@@ -94,10 +94,19 @@ function getStatusSummary(args: Record<string, unknown>): string {
   return taskId ? `${label} — ${taskId.slice(0, 8)}…` : label
 }
 
+/** Schema 无关：优先 output，否则取第一个非 status 的字符串字段 */
 function getSetResultSummary(args: Record<string, unknown>): string {
-  const output = (args.output as string) ?? ''
   const status = (args.status as string) ?? 'success'
-  return `[${status}] ${output.slice(0, 60)}${output.length > 60 ? '…' : ''}`
+  let content = (args.output as string) ?? ''
+  if (!content) {
+    for (const [k, v] of Object.entries(args)) {
+      if (k !== 'status' && typeof v === 'string') {
+        content = v
+        break
+      }
+    }
+  }
+  return `[${status}] ${content.slice(0, 60)}${content.length > 60 ? '…' : ''}`
 }
 
 function extractSessionId(resultStr: string): string | null {
@@ -185,11 +194,13 @@ function ViewTaskInPanelButton({ resultStr }: { resultStr: string }) {
 
 function TaskToolCardDone({
   tc,
+  session,
   displayName,
   CategoryIcon,
   isError
 }: {
   tc: ToolCallRecord
+  session?: EnrichedSession | null
   displayName: string
   CategoryIcon: LucideIcon
   isError: boolean
@@ -199,6 +210,10 @@ function TaskToolCardDone({
   const handleKeyDown = useToolCardExpandedKeyboard(toggleExpanded)
   const args = parseArgs(tc.arguments)
   const accentColor = isError ? 'var(--ant-color-error)' : ACCENT_COLOR
+  const showSetResultHint =
+    tc.name === 'prizm_set_result' &&
+    session?.kind === 'background' &&
+    !!session?.bgMeta?.ioConfig?.outputParams
 
   let summary = ''
   if (tc.name === 'prizm_spawn_task') summary = getSpawnSummary(args)
@@ -247,6 +262,19 @@ function TaskToolCardDone({
       </div>
       {expanded && (
         <div className="tool-card__body">
+          {showSetResultHint && (
+            <div className="tool-card__set-result-hint" style={{ marginBottom: 8 }}>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                参数依当前步骤要求提交（仅必填字段）
+              </Typography.Text>
+            </div>
+          )}
+          {tc.arguments && tc.arguments !== '{}' && (
+            <div className="tool-card__pre-wrap" style={{ marginBottom: 8 }}>
+            <div className="tool-card__section-label">参数</div>
+            <pre className="tool-card__pre">{JSON.stringify(parseArgs(tc.arguments), null, 2)}</pre>
+            </div>
+          )}
           <div className="tool-card__section-label">{isError ? '错误信息' : '结果'}</div>
           <pre className={`tool-card__pre${isError ? ' tool-card__pre--error' : ''}`}>
             {tc.result || '(无返回)'}
@@ -258,7 +286,7 @@ function TaskToolCardDone({
 }
 
 const TaskToolCard = memo(
-  function TaskToolCard({ tc }: { tc: ToolCallRecord }) {
+  function TaskToolCard({ tc, session }: { tc: ToolCallRecord; session?: EnrichedSession | null }) {
     const { styles } = useStyles()
     const status = tc.status ?? 'done'
     const displayName = getToolDisplayName(tc.name, tc.arguments)
@@ -312,6 +340,7 @@ const TaskToolCard = memo(
     return (
       <TaskToolCardDone
         tc={tc}
+        session={session}
         displayName={displayName}
         CategoryIcon={CategoryIcon}
         isError={isError}
@@ -321,6 +350,7 @@ const TaskToolCard = memo(
   (prev, next) => {
     const a = prev.tc
     const b = next.tc
+    if (prev.session?.id !== next.session?.id) return false
     return (
       a.id === b.id &&
       a.name === b.name &&
@@ -339,5 +369,5 @@ const TASK_TOOLS = [
 ] as const
 
 for (const name of TASK_TOOLS) {
-  registerToolRender(name, (props) => <TaskToolCard tc={props.tc} />)
+  registerToolRender(name, (props) => <TaskToolCard tc={props.tc} session={props.session} />)
 }

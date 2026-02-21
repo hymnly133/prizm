@@ -320,6 +320,45 @@ describe('WorkflowRunner — 单步 agent', () => {
     expect(result.error).toBe('网络错误')
   })
 
+  it('config.maxStepOutputChars 超出时应截断 output 并追加 (truncated)', async () => {
+    const longOutput = 'a'.repeat(100)
+    const executor = createMockExecutor(async () => ({
+      sessionId: 'sess-1',
+      status: 'success',
+      output: longOutput,
+      durationMs: 10
+    }))
+    const def: WorkflowDef = {
+      name: 'output-limit',
+      steps: [{ id: 's1', type: 'agent', prompt: 'go' }],
+      config: { maxStepOutputChars: 20 }
+    }
+    const runner = new WorkflowRunner(executor)
+    const result = await runner.runWorkflow('default', def)
+
+    expect(result.status).toBe('completed')
+    const run = store.getRunById(result.runId)
+    const stepOutput = run!.stepResults.s1.output!
+    expect(stepOutput).toHaveLength(20 + '\n... (truncated)'.length)
+    expect(stepOutput).toBe('a'.repeat(20) + '\n... (truncated)')
+  })
+
+  it('未配置 maxStepOutputChars 时不截断 output', async () => {
+    const longOutput = 'b'.repeat(200)
+    const executor = createMockExecutor(async () => ({
+      sessionId: 'sess-1',
+      status: 'success',
+      output: longOutput,
+      durationMs: 10
+    }))
+    const runner = new WorkflowRunner(executor)
+    const result = await runner.runWorkflow('default', defSingleAgent())
+
+    expect(result.status).toBe('completed')
+    const run = store.getRunById(result.runId)
+    expect(run!.stepResults.s1.output).toBe(longOutput)
+  })
+
   it('应 emit workflow:started 和 workflow:completed 事件', async () => {
     const executor = createMockExecutor()
     const runner = new WorkflowRunner(executor)
@@ -749,6 +788,35 @@ describe('WorkflowRunner — $args 和 $prev 引用', () => {
     await runner.runWorkflow('default', def, { args: { topic: 'AI安全' } })
 
     expect(calls[0].prompt).toContain('AI安全')
+  })
+
+  it('应将 prompt 文本中的 $args.xxx 引用解析为实际值', async () => {
+    const calls: StepExecutionInput[] = []
+    const executor = createMockExecutor(async (_scope, input) => {
+      calls.push(input)
+      return { sessionId: 's', status: 'success', output: 'ok', durationMs: 10 }
+    })
+
+    const def: WorkflowDef = {
+      name: 'prompt-args',
+      steps: [
+        {
+          id: 's1',
+          type: 'agent',
+          prompt: '请写关于「$args.topic」的简短分析，字数约 $args.count 字。',
+          input: ''
+        }
+      ]
+    }
+
+    const runner = new WorkflowRunner(executor)
+    await runner.runWorkflow('default', def, {
+      args: { topic: 'AI安全', count: '500' }
+    })
+
+    expect(calls[0].prompt).toContain('请写关于「AI安全」的简短分析')
+    expect(calls[0].prompt).toContain('字数约 500 字')
+    expect(calls[0].prompt).not.toContain('$args.')
   })
 
   it('$prev.output 应引用前一个 completed 步骤', async () => {
@@ -1250,5 +1318,193 @@ describe('WorkflowRunner — cleanBefore', () => {
     await runner.runWorkflow('default', defSingleAgent())
 
     expect(fs.existsSync(path.join(wsDir, 'preserved.txt'))).toBe(true)
+  })
+})
+
+describe('WorkflowRunner — 流水线 I/O 单一路径与结构化对齐', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    clearDefStore()
+    store.initResumeStore()
+  })
+  afterEach(() => store.closeResumeStore())
+
+  it('无 def.args 时传 options.args 首步仍收到 inputParams（推断 schema）', async () => {
+    const calls: StepExecutionInput[] = []
+    const executor = createMockExecutor(async (_scope, input) => {
+      calls.push(input)
+      return { sessionId: 's1', status: 'success', output: 'ok', durationMs: 10 }
+    })
+    const def: WorkflowDef = {
+      name: 'no-args-def',
+      steps: [{ id: 's1', type: 'agent', prompt: '处理' }]
+    }
+    const runner = new WorkflowRunner(executor)
+    await runner.runWorkflow('default', def, { args: { topic: 'AI安全', count: 42 } })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].inputParams).toBeDefined()
+    expect(calls[0].inputParams!.schema).toEqual({
+      topic: { type: 'string', description: '' },
+      count: { type: 'string', description: '' }
+    })
+    expect(calls[0].inputParams!.values).toEqual({ topic: 'AI安全', count: 42 })
+  })
+
+  it('completed 时 finalStructuredOutput 派生自最后一步 structuredData', async () => {
+    const executor = createMockExecutor(async () => ({
+      sessionId: 'sess-final',
+      status: 'success',
+      output: 'done',
+      durationMs: 10
+    }))
+    mockScopeStore.getScopeData.mockImplementation(() => ({
+      agentSessions: [
+        {
+          id: 'sess-final',
+          scope: 'default',
+          kind: 'background',
+          bgStructuredData: '{"result":"Markdown 列表项1\\n列表项2"}',
+          bgArtifacts: [],
+          messages: [],
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        }
+      ]
+    }))
+    const runner = new WorkflowRunner(executor)
+    const result = await runner.runWorkflow('default', defSingleAgent())
+
+    expect(result.status).toBe('completed')
+    expect(result.finalOutput).toContain('done')
+    expect(result.finalStructuredOutput).toBe('{"result":"Markdown 列表项1\\n列表项2"}')
+  })
+
+  it('结构化 I/O：def 含 args（type）与 outputs（单字段 result），首步 inputParams 带 type、末步 outputParams 与 def.outputs 一致', async () => {
+    const calls: StepExecutionInput[] = []
+    const executor = createMockExecutor(async (_scope, input) => {
+      calls.push(input)
+      return { sessionId: 's1', status: 'success', output: 'ok', durationMs: 10 }
+    })
+    const def: WorkflowDef = {
+      name: 'structured-io',
+      args: {
+        query: { description: '用户自然语言描述的需求', type: 'string' }
+      },
+      outputs: {
+        result: {
+          type: 'string',
+          description: '以 Markdown 列表形式返回的最终结果，每条一行'
+        }
+      },
+      steps: [{ id: 's1', type: 'agent', prompt: '处理' }]
+    }
+    const runner = new WorkflowRunner(executor)
+    await runner.runWorkflow('default', def, { args: { query: '请列三条要点' } })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].inputParams).toBeDefined()
+    expect(calls[0].inputParams!.schema.query).toMatchObject({
+      type: 'string',
+      description: '用户自然语言描述的需求'
+    })
+    expect(calls[0].inputParams!.values).toEqual({ query: '请列三条要点' })
+    expect(calls[0].outputParams).toBeDefined()
+    expect(calls[0].outputParams!.schema).toEqual(def.outputs)
+    expect(calls[0].outputParams!.required).toEqual(['result'])
+  })
+
+  it('多步工作流且传 options.args 时，run.args 单源由 workflow_context 提供，systemInstructions 不再包含流水线原始输入', async () => {
+    const calls: StepExecutionInput[] = []
+    const executor = createMockExecutor(async (_scope, input) => {
+      calls.push(input)
+      return { sessionId: 's', status: 'success', output: `out-${calls.length}`, durationMs: 10 }
+    })
+    const def: WorkflowDef = {
+      name: 'multi-original-input',
+      steps: [
+        { id: 's1', type: 'agent', prompt: '第一步' },
+        { id: 's2', type: 'agent', prompt: '第二步' }
+      ]
+    }
+    const runArgs = { topic: 'OriginalTopic', count: 100 }
+    const runner = new WorkflowRunner(executor)
+    await runner.runWorkflow('default', def, { args: runArgs })
+
+    expect(calls).toHaveLength(2)
+    // run.args 仅在 workflow_context 片段中展示（工作流参数），此处不重复
+    expect(calls[0].systemInstructions).not.toContain('流水线原始输入')
+    expect(calls[1].systemInstructions).not.toContain('流水线原始输入')
+    // 首步仍有 inputParams（表格形式），后续步骤通过 workflow_context 的 run 获取参数
+    expect(calls[0].inputParams?.values).toEqual(runArgs)
+  })
+
+  it('有 def.args 且含 default，不传 options.args 时，首步 inputParams.values 为各 default', async () => {
+    const calls: StepExecutionInput[] = []
+    const executor = createMockExecutor(async (_scope, input) => {
+      calls.push(input)
+      return { sessionId: 's1', status: 'success', output: 'ok', durationMs: 10 }
+    })
+    const def: WorkflowDef = {
+      name: 'with-defaults',
+      args: {
+        topic: { default: 'AI', description: '主题' },
+        count: { default: 3, type: 'number', description: '数量' }
+      },
+      steps: [{ id: 's1', type: 'agent', prompt: '处理' }]
+    }
+    const runner = new WorkflowRunner(executor)
+    await runner.runWorkflow('default', def)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].inputParams).toBeDefined()
+    expect(calls[0].inputParams!.values).toEqual({ topic: 'AI', count: 3 })
+  })
+
+  it('有 def.args 且含 default，传部分 options.args 时，未传的 key 使用 default', async () => {
+    const calls: StepExecutionInput[] = []
+    const executor = createMockExecutor(async (_scope, input) => {
+      calls.push(input)
+      return { sessionId: 's1', status: 'success', output: 'ok', durationMs: 10 }
+    })
+    const def: WorkflowDef = {
+      name: 'partial-args',
+      args: {
+        topic: { default: 'AI', description: '主题' },
+        query: { default: '默认查询', description: '查询' }
+      },
+      steps: [{ id: 's1', type: 'agent', prompt: '处理' }]
+    }
+    const runner = new WorkflowRunner(executor)
+    await runner.runWorkflow('default', def, { args: { topic: '自定义主题' } })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].inputParams!.values).toEqual({
+      topic: '自定义主题',
+      query: '默认查询'
+    })
+  })
+
+  it('有 def.args 且某参数无 default、未传时，该 key 在 values 中为 undefined', async () => {
+    const calls: StepExecutionInput[] = []
+    const executor = createMockExecutor(async (_scope, input) => {
+      calls.push(input)
+      return { sessionId: 's1', status: 'success', output: 'ok', durationMs: 10 }
+    })
+    const def: WorkflowDef = {
+      name: 'partial-required',
+      args: {
+        required: { description: '必填' },
+        note: { description: '备注' }
+      },
+      steps: [{ id: 's1', type: 'agent', prompt: '处理' }]
+    }
+    const runner = new WorkflowRunner(executor)
+    await runner.runWorkflow('default', def, { args: { required: '必填值' } })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].inputParams).toBeDefined()
+    expect(calls[0].inputParams!.values.required).toBe('必填值')
+    expect(calls[0].inputParams!.values.note).toBeUndefined()
   })
 })

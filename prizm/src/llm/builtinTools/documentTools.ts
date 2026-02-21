@@ -365,7 +365,7 @@ export async function executeDeleteDocument(ctx: BuiltinToolContext): Promise<Bu
 
 export async function executePromoteFile(ctx: BuiltinToolContext): Promise<BuiltinToolResult> {
   const hasSession = ctx.wsCtx.sessionWorkspaceRoot && ctx.wsCtx.sessionId
-  const hasWorkflow = !!ctx.wsCtx.workflowWorkspaceRoot
+  const hasWorkflow = !!ctx.wsCtx.runWorkspaceRoot
   if (!hasSession && !hasWorkflow) {
     return { text: '当前没有活跃的临时工作区或工作流工作区，无法执行提升操作。', isError: true }
   }
@@ -383,8 +383,7 @@ export async function executePromoteFile(ctx: BuiltinToolContext): Promise<Built
 
   // 依次在 workflow 工作区和 session 工作区中查找
   const searchRoots: Array<{ root: string; label: string }> = []
-  if (hasWorkflow)
-    searchRoots.push({ root: ctx.wsCtx.workflowWorkspaceRoot!, label: '工作流工作区' })
+  if (hasWorkflow) searchRoots.push({ root: ctx.wsCtx.runWorkspaceRoot!, label: '运行工作区' })
   if (hasSession) searchRoots.push({ root: ctx.wsCtx.sessionWorkspaceRoot!, label: '临时工作区' })
 
   for (const { root, label } of searchRoots) {

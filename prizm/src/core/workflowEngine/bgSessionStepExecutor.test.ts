@@ -3,7 +3,7 @@
  *
  * 覆盖：
  * - 成功执行 → 正确映射 StepExecutionOutput
- * - workspaceDir 传递到 bgManager.triggerSync meta
+ * - workspaceDir 传递到 bgManager.trigger meta
  * - 无 workspaceDir 时 meta.workspaceDir 为 undefined
  * - 各 status 映射（success / failed / timeout / cancelled）
  * - structuredData 透传
@@ -11,6 +11,7 @@
  * - bgManager 抛异常时向上传播
  * - 默认 label 为 'workflow-step'
  * - autoCleanup 始终为 true
+ * - onSessionCreated 在 session 创建后被调用
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -18,15 +19,20 @@ import { BgSessionStepExecutor } from './bgSessionStepExecutor'
 import type { StepExecutionInput } from './types'
 import type { BackgroundSessionManager } from '../backgroundSession/manager'
 
+const DEFAULT_RESULT = {
+  sessionId: 'bg-sess-1',
+  status: 'success' as const,
+  output: '执行结果',
+  structuredData: undefined,
+  durationMs: 500
+}
+
 function createMockBgManager() {
   return {
-    triggerSync: vi.fn().mockResolvedValue({
-      sessionId: 'bg-sess-1',
-      status: 'success',
-      output: '执行结果',
-      structuredData: undefined,
-      durationMs: 500
-    })
+    trigger: vi.fn().mockImplementation(async () => ({
+      sessionId: DEFAULT_RESULT.sessionId,
+      promise: Promise.resolve(DEFAULT_RESULT)
+    }))
   } as unknown as BackgroundSessionManager
 }
 
@@ -51,33 +57,33 @@ describe('BgSessionStepExecutor.execute', () => {
     expect(result.durationMs).toBe(500)
   })
 
-  it('应传递 workspaceDir 到 triggerSync meta', async () => {
+  it('应传递 workspaceDir 到 trigger meta', async () => {
     const input: StepExecutionInput = {
       prompt: '生成报告',
       workspaceDir: '/path/to/workflow/workspace'
     }
     await executor.execute('default', input)
 
-    const triggerSyncFn = mockBg.triggerSync as ReturnType<typeof vi.fn>
-    expect(triggerSyncFn).toHaveBeenCalledTimes(1)
+    const triggerFn = mockBg.trigger as ReturnType<typeof vi.fn>
+    expect(triggerFn).toHaveBeenCalledTimes(1)
 
-    const [, , meta] = triggerSyncFn.mock.calls[0]
+    const [, , meta] = triggerFn.mock.calls[0]
     expect(meta.workspaceDir).toBe('/path/to/workflow/workspace')
   })
 
   it('无 workspaceDir 时 meta.workspaceDir 为 undefined', async () => {
     await executor.execute('default', { prompt: '任务' })
 
-    const triggerSyncFn = mockBg.triggerSync as ReturnType<typeof vi.fn>
-    const [, , meta] = triggerSyncFn.mock.calls[0]
+    const triggerFn = mockBg.trigger as ReturnType<typeof vi.fn>
+    const [, , meta] = triggerFn.mock.calls[0]
     expect(meta.workspaceDir).toBeUndefined()
   })
 
   it('应传递 prompt 到 payload', async () => {
     await executor.execute('scope-x', { prompt: '具体任务描述' })
 
-    const triggerSyncFn = mockBg.triggerSync as ReturnType<typeof vi.fn>
-    const [scope, payload] = triggerSyncFn.mock.calls[0]
+    const triggerFn = mockBg.trigger as ReturnType<typeof vi.fn>
+    const [scope, payload] = triggerFn.mock.calls[0]
     expect(scope).toBe('scope-x')
     expect(payload.prompt).toBe('具体任务描述')
   })
@@ -89,8 +95,8 @@ describe('BgSessionStepExecutor.execute', () => {
       expectedOutputFormat: 'JSON'
     })
 
-    const triggerSyncFn = mockBg.triggerSync as ReturnType<typeof vi.fn>
-    const [, payload] = triggerSyncFn.mock.calls[0]
+    const triggerFn = mockBg.trigger as ReturnType<typeof vi.fn>
+    const [, payload] = triggerFn.mock.calls[0]
     expect(payload.systemInstructions).toBe('你是助手')
     expect(payload.expectedOutputFormat).toBe('JSON')
   })
@@ -101,8 +107,8 @@ describe('BgSessionStepExecutor.execute', () => {
       context: { key: 'value' }
     })
 
-    const triggerSyncFn = mockBg.triggerSync as ReturnType<typeof vi.fn>
-    const [, payload] = triggerSyncFn.mock.calls[0]
+    const triggerFn = mockBg.trigger as ReturnType<typeof vi.fn>
+    const [, payload] = triggerFn.mock.calls[0]
     expect(payload.context).toEqual({ key: 'value' })
   })
 
@@ -112,54 +118,60 @@ describe('BgSessionStepExecutor.execute', () => {
       label: 'workflow:analyze'
     })
 
-    const triggerSyncFn = mockBg.triggerSync as ReturnType<typeof vi.fn>
-    const [, , meta] = triggerSyncFn.mock.calls[0]
+    const triggerFn = mockBg.trigger as ReturnType<typeof vi.fn>
+    const [, , meta] = triggerFn.mock.calls[0]
     expect(meta.label).toBe('workflow:analyze')
   })
 
   it('无 label 时使用默认值 workflow-step', async () => {
     await executor.execute('default', { prompt: '任务' })
 
-    const triggerSyncFn = mockBg.triggerSync as ReturnType<typeof vi.fn>
-    const [, , meta] = triggerSyncFn.mock.calls[0]
+    const triggerFn = mockBg.trigger as ReturnType<typeof vi.fn>
+    const [, , meta] = triggerFn.mock.calls[0]
     expect(meta.label).toBe('workflow-step')
   })
 
   it('应传递 model 到 meta', async () => {
     await executor.execute('default', { prompt: '任务', model: 'gpt-4' })
 
-    const triggerSyncFn = mockBg.triggerSync as ReturnType<typeof vi.fn>
-    const [, , meta] = triggerSyncFn.mock.calls[0]
+    const triggerFn = mockBg.trigger as ReturnType<typeof vi.fn>
+    const [, , meta] = triggerFn.mock.calls[0]
     expect(meta.model).toBe('gpt-4')
   })
 
   it('应传递 timeoutMs 到 meta', async () => {
     await executor.execute('default', { prompt: '任务', timeoutMs: 60000 })
 
-    const triggerSyncFn = mockBg.triggerSync as ReturnType<typeof vi.fn>
-    const [, , meta] = triggerSyncFn.mock.calls[0]
+    const triggerFn = mockBg.trigger as ReturnType<typeof vi.fn>
+    const [, , meta] = triggerFn.mock.calls[0]
     expect(meta.timeoutMs).toBe(60000)
   })
 
   it('meta.triggerType 始终为 event_hook', async () => {
     await executor.execute('default', { prompt: '任务' })
 
-    const triggerSyncFn = mockBg.triggerSync as ReturnType<typeof vi.fn>
-    const [, , meta] = triggerSyncFn.mock.calls[0]
+    const triggerFn = mockBg.trigger as ReturnType<typeof vi.fn>
+    const [, , meta] = triggerFn.mock.calls[0]
     expect(meta.triggerType).toBe('event_hook')
   })
 
   it('meta.autoCleanup 始终为 true', async () => {
     await executor.execute('default', { prompt: '任务' })
 
-    const triggerSyncFn = mockBg.triggerSync as ReturnType<typeof vi.fn>
-    const [, , meta] = triggerSyncFn.mock.calls[0]
+    const triggerFn = mockBg.trigger as ReturnType<typeof vi.fn>
+    const [, , meta] = triggerFn.mock.calls[0]
     expect(meta.autoCleanup).toBe(true)
   })
 
   it('failed 状态 → 正确映射', async () => {
-    ;(mockBg.triggerSync as ReturnType<typeof vi.fn>).mockResolvedValue({
-      sessionId: 'bg-2', status: 'failed', output: '执行失败', durationMs: 200
+    ;(mockBg.trigger as ReturnType<typeof vi.fn>).mockResolvedValue({
+      sessionId: 'bg-2',
+      promise: Promise.resolve({
+        sessionId: 'bg-2',
+        status: 'failed',
+        output: '执行失败',
+        durationMs: 200
+      })
     })
 
     const result = await executor.execute('default', { prompt: '任务' })
@@ -168,8 +180,14 @@ describe('BgSessionStepExecutor.execute', () => {
   })
 
   it('timeout 状态 → 正确映射', async () => {
-    ;(mockBg.triggerSync as ReturnType<typeof vi.fn>).mockResolvedValue({
-      sessionId: 'bg-3', status: 'timeout', output: '超时', durationMs: 30000
+    ;(mockBg.trigger as ReturnType<typeof vi.fn>).mockResolvedValue({
+      sessionId: 'bg-3',
+      promise: Promise.resolve({
+        sessionId: 'bg-3',
+        status: 'timeout',
+        output: '超时',
+        durationMs: 30000
+      })
     })
 
     const result = await executor.execute('default', { prompt: '任务' })
@@ -177,9 +195,15 @@ describe('BgSessionStepExecutor.execute', () => {
   })
 
   it('structuredData 透传', async () => {
-    ;(mockBg.triggerSync as ReturnType<typeof vi.fn>).mockResolvedValue({
-      sessionId: 'bg-4', status: 'success', output: 'ok',
-      structuredData: '{"key":"val"}', durationMs: 100
+    ;(mockBg.trigger as ReturnType<typeof vi.fn>).mockResolvedValue({
+      sessionId: 'bg-4',
+      promise: Promise.resolve({
+        sessionId: 'bg-4',
+        status: 'success',
+        output: 'ok',
+        structuredData: '{"key":"val"}',
+        durationMs: 100
+      })
     })
 
     const result = await executor.execute('default', { prompt: '任务' })
@@ -187,7 +211,7 @@ describe('BgSessionStepExecutor.execute', () => {
   })
 
   it('bgManager 抛异常时应向上传播', async () => {
-    ;(mockBg.triggerSync as ReturnType<typeof vi.fn>).mockRejectedValue(
+    ;(mockBg.trigger as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error('连接失败')
     )
 
@@ -204,7 +228,7 @@ describe('BgSessionStepExecutor.execute', () => {
     }
     await executor.execute('default', input)
 
-    const call = (mockBg.triggerSync as ReturnType<typeof vi.fn>).mock.calls[0]
+    const call = (mockBg.trigger as ReturnType<typeof vi.fn>).mock.calls[0]
     const payload = call[1]
     expect(payload.inputParams).toEqual(input.inputParams)
   })
@@ -219,7 +243,7 @@ describe('BgSessionStepExecutor.execute', () => {
     }
     await executor.execute('default', input)
 
-    const call = (mockBg.triggerSync as ReturnType<typeof vi.fn>).mock.calls[0]
+    const call = (mockBg.trigger as ReturnType<typeof vi.fn>).mock.calls[0]
     const meta = call[2]
     expect(meta.ioConfig).toBeDefined()
     expect(meta.ioConfig.outputParams).toEqual(input.outputParams)
@@ -239,7 +263,7 @@ describe('BgSessionStepExecutor.execute', () => {
     }
     await executor.execute('default', input)
 
-    const call = (mockBg.triggerSync as ReturnType<typeof vi.fn>).mock.calls[0]
+    const call = (mockBg.trigger as ReturnType<typeof vi.fn>).mock.calls[0]
     const meta = call[2]
     expect(meta.ioConfig.inputParams).toEqual(input.inputParams)
     expect(meta.ioConfig.outputParams).toEqual(input.outputParams)
@@ -248,8 +272,38 @@ describe('BgSessionStepExecutor.execute', () => {
   it('无 inputParams/outputParams 时 meta.ioConfig 为 undefined', async () => {
     await executor.execute('default', { prompt: '简单任务' })
 
-    const call = (mockBg.triggerSync as ReturnType<typeof vi.fn>).mock.calls[0]
+    const call = (mockBg.trigger as ReturnType<typeof vi.fn>).mock.calls[0]
     const meta = call[2]
     expect(meta.ioConfig).toBeUndefined()
+  })
+
+  it('应传递 persistentWorkspaceDir 到 meta', async () => {
+    const input: StepExecutionInput = {
+      prompt: '工作流任务',
+      workspaceDir: '/path/to/run-workspace',
+      persistentWorkspaceDir: '/path/to/persistent-workspace'
+    }
+    await executor.execute('default', input)
+
+    const triggerFn = mockBg.trigger as ReturnType<typeof vi.fn>
+    const [, , meta] = triggerFn.mock.calls[0]
+    expect(meta.workspaceDir).toBe('/path/to/run-workspace')
+    expect(meta.persistentWorkspaceDir).toBe('/path/to/persistent-workspace')
+  })
+
+  it('无 persistentWorkspaceDir 时 meta.persistentWorkspaceDir 为 undefined', async () => {
+    await executor.execute('default', { prompt: '任务' })
+
+    const triggerFn = mockBg.trigger as ReturnType<typeof vi.fn>
+    const [, , meta] = triggerFn.mock.calls[0]
+    expect(meta.persistentWorkspaceDir).toBeUndefined()
+  })
+
+  it('onSessionCreated 在 session 创建后被调用', async () => {
+    const onSessionCreated = vi.fn()
+    await executor.execute('default', { prompt: '任务', onSessionCreated })
+
+    expect(onSessionCreated).toHaveBeenCalledTimes(1)
+    expect(onSessionCreated).toHaveBeenCalledWith('bg-sess-1')
   })
 })

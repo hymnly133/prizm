@@ -3,14 +3,13 @@
  * 弹出编辑：同一 Modal 内点击「编辑」切换为表单，保存后刷新
  * TodoList：编辑预览一体，结构化编辑
  */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   ActionIcon,
   Button,
   Empty,
   Flexbox,
   Input,
-  Markdown,
   Select,
   Tag,
   Text,
@@ -21,6 +20,8 @@ import type { FileItem } from '../hooks/useFileList'
 import type { TodoList, Document, TodoItem, TodoItemStatus } from '@prizm/client-core'
 import { getKindLabel, STATUS_OPTIONS } from '../constants/todo'
 import { Plus, Trash2 } from 'lucide-react'
+import { PrizmMarkdown } from './agent/PrizmMarkdown'
+import ImagePreviewModal from './ImagePreviewModal'
 
 export type SavePayload =
   | { kind: 'document'; title: string; content: string }
@@ -51,6 +52,8 @@ export default function FileDetailView({
   const [todoTitle, setTodoTitle] = useState('')
   const [todoItems, setTodoItems] = useState<TodoItem[]>([])
   const [todoError, setTodoError] = useState<string | null>(null)
+  const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
+  const handleImageClick = useCallback((src: string) => setPreviewImageSrc(src), [])
 
   useEffect(() => {
     if (file) {
@@ -211,7 +214,9 @@ export default function FileDetailView({
               <div className="document-detail">
                 <h2 className="document-title">{(file.raw as Document).title || '无标题'}</h2>
                 <div className="md-preview-wrap">
-                  <Markdown>{(file.raw as Document).content ?? '(空)'}</Markdown>
+                  <PrizmMarkdown onImageClick={handleImageClick}>
+                    {(file.raw as Document).content ?? '(空)'}
+                  </PrizmMarkdown>
                 </div>
               </div>
             )}
@@ -295,6 +300,12 @@ export default function FileDetailView({
           </>
         )}
       </div>
+      <ImagePreviewModal
+        open={!!previewImageSrc}
+        src={previewImageSrc}
+        title="图片预览"
+        onClose={() => setPreviewImageSrc(null)}
+      />
     </div>
   )
 }

@@ -39,6 +39,7 @@ import * as documentService from '../../services/documentService'
 import { getVersionHistory, saveVersion } from '../../core/documentVersionStore'
 import { resetSessionAccumulator } from '../../llm/EverMemService'
 import { scheduleTurnSummary } from '../../llm/conversationSummaryService'
+import { clearDefMetaSessionRef } from '../../core/workflowEngine/workflowDefStore'
 import { log, getScopeFromQuery, activeChats, chatKey } from './_shared'
 
 export function registerSessionRoutes(router: Router, adapter?: IAgentAdapter): void {
@@ -282,6 +283,8 @@ export function registerSessionRoutes(router: Router, adapter?: IAgentAdapter): 
         sessions = sessions.filter((s) => s.kind === 'background')
       } else if (kindFilter === 'interactive') {
         sessions = sessions.filter((s) => !s.kind || s.kind === 'interactive')
+      } else if (kindFilter === 'tool') {
+        sessions = sessions.filter((s) => s.kind === 'tool')
       }
       const bgStatusFilter = typeof req.query.bgStatus === 'string' ? req.query.bgStatus : undefined
       if (bgStatusFilter) {
@@ -374,8 +377,24 @@ export function registerSessionRoutes(router: Router, adapter?: IAgentAdapter): 
       if (!hasScopeAccess(req, scope)) {
         return res.status(403).json({ error: 'scope access denied' })
       }
-      const { llmSummary } = req.body ?? {}
-      const session = await adapter.updateSession(scope, id, { llmSummary })
+      const body = req.body ?? {}
+      const llmSummary =
+        typeof body.llmSummary === 'string' ? body.llmSummary : undefined
+      const allowedTools = Array.isArray(body.allowedTools)
+        ? (body.allowedTools as unknown[]).filter((t): t is string => typeof t === 'string')
+        : undefined
+      const allowedSkills = Array.isArray(body.allowedSkills)
+        ? (body.allowedSkills as unknown[]).filter((s): s is string => typeof s === 'string')
+        : undefined
+      const allowedMcpServerIds = Array.isArray(body.allowedMcpServerIds)
+        ? (body.allowedMcpServerIds as unknown[]).filter((m): m is string => typeof m === 'string')
+        : undefined
+      const session = await adapter.updateSession(scope, id, {
+        ...(llmSummary !== undefined && { llmSummary }),
+        ...(allowedTools !== undefined && { allowedTools }),
+        ...(allowedSkills !== undefined && { allowedSkills }),
+        ...(allowedMcpServerIds !== undefined && { allowedMcpServerIds })
+      })
       res.json({ session })
     } catch (error) {
       log.error('update agent session error:', error)
@@ -447,9 +466,12 @@ export function registerSessionRoutes(router: Router, adapter?: IAgentAdapter): 
       if (request.sessionId !== id || request.scope !== scope) {
         return res.status(403).json({ error: 'Interact request does not belong to this session' })
       }
+      const defaultPaths = request.details?.kind === 'file_access'
+        ? (request.details as { paths: string[] }).paths
+        : []
       const grantedPaths = Array.isArray(paths)
         ? paths.filter((p: unknown) => typeof p === 'string' && p.trim())
-        : request.paths
+        : defaultPaths
       if (approved && grantedPaths.length > 0) {
         const session = await adapter.getSession(scope, id)
         if (session) {
@@ -810,7 +832,7 @@ export function registerSessionRoutes(router: Router, adapter?: IAgentAdapter): 
         return res.status(503).json({ error: 'Agent adapter not available' })
       }
       const id = ensureStringParam(req.params.id)
-      const scope = getScopeFromQuery(req)
+      const scope = getScopeFromQuery(req) ?? 'default'
       if (!hasScopeAccess(req, scope)) {
         return res.status(403).json({ error: 'scope access denied' })
       }
@@ -860,6 +882,14 @@ export function registerSessionRoutes(router: Router, adapter?: IAgentAdapter): 
       // 5. 删除会话数据（核心操作，失败则抛出）
       await adapter.deleteSession(scope, id)
       cleanupReport.deleteSession = true
+
+      // 5b. 清除工作流 def 上指向该会话的引用，避免死数据
+      try {
+        const cleared = clearDefMetaSessionRef(id)
+        if (cleared > 0) log.info('Cleared workflow def refs for deleted session:', id, 'count:', cleared)
+      } catch (err) {
+        log.warn('clear def meta session ref failed:', err)
+      }
 
       // 6. 发布会话删除事件 — 锁释放、后续清理由各 handler 响应
       try {

@@ -34,6 +34,10 @@ coverage/
 # Workspace data
 .prizm-data/
 
+# Excluded from repo (kept locally only)
+reference/
+research/
+
 # Rust/Tauri
 src-tauri/target/
 lobehub

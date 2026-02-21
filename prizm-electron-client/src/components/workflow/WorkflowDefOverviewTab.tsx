@@ -1,11 +1,11 @@
 /**
  * WorkflowDefOverviewTab — 定义总览 Tab
  *
- * 步骤流程图 + 参数 Schema + 触发器 + 运行统计
+ * 步骤流程图 + 参数 Schema + 触发器 + 运行统计 + 版本历史（一键回溯）
  */
 
-import { useMemo } from 'react'
-import { Tag } from 'antd'
+import { useMemo, useState, useEffect, useCallback } from 'react'
+import { Tag, Button, Popconfirm, message } from 'antd'
 import {
   RobotOutlined,
   CheckSquareOutlined,
@@ -13,42 +13,105 @@ import {
   ClockCircleOutlined,
   FieldTimeOutlined,
   FileOutlined,
-  CheckOutlined
+  CheckOutlined,
+  HistoryOutlined,
+  RollbackOutlined
 } from '@ant-design/icons'
-import type { WorkflowDef, WorkflowRun } from '@prizm/shared'
+import type { WorkflowDef, WorkflowRun, WorkflowDefVersionItem } from '@prizm/shared'
 import { StatCard } from '../ui/StatCard'
+import { EmptyState } from '../ui/EmptyState'
+import { getWorkflowArgsSchema } from './workflowArgsSchema'
 import { WorkflowStepDiagram } from './WorkflowStepDiagram'
+import { GitBranch } from 'lucide-react'
+import { usePrizmContext } from '../../context/PrizmContext'
 
 export interface WorkflowDefOverviewTabProps {
   def: WorkflowDef
   runs: WorkflowRun[]
+  /** 定义 ID，用于版本列表与一键回溯 */
+  defId?: string
+  /** 回溯成功后回调（用于刷新定义列表） */
+  onRollbackSuccess?: () => void
 }
 
-export function WorkflowDefOverviewTab({ def, runs }: WorkflowDefOverviewTabProps) {
-  const argsSchema = useMemo(() => {
-    if (def.args && Object.keys(def.args).length > 0) {
-      return Object.entries(def.args).map(([key, val]) => ({
-        key,
-        default: val?.default !== undefined ? JSON.stringify(val.default) : '-',
-        description: val?.description ?? '-'
-      }))
+function formatVersionTime(ts: number): string {
+  const d = new Date(ts)
+  const now = new Date()
+  const sameDay = d.toDateString() === now.toDateString()
+  if (sameDay) {
+    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  }
+  return d.toLocaleString('zh-CN', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+export function WorkflowDefOverviewTab({
+  def,
+  runs,
+  defId,
+  onRollbackSuccess
+}: WorkflowDefOverviewTabProps) {
+  const { manager } = usePrizmContext()
+  const [versions, setVersions] = useState<WorkflowDefVersionItem[]>([])
+  const [versionsLoading, setVersionsLoading] = useState(false)
+  const [rollbackingId, setRollbackingId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!defId) {
+      setVersions([])
+      return
     }
-    if (!def.steps.length) return null
-    const refs = new Set<string>()
-    const pattern = /\$args\.([a-zA-Z_][a-zA-Z0-9_.]*)/g
-    for (const step of def.steps) {
-      const texts = [step.prompt, step.input, step.condition, step.transform, step.approvePrompt]
-      for (const t of texts) {
-        if (!t) continue
-        let match
-        while ((match = pattern.exec(t)) !== null) {
-          refs.add(match[1])
-        }
-        pattern.lastIndex = 0
+    let cancelled = false
+    setVersionsLoading(true)
+    const http = manager.getHttpClient()
+    http
+      .getWorkflowDefVersions(defId)
+      .then((list) => {
+        if (!cancelled) setVersions(list)
+      })
+      .catch(() => {
+        if (!cancelled) setVersions([])
+      })
+      .finally(() => {
+        if (!cancelled) setVersionsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [defId, manager])
+
+  const handleRollback = useCallback(
+    async (versionId: string) => {
+      if (!defId) return
+      setRollbackingId(versionId)
+      try {
+        const http = manager.getHttpClient()
+        await http.rollbackWorkflowDef(defId, versionId)
+        message.success('已回溯到该版本')
+        onRollbackSuccess?.()
+        const list = await http.getWorkflowDefVersions(defId)
+        setVersions(list)
+      } catch (e) {
+        message.error(e instanceof Error ? e.message : '回溯失败')
+      } finally {
+        setRollbackingId(null)
       }
-    }
-    if (refs.size === 0) return null
-    return Array.from(refs).map((key) => ({ key, default: '-', description: '-' }))
+    },
+    [defId, manager, onRollbackSuccess]
+  )
+  const argsSchema = useMemo(() => {
+    const raw = getWorkflowArgsSchema(def)
+    if (!raw?.length) return null
+    return raw.map((p) => ({
+      key: p.key,
+      default: p.default !== undefined ? JSON.stringify(p.default) : '-',
+      description: p.description || '-',
+      optional: p.optional ?? false
+    }))
   }, [def])
 
   const runStats = useMemo(() => {
@@ -85,9 +148,11 @@ export function WorkflowDefOverviewTab({ def, runs }: WorkflowDefOverviewTabProp
         {def.steps.length > 0 ? (
           <WorkflowStepDiagram steps={def.steps} />
         ) : (
-          <div style={{ color: 'var(--ant-color-text-quaternary)', fontSize: 13, padding: '12px 0' }}>
-            暂无步骤定义
-          </div>
+          <EmptyState
+            icon={GitBranch}
+            description="暂无步骤定义"
+            className="wfp-overview-tab__empty"
+          />
         )}
       </div>
 
@@ -95,11 +160,15 @@ export function WorkflowDefOverviewTab({ def, runs }: WorkflowDefOverviewTabProp
       {argsSchema && argsSchema.length > 0 && (
         <div className="wfp-overview-tab__section">
           <div className="wfp-overview-tab__section-title">参数 Schema</div>
+          <div className="wfp-overview-tab__section-desc" style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', marginBottom: 8 }}>
+            有默认值即为可选，运行时不填则使用默认值。
+          </div>
           <table className="wfp-params-table">
             <thead>
               <tr>
                 <th>参数名</th>
                 <th>默认值</th>
+                <th title="有默认值即为可选">可选</th>
                 <th>描述</th>
               </tr>
             </thead>
@@ -108,6 +177,7 @@ export function WorkflowDefOverviewTab({ def, runs }: WorkflowDefOverviewTabProp
                 <tr key={param.key}>
                   <td><code>{param.key}</code></td>
                   <td>{param.default}</td>
+                  <td>{param.optional ? '是' : '否'}</td>
                   <td>{param.description}</td>
                 </tr>
               ))}
@@ -170,6 +240,46 @@ export function WorkflowDefOverviewTab({ def, runs }: WorkflowDefOverviewTabProp
           </div>
         )}
       </div>
+
+      {/* 版本历史（无记忆功能，仅快照与一键回溯） */}
+      {defId && (
+        <div className="wfp-overview-tab__section">
+          <div className="wfp-overview-tab__section-title">
+            <HistoryOutlined style={{ marginRight: 6 }} />
+            版本历史
+          </div>
+          {versionsLoading ? (
+            <div style={{ color: 'var(--ant-color-text-quaternary)', fontSize: 13 }}>加载中…</div>
+          ) : versions.length === 0 ? (
+            <div style={{ color: 'var(--ant-color-text-quaternary)', fontSize: 13 }}>
+              暂无历史版本（每次保存会生成快照）
+            </div>
+          ) : (
+            <ul className="wfp-version-list">
+              {versions.map((v) => (
+                <li key={v.id} className="wfp-version-list__item">
+                  <span className="wfp-version-list__time">{formatVersionTime(v.createdAt)}</span>
+                  <Popconfirm
+                    title="确定回溯到此版本？"
+                    description="当前内容会先被保存为快照，再替换为该版本。"
+                    onConfirm={() => handleRollback(v.id)}
+                    okText="回溯"
+                  >
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<RollbackOutlined />}
+                      loading={rollbackingId === v.id}
+                    >
+                      回溯
+                    </Button>
+                  </Popconfirm>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   )
 }

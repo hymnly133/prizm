@@ -17,8 +17,21 @@ import {
   discoverImportableSources,
   type CustomCommandConfig
 } from '../llm/customCommandLoader'
+import { reloadCustomCommands } from '../llm/slashCommands'
+import { EVENT_TYPES } from '../websocket/types'
 
 const log = createLogger('Commands')
+
+function broadcastCommandChanged(
+  req: Request,
+  action: 'created' | 'updated' | 'deleted' | 'imported',
+  commandId?: string
+): void {
+  const wsServer = req.prizmServer
+  if (wsServer) {
+    wsServer.broadcast(EVENT_TYPES.COMMAND_CHANGED, { action, commandId })
+  }
+}
 
 export function createCommandsRoutes(router: Router): void {
   // GET /commands - 列出所有自定义命令
@@ -76,9 +89,56 @@ export function createCommandsRoutes(router: Router): void {
       }
 
       saveCustomCommand(config)
+      reloadCustomCommands()
+      broadcastCommandChanged(req, 'created', config.id)
       res.status(201).json(config)
     } catch (error) {
       log.error('create command error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // POST /commands/import - 从外部工具导入命令
+  // (registered before /commands/:id to avoid Express param matching)
+  router.post('/commands/import', (req: Request, res: Response) => {
+    try {
+      const { source, path: customPath } = req.body ?? {}
+      if (!source || !['cursor', 'claude-code'].includes(source)) {
+        return res.status(400).json({ error: 'source must be "cursor" or "claude-code"' })
+      }
+
+      let importDir: string
+      if (typeof customPath === 'string' && customPath.trim()) {
+        importDir = customPath.trim()
+      } else {
+        const cwd = process.cwd()
+        if (source === 'cursor') {
+          importDir = require('path').join(cwd, '.cursor', 'commands')
+        } else {
+          importDir = require('path').join(cwd, '.claude', 'commands')
+        }
+      }
+
+      const imported = importCommandsFromDir(importDir, source)
+      reloadCustomCommands()
+      broadcastCommandChanged(req, 'imported')
+      res.json({ imported: imported.length, commands: imported })
+    } catch (error) {
+      log.error('import commands error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // GET /commands/discover - 发现可导入的命令源
+  // (registered before /commands/:id to avoid Express param matching)
+  router.get('/commands/discover', (_req: Request, res: Response) => {
+    try {
+      const sources = discoverImportableSources()
+      res.json({ sources })
+    } catch (error) {
+      log.error('discover commands error:', error)
       const { status, body } = toErrorResponse(error)
       res.status(status).json(body)
     }
@@ -123,6 +183,8 @@ export function createCommandsRoutes(router: Router): void {
       }
 
       saveCustomCommand(updated)
+      reloadCustomCommands()
+      broadcastCommandChanged(req, 'updated', id)
       res.json(updated)
     } catch (error) {
       log.error('update command error:', error)
@@ -139,51 +201,11 @@ export function createCommandsRoutes(router: Router): void {
       if (!deleted) {
         return res.status(404).json({ error: 'Command not found' })
       }
+      reloadCustomCommands()
+      broadcastCommandChanged(req, 'deleted', id)
       res.status(204).send()
     } catch (error) {
       log.error('delete command error:', error)
-      const { status, body } = toErrorResponse(error)
-      res.status(status).json(body)
-    }
-  })
-
-  // POST /commands/import - 从外部工具导入命令
-  router.post('/commands/import', (req: Request, res: Response) => {
-    try {
-      const { source, path: customPath } = req.body ?? {}
-      if (!source || !['cursor', 'claude-code'].includes(source)) {
-        return res.status(400).json({ error: 'source must be "cursor" or "claude-code"' })
-      }
-
-      let importDir: string
-      if (typeof customPath === 'string' && customPath.trim()) {
-        importDir = customPath.trim()
-      } else {
-        // 默认路径
-        const cwd = process.cwd()
-        if (source === 'cursor') {
-          importDir = require('path').join(cwd, '.cursor', 'commands')
-        } else {
-          importDir = require('path').join(cwd, '.claude', 'commands')
-        }
-      }
-
-      const imported = importCommandsFromDir(importDir, source)
-      res.json({ imported: imported.length, commands: imported })
-    } catch (error) {
-      log.error('import commands error:', error)
-      const { status, body } = toErrorResponse(error)
-      res.status(status).json(body)
-    }
-  })
-
-  // GET /commands/discover - 发现可导入的命令源
-  router.get('/commands/discover', (_req: Request, res: Response) => {
-    try {
-      const sources = discoverImportableSources()
-      res.json({ sources })
-    } catch (error) {
-      log.error('discover commands error:', error)
       const { status, body } = toErrorResponse(error)
       res.status(status).json(body)
     }

@@ -39,6 +39,16 @@ const STEP_TYPE_ICON: Record<string, React.ReactNode> = {
   transform: <SwapOutlined />
 }
 
+/** 从 stepResult 派生单行概览（有输出/无输出 · N 个产物），不持久化 */
+function deriveStepOverview(result?: WorkflowStepResult): string {
+  if (!result) return '—'
+  const hasOutput = !!(result.output?.trim() || result.structuredData?.trim())
+  const count = result.artifacts?.length ?? 0
+  const parts = hasOutput ? ['有输出'] : ['无输出']
+  if (count > 0) parts.push(`${count} 个产物`)
+  return parts.join(' · ')
+}
+
 interface StepInfo {
   id: string
   type: string
@@ -146,6 +156,9 @@ function StepNode({
           <div className="wf-step__label">{step.label}</div>
           <div className="wf-step__meta">
             {step.status === 'running' ? '执行中…' : step.status === 'paused' ? '待审批' : durationStr ?? ''}
+            {(step.status === 'completed' || step.status === 'failed') && step.result && (
+              <span style={{ marginLeft: 8 }}>· {deriveStepOverview(step.result)}</span>
+            )}
           </div>
         </>
       )}
@@ -178,6 +191,7 @@ function StepNode({
           <Tag style={{ marginLeft: 8 }}>{step.type}</Tag>
           <Tag color={statusColor(step.status)}>{step.status}</Tag>
         </div>
+        <Text type="secondary" style={{ fontSize: 12 }}>概览：{deriveStepOverview(step.result)}</Text>
         {step.result?.sessionId && (
           <Text type="secondary" style={{ fontSize: 12 }}>
             Session: {step.result.sessionId.slice(0, 12)}…

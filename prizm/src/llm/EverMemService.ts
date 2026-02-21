@@ -206,6 +206,9 @@ export async function initEverMemService() {
   })
 
   _userManagers = { memory: userMemory, retrieval: userRetrieval }
+  // 同步到 EverMemService/_state，供 crud、routes/memory 等子模块使用
+  const { setUserManagers } = await import('./EverMemService/_state')
+  setUserManagers(_userManagers)
   log.info('EverMemService initialized (user-level)')
 
   // 当本地 embedding 模型就绪后，自动补全无向量的记忆
@@ -1542,115 +1545,8 @@ function mapRowToMemoryItem(r: {
   }
 }
 
-export async function getAllMemories(scope?: string): Promise<MemoryItem[]> {
-  // User DB: PROFILE 记忆（group_id="user"）
-  const userRows = await getUserManagers().memory.listMemories()
-  let rows = userRows
-  if (scope) {
-    try {
-      // Scope DB: NARRATIVE / FORESIGHT / DOCUMENT / EVENT_LOG 记忆
-      // 使用 scopeOnlyMemory 直接查询 scope DB，避免 composite adapter 路由问题
-      const scopeRows = await getScopeManagers(scope).scopeOnlyMemory.listMemories()
-      rows = [...userRows, ...scopeRows]
-    } catch {
-      // scope not found, use user only
-    }
-  }
-  return deduplicateRows(rows).map(mapRowToMemoryItem)
-}
-
-/** 按 ID 查询单条记忆（先查 user 库，再查 scope 库） */
-export async function getMemoryById(id: string, scope?: string): Promise<MemoryItem | null> {
-  const userRows = await getUserManagers().memory.storage.relational.query(
-    'SELECT * FROM memories WHERE id = ? LIMIT 1',
-    [id]
-  )
-  if (userRows.length > 0) return mapRowToMemoryItem(userRows[0] as any)
-  if (scope) {
-    try {
-      const scopeRows = await getScopeManagers(scope).scopeOnlyMemory.storage.relational.query(
-        'SELECT * FROM memories WHERE id = ? LIMIT 1',
-        [id]
-      )
-      if (scopeRows.length > 0) return mapRowToMemoryItem(scopeRows[0] as any)
-    } catch {
-      // scope not found
-    }
-  }
-  return null
-}
-
-export async function deleteMemory(id: string, scope?: string): Promise<boolean> {
-  let ok = await getUserManagers().memory.deleteMemory(id)
-  if (ok) return true
-  if (scope) {
-    try {
-      ok = await getScopeManagers(scope).memory.deleteMemory(id)
-    } catch {
-      // scope not found
-    }
-  } else {
-    for (const [, m] of _scopeManagers) {
-      ok = await m.memory.deleteMemory(id)
-      if (ok) return true
-    }
-  }
-  return ok
-}
-
-/**
- * 按 group_id 批量删除记忆（用于 session 生命周期管理）
- */
-export async function deleteMemoriesByGroupId(groupId: string): Promise<number> {
-  if (groupId === USER_GROUP_ID) {
-    return getUserManagers().memory.deleteMemoriesByGroupId(groupId)
-  }
-  const scope = groupId.split(':')[0]
-  return getScopeManagers(scope).memory.deleteMemoriesByGroupId(groupId)
-}
-
-/**
- * 按 group_id 前缀批量删除（用于 scope 生命周期管理）
- */
-export async function deleteMemoriesByGroupPrefix(groupPrefix: string): Promise<number> {
-  if (!groupPrefix || groupPrefix === '') return 0
-  const scope = groupPrefix.split(':')[0]
-  return getScopeManagers(scope).memory.deleteMemoriesByGroupPrefix(groupPrefix)
-}
-
 export function isMemoryEnabled(): boolean {
   return true
-}
-
-/**
- * 清空所有记忆（User DB + 所有已初始化的 Scope DB）。
- * 包括 SQLite 记录和 LanceDB 向量索引。
- */
-export async function clearAllMemories(): Promise<number> {
-  let total = 0
-
-  // 清空 user-level DB
-  try {
-    total += await getUserManagers().memory.clearAllMemories()
-  } catch (e) {
-    log.error('Failed to clear user memories:', e)
-  }
-
-  // 清空所有已初始化的 scope DB
-  for (const [scopeId, managers] of _scopeManagers) {
-    try {
-      total += await managers.scopeOnlyMemory.clearAllMemories()
-      log.info(`Cleared scope "${scopeId}" memories`)
-    } catch (e) {
-      log.error(`Failed to clear scope "${scopeId}" memories:`, e)
-    }
-  }
-
-  // 清除缓存，下次访问时重建连接
-  _scopeManagers.clear()
-  memLog('memory:clear', { detail: { totalDeleted: total } })
-  log.info(`All memories cleared: ${total} records deleted`)
-  return total
 }
 
 /**
@@ -1669,235 +1565,18 @@ export function invalidateScopeManagerCache(scope?: string): void {
   }
 }
 
-/** 按类型分组的记忆计数 */
-export interface MemoryCountsByType {
-  /** 总计: User 层 */
-  userCount: number
-  /** 总计: Scope 层（不含 session 记忆） */
-  scopeCount: number
-  /** Scope 中对话记忆（scopeCount - scopeDocumentCount） */
-  scopeChatCount: number
-  /** Scope 中文档记忆（memory_type='document' 且非 session 的记忆） */
-  scopeDocumentCount: number
-  /** 总计: Session 层（group_id 匹配 {scope}:session:* 的记忆） */
-  sessionCount: number
-  /** 按类型分组: { profile: N, narrative: N, foresight: N, document: N, event_log: N } */
-  byType: Record<string, number>
-}
-
-/**
- * 获取各层记忆的实际总数 + 按类型分组计数（直接 COUNT，不依赖语义搜索）。
- * 将 session 层记忆（group_id 含 :session:）从 scopeCount 中分离出来。
- */
-export async function getMemoryCounts(scope?: string): Promise<MemoryCountsByType> {
-  const userByType = await getUserManagers().memory.countMemoriesByType()
-  const userCount = Object.values(userByType).reduce((s, n) => s + n, 0)
-
-  let scopeByType: Record<string, number> = {}
-  let scopeTotalCount = 0
-  let sessionCount = 0
-  let scopeDocumentCount = 0
-  if (scope) {
-    try {
-      const managers = getScopeManagers(scope)
-      scopeByType = await managers.scopeOnlyMemory.countMemoriesByType()
-      scopeTotalCount = Object.values(scopeByType).reduce((s, n) => s + n, 0)
-
-      const sessionPrefix = `${scope}:session:`
-      try {
-        const rows = await managers.scopeOnlyMemory.storage.relational.query(
-          'SELECT COUNT(*) as cnt FROM memories WHERE group_id LIKE ?',
-          [`${sessionPrefix}%`]
-        )
-        sessionCount = (rows[0] as { cnt: number })?.cnt ?? 0
-      } catch {
-        // 查询失败不影响总数
-      }
-
-      try {
-        const rows = await managers.scopeOnlyMemory.storage.relational.query(
-          "SELECT COUNT(*) as cnt FROM memories WHERE memory_type = 'document' AND (group_id IS NULL OR group_id NOT LIKE ?)",
-          [`${sessionPrefix}%`]
-        )
-        scopeDocumentCount = (rows[0] as { cnt: number })?.cnt ?? 0
-      } catch {
-        // fallback: 不影响其他计数
-      }
-    } catch {
-      // scope not found
-    }
-  }
-
-  const scopeCount = scopeTotalCount - sessionCount
-  const scopeChatCount = scopeCount - scopeDocumentCount
-
-  const byType: Record<string, number> = {}
-  for (const [t, c] of Object.entries(userByType)) byType[t] = (byType[t] ?? 0) + c
-  for (const [t, c] of Object.entries(scopeByType)) byType[t] = (byType[t] ?? 0) + c
-
-  return { userCount, scopeCount, scopeChatCount, scopeDocumentCount, sessionCount, byType }
-}
-
-/**
- * 按层精确解析记忆 ID → MemoryItem（用于客户端懒加载）。
- * 每个 ID 只查对应层的 DB，不盲查。已删除的 ID 返回 null。
- */
-export async function resolveMemoryIds(
-  byLayer: MemoryIdsByLayer,
-  scope?: string
-): Promise<Record<string, MemoryItem | null>> {
-  const result: Record<string, MemoryItem | null> = {}
-  const allIds = [...byLayer.user, ...byLayer.scope, ...byLayer.session]
-  for (const id of allIds) result[id] = null
-
-  // User DB
-  if (byLayer.user.length > 0) {
-    try {
-      const placeholders = byLayer.user.map(() => '?').join(',')
-      const rows = await getUserManagers().memory.storage.relational.query(
-        `SELECT * FROM memories WHERE id IN (${placeholders})`,
-        byLayer.user
-      )
-      for (const r of rows) {
-        result[r.id] = mapRowToMemoryItem(r)
-      }
-    } catch {
-      // user managers not initialized
-    }
-  }
-
-  // Scope DB
-  const scopeIds = [...byLayer.scope, ...byLayer.session]
-  if (scopeIds.length > 0 && scope) {
-    try {
-      const placeholders = scopeIds.map(() => '?').join(',')
-      const rows = await getScopeManagers(scope).scopeOnlyMemory.storage.relational.query(
-        `SELECT * FROM memories WHERE id IN (${placeholders})`,
-        scopeIds
-      )
-      for (const r of rows) {
-        result[r.id] = mapRowToMemoryItem(r)
-      }
-    } catch {
-      // scope not found
-    }
-  }
-
-  return result
-}
-
-/**
- * 按层批量更新记忆引用索引（ref_count += 1, last_ref_at = NOW）。
- * fire-and-forget 调用，不阻塞对话流程。
- */
-export async function updateMemoryRefStats(
-  byLayer: MemoryIdsByLayer,
-  scope?: string
-): Promise<void> {
-  const now = new Date().toISOString()
-
-  const updateSql = `UPDATE memories SET metadata = json_set(
-    COALESCE(metadata, '{}'),
-    '$.ref_count', COALESCE(json_extract(metadata, '$.ref_count'), 0) + 1,
-    '$.last_ref_at', ?
-  ) WHERE id = ?`
-
-  type StoreWithRun = { run?(sql: string, params?: unknown[]): Promise<void> }
-
-  // User DB
-  if (byLayer.user.length > 0) {
-    try {
-      const store = getUserManagers().memory.storage.relational
-      const run = (store as StoreWithRun).run?.bind(store)
-      for (const id of byLayer.user) {
-        if (run) await run(updateSql, [now, id])
-        else await store.query(updateSql, [now, id])
-      }
-    } catch (e) {
-      log.warn('updateMemoryRefStats user failed:', e)
-    }
-  }
-
-  // Scope DB
-  const scopeIds = [...byLayer.scope, ...byLayer.session]
-  if (scopeIds.length > 0 && scope) {
-    try {
-      const store = getScopeManagers(scope).scopeOnlyMemory.storage.relational
-      const run = (store as StoreWithRun).run?.bind(store)
-      for (const id of scopeIds) {
-        if (run) await run(updateSql, [now, id])
-        else await store.query(updateSql, [now, id])
-      }
-    } catch (e) {
-      log.warn('updateMemoryRefStats scope failed:', e)
-    }
-  }
-}
-
-// ==================== 去重日志 API ====================
-
-/**
- * 获取去重日志列表。
- * 合并查询 scopeDB + userDB（Profile 的去重日志写入 userDB，其余写入 scopeDB），
- * 按 created_at 降序排列后截取。
- */
-export async function listDedupLog(scope: string, limit?: number): Promise<DedupLogEntry[]> {
-  const effectiveLimit = limit ?? 50
-  try {
-    const scopeEntries = await getScopeManagers(scope).scopeOnlyMemory.listDedupLog(
-      DEFAULT_USER_ID,
-      effectiveLimit
-    )
-
-    // 也查询 userDB 中的去重日志（Profile 的 group_id="user" → composite 路由到 userDB）
-    let userEntries: DedupLogEntry[] = []
-    try {
-      userEntries = await getUserManagers().memory.listDedupLog(DEFAULT_USER_ID, effectiveLimit)
-    } catch {
-      // user managers 未初始化或查询失败，忽略
-    }
-
-    if (userEntries.length === 0) return scopeEntries
-    if (scopeEntries.length === 0) return userEntries
-
-    // 按 id 去重（避免 composite 查询两个 DB 返回相同记录）
-    const seen = new Set<string>()
-    const merged: DedupLogEntry[] = []
-    for (const entry of [...scopeEntries, ...userEntries]) {
-      if (seen.has(entry.id)) continue
-      seen.add(entry.id)
-      merged.push(entry)
-    }
-    merged.sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
-    return merged.slice(0, effectiveLimit)
-  } catch (e) {
-    log.error('listDedupLog error:', e)
-    return []
-  }
-}
-
-/**
- * 回退一次去重：恢复被抑制的记忆。
- * 先尝试 scopeDB，再尝试 userDB（Profile 日志在 userDB 中）。
- * @returns 恢复的记忆 id，或 null 表示失败
- */
-export async function undoDedupLog(dedupLogId: string, scope: string): Promise<string | null> {
-  try {
-    // 先尝试 scope DB
-    const scopeResult = await getScopeManagers(scope).scopeOnlyMemory.undoDedup(dedupLogId)
-    if (scopeResult) return scopeResult
-
-    // 再尝试 user DB（Profile 的去重日志在此）
-    try {
-      const userResult = await getUserManagers().memory.undoDedup(dedupLogId)
-      if (userResult) return userResult
-    } catch {
-      // user managers 未初始化
-    }
-
-    return null
-  } catch (e) {
-    log.error('undoDedupLog error:', e)
-    return null
-  }
-}
+// CRUD、计数、去重等统一由 EverMemService/crud 实现（含 type 列名修正与 5000 条 limit），此处仅 re-export
+export {
+  getAllMemories,
+  getMemoryById,
+  deleteMemory,
+  deleteMemoriesByGroupId,
+  deleteMemoriesByGroupPrefix,
+  clearAllMemories,
+  getMemoryCounts,
+  resolveMemoryIds,
+  updateMemoryRefStats,
+  listDedupLog,
+  undoDedupLog
+} from './EverMemService/crud'
+export type { MemoryCountsByType } from './EverMemService/crud'

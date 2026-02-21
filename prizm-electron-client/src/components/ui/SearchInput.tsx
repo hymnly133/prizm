@@ -1,8 +1,9 @@
 /**
- * SearchInput - 带 debounce 和加载状态的搜索输入
+ * SearchInput - 带 debounce 和加载状态的搜索输入，使用 @lobehub/ui
  */
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { Input, Spin } from 'antd'
+import { Input } from '@lobehub/ui'
+import { Spin } from 'antd'
 import { Search, X } from 'lucide-react'
 
 interface SearchInputProps {

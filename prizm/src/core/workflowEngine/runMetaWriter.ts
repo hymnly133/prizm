@@ -25,6 +25,8 @@ export interface RunMetaData {
   args?: Record<string, unknown>
   startedAt?: number
   finishedAt?: number
+  /** Run 级错误详情/堆栈 */
+  errorDetail?: string
   stepResults: Record<string, WorkflowStepResult>
 }
 
@@ -111,6 +113,7 @@ function buildRunMetaContent(data: RunMetaData): string {
   if (data.args && Object.keys(data.args).length > 0) fm.args = data.args
   if (data.startedAt) fm.startedAt = data.startedAt
   if (data.finishedAt) fm.finishedAt = data.finishedAt
+  if (data.errorDetail) fm.errorDetail = data.errorDetail
 
   const steps: Record<string, Record<string, unknown>> = {}
   for (const [stepId, result] of Object.entries(data.stepResults)) {
@@ -127,6 +130,7 @@ function buildRunMetaContent(data: RunMetaData): string {
     }
     if (result.artifacts?.length) s.artifacts = result.artifacts
     if (result.error) s.error = result.error
+    if (result.errorDetail) s.errorDetail = result.errorDetail
     steps[stepId] = s
   }
   if (Object.keys(steps).length > 0) fm.steps = steps
@@ -137,11 +141,22 @@ function buildRunMetaContent(data: RunMetaData): string {
   return `---\n${frontmatter}\n---\n\n${body}`
 }
 
+/** 从 stepResult 派生单行概览（有输出/无输出 · N 个产物），不持久化到 step 字段 */
+function deriveStepOverview(result: WorkflowStepResult): string {
+  const hasOutput = !!(result.output?.trim() || result.structuredData?.trim())
+  const count = result.artifacts?.length ?? 0
+  const parts = hasOutput ? ['有输出'] : ['无输出']
+  if (count > 0) parts.push(`${count} 个产物`)
+  return parts.join(' · ')
+}
+
 function buildMarkdownBody(data: RunMetaData): string {
   const lines: string[] = [`# Run: ${data.workflowName}\n`]
 
   for (const [stepId, result] of Object.entries(data.stepResults)) {
     lines.push(`## Step: ${stepId}`)
+    lines.push(`概览：${deriveStepOverview(result)}`)
+    lines.push('')
     if (result.output) {
       const preview = result.output.length > 500
         ? result.output.slice(0, 500) + '...'
@@ -149,6 +164,12 @@ function buildMarkdownBody(data: RunMetaData): string {
       lines.push(preview)
     } else if (result.error) {
       lines.push(`Error: ${result.error}`)
+      if (result.errorDetail) {
+        lines.push('')
+        lines.push('```')
+        lines.push(result.errorDetail)
+        lines.push('```')
+      }
     } else if (result.status === 'skipped') {
       lines.push('(skipped)')
     }
@@ -214,6 +235,7 @@ function parseRunMeta(raw: string, workflowName: string): RunMetaData | null {
   let triggerType: string | undefined
   let startedAt: number | undefined
   let finishedAt: number | undefined
+  let errorDetail: string | undefined
   const stepResults: Record<string, WorkflowStepResult> = {}
 
   let inSteps = false
@@ -235,12 +257,14 @@ function parseRunMeta(raw: string, workflowName: string): RunMetaData | null {
       const kv = line.match(/^(\w+):\s*(.+)$/)
       if (!kv) continue
       const [, k, v] = kv
+      const unquote = (s: string) => (s.startsWith('"') && s.endsWith('"') ? s.slice(1, -1).replace(/\\n/g, '\n') : s)
       switch (k) {
         case 'runId': runId = v; break
         case 'status': status = v; break
         case 'triggerType': triggerType = v; break
         case 'startedAt': startedAt = Number(v) || undefined; break
         case 'finishedAt': finishedAt = Number(v) || undefined; break
+        case 'errorDetail': errorDetail = unquote(v); break
       }
     } else if (inSteps && indent === 2) {
       const stepMatch = line.match(/^ {2}(\w[\w-]*):\s*$/)
@@ -253,12 +277,14 @@ function parseRunMeta(raw: string, workflowName: string): RunMetaData | null {
       if (!propMatch) continue
       const [, pk, pv] = propMatch
       const result = stepResults[currentStepId]
+      const unquote = (s: string) => (s.startsWith('"') && s.endsWith('"') ? s.slice(1, -1).replace(/\\n/g, '\n') : s)
       switch (pk) {
         case 'status': result.status = pv as WorkflowStepResult['status']; break
         case 'type': result.type = pv as WorkflowStepResult['type']; break
         case 'sessionId': result.sessionId = pv; break
         case 'durationMs': result.durationMs = Number(pv) || undefined; break
-        case 'error': result.error = pv; break
+        case 'error': result.error = unquote(pv); break
+        case 'errorDetail': result.errorDetail = unquote(pv); break
       }
     }
   }
@@ -273,6 +299,7 @@ function parseRunMeta(raw: string, workflowName: string): RunMetaData | null {
     triggerType,
     startedAt,
     finishedAt,
+    errorDetail,
     stepResults
   }
 }

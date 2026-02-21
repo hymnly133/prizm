@@ -90,14 +90,14 @@ describe('executePreToolUseHooks', () => {
     expect(cb3).not.toHaveBeenCalled()
   })
 
-  it('should merge ask decisions with interact paths', async () => {
+  it('should use first ask interactDetails from hooks', async () => {
     hookRegistry.register({
       id: 'h1',
       event: 'PreToolUse',
       priority: 10,
       callback: async () => ({
         decision: 'ask' as const,
-        interactPaths: ['/path/a']
+        interactDetails: { kind: 'file_access' as const, paths: ['/path/a'] }
       })
     })
     hookRegistry.register({
@@ -106,13 +106,13 @@ describe('executePreToolUseHooks', () => {
       priority: 20,
       callback: async () => ({
         decision: 'ask' as const,
-        interactPaths: ['/path/b', '/path/a']
+        interactDetails: { kind: 'file_access' as const, paths: ['/path/b'] }
       })
     })
 
     const result = await executePreToolUseHooks(basePreToolPayload)
     expect(result.decision).toBe('ask')
-    expect(result.interactPaths).toEqual(['/path/a', '/path/b'])
+    expect(result.interactDetails).toEqual({ kind: 'file_access', paths: ['/path/a'] })
   })
 
   it('should pass updated arguments through the chain', async () => {

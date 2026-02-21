@@ -32,8 +32,7 @@ vi.mock('../../llm/slashCommands', () => ({
 }))
 
 vi.mock('../../llm/skillManager', () => ({
-  autoActivateSkills: vi.fn(),
-  getActiveSkills: vi.fn(() => [])
+  getSkillsToInject: vi.fn(() => [])
 }))
 
 vi.mock('../../llm/rulesLoader', () => ({
@@ -781,9 +780,8 @@ describe('chatCore', () => {
 
   describe('记忆注入', () => {
     it('记忆启用时 onReady 返回注入的记忆', async () => {
-      const { isMemoryEnabled, listAllUserProfiles, searchUserAndScopeMemories } = await import(
-        '../../llm/EverMemService'
-      )
+      const { isMemoryEnabled, listAllUserProfiles, searchUserAndScopeMemories } =
+        await import('../../llm/EverMemService')
       ;(isMemoryEnabled as ReturnType<typeof vi.fn>).mockReturnValue(true)
       ;(listAllUserProfiles as ReturnType<typeof vi.fn>).mockResolvedValue([
         { id: 'p1', memory: '用户喜欢 TypeScript', memory_type: 'profile' }
@@ -924,9 +922,8 @@ describe('chatCore', () => {
     })
 
     it('skipCheckpoint=true 时不创建 checkpoint 也不初始化 snapshot', async () => {
-      const { createCheckpoint: mockCreateCp, initSnapshotCollector: mockInitSnap } = await import(
-        '../../core/checkpointStore'
-      )
+      const { createCheckpoint: mockCreateCp, initSnapshotCollector: mockInitSnap } =
+        await import('../../core/checkpointStore')
 
       await chatCore(
         adapter,

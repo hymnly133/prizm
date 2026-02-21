@@ -320,8 +320,13 @@ function topologicalSort(nodes: StepNode[], edges: Edge[]): StepNode[] {
     if (deg === 0) queue.push(id)
   }
 
-  // Stable sort: among nodes with equal in-degree, prefer by Y position
-  queue.sort((a, b) => (nodeMap.get(a)?.position.y ?? 0) - (nodeMap.get(b)?.position.y ?? 0))
+  /** Stable sort: first by node.id (lexicographic), then by position.y */
+  const sortQueue = (a: string, b: string) => {
+    const cmpId = a.localeCompare(b)
+    if (cmpId !== 0) return cmpId
+    return (nodeMap.get(a)?.position.y ?? 0) - (nodeMap.get(b)?.position.y ?? 0)
+  }
+  queue.sort(sortQueue)
 
   const result: StepNode[] = []
   while (queue.length > 0) {
@@ -334,7 +339,7 @@ function topologicalSort(nodes: StepNode[], edges: Edge[]): StepNode[] {
       inDegree.set(next, deg)
       if (deg === 0) queue.push(next)
     }
-    queue.sort((a, b) => (nodeMap.get(a)?.position.y ?? 0) - (nodeMap.get(b)?.position.y ?? 0))
+    queue.sort(sortQueue)
   }
 
   // Append any remaining nodes not in graph (disconnected)
@@ -421,4 +426,79 @@ function hasAnyValue(obj: object): boolean {
     if (Array.isArray(v)) return v.length > 0
     return true
   })
+}
+
+// ─── Export validation (serial pipeline) ───
+
+/**
+ * Validates that the flow forms a single serial chain: each step has at most one incoming
+ * and one outgoing step-edge; exactly one head (0 in-edges) and one tail (0 out-edges);
+ * no isolated or disconnected steps.
+ * Returns the first error message or empty string if valid.
+ */
+export function validateFlowForExport(nodes: EditorNode[], edges: Edge[]): string {
+  const stepNodes = nodes.filter(
+    (n) => n.id !== INPUT_NODE_ID && n.id !== OUTPUT_NODE_ID
+  ) as StepNode[]
+  const stepEdges = edges.filter(
+    (e) => e.source !== INPUT_NODE_ID && e.target !== OUTPUT_NODE_ID
+  )
+
+  if (stepNodes.length === 0) {
+    return '工作流至少需要一个步骤'
+  }
+
+  const inDegree = new Map<string, number>()
+  const outDegree = new Map<string, number>()
+  for (const n of stepNodes) {
+    inDegree.set(n.id, 0)
+    outDegree.set(n.id, 0)
+  }
+  for (const e of stepEdges) {
+    if (inDegree.has(e.target)) inDegree.set(e.target, (inDegree.get(e.target) ?? 0) + 1)
+    if (outDegree.has(e.source)) outDegree.set(e.source, (outDegree.get(e.source) ?? 0) + 1)
+  }
+
+  const heads = stepNodes.filter((n) => inDegree.get(n.id) === 0)
+  const tails = stepNodes.filter((n) => outDegree.get(n.id) === 0)
+
+  if (heads.length === 0) {
+    return '存在环路或所有步骤都有前驱，无法确定起始步骤。请保证有且仅有一条从首步到末步的串行链。'
+  }
+  if (heads.length > 1) {
+    return '存在多个无前驱的步骤（分支或孤立节点）。当前仅支持串行流水线，请连接成单链。'
+  }
+  if (tails.length === 0) {
+    return '存在环路，无法确定结束步骤。请保证有且仅有一条从首步到末步的串行链。'
+  }
+  if (tails.length > 1) {
+    return '存在多个无后继的步骤（分支或孤立节点）。当前仅支持串行流水线，请连接成单链。'
+  }
+
+  for (const n of stepNodes) {
+    const id = n.id
+    const inD = inDegree.get(id) ?? 0
+    const outD = outDegree.get(id) ?? 0
+    const isHead = heads[0].id === id
+    const isTail = tails[0].id === id
+    if (!isHead && !isTail) {
+      if (inD !== 1 || outD !== 1) {
+        return `步骤「${(n.data as StepNodeData).label || id}」应有且仅有 1 个前驱和 1 个后继，当前为 ${inD} 个前驱、${outD} 个后继。请连接成单链。`
+      }
+    } else if (isHead && !isTail && (inD !== 0 || outD !== 1)) {
+      return `起始步骤「${(n.data as StepNodeData).label || id}」应有 0 个前驱、1 个后继。请检查连线。`
+    } else if (!isHead && isTail && (inD !== 1 || outD !== 0)) {
+      return `结束步骤「${(n.data as StepNodeData).label || id}」应有 1 个前驱、0 个后继。请检查连线。`
+    }
+  }
+
+  // Single-node chain: head === tail, both inDegree and outDegree 0 (no step-edges)
+  if (stepNodes.length === 1) {
+    const id = stepNodes[0].id
+    if ((inDegree.get(id) ?? 0) > 0 || (outDegree.get(id) ?? 0) > 0) {
+      return '单步骤工作流不应有步骤之间的连线。请移除多余连线。'
+    }
+  }
+
+  return ''
 }

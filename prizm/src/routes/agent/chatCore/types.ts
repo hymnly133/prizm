@@ -18,11 +18,15 @@ export interface ChatCoreOptions {
   content: string
   model?: string
   fileRefPaths?: string[]
+  /** Run 引用 ID 列表；管理会话下会据此自动 grant 对应 run/步骤工作区路径 */
+  runRefIds?: string[]
   signal?: AbortSignal
   mcpEnabled?: boolean
   includeScopeContext?: boolean
   /** BG 前置系统消息（systemInstructions / context / expectedOutputFormat 拼接后） */
   systemPreamble?: string
+  /** 工作流管理会话：当前工作流 YAML，注入 perTurn（cache 友好） */
+  workflowEditContext?: string
   /** 跳过记忆注入（BG 可按 memoryPolicy 控制） */
   skipMemory?: boolean
   /** 跳过 checkpoint 创建（BG 默认跳过） */

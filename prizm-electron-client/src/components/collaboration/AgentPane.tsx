@@ -15,7 +15,8 @@ import {
   PanelRightDashed,
   Maximize2
 } from 'lucide-react'
-import { useState, useCallback, memo } from 'react'
+import { useState, useCallback, memo, useMemo } from 'react'
+import { isToolSession } from '@prizm/shared'
 import { useAgent } from '../../hooks/useAgent'
 import { useAgentScopeData } from '../../hooks/useAgentScopeData'
 import { useAgentChatActions } from '../../hooks/useAgentChatActions'
@@ -71,6 +72,12 @@ function AgentPane({ onOpenFullPage, sidebarSide = 'left' }: AgentPaneProps) {
   const [detailCollapsed, setDetailCollapsed] = useState(true)
 
   const aliveSessionIds = useKeepAlivePool(currentSession?.id, sessions, 2)
+
+  /** 协作会话列表仅展示聊天会话，过滤掉工具会话（如工作流管理、Tool LLM 等） */
+  const chatSessions = useMemo(
+    () => sessions.filter((s) => !isToolSession(s)),
+    [sessions]
+  )
 
   const { handleSend, handleClear, handleQuickPrompt, handleMarkdownContentChange, sendButtonProps } =
     useAgentChatActions({
@@ -152,7 +159,7 @@ function AgentPane({ onOpenFullPage, sidebarSide = 'left' }: AgentPaneProps) {
           style={{ order: sidebarSide === 'left' ? 0 : 2 }}
         >
           <AgentSessionList
-            sessions={sessions}
+            sessions={chatSessions}
             activeSessionId={currentSession?.id}
             loading={loading}
             pendingInteractSessionIds={pendingInteractSessionIds}

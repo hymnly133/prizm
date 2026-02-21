@@ -8,7 +8,15 @@
 import type { AgentSession } from '@prizm/shared'
 
 export const RESULT_GUARD_PROMPT =
-  '你的任务已执行完毕，但尚未提交结果。请立即调用 prizm_set_result 工具提交你的执行结果摘要。'
+  '你的任务已执行完毕，但尚未提交结果。请立即调用 prizm_set_result 工具提交本步要求产出的结果（仅结果内容，勿含总结性、描述性话语）。'
+
+const RESULT_GUARD_PROMPT_WORKFLOW =
+  '本步输出将传给下一步或作为流水线结果。请立即调用 prizm_set_result 工具提交本步要求产出的结果（仅结果内容，勿含总结性、描述性话语）。'
+
+/** 按会话类型返回结果守卫提示（workflow 步骤强调后果） */
+export function getResultGuardPrompt(session: AgentSession): string {
+  return session.bgMeta?.source === 'workflow' ? RESULT_GUARD_PROMPT_WORKFLOW : RESULT_GUARD_PROMPT
+}
 
 /** 检查 BG Session 是否需要结果守卫干预 */
 export function needsResultGuard(session: AgentSession): boolean {

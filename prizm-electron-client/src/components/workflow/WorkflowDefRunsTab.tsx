@@ -5,9 +5,11 @@
  */
 
 import { useMemo, useState } from 'react'
-import { Button, Empty } from 'antd'
+import { Button } from 'antd'
 import { Segmented } from '../ui/Segmented'
+import { EmptyState } from '../ui/EmptyState'
 import { ReloadOutlined } from '@ant-design/icons'
+import { Play } from 'lucide-react'
 import type { WorkflowRun } from '@prizm/shared'
 import { WorkflowRunCard } from './WorkflowRunCard'
 
@@ -71,10 +73,10 @@ export function WorkflowDefRunsTab({
       </div>
 
       {filtered.length === 0 ? (
-        <Empty
+        <EmptyState
+          icon={Play}
           description={filter === '全部' ? '暂无运行记录' : `暂无${filter}的运行`}
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          style={{ marginTop: 40 }}
+          className="wfp-runs-tab__empty"
         />
       ) : (
         <div className="wfp-runs-list">

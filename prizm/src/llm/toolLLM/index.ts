@@ -3,7 +3,7 @@
  */
 
 export { ToolLLMManager, toolLLMManager } from './manager'
-export { TOOL_LLM_TOOLS, executeSubmitWorkflow } from './workflowSubmitTool'
+export { WORKFLOW_MANAGEMENT_TOOLS, executeSubmitWorkflow } from './workflowSubmitTool'
 export { buildWorkflowSystemPrompt } from './workflowPrompt'
 export type {
   ToolLLMDomain,

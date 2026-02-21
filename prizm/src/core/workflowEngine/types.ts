@@ -18,11 +18,11 @@ export interface StepExecutionInput {
   model?: string
   timeoutMs?: number
   label?: string
-  /** Workflow 工作区绝对路径，BG Session 将以此为默认文件操作根目录 */
+  /** 运行工作区绝对路径，BG Session 将以此为默认文件操作根目录 */
   workspaceDir?: string
-  /** Workflow 级持久工作空间路径（跨 run 共享） */
+  /** 工作流工作区路径（跨 run 共享，存放长期数据） */
   persistentWorkspaceDir?: string
-  /** Run 级独立工作空间路径（本次 run 独占） */
+  /** 运行工作区路径（本次 run 独占，步骤间数据传递） */
   runWorkspaceDir?: string
   /** 上层来源标识（direct / task / workflow） */
   source?: BgSessionSource
@@ -32,7 +32,7 @@ export interface StepExecutionInput {
   sessionConfig?: WorkflowStepSessionConfig
   /** 函数化输入参数（schema + values），注入 BG Session 系统提示词 */
   inputParams?: {
-    schema: Record<string, { type?: string; description?: string }>
+    schema: Record<string, { type?: string; description?: string; optional?: boolean }>
     values: Record<string, unknown>
   }
   /** 函数化输出参数 schema，动态构建 prizm_set_result 工具 */
@@ -40,6 +40,16 @@ export interface StepExecutionInput {
     schema: Record<string, { type?: string; description?: string }>
     required?: string[]
   }
+  /** 输出 JSON Schema，用于 BG Session 对 structuredData 的校验；非空时与 outputParams 对齐 */
+  outputSchema?: Record<string, unknown>
+  /** Schema 校验失败时的最大重试次数 */
+  maxSchemaRetries?: number
+  /** BG Session 创建后立即调用，便于 run 侧写入 stepResults.sessionId（running 步骤可打开会话） */
+  onSessionCreated?: (sessionId: string) => void
+  /** 工作流步骤 id 序列（供 workflow_context 单源展示） */
+  workflowStepIds?: string[]
+  /** 下一步步骤 id（无则 null） */
+  workflowNextStepId?: string | null
 }
 
 /** IStepExecutor 返回的执行结果 */
@@ -50,6 +60,8 @@ export interface StepExecutionOutput {
   structuredData?: string
   artifacts?: string[]
   durationMs: number
+  /** 失败时的堆栈或完整错误详情（由 BG Session 等传入） */
+  errorDetail?: string
 }
 
 /**
@@ -68,8 +80,10 @@ export interface IStepExecutor {
 export interface WorkflowRunResult {
   runId: string
   status: 'completed' | 'paused' | 'failed' | 'cancelled'
-  /** 最终输出（最后一个 step 的 output） */
+  /** 最终输出（最后一个 step 的 output，派生自 stepResults，不持久化） */
   finalOutput?: string
+  /** 最后一步的结构化数据（派生自 stepResults[lastStepId].structuredData，不持久化） */
+  finalStructuredOutput?: string
   /** 当 status='paused' 时，供后续 resume 使用 */
   resumeToken?: string
   /** 需要审批时的提示信息 */

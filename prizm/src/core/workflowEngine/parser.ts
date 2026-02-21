@@ -79,7 +79,7 @@ function validateWorkflowDef(obj: Record<string, unknown>): WorkflowDef {
 
   if (typeof obj.description === 'string') def.description = obj.description
   if (obj.args && typeof obj.args === 'object') {
-    def.args = obj.args as WorkflowDef['args']
+    def.args = validateArgs(obj.args as Record<string, unknown>)
   }
   if (obj.outputs && typeof obj.outputs === 'object') {
     def.outputs = validateOutputs(obj.outputs as Record<string, unknown>)
@@ -192,6 +192,22 @@ function validateStepReferences(
   }
 }
 
+function validateArgs(raw: Record<string, unknown>): WorkflowDef['args'] {
+  const result: Record<string, { default?: unknown; description?: string; type?: string }> = {}
+  for (const [key, value] of Object.entries(raw)) {
+    if (!value || typeof value !== 'object') {
+      throw new WorkflowParseError(`args.${key} 必须是一个对象（可含 description/default/type）`)
+    }
+    const v = value as Record<string, unknown>
+    result[key] = {
+      ...(v.default !== undefined ? { default: v.default } : {}),
+      ...(typeof v.description === 'string' ? { description: v.description } : {}),
+      ...(typeof v.type === 'string' ? { type: v.type } : {})
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined
+}
+
 function validateOutputs(raw: Record<string, unknown>): WorkflowDef['outputs'] {
   const result: Record<string, { type?: string; description?: string }> = {}
   for (const [key, value] of Object.entries(raw)) {
@@ -237,6 +253,9 @@ function validateConfig(raw: Record<string, unknown>): WorkflowDefConfig {
   }
   if (typeof raw.notifyOnComplete === 'boolean') config.notifyOnComplete = raw.notifyOnComplete
   if (typeof raw.notifyOnFail === 'boolean') config.notifyOnFail = raw.notifyOnFail
+  if (typeof raw.maxStepOutputChars === 'number' && raw.maxStepOutputChars > 0) {
+    config.maxStepOutputChars = Math.floor(raw.maxStepOutputChars)
+  }
   if (Array.isArray(raw.tags)) config.tags = raw.tags.filter((t): t is string => typeof t === 'string')
   if (typeof raw.version === 'string') config.version = raw.version
   return config
@@ -248,6 +267,8 @@ function validateSessionConfig(raw: Record<string, unknown>): WorkflowStepSessio
   if (Array.isArray(raw.skills)) sc.skills = raw.skills.filter((s): s is string => typeof s === 'string')
   if (typeof raw.systemPrompt === 'string') sc.systemPrompt = raw.systemPrompt
   if (Array.isArray(raw.allowedTools)) sc.allowedTools = raw.allowedTools.filter((t): t is string => typeof t === 'string')
+  if (Array.isArray(raw.allowedSkills)) sc.allowedSkills = raw.allowedSkills.filter((s): s is string => typeof s === 'string')
+  if (Array.isArray(raw.allowedMcpServerIds)) sc.allowedMcpServerIds = raw.allowedMcpServerIds.filter((m): m is string => typeof m === 'string')
   if (typeof raw.model === 'string') sc.model = raw.model
   if (typeof raw.maxTurns === 'number') sc.maxTurns = raw.maxTurns
   if (typeof raw.expectedOutputFormat === 'string') sc.expectedOutputFormat = raw.expectedOutputFormat

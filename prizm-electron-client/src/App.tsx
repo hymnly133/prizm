@@ -25,11 +25,8 @@ import { HeaderSlotsProvider } from './context/HeaderSlotsContext'
 import DropZoneOverlay from './components/import/DropZoneOverlay'
 import ImportConfirmModal from './components/import/ImportConfirmModal'
 import { setLastSyncEvent } from './events/syncEventStore'
-import {
-  useAgentSending,
-  useAgentPendingInteract,
-  useFirstPendingInteract
-} from './events/agentBackgroundStore'
+import { useAgentSending, useAgentPendingInteract } from './events/agentBackgroundStore'
+import { GlobalInteractPanel } from './components/agent/GlobalInteractPanel'
 import { AppHeader } from './components/layout'
 import ScopeSwitcher from './components/ui/ScopeSwitcher'
 import { LogsDrawer } from './components/LogsDrawer'
@@ -52,6 +49,7 @@ import './styles/workflow-editor.css'
 import './styles/execution.css'
 import './components/workflow/WorkflowToolCards'
 import './components/agent/WorkflowBuilderCard'
+import './components/agent/NavigationCard'
 
 type PageKey = 'home' | 'work' | 'docs' | 'agent' | 'workflow' | 'settings' | 'test'
 
@@ -109,6 +107,7 @@ function AppContent() {
   const navigateToWork = useCallback(() => setActivePageSafe('work'), [setActivePageSafe])
   const navigateToDocs = useCallback(() => setActivePageSafe('docs'), [setActivePageSafe])
   const navigateToAgent = useCallback(() => setActivePageSafe('agent'), [setActivePageSafe])
+  const navigateToWorkflow = useCallback(() => setActivePageSafe('workflow'), [setActivePageSafe])
 
   /** 懒挂载 + 空闲预加载：首屏只挂载 home，之后空闲时预挂载高频页面 */
   const mountedPagesRef = useRef(new Set<PageKey>(['home']))
@@ -136,10 +135,6 @@ function AppContent() {
   const mounted = mountedPagesRef.current
   const agentSending = useAgentSending()
   const agentPendingInteract = useAgentPendingInteract()
-  const firstPendingInteract = useFirstPendingInteract()
-  const { notification } = AntdApp.useApp()
-  /** 用于去重通知：记录上一次弹出通知的 requestId，同一请求不重复弹出 */
-  const lastNotifiedRequestId = useRef<string | null>(null)
 
   useEffect(() => {
     addLog('Prizm Electron 通知客户端启动', 'info')
@@ -172,34 +167,6 @@ function AppContent() {
       disconnect()
     }
   }, [addLog, loadConfig, initializePrizm, disconnect])
-
-  // --- Agent 交互通知：待交互请求变化时弹出应用内通知 ---
-  useEffect(() => {
-    if (!firstPendingInteract) {
-      lastNotifiedRequestId.current = null
-      return
-    }
-    const { interact } = firstPendingInteract
-    if (interact.requestId === lastNotifiedRequestId.current) return
-    lastNotifiedRequestId.current = interact.requestId
-
-    const pathsPreview =
-      interact.paths.length > 2
-        ? `${interact.paths.slice(0, 2).join(', ')} 等 ${interact.paths.length} 个路径`
-        : interact.paths.join(', ')
-
-    notification.warning({
-      key: `interact-${interact.requestId}`,
-      message: 'Agent 需要您的确认',
-      description: `工具 ${interact.toolName} 需要访问: ${pathsPreview}`,
-      placement: 'topRight',
-      duration: 0,
-      onClick: () => {
-        setActivePage('agent')
-        notification.destroy(`interact-${interact.requestId}`)
-      }
-    })
-  }, [firstPendingInteract, notification, setActivePage])
 
   /** Segmented 导航选项（带图标 + Agent 后台指示器 + 交互警告指示器）
    *  依赖 agentSending + agentPendingInteract */
@@ -279,10 +246,12 @@ function AppContent() {
             </>
           }
         />
+        <GlobalInteractPanel onNavigateToAgent={navigateToAgent} />
         <NavigationProvider
           onNavigateToWork={navigateToWork}
           onNavigateToDocs={navigateToDocs}
           onNavigateToAgent={navigateToAgent}
+          onNavigateToWorkflow={navigateToWorkflow}
         >
           <ImportProvider>
             <DropZoneOverlay />

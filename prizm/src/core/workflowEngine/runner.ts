@@ -31,10 +31,63 @@ import type { IStepExecutor, WorkflowRunResult, RunWorkflowOptions } from './typ
 
 const log = createLogger('WorkflowRunner')
 
+/** 解析 $stepId.output / $args.key 等引用，支持 dot-path；预编译避免每次创建 */
+const REF_PATTERN = /\$([a-zA-Z_][a-zA-Z0-9_]*)\.(\w+(?:\.\w+)*)/g
+/** 条件表达式中的引用，仅单段 prop（approved / output） */
+const CONDITION_REF_PATTERN = /\$([a-zA-Z_][a-zA-Z0-9_]*)\.(\w+)/g
+
+/** 流水线未定义 outputs 或非末步时，使用的默认输出 schema：单字段 output，代表留空/默认的结果输出 */
+const DEFAULT_STEP_OUTPUT_SCHEMA: Record<string, { type?: string; description?: string }> = {
+  output: {
+    type: 'string',
+    description: '本步结果输出（必填）；将传递给下一步骤或作为流水线最终输出'
+  }
+}
+
+/**
+ * 将工作流 def.outputs 形态转为 JSON Schema，供 BG Session 校验 structuredData。
+ */
+function buildOutputSchemaForValidation(
+  outputs: Record<string, { type?: string; description?: string }>
+): Record<string, unknown> {
+  const properties: Record<string, unknown> = {}
+  for (const [name, def] of Object.entries(outputs)) {
+    properties[name] = {
+      type: (def.type === 'number'
+        ? 'number'
+        : def.type === 'boolean'
+        ? 'boolean'
+        : 'string') as string,
+      ...(def.description ? { description: def.description } : {})
+    }
+  }
+  return {
+    type: 'object',
+    properties,
+    required: Object.keys(outputs)
+  }
+}
+
 export class WorkflowRunner {
   private activeAbortControllers = new Map<string, AbortController>()
 
   constructor(private executor: IStepExecutor) {}
+
+  /**
+   * 合并工作流定义默认值与本次运行参数：run 有值且非空则用 run，否则用 def 的 default。
+   */
+  private mergeWorkflowArgs(
+    defArgs: NonNullable<WorkflowDef['args']>,
+    runArgs?: Record<string, unknown>
+  ): Record<string, unknown> {
+    const result: Record<string, unknown> = {}
+    for (const [key, def] of Object.entries(defArgs)) {
+      const runVal = runArgs?.[key]
+      const hasRunVal = runVal !== undefined && runVal !== ''
+      result[key] = hasRunVal ? runVal : def.default !== undefined ? def.default : undefined
+    }
+    return result
+  }
 
   /**
    * 启动工作流并立即返回 runId（fire-and-forget）。
@@ -321,6 +374,15 @@ export class WorkflowRunner {
         }
         store.updateRunStep(runId, i, results)
 
+        const onSessionCreated =
+          step.type === 'agent'
+            ? (sessionId: string) => {
+                results[step.id] = { ...results[step.id], sessionId }
+                store.updateRunStep(runId, i, results)
+                this.flushRunMeta(scopeRoot, def.name, runId, scope, results, args, 'running')
+              }
+            : undefined
+
         try {
           const result = await this.executeStepWithRetry(
             scope,
@@ -333,7 +395,8 @@ export class WorkflowRunner {
             runId,
             abortController.signal,
             persistentWorkspaceDir,
-            runWorkspaceDir
+            runWorkspaceDir,
+            onSessionCreated
           )
 
           if (abortController.signal.aborted) {
@@ -372,12 +435,19 @@ export class WorkflowRunner {
             ? this.extractBgSessionData(scope, result.sessionId)
             : undefined
 
+          const maxChars = def.config?.maxStepOutputChars
+          const rawOutput = result.output ?? ''
+          const output =
+            typeof maxChars === 'number' && rawOutput.length > maxChars
+              ? rawOutput.slice(0, maxChars) + '\n... (truncated)'
+              : rawOutput
+
           const stepFailed = !!result.error
           results[step.id] = {
             stepId: step.id,
             type: step.type,
             status: stepFailed ? 'failed' : 'completed',
-            output: result.output,
+            output,
             structuredData: bgData?.structuredData,
             artifacts: bgData?.artifacts,
             sessionId: result.sessionId,
@@ -385,7 +455,8 @@ export class WorkflowRunner {
             startedAt: results[step.id].startedAt,
             finishedAt: Date.now(),
             durationMs: Date.now() - (results[step.id].startedAt ?? Date.now()),
-            error: result.error
+            error: result.error,
+            ...(result.errorDetail ? { errorDetail: result.errorDetail } : {})
           }
           store.updateRunStep(runId, i, results)
           this.flushRunMeta(
@@ -412,7 +483,7 @@ export class WorkflowRunner {
                 `Step "${step.id}" failed but errorStrategy=continue, skipping: ${result.error}`
               )
             } else {
-              store.updateRunStatus(runId, 'failed', result.error)
+              store.updateRunStatus(runId, 'failed', result.error, result.errorDetail)
               this.flushRunMeta(scopeRoot, def.name, runId, scope, results, args, 'failed')
               void emit('workflow:failed', {
                 scope,
@@ -434,11 +505,13 @@ export class WorkflowRunner {
           }
 
           const errMsg = err instanceof Error ? err.message : String(err)
+          const errorDetail = err instanceof Error ? err.stack : undefined
           results[step.id] = {
             stepId: step.id,
             type: step.type,
             status: 'failed',
             error: errMsg,
+            errorDetail,
             startedAt: results[step.id].startedAt,
             finishedAt: Date.now(),
             durationMs: Date.now() - (results[step.id].startedAt ?? Date.now())
@@ -451,7 +524,7 @@ export class WorkflowRunner {
             continue
           }
 
-          store.updateRunStatus(runId, 'failed', errMsg)
+          store.updateRunStatus(runId, 'failed', errMsg, errorDetail)
           this.flushRunMeta(scopeRoot, def.name, runId, scope, results, args, 'failed')
           void emit('workflow:failed', {
             scope,
@@ -481,7 +554,9 @@ export class WorkflowRunner {
     status: 'completed' | 'cancelled'
   ): WorkflowRunResult {
     const lastStep = def.steps[def.steps.length - 1]
-    const finalOutput = lastStep ? results[lastStep.id]?.output : undefined
+    const lastResult = lastStep ? results[lastStep.id] : undefined
+    const finalOutput = lastResult?.output
+    const finalStructuredOutput = lastResult?.structuredData
 
     store.updateRunStatus(runId, status)
     this.flushRunMeta(scopeRoot, def.name, runId, scope, results, args, status)
@@ -496,7 +571,7 @@ export class WorkflowRunner {
       this.emitNotification(scope, def, 'complete')
     }
 
-    return { runId, status, finalOutput }
+    return { runId, status, finalOutput, finalStructuredOutput }
   }
 
   /** 带重试的步骤执行 */
@@ -511,7 +586,8 @@ export class WorkflowRunner {
     runId?: string,
     signal?: AbortSignal,
     persistentWorkspaceDir?: string,
-    runWorkspaceDir?: string
+    runWorkspaceDir?: string,
+    onSessionCreated?: (sessionId: string) => void
   ): Promise<StepExecResult> {
     const rc = step.retryConfig
     const maxRetries = rc?.maxRetries ?? 0
@@ -529,7 +605,8 @@ export class WorkflowRunner {
       runId,
       signal,
       persistentWorkspaceDir,
-      runWorkspaceDir
+      runWorkspaceDir,
+      onSessionCreated
     )
 
     for (let attempt = 0; attempt < maxRetries && lastResult.status === 'error'; attempt++) {
@@ -555,7 +632,8 @@ export class WorkflowRunner {
         runId,
         signal,
         persistentWorkspaceDir,
-        runWorkspaceDir
+        runWorkspaceDir,
+        onSessionCreated
       )
     }
 
@@ -590,7 +668,8 @@ export class WorkflowRunner {
     runId?: string,
     signal?: AbortSignal,
     persistentWorkspaceDir?: string,
-    runWorkspaceDir?: string
+    runWorkspaceDir?: string,
+    onSessionCreated?: (sessionId: string) => void
   ): Promise<StepExecResult> {
     switch (step.type) {
       case 'agent':
@@ -605,7 +684,8 @@ export class WorkflowRunner {
           runId,
           signal,
           persistentWorkspaceDir,
-          runWorkspaceDir
+          runWorkspaceDir,
+          onSessionCreated
         )
       case 'approve':
         return { status: 'paused' }
@@ -627,70 +707,136 @@ export class WorkflowRunner {
     runId?: string,
     signal?: AbortSignal,
     persistentWorkspaceDir?: string,
-    runWorkspaceDir?: string
+    runWorkspaceDir?: string,
+    onSessionCreated?: (sessionId: string) => void
   ): Promise<StepExecResult> {
     // 解析输入：显式 input > 隐式 $prev.output（非首步自动管道传递）
     const { inputContext, inputLabel } = this.resolveStepInput(step, stepIndex, results, args)
 
-    const prompt = step.prompt ?? ''
+    // 提示词中的 $args.xxx / $stepId.output / $prev.output 引用在此解析后传入 executor
+    const rawPrompt = step.prompt ?? ''
+    const prompt = this.resolveReference(rawPrompt, results, args)
     const fullPrompt = inputContext ? `${prompt}\n\n--- ${inputLabel} ---\n${inputContext}` : prompt
 
     const effectiveRunDir = runWorkspaceDir ?? workspaceDir
     const isLastStep = stepIndex === def.steps.length - 1
-    const systemLines = [
-      `你正在执行工作流 "${def.name}" 的步骤 ${stepIndex + 1}/${def.steps.length}（步骤 ID: ${
-        step.id
-      }）。`,
-      step.description ? `步骤描述: ${step.description}` : '',
-      def.description ? `工作流描述: ${def.description}` : '',
-      persistentWorkspaceDir
-        ? `[持久工作空间] ${persistentWorkspaceDir} — 存放跨运行共享数据（经验、参考资料等长期数据）`
-        : '',
-      effectiveRunDir
-        ? `[本次运行工作空间] ${effectiveRunDir} — 本次 run 独占，步骤间共享临时数据`
-        : '',
-      persistentWorkspaceDir || effectiveRunDir
-        ? '使用 prizm_file 工具可读写以上工作空间中的文件。'
-        : '',
-      isLastStep
-        ? '请完成任务后调用 prizm_set_result 提交最终结果。'
-        : '请完成任务后调用 prizm_set_result 提交结果，你的输出将自动传递给下一步骤作为输入。'
-    ]
-      .filter(Boolean)
-      .join('\n')
-
-    const sc = step.sessionConfig
     const isFirstStep = stepIndex === 0
 
-    // 第一步注入工作流 args 作为 inputParams
-    const inputParams =
-      isFirstStep && def.args && args
+    // 工作区说明与 run.args 单源：由 workflow_context 片段提供，此处不再重复
+    const stepRole =
+      `你正在执行工作流 "${def.name}" 的步骤 ${stepIndex + 1}/${def.steps.length}（步骤 ID: ${
+        step.id
+      }）。` + '本步骤可能有前序步骤的输出作为输入，你的输出会传递给后续步骤。'
+    const stepDesc = step.description ? `步骤描述: ${step.description}` : ''
+    const wfDesc = def.description ? `工作流描述: ${def.description}` : ''
+    const docConstraint =
+      '除非步骤或用户明确要求，禁止编写文档；不得主动创建使用说明、报告、参考卡片、技术文档等。'
+    const submitRule =
+      (isLastStep && def.outputs && Object.keys(def.outputs).length > 0
+        ? '本步为流水线最后一步，必须按工作流定义的 outputs 格式调用 prizm_set_result，提交后将进行 schema 校验。'
+        : isLastStep
+        ? '请完成任务后调用 prizm_set_result 提交最终结果。'
+        : '你的输出将自动传递给下一步骤作为输入。') +
+      ' 禁止先在回复正文中输出完整结构化结果再调用工具；直接调用 prizm_set_result，在工具参数中填入结果。调用后对话即结束。'
+
+    const replyTemplate = [
+      '<reply_template>',
+      '回复方式：',
+      '1. 正文：至多一两句话说明完成情况（可选）；不要在此处贴出完整 JSON、表格或长列表。',
+      '2. 动作：随即调用 prizm_set_result，在工具参数中填入完整结果。调用后无需再回复。',
+      '示例（单字段 output）：',
+      '  正文：（可选）已根据输入完成汇总。',
+      '  工具调用：prizm_set_result({ "output": "此处为完整结果内容" })',
+      '示例（多字段时）：',
+      '  正文：（可选）已生成报告与列表。',
+      '  工具调用：prizm_set_result({ "summary": "...", "list": "..." })',
+      '</reply_template>'
+    ].join('\n')
+
+    const systemLines = [stepRole, stepDesc, wfDesc, docConstraint, submitRule, replyTemplate]
+      .filter(Boolean)
+      .join('\n\n')
+
+    // 末步且工作流定义了 outputs 时，在 preamble 中列出提交字段（完整、精确）
+    let systemInstructions = systemLines
+    if (isLastStep && def.outputs && Object.keys(def.outputs).length > 0) {
+      const fieldsLine =
+        '\n提交字段: ' +
+        Object.entries(def.outputs)
+          .map(([k, v]) => `${k}(${(v as { type?: string }).type ?? 'string'})`)
+          .join(', ')
+      systemInstructions = systemLines + fieldsLine
+    }
+
+    // 前序步骤 structuredData 通过 context 单源注入 preamble（正交）
+    let context: Record<string, unknown> | undefined
+    if (stepIndex > 0) {
+      const prevStep = def.steps[stepIndex - 1]
+      const prevResult = prevStep ? results[prevStep.id] : undefined
+      const prevStructured = prevResult?.structuredData
+      if (prevStructured) {
+        try {
+          const parsed = JSON.parse(prevStructured) as Record<string, unknown>
+          context = { previousStepStructured: parsed }
+        } catch {
+          // 非 JSON 或无效，不注入 context
+        }
+      }
+    }
+
+    const sc = step.sessionConfig
+
+    // 第一步注入工作流 args 作为 inputParams：有 def.args 即建（即使用户未传 args，用默认值）；无 def.args 时仅当有 args 时建
+    const shouldBuildInputParams =
+      isFirstStep && (def.args != null || (args != null && Object.keys(args).length > 0))
+    const inputParams = shouldBuildInputParams
+      ? def.args
         ? {
             schema: Object.fromEntries(
-              Object.entries(def.args).map(([k, v]) => [
-                k,
-                { type: 'string', description: v.description }
-              ])
+              Object.entries(def.args).map(([k, v]) => {
+                const arg = v as { type?: string; description?: string; default?: unknown }
+                return [
+                  k,
+                  {
+                    type: arg.type ?? 'string',
+                    description: arg.description ?? '',
+                    optional: arg.default !== undefined
+                  }
+                ]
+              })
             ),
-            values: args
+            values: this.mergeWorkflowArgs(def.args, args)
           }
-        : undefined
+        : {
+            schema: Object.fromEntries(
+              Object.keys(args!).map((k) => [k, { type: 'string' as const, description: '' }])
+            ),
+            values: args!
+          }
+      : undefined
 
-    // 最后一步注入工作流 outputs 作为 outputParams
+    // 以 schema 驱动：每步必有 outputParams。末步用 def.outputs（流水线输出），否则用默认单字段 output
     const outputParams =
-      isLastStep && def.outputs
-        ? {
-            schema: def.outputs,
-            required: Object.keys(def.outputs)
-          }
+      isLastStep && def.outputs && Object.keys(def.outputs).length > 0
+        ? { schema: def.outputs, required: Object.keys(def.outputs) }
+        : { schema: DEFAULT_STEP_OUTPUT_SCHEMA, required: ['output'] }
+
+    // 末步且工作流定义了 outputs 时，传入 outputSchema 做校验，与 outputParams 对齐
+    const outputSchema =
+      isLastStep && def.outputs && Object.keys(def.outputs).length > 0
+        ? buildOutputSchemaForValidation(def.outputs)
         : undefined
 
     const output = await this.executor.execute(
       scope,
       {
         prompt: fullPrompt,
-        systemInstructions: systemLines,
-        expectedOutputFormat: sc?.expectedOutputFormat ?? 'JSON 或纯文本',
+        systemInstructions,
+        expectedOutputFormat:
+          sc?.expectedOutputFormat ??
+          (outputSchema
+            ? '按工作流定义的 outputs 格式提交，必须符合 schema'
+            : '按 output 字段提交结果（必填）'),
         model: sc?.model ?? step.model,
         timeoutMs: step.timeoutMs,
         label: `workflow:${step.id}`,
@@ -701,7 +847,13 @@ export class WorkflowRunner {
         sourceId: runId,
         sessionConfig: sc,
         inputParams,
-        outputParams
+        outputParams,
+        outputSchema,
+        maxSchemaRetries: outputSchema ? sc?.maxSchemaRetries ?? 2 : undefined,
+        onSessionCreated,
+        workflowStepIds: def.steps.map((s) => s.id),
+        workflowNextStepId: def.steps[stepIndex + 1]?.id ?? null,
+        context
       },
       signal
     )
@@ -714,7 +866,8 @@ export class WorkflowRunner {
       return {
         status: 'error',
         error: `Agent step ${output.status}: ${output.output}`,
-        sessionId: output.sessionId
+        sessionId: output.sessionId,
+        ...(output.errorDetail ? { errorDetail: output.errorDetail } : {})
       }
     }
 
@@ -804,7 +957,8 @@ export class WorkflowRunner {
     results: Record<string, WorkflowStepResult>,
     args?: Record<string, unknown>
   ): string {
-    return ref.replace(/\$([a-zA-Z_][a-zA-Z0-9_]*)\.(\w+(?:\.\w+)*)/g, (_m, id, propPath) => {
+    REF_PATTERN.lastIndex = 0
+    return ref.replace(REF_PATTERN, (_m, id, propPath) => {
       if (id === 'args' && args) {
         const keys = propPath.split('.')
         let current: unknown = args
@@ -862,7 +1016,11 @@ export class WorkflowRunner {
           }
         }
         return typeof current === 'string' ? current : JSON.stringify(current)
-      } catch {
+      } catch (err) {
+        log.warn('Workflow step structuredData parse failed, $stepId.data.xxx will be empty', {
+          stepId: result.stepId,
+          propPath
+        })
         return ''
       }
     }
@@ -878,7 +1036,8 @@ export class WorkflowRunner {
     condition: string,
     results: Record<string, WorkflowStepResult>
   ): boolean {
-    const resolved = condition.replace(/\$([a-zA-Z_][a-zA-Z0-9_]*)\.(\w+)/g, (_m, id, prop) => {
+    CONDITION_REF_PATTERN.lastIndex = 0
+    const resolved = condition.replace(CONDITION_REF_PATTERN, (_m, id, prop) => {
       const result = results[id]
       if (!result) return 'false'
       if (prop === 'approved') return String(result.approved ?? false)
@@ -937,6 +1096,7 @@ export class WorkflowRunner {
       args,
       startedAt: run?.createdAt,
       finishedAt: status === 'completed' || status === 'failed' ? Date.now() : undefined,
+      errorDetail: run?.errorDetail,
       stepResults
     })
   }
@@ -1002,6 +1162,7 @@ interface StepExecResult {
   sessionId?: string
   approved?: boolean
   error?: string
+  errorDetail?: string
 }
 
 // ─── 单例实例（server.ts 注入 executor 后使用） ───

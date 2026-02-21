@@ -5,7 +5,8 @@
  * 使用 LobeUI + antd-style createStyles 统一风格
  */
 import { useEffect, useCallback, useMemo, useState } from 'react'
-import { Flexbox, Markdown } from '@lobehub/ui'
+import { Flexbox } from '@lobehub/ui'
+import { PrizmMarkdown as Markdown } from './agent/PrizmMarkdown'
 import { Tag } from 'antd'
 import { Segmented } from './ui/Segmented'
 import { createStyles } from 'antd-style'

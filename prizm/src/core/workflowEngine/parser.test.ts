@@ -99,6 +99,56 @@ steps:
     expect(def.args?.topic?.description).toBe('主题')
   })
 
+  it('应该解析 args 中的 type 字段', () => {
+    const yaml = `
+name: args-type
+args:
+  query:
+    description: 用户自然语言描述
+    type: string
+steps:
+  - id: s1
+    type: agent
+    prompt: "处理"
+`
+    const def = parseWorkflowDef(yaml)
+    expect(def.args?.query?.description).toBe('用户自然语言描述')
+    expect(def.args?.query?.type).toBe('string')
+  })
+
+  it('有 default 即表示可选，不填时用默认值', () => {
+    const yaml = `
+name: args-default-optional
+args:
+  topic:
+    default: "AI"
+    description: 主题
+  note:
+    default: ""
+    description: 备注（默认为空即可选）
+steps:
+  - id: s1
+    type: agent
+    prompt: "处理"
+`
+    const def = parseWorkflowDef(yaml)
+    expect(def.args?.topic?.default).toBe('AI')
+    expect(def.args?.note?.default).toBe('')
+  })
+
+  it('args 中非对象值应抛出错误', () => {
+    const yaml = `
+name: bad-args
+args:
+  topic: "not_an_object"
+steps:
+  - id: s1
+    type: agent
+    prompt: go
+`
+    expect(() => parseWorkflowDef(yaml)).toThrow()
+  })
+
   it('应该解析带 triggers 的定义', () => {
     const yaml = `
 name: triggered
@@ -447,6 +497,29 @@ triggers:
     expect(restored.triggers).toHaveLength(1)
     expect(restored.args?.key?.default).toBe('val')
   })
+
+  it('serializeWorkflowDef 应保留 args 的 default/description/type', () => {
+    const def = parseWorkflowDef(`
+name: args-roundtrip
+args:
+  a:
+    default: "x"
+    description: 可选
+  b:
+    description: "必填（无 default）"
+    type: string
+steps:
+  - id: s1
+    type: agent
+    prompt: "go"
+`)
+    const yaml = serializeWorkflowDef(def)
+    const restored = parseWorkflowDef(yaml)
+    expect(restored.args?.a?.default).toBe('x')
+    expect(restored.args?.a?.description).toBe('可选')
+    expect(restored.args?.b?.description).toBe('必填（无 default）')
+    expect(restored.args?.b?.type).toBe('string')
+  })
 })
 
 // ─── 边缘情况 ───
@@ -624,6 +697,33 @@ config:
     expect(def.config!.notifyOnFail).toBe(true)
     expect(def.config!.tags).toEqual(['daily', 'report'])
     expect(def.config!.version).toBe('1.0')
+  })
+
+  it('应该解析 config.maxStepOutputChars', () => {
+    const yaml = `
+name: output-limit
+steps:
+  - id: s1
+    type: agent
+    prompt: go
+config:
+  maxStepOutputChars: 10000
+`
+    const def = parseWorkflowDef(yaml)
+    expect(def.config!.maxStepOutputChars).toBe(10000)
+  })
+
+  it('应忽略非正数 maxStepOutputChars', () => {
+    const def = parseWorkflowDef(`
+name: no-limit
+steps:
+  - id: s1
+    type: agent
+    prompt: go
+config:
+  maxStepOutputChars: 0
+`)
+    expect(def.config!.maxStepOutputChars).toBeUndefined()
   })
 
   it('无 config 时 def.config 为 undefined', () => {

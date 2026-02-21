@@ -22,6 +22,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+import { getWorkflowRunMetaDir } from '../PathProviderCore'
 import { writeRunMeta, readRunMeta, listRecentRuns } from './runMetaWriter'
 import type { RunMetaData } from './runMetaWriter'
 import type { WorkflowStepResult } from '@prizm/shared'
@@ -222,12 +223,13 @@ describe('writeRunMeta', () => {
 
   it('特殊字符 workflowName 应被清洗', () => {
     const scopeRoot = makeScopeRoot()
+    const workflowName = 'my workflow/test<>name'
     writeRunMeta(scopeRoot, makeRunMeta({
       runId: 'run-special',
-      workflowName: 'my workflow/test<>name'
+      workflowName
     }))
 
-    const metaDir = path.join(scopeRoot, '.prizm', 'workflows', 'my_workflow_test__name', '.meta', 'runs')
+    const metaDir = getWorkflowRunMetaDir(scopeRoot, workflowName)
     expect(fs.existsSync(metaDir)).toBe(true)
   })
 })

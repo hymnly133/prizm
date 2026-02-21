@@ -110,7 +110,8 @@ describe('workflowDefStore — getDefById', () => {
     const loaded = defStore.getDefById(def.id)
     expect(loaded).not.toBeNull()
     expect(loaded!.id).toBe(def.id)
-    expect(loaded!.name).toBe('wf-by-id')
+    // name 来自 YAML 提取时以 YAML 内 name 为准，SIMPLE_YAML 中为 simple
+    expect(loaded!.name).toBe('simple')
   })
 
   it('不存在的 ID 应返回 null', () => {
@@ -176,11 +177,15 @@ describe('workflowDefStore — listDefs', () => {
 })
 
 describe('workflowDefStore — deleteDef', () => {
-  it('应删除定义（workflow.yaml + def.json）', () => {
+  it('应删除定义并移除整个工作流目录（含 .meta/runs、versions、workspace 等）', () => {
     const def = defStore.registerDef('to-delete', 'default', SIMPLE_YAML)
+    const scopeRoot = path.join(TEST_ROOT, 'scopes', 'default')
+    const workflowDir = path.join(scopeRoot, '.prizm', 'workflows', 'to-delete')
+    expect(fs.existsSync(workflowDir)).toBe(true)
     expect(defStore.deleteDef(def.id)).toBe(true)
     expect(defStore.getDefById(def.id)).toBeNull()
     expect(defStore.getDefByName('to-delete', 'default')).toBeNull()
+    expect(fs.existsSync(workflowDir)).toBe(false)
   })
 
   it('删除不存在的 ID 应返回 false', () => {
@@ -206,5 +211,87 @@ describe('workflowDefStore — description / triggers 自动提取', () => {
     const def = defStore.registerDef('no-desc', 'default', SIMPLE_YAML)
     const loaded = defStore.getDefByName('no-desc', 'default')
     expect(loaded!.description).toBeUndefined()
+  })
+})
+
+describe('workflowDefStore — workflowManagementSessionId（工作流管理会话双向引用）', () => {
+  it('updateDefMeta 写入 workflowManagementSessionId 后 getDefById 应返回该字段', () => {
+    const def = defStore.registerDef('wf-with-session', 'default', SIMPLE_YAML)
+    expect(def.workflowManagementSessionId).toBeUndefined()
+
+    defStore.updateDefMeta('wf-with-session', 'default', { workflowManagementSessionId: 'mgmt-sess-001' })
+    const loaded = defStore.getDefById(def.id)
+    expect(loaded).not.toBeNull()
+    expect(loaded!.workflowManagementSessionId).toBe('mgmt-sess-001')
+  })
+
+  it('updateDefMeta 写入 workflowManagementSessionId 后 getDefByName 应返回该字段', () => {
+    defStore.registerDef('wf-by-name', 'default', SIMPLE_YAML)
+    defStore.updateDefMeta('wf-by-name', 'default', { workflowManagementSessionId: 'sess-42' })
+    const loaded = defStore.getDefByName('wf-by-name', 'default')
+    expect(loaded).not.toBeNull()
+    expect(loaded!.workflowManagementSessionId).toBe('sess-42')
+  })
+
+  it('updateDefMeta 写入 workflowManagementSessionId 后 listDefs 应包含该字段', () => {
+    const def = defStore.registerDef('wf-list-session', 'default', SIMPLE_YAML)
+    defStore.updateDefMeta('wf-list-session', 'default', { workflowManagementSessionId: 'list-sess-1' })
+    const list = defStore.listDefs('default')
+    const found = list.find((d) => d.id === def.id)
+    expect(found).toBeDefined()
+    expect(found!.workflowManagementSessionId).toBe('list-sess-1')
+  })
+
+  it('未写入 workflowManagementSessionId 时 getDefById 返回的 record 该字段为 undefined', () => {
+    const def = defStore.registerDef('wf-no-session', 'default', SIMPLE_YAML)
+    const loaded = defStore.getDefById(def.id)
+    expect(loaded).not.toBeNull()
+    expect(loaded!.workflowManagementSessionId).toBeUndefined()
+  })
+
+  it('updateDefMeta 仅合并 workflowManagementSessionId，不覆盖 id/createdAt/updatedAt', () => {
+    const def = defStore.registerDef('wf-merge-meta', 'default', SIMPLE_YAML)
+    const before = defStore.getDefMeta('wf-merge-meta', 'default')
+    defStore.updateDefMeta('wf-merge-meta', 'default', { workflowManagementSessionId: 'merge-sess' })
+    const after = defStore.getDefMeta('wf-merge-meta', 'default')
+    expect(after!.id).toBe(before!.id)
+    expect(after!.createdAt).toBe(before!.createdAt)
+    expect(after!.workflowManagementSessionId).toBe('merge-sess')
+    expect(after!.updatedAt).toBeGreaterThanOrEqual(before!.updatedAt)
+  })
+
+  it('getDefMetaByDefId / updateDefMetaByDefId 按 id 读写，不依赖 name 与目录名一致', () => {
+    const def = defStore.registerDef('wf-by-id', 'default', SIMPLE_YAML)
+    expect(defStore.getDefMetaByDefId(def.id)).not.toBeNull()
+    expect(defStore.getDefMetaByDefId(def.id)!.workflowManagementSessionId).toBeUndefined()
+    const ok = defStore.updateDefMetaByDefId(def.id, { workflowManagementSessionId: 'sess-by-id' })
+    expect(ok).toBe(true)
+    const meta = defStore.getDefMetaByDefId(def.id)
+    expect(meta!.workflowManagementSessionId).toBe('sess-by-id')
+    const loaded = defStore.getDefById(def.id)
+    expect(loaded!.workflowManagementSessionId).toBe('sess-by-id')
+  })
+
+  it('registerDef upsert 时保留 workflowManagementSessionId 与 descriptionDocumentId', () => {
+    const def = defStore.registerDef('wf-preserve-meta', 'default', SIMPLE_YAML)
+    defStore.updateDefMetaByDefId(def.id, {
+      workflowManagementSessionId: 'preserved-sess',
+      descriptionDocumentId: 'preserved-doc'
+    })
+    defStore.registerDef('wf-preserve-meta', 'default', SAMPLE_YAML)
+    const loaded = defStore.getDefById(def.id)
+    expect(loaded).not.toBeNull()
+    expect(loaded!.workflowManagementSessionId).toBe('preserved-sess')
+    expect(loaded!.descriptionDocumentId).toBe('preserved-doc')
+  })
+
+  it('clearDefMetaSessionRef 清除指向某 sessionId 的 def 引用', () => {
+    const def = defStore.registerDef('wf-clear-ref', 'default', SIMPLE_YAML)
+    defStore.updateDefMetaByDefId(def.id, { workflowManagementSessionId: 'dead-sess' })
+    expect(defStore.getDefMetaByDefId(def.id)!.workflowManagementSessionId).toBe('dead-sess')
+    const cleared = defStore.clearDefMetaSessionRef('dead-sess')
+    expect(cleared).toBe(1)
+    expect(defStore.getDefMetaByDefId(def.id)!.workflowManagementSessionId).toBeUndefined()
+    expect(defStore.clearDefMetaSessionRef('nonexistent')).toBe(0)
   })
 })

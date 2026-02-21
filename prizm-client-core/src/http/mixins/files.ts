@@ -10,6 +10,8 @@ declare module '../client' {
       sessionWorkspace?: string
     }): Promise<FileEntry[]>
     fileRead(filePath: string, scope?: string): Promise<FileReadResult>
+    /** 流式获取文件内容为 Blob（用于图片等二进制查看，带认证） */
+    fileServeBlob(filePath: string, scope?: string): Promise<Blob>
     fileWrite(filePath: string, content: string, scope?: string): Promise<void>
     fileMkdir(dirPath: string, scope?: string): Promise<void>
     fileMove(from: string, to: string, scope?: string): Promise<void>
@@ -61,6 +63,21 @@ PrizmClient.prototype.fileRead = async function (
   }
   const data = (await response.json()) as { file: FileReadResult }
   return data.file
+}
+
+PrizmClient.prototype.fileServeBlob = async function (
+  this: PrizmClient,
+  filePath: string,
+  scope?: string
+) {
+  const s = scope ?? this.defaultScope
+  const url = this.buildUrl('/files/serve', { path: filePath, scope: s })
+  const response = await fetch(url, { method: 'GET', headers: this.buildHeaders() })
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    throw new Error(`HTTP ${response.status} ${response.statusText}: ${text || 'Request failed'}`)
+  }
+  return response.blob()
 }
 
 PrizmClient.prototype.fileWrite = async function (

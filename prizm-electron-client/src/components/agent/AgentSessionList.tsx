@@ -3,7 +3,7 @@
  *
  * 被 AgentPage 和 CollaborationPage 的 AgentPane 共同使用。
  * 支持可选的"总览"标签页和可选的侧边栏 header。
- * 自动过滤 Task/Workflow 内部 session，仅显示交互式和直接触发的 BG session。
+ * 自动过滤：隐藏工具会话（Tool LLM、工作流管理等）；仅显示交互式和直接触发的 BG session。
  */
 import { ActionIcon, Empty } from '@lobehub/ui'
 import { Modal } from 'antd'
@@ -12,6 +12,7 @@ import { LayoutDashboard, Plus, Trash2, Zap } from 'lucide-react'
 import { memo, useMemo, useCallback } from 'react'
 import type { EnrichedSession } from '@prizm/client-core'
 import type { BgStatus } from '@prizm/shared'
+import { isChatListSession } from '@prizm/shared'
 import { useAgentSessionStore } from '../../store/agentSessionStore'
 
 const BG_STATUS_TAG: Record<string, { label: string; color: string; bgColor: string }> = {
@@ -79,14 +80,7 @@ export const AgentSessionList = memo(function AgentSessionList({
 }: AgentSessionListProps) {
   const streamingStates = useAgentSessionStore((s) => s.streamingStates)
 
-  const visibleSessions = useMemo(
-    () => sessions.filter((s) => {
-      if (s.kind !== 'background') return true
-      const src = s.bgMeta?.source
-      return !src || src === 'direct'
-    }),
-    [sessions]
-  )
+  const visibleSessions = useMemo(() => sessions.filter((s) => isChatListSession(s)), [sessions])
 
   const confirmDeleteSession = useCallback(
     (id: string, label: string) => {
@@ -172,7 +166,13 @@ export const AgentSessionList = memo(function AgentSessionList({
           onClick: () => onLoadSession(s.id)
         }
       }),
-    [visibleSessions, pendingInteractSessionIds, streamingStates, confirmDeleteSession, onLoadSession]
+    [
+      visibleSessions,
+      pendingInteractSessionIds,
+      streamingStates,
+      confirmDeleteSession,
+      onLoadSession
+    ]
   )
 
   return (

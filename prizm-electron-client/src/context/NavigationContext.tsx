@@ -56,6 +56,16 @@ export interface NavigationContextValue {
   /** 导航到指定会话的指定消息（记忆溯源用） */
   navigateToAgentMessage: (sessionId: string, messageId: string) => void
 
+  /** 导航到工作流页并创建待创建工作流会话（可带 initialPrompt） */
+  navigateToWorkflowCreate: (payload: { initialPrompt?: string }) => void
+  pendingWorkflowCreate: { initialPrompt?: string } | null
+  consumePendingWorkflowCreate: () => { initialPrompt?: string } | null
+
+  /** 导航到工作流页并选中指定工作流定义（用于会话 header「查看工作流」） */
+  navigateToWorkflowDef: (defId: string, name?: string) => void
+  pendingWorkflowDef: { defId: string; name?: string } | null
+  consumePendingWorkflowDef: () => { defId: string; name?: string } | null
+
   /* ChatWithFile backward compat */
   /** @deprecated 请使用 chatWith({ files: [{ kind, id }] }) */
   startChatWithFile: (payload: PendingChatFile) => void
@@ -80,6 +90,12 @@ const defaultValue: NavigationContextValue = {
   pendingPayload: null,
   consumePendingPayload: () => {},
   navigateToAgentMessage: () => {},
+  navigateToWorkflowCreate: () => {},
+  pendingWorkflowCreate: null,
+  consumePendingWorkflowCreate: () => null,
+  navigateToWorkflowDef: () => {},
+  pendingWorkflowDef: null,
+  consumePendingWorkflowDef: () => null,
   startChatWithFile: () => {},
   pendingChatFile: null,
   consumePendingChatFile: () => {},
@@ -94,13 +110,15 @@ export interface NavigationProviderProps {
   onNavigateToWork: () => void
   onNavigateToDocs: () => void
   onNavigateToAgent: () => void
+  onNavigateToWorkflow?: () => void
 }
 
 export function NavigationProvider({
   children,
   onNavigateToWork,
   onNavigateToDocs,
-  onNavigateToAgent
+  onNavigateToAgent,
+  onNavigateToWorkflow
 }: NavigationProviderProps) {
   /* ── Work ── */
   const [pendingWorkFile, setPendingWorkFile] = useState<{ kind: FileKind; id: string } | null>(
@@ -167,6 +185,46 @@ export function NavigationProvider({
     [chatWith]
   )
 
+  /* ── 工作流创建会话导航 ── */
+  const [pendingWorkflowCreate, setPendingWorkflowCreate] = useState<{
+    initialPrompt?: string
+  } | null>(null)
+  const pendingWorkflowCreateRef = useRef(pendingWorkflowCreate)
+  pendingWorkflowCreateRef.current = pendingWorkflowCreate
+
+  const navigateToWorkflowCreate = useCallback(
+    (payload: { initialPrompt?: string }) => {
+      setPendingWorkflowCreate(payload)
+      onNavigateToWorkflow?.()
+    },
+    [onNavigateToWorkflow]
+  )
+
+  const consumePendingWorkflowCreate = useCallback(() => {
+    const prev = pendingWorkflowCreateRef.current
+    setPendingWorkflowCreate(null)
+    return prev
+  }, [])
+
+  /* ── 工作流定义选中（会话 header「查看工作流」） ── */
+  const [pendingWorkflowDef, setPendingWorkflowDef] = useState<{
+    defId: string
+    name?: string
+  } | null>(null)
+  const pendingWorkflowDefRef = useRef(pendingWorkflowDef)
+  pendingWorkflowDefRef.current = pendingWorkflowDef
+
+  const navigateToWorkflowDef = useCallback((defId: string, name?: string) => {
+    setPendingWorkflowDef({ defId, name })
+    onNavigateToWorkflow?.()
+  }, [onNavigateToWorkflow])
+
+  const consumePendingWorkflowDef = useCallback(() => {
+    const prev = pendingWorkflowDefRef.current
+    setPendingWorkflowDef(null)
+    return prev ?? null
+  }, [])
+
   /* ── Chat backward compat ── */
   const startChatWithFile = useCallback(
     (payload: PendingChatFile) => {
@@ -219,6 +277,12 @@ export function NavigationProvider({
       pendingPayload,
       consumePendingPayload,
       navigateToAgentMessage,
+      navigateToWorkflowCreate,
+      pendingWorkflowCreate,
+      consumePendingWorkflowCreate,
+      navigateToWorkflowDef,
+      pendingWorkflowDef,
+      consumePendingWorkflowDef,
       startChatWithFile,
       pendingChatFile,
       consumePendingChatFile,
@@ -232,6 +296,12 @@ export function NavigationProvider({
       navigateToDocs,
       pendingDocId,
       consumePendingDoc,
+      navigateToWorkflowCreate,
+      pendingWorkflowCreate,
+      consumePendingWorkflowCreate,
+      navigateToWorkflowDef,
+      pendingWorkflowDef,
+      consumePendingWorkflowDef,
       chatWith,
       pendingPayload,
       consumePendingPayload,

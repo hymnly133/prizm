@@ -541,6 +541,32 @@ export function registerWSBridgeHandlers(): void {
     'wsBridge.workflowFailed'
   )
 
+  subscribe(
+    'workflow:def.registered',
+    (data) => {
+      if (!wsServer) return
+      wsServer.broadcast(
+        EVENT_TYPES_OBJ.WORKFLOW_DEF_REGISTERED as EventType,
+        { defId: data.defId, name: data.name, scope: data.scope },
+        data.scope
+      )
+    },
+    'wsBridge.workflowDefRegistered'
+  )
+
+  subscribe(
+    'workflow:def.deleted',
+    (data) => {
+      if (!wsServer) return
+      wsServer.broadcast(
+        EVENT_TYPES_OBJ.WORKFLOW_DEF_DELETED as EventType,
+        { defId: data.defId, name: data.name, scope: data.scope },
+        data.scope
+      )
+    },
+    'wsBridge.workflowDefDeleted'
+  )
+
   // ─── Task 事件 ───
 
   subscribe(

@@ -8,14 +8,15 @@ import {
   registerSlashCommand,
   parseSlashMessage,
   getSlashCommand,
+  clearNonBuiltinCommands,
   type SlashCommandRunOptions
 } from './slashCommandRegistry'
 import { loadAllCustomCommands, replaceTemplateVariables } from './customCommandLoader'
 import {
   loadAllSkillMetadata,
-  activateSkill,
-  deactivateSkill,
-  getActiveSkills
+  loadSkillFull,
+  listSkillResources,
+  getSkillsToInject
 } from './skillManager'
 import { createLogger } from '../logger'
 
@@ -110,6 +111,7 @@ function loadAndRegisterCustomCommands(): void {
         mode: cmd.mode,
         allowedTools: cmd.allowedTools,
         builtin: false,
+        category: 'custom',
         run: async (options) => {
           return replaceTemplateVariables(cmd.content, options.args)
         }
@@ -125,6 +127,7 @@ function loadAndRegisterCustomCommands(): void {
 
 /** 重新加载自定义命令（供外部调用，如命令变更后刷新） */
 export function reloadCustomCommands(): void {
+  clearNonBuiltinCommands()
   loadAndRegisterCustomCommands()
 }
 
@@ -138,101 +141,161 @@ export function registerBuiltinSlashCommands(): void {
     aliases: ['便签'],
     description: '列出当前工作区的便签',
     run: runNotes,
-    builtin: true
+    builtin: true,
+    category: 'data'
   })
   registerSlashCommand({
     name: 'todos',
     aliases: ['待办'],
     description: '列出待办项',
     run: runTodos,
-    builtin: true
+    builtin: true,
+    category: 'data'
   })
   registerSlashCommand({
     name: 'docs',
     aliases: ['文档'],
     description: '列出文档',
     run: runDocs,
-    builtin: true
+    builtin: true,
+    category: 'data'
   })
   registerSlashCommand({
     name: 'read',
     description: '读取指定项全文，如 /read doc:id 或 /read note:id',
     run: runRead,
-    builtin: true
+    builtin: true,
+    category: 'data'
   })
   registerSlashCommand({
     name: 'stats',
     description: '显示工作区数据统计',
     run: runStats,
-    builtin: true
+    builtin: true,
+    category: 'data'
   })
   registerSlashCommand({
     name: 'search',
     description: '全文搜索',
     run: runSearch,
-    builtin: true
+    builtin: true,
+    category: 'search'
   })
   registerSlashCommand({
     name: 'context',
     description: '显示当前会话的上下文提供状态',
     run: runContext,
-    builtin: true
+    builtin: true,
+    category: 'session'
   })
   registerSlashCommand({
     name: 'help',
     description: '显示可用命令列表',
     run: runHelp,
-    builtin: true
+    builtin: true,
+    category: 'session'
   })
 
   // /skill 命令：管理 skills
   registerSlashCommand({
     name: 'skill',
     aliases: ['技能'],
-    description: '管理 Skills: /skill list | /skill <name> | /skill deactivate <name>',
+    description:
+      '管理 Skills: /skill list | /skill <name> | /skill off <name> | /skill info <name> | /skill search <query>',
     builtin: true,
+    category: 'skill',
+    subCommands: [
+      { name: 'list', description: '列出所有可用 Skills' },
+      { name: 'active', description: '查看当前会话已激活的 Skills' },
+      { name: 'info', description: '查看 Skill 详情 (/skill info <name>)' },
+      { name: 'search', description: '搜索已安装的 Skills (/skill search <query>)' },
+      { name: 'off', description: '取消激活 Skill (/skill off <name>)' }
+    ],
+    argHints: () => loadAllSkillMetadata().map((s) => s.name),
     run: async (options) => {
       const [subCmd, ...rest] = options.args
       const scope = options.scope
       const sessionId = options.sessionId ?? ''
 
+      const allowedSkills = options.allowedSkills
+      const toInject = getSkillsToInject(scope, allowedSkills)
+      const allowedNames = new Set(toInject.map((x) => x.name))
+
       if (!subCmd || subCmd === 'list') {
         const allSkills = loadAllSkillMetadata()
-        const active = getActiveSkills(scope, sessionId)
-        const activeNames = new Set(active.map((a) => a.skillName))
         if (allSkills.length === 0) return '当前无可用 Skills。'
         return allSkills
           .map(
             (s) =>
-              `- ${s.name}${activeNames.has(s.name) ? ' ✓' : ''}: ${s.description.slice(0, 60)}`
+              `- ${s.name}${allowedNames.has(s.name) ? ' ✓' : ''}: ${s.description.slice(0, 60)}`
           )
           .join('\n')
       }
 
       if (subCmd === 'deactivate' || subCmd === 'off') {
-        const name = rest[0]
-        if (!name) return '用法: /skill deactivate <name>'
-        const result = deactivateSkill(scope, sessionId, name)
-        return result ? `已取消激活 Skill: ${name}` : `Skill "${name}" 未激活或不存在`
+        return '请使用输入框旁 Skills 面板调整「允许」列表。'
       }
 
       if (subCmd === 'active') {
-        const active = getActiveSkills(scope, sessionId)
-        if (active.length === 0) return '当前会话无激活的 Skills。'
-        return active
-          .map(
-            (a) =>
-              `- ${a.skillName} (${a.autoActivated ? '自动' : '手动'}, ${new Date(
-                a.activatedAt
-              ).toLocaleTimeString()})`
-          )
+        if (toInject.length === 0) return '当前会话允许的 Skills 为空（全关 = 不限制，全部生效）。'
+        return toInject.map((a) => `- ${a.name}`).join('\n')
+      }
+
+      if (subCmd === 'info') {
+        const name = rest[0]
+        if (!name) return '用法: /skill info <name>'
+        const skill = loadSkillFull(name)
+        if (!skill) return `Skill "${name}" 未找到。`
+        const resources = listSkillResources(name)
+        const lines: string[] = []
+        lines.push(`## ${skill.name}`)
+        lines.push(`**描述:** ${skill.description}`)
+        if (skill.license) lines.push(`**许可:** ${skill.license}`)
+        if (skill.source) lines.push(`**来源:** ${skill.source}`)
+        if (skill.metadata) {
+          lines.push(`**元数据:** ${JSON.stringify(skill.metadata)}`)
+        }
+        const resCount =
+          resources.scripts.length + resources.references.length + resources.assets.length
+        if (resCount > 0) {
+          lines.push(`**资源文件:** ${resCount} 个`)
+          if (resources.scripts.length)
+            lines.push(`  scripts: ${resources.scripts.join(', ')}`)
+          if (resources.references.length)
+            lines.push(`  references: ${resources.references.join(', ')}`)
+          if (resources.assets.length)
+            lines.push(`  assets: ${resources.assets.join(', ')}`)
+        }
+        const bodyPreview =
+          skill.body.length > 500 ? skill.body.slice(0, 500) + '…' : skill.body
+        if (bodyPreview) {
+          lines.push('')
+          lines.push('**指令内容:**')
+          lines.push(bodyPreview)
+        }
+        return lines.join('\n')
+      }
+
+      if (subCmd === 'search') {
+        const query = rest.join(' ').trim()
+        if (!query) return '用法: /skill search <关键词>'
+        const allSkills = loadAllSkillMetadata()
+        const q = query.toLowerCase()
+        const matched = allSkills.filter(
+          (s) =>
+            s.name.toLowerCase().includes(q) ||
+            s.description.toLowerCase().includes(q)
+        )
+        if (matched.length === 0) return `未找到匹配 "${query}" 的 Skills。`
+        return matched
+          .map((s) => `- ${s.name}: ${s.description.slice(0, 60)}`)
           .join('\n')
       }
 
-      // /skill <name> → 手动激活
-      const activation = activateSkill(scope, sessionId, subCmd)
-      if (!activation) return `Skill "${subCmd}" 未找到。使用 /skill list 查看可用 Skills。`
-      return `已激活 Skill: ${subCmd}`
+      // /skill <name> → 提示使用面板允许
+      const skill = loadAllSkillMetadata().find((s) => s.name.toLowerCase() === subCmd.toLowerCase())
+      if (!skill) return `Skill "${subCmd}" 未找到。使用 /skill list 查看可用 Skills。`
+      return `请使用输入框旁 Skills 面板将「${subCmd}」的允许打开，即可在本会话中生效。`
     }
   })
 
@@ -248,25 +311,38 @@ export interface SlashCommandResult {
   mode: 'prompt' | 'action'
   /** 原始命令名 */
   commandName: string
+  /** prompt 模式下限定 LLM 可使用的工具 */
+  allowedTools?: string[]
 }
 
 /**
- * 若消息为 slash 命令则执行并返回结果，否则返回 null
+ * 若消息为 slash 命令则执行并返回结果，否则返回 null。
+ * extra.allowedSkills 由 chatCore 传入，用于 /skill 等命令（仅用 allowedSkills 全链路去重）。
  */
 export async function tryRunSlashCommand(
   scope: string,
   sessionId: string | undefined,
-  message: string
+  message: string,
+  extra?: { allowedSkills?: string[] }
 ): Promise<SlashCommandResult | null> {
   registerBuiltinSlashCommands()
   const parsed = parseSlashMessage(message)
   if (!parsed) return null
   const cmd = getSlashCommand(parsed.name)
-  if (!cmd) return null
-  const result = await cmd.run({ scope, sessionId, args: parsed.args })
-  return {
-    text: result,
-    mode: cmd.mode ?? 'action',
-    commandName: cmd.name
+  if (cmd) {
+    const options = {
+      scope,
+      sessionId,
+      args: parsed.args,
+      allowedSkills: extra?.allowedSkills
+    }
+    const result = await cmd.run(options)
+    return {
+      text: result,
+      mode: cmd.mode ?? 'action',
+      commandName: cmd.name,
+      allowedTools: cmd.allowedTools
+    }
   }
+  return null
 }

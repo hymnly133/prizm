@@ -4,12 +4,21 @@
  * Layout: CollabNav (left) + Session Chat (center, always visible) + RightDrawerPanel (expandable right)
  *
  * Session is the primary citizen. Document / Task / Workflow live in an expandable
- * right-side panel with tabs and a draggable split divider.
+ * right-side panel with per-session tabs managed by collabTabStore.
  */
-import { GripVertical, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, FileText, Zap, GitBranch } from 'lucide-react'
+import {
+  GripVertical,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  FileText,
+  Zap,
+  GitBranch
+} from 'lucide-react'
 import { ActionIcon } from '@lobehub/ui'
 import { Drawer } from 'antd'
-import { motion } from 'motion/react'
+import { motion, AnimatePresence } from 'motion/react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useChatWithFile } from '../context/ChatWithFileContext'
 import { SelectionRefProvider, useSelectionRef } from '../context/SelectionRefContext'
@@ -27,13 +36,17 @@ import { useRegisterHeaderSlots } from '../context/HeaderSlotsContext'
 import { ChatInputProvider, useChatInputStoreApi, type ActionKeys } from '../features/ChatInput'
 import type { InputRef } from '../features/ChatInput/store/initialState'
 import { AgentDetailSidebar } from '../components/agent/AgentDetailSidebar'
+import { AgentOverviewPanel } from '../components/agent/AgentOverviewPanel'
 import { AgentChatZone } from '../components/agent/AgentChatZone'
+import { CodeViewerPanel } from '../components/agent/CodeViewerPanel'
 import { setSkipNextDraftRestore } from '../components/agent/chatMessageAdapter'
-import { useDocumentNavigation } from '../context/NavigationContext'
+import { panelCrossfade, panelCrossfadeTransition } from '../theme/motionPresets'
 import { useAgentSessionStore } from '../store/agentSessionStore'
 import { useScopeDataStore } from '../store/scopeDataStore'
 import { useWorkflowStore } from '../store/workflowStore'
+import { useCollabTabStore, EMPTY_TABS } from '../store/collabTabStore'
 import { usePrizmContext } from '../context/PrizmContext'
+import { isChatListSession } from '@prizm/shared'
 import { toast } from '@lobehub/ui'
 import '../components/agent/TerminalToolCards'
 import '../components/agent/TaskToolCards'
@@ -47,9 +60,9 @@ import '../components/agent/ScheduleCronToolCards'
 
 import { CollabNav } from '../components/collaboration/CollabNav'
 import { CollabHub } from '../components/collaboration/CollabHub'
-import { RightDrawerPanel } from '../components/collaboration/RightDrawerPanel'
+import { UnifiedRightPanel } from '../components/collaboration/UnifiedRightPanel'
 import { CollabInteractionContext, useCollabInteractionValue } from '../hooks/useCollabInteraction'
-import type { RightPanelTab } from '../components/collaboration/collabTypes'
+import { makeEntityTab, makeListTab } from '../components/collaboration/collabTabTypes'
 import '../styles/collab-hub.css'
 
 const LEFT_ACTIONS: ActionKeys[] = ['fileUpload', 'thinking', 'toolCompact', 'skills', 'clear']
@@ -124,31 +137,53 @@ function CollaborationPage() {
 
   const pendingInteractSessionIds = usePendingInteractSessionIds()
 
-  /* Layout state */
+  /* Layout state (split pct, right panel open/close) */
   const layout = useCollabLayout()
   const {
-    rightPanelOpen, rightPanelTab, rightPanelEntityId,
-    splitPct, splitContainerRef, handleSplitPointerDown,
-    openRightPanel, closeRightPanel, toggleRightPanel, switchRightTab
+    rightPanelOpen,
+    splitPct,
+    splitContainerRef,
+    handleSplitPointerDown,
+    openRightPanel,
+    closeRightPanel,
+    toggleRightPanel
   } = layout
+
+  const [overviewMode, setOverviewMode] = useState(() => !currentSession)
+  const overviewModeRef = useRef(overviewMode)
+  overviewModeRef.current = overviewMode
+
+  const [previewFile, setPreviewFile] = useState<{ kind: FileKind; id: string } | null>(null)
 
   const [leftCollapsed, setLeftCollapsed] = useState(false)
   const [rightDetailCollapsed, setRightDetailCollapsed] = useState(false)
-  const [collabDocId, setCollabDocId] = useState<string | null>(null)
-  const docDirtyRef = useRef(false)
   const [hubDrawerOpen, setHubDrawerOpen] = useState(false)
-  const { navigateToDocs } = useDocumentNavigation()
+
+  /* Tab store: ensure tabs are loaded when session switches */
+  const ensureTabsLoaded = useCollabTabStore((s) => s.ensureLoaded)
+  const openTabAction = useCollabTabStore((s) => s.openTab)
+  const tabsForSession = useCollabTabStore((s) =>
+    currentSession?.id ? s.tabsBySession[currentSession.id] ?? EMPTY_TABS : s.globalTabs
+  )
+
+  useEffect(() => {
+    ensureTabsLoaded(currentSession?.id ?? null)
+  }, [currentSession?.id, ensureTabsLoaded])
 
   /* Data sources */
   const allSessions = useAgentSessionStore((s) => s.sessions)
   const bgSessions = useMemo(
-    () => allSessions.filter((s) => {
-      if (s.kind !== 'background') return false
-      const src = s.bgMeta?.source
-      return !src || src === 'direct'
-    }).sort((a, b) => (b.startedAt ?? b.createdAt) - (a.startedAt ?? a.createdAt)),
+    () =>
+      allSessions
+        .filter((s) => {
+          if (s.kind !== 'background') return false
+          const src = s.bgMeta?.source
+          return !src || src === 'direct'
+        })
+        .sort((a, b) => (b.startedAt ?? b.createdAt) - (a.startedAt ?? a.createdAt)),
     [allSessions]
   )
+  const chatSessions = useMemo(() => sessions.filter((s) => isChatListSession(s)), [sessions])
   const documents = useScopeDataStore((s) => s.documents)
   const documentsLoading = useScopeDataStore((s) => s.documentsLoading)
   const refreshDocuments = useScopeDataStore((s) => s.refreshDocuments)
@@ -168,8 +203,8 @@ function CollaborationPage() {
   /* Agent chat actions */
   const {
     handleSend,
-    handleClear,
-    handleQuickPrompt,
+    handleClear: handleClearBase,
+    handleQuickPrompt: handleQuickPromptBase,
     handleMarkdownContentChange,
     sendButtonProps
   } = useAgentChatActions({
@@ -179,8 +214,22 @@ function CollaborationPage() {
     sendMessage,
     stopGeneration,
     setCurrentSession,
-    shouldCreateNewSession: () => !currentSession
+    shouldCreateNewSession: () => overviewModeRef.current,
+    onBeforeCreateSession: () => setOverviewMode(false)
   })
+
+  const handleClear = useCallback(() => {
+    setOverviewMode(false)
+    handleClearBase()
+  }, [handleClearBase])
+
+  const handleQuickPrompt = useCallback(
+    (text: string) => {
+      setOverviewMode(false)
+      handleQuickPromptBase(text)
+    },
+    [handleQuickPromptBase]
+  )
 
   const aliveSessionIds = useKeepAlivePool(currentSession?.id, sessions, 3)
 
@@ -195,6 +244,7 @@ function CollaborationPage() {
     }|${pendingPayload.forceNew ? 'force' : ''}|${pendingPayload.targetMessageId ?? ''}`
     if (pendingHandledRef.current === key) return
     pendingHandledRef.current = key
+    setOverviewMode(false)
     if (pendingPayload.forceNew) {
       setSkipNextDraftRestore()
       setCurrentSession(null)
@@ -207,26 +257,27 @@ function CollaborationPage() {
     if (!pendingPayload) pendingHandledRef.current = null
   }, [pendingPayload])
 
-  /* Work nav override — opens document in right panel */
+  /* Work nav override — open file in CodeViewerPanel (preview) */
   const workNavValue = useMemo(
     () => ({
-      openFileAtWork: (_kind: FileKind, id: string) => {
-        setCollabDocId(id)
-        openRightPanel('document', id)
-      },
+      openFileAtWork: (kind: FileKind, id: string) => setPreviewFile({ kind, id }),
       pendingWorkFile: null,
       consumePendingWorkFile: () => {}
     }),
-    [openRightPanel]
+    []
   )
 
   /* Callbacks */
   const handleLoadSession = useCallback(
-    (id: string) => loadSession(id),
+    (id: string) => {
+      setOverviewMode(false)
+      loadSession(id)
+    },
     [loadSession]
   )
 
   const handleNewSession = useCallback(() => {
+    setOverviewMode(false)
     setCurrentSession(null)
   }, [setCurrentSession])
 
@@ -235,13 +286,21 @@ function CollaborationPage() {
     if (!http) return
     try {
       const doc = await http.createDocument({ title: '新文档' }, currentScope)
-      setCollabDocId(doc.id)
-      openRightPanel('document', doc.id)
+      const sessionId = currentSessionRef.current?.id ?? null
+      openTabAction(sessionId, makeEntityTab('document', doc.id, doc.title || '新文档'))
+      if (!layout.rightPanelOpen) openRightPanel()
       void refreshDocuments()
     } catch {
       toast.error('创建文档失败')
     }
-  }, [manager, currentScope, openRightPanel, refreshDocuments])
+  }, [
+    manager,
+    currentScope,
+    openTabAction,
+    openRightPanel,
+    layout.rightPanelOpen,
+    refreshDocuments
+  ])
 
   const handleRefreshAll = useCallback(() => {
     void refreshDocuments()
@@ -251,11 +310,37 @@ function CollaborationPage() {
     if (currentScope) void sessionStore.refreshSessions(currentScope)
   }, [refreshDocuments, currentScope])
 
-  /* Interaction API for cross-panel navigation */
+  /* Tab-based open helpers for nav quick-access buttons */
+  const handleOpenListTab = useCallback(
+    (type: 'document-list' | 'task-list' | 'workflow-list') => {
+      const sessionId = currentSessionRef.current?.id ?? null
+      openTabAction(sessionId, makeListTab(type))
+      if (!layout.rightPanelOpen) openRightPanel()
+    },
+    [openTabAction, openRightPanel, layout.rightPanelOpen]
+  )
+
+  const handleToggleListTab = useCallback(
+    (type: 'document-list' | 'task-list' | 'workflow-list') => {
+      if (layout.rightPanelOpen && tabsForSession.length > 0) {
+        closeRightPanel()
+      } else {
+        handleOpenListTab(type)
+      }
+    },
+    [layout.rightPanelOpen, tabsForSession.length, closeRightPanel, handleOpenListTab]
+  )
+
+  /* Interaction API for cross-panel navigation (uses tab store) */
   const interactionAPI = useCollabInteractionValue({
-    openRightPanel,
+    openTab: (sessionId, tab) => {
+      openTabAction(sessionId, tab)
+      if (!layout.rightPanelOpen) openRightPanel()
+    },
     closeRightPanel,
-    loadSession: handleLoadSession
+    openRightPanel,
+    loadSession: handleLoadSession,
+    getCurrentSessionId: () => currentSessionRef.current?.id ?? null
   })
 
   /* Header slots */
@@ -269,7 +354,7 @@ function CollaborationPage() {
           onClick={() => setLeftCollapsed((c) => !c)}
         />
       ),
-      right: (
+      right: !overviewMode ? (
         <>
           {!rightPanelOpen && (
             <ActionIcon
@@ -283,51 +368,49 @@ function CollaborationPage() {
           <ActionIcon
             icon={FileText}
             size="small"
-            title="文档面板"
-            active={rightPanelOpen && rightPanelTab === 'document'}
-            onClick={() => toggleRightPanel('document')}
+            title="文档"
+            onClick={() => handleToggleListTab('document-list')}
           />
           <ActionIcon
             icon={Zap}
             size="small"
-            title="任务面板"
-            active={rightPanelOpen && rightPanelTab === 'task'}
-            onClick={() => toggleRightPanel('task')}
+            title="任务"
+            onClick={() => handleToggleListTab('task-list')}
           />
           <ActionIcon
             icon={GitBranch}
             size="small"
-            title="工作流面板"
-            active={rightPanelOpen && rightPanelTab === 'workflow'}
-            onClick={() => toggleRightPanel('workflow')}
+            title="工作流"
+            onClick={() => handleToggleListTab('workflow-list')}
           />
         </>
-      )
+      ) : undefined
     }),
-    [leftCollapsed, rightDetailCollapsed, rightPanelOpen, rightPanelTab, toggleRightPanel]
+    [leftCollapsed, rightDetailCollapsed, rightPanelOpen, overviewMode, handleToggleListTab]
   )
   useRegisterHeaderSlots('agent', headerSlots)
 
-  /* Hub drawer callbacks */
+  /* Hub drawer callbacks — open items as tabs */
   const handleHubNavigate = useCallback(
     (panel: string) => {
       if (panel === 'agent') {
         setHubDrawerOpen(false)
       } else if (panel === 'document' || panel === 'task' || panel === 'workflow') {
-        openRightPanel(panel as RightPanelTab)
+        handleOpenListTab(`${panel}-list` as 'document-list' | 'task-list' | 'workflow-list')
         setHubDrawerOpen(false)
       }
     },
-    [openRightPanel]
+    [handleOpenListTab]
   )
 
   const handleHubSelectDocument = useCallback(
     (docId: string) => {
-      setCollabDocId(docId)
-      openRightPanel('document', docId)
+      const sessionId = currentSessionRef.current?.id ?? null
+      openTabAction(sessionId, makeEntityTab('document', docId, '文档'))
+      if (!layout.rightPanelOpen) openRightPanel()
       setHubDrawerOpen(false)
     },
-    [openRightPanel]
+    [openTabAction, openRightPanel, layout.rightPanelOpen]
   )
 
   const handleHubLoadSession = useCallback(
@@ -363,7 +446,7 @@ function CollaborationPage() {
             onCollapsedChange={setLeftCollapsed}
           >
             <CollabNav
-              sessions={sessions}
+              sessions={chatSessions}
               activeSessionId={currentSession?.id}
               sessionsLoading={loading}
               pendingInteractSessionIds={pendingInteractSessionIds}
@@ -372,10 +455,13 @@ function CollaborationPage() {
               bgSessions={bgSessions}
               bgLoading={loading}
               rightPanelOpen={rightPanelOpen}
-              rightPanelTab={rightPanelTab}
-              onOpenRightPanel={openRightPanel}
-              onToggleRightPanel={toggleRightPanel}
+              rightPanelTab="document"
+              onOpenRightPanel={() => openRightPanel()}
+              onToggleRightPanel={() => toggleRightPanel()}
               onOpenHub={() => setHubDrawerOpen(true)}
+              showOverviewTab
+              overviewActive={overviewMode}
+              onOverviewClick={() => setOverviewMode(true)}
               documentCount={documents.length}
               activeTaskCount={activeTaskCount}
               activeWorkflowCount={activeWorkflowCount}
@@ -399,30 +485,69 @@ function CollaborationPage() {
                   {/* Main session area */}
                   <div className="collab-split-pane" style={{ width: `calc(${splitPct}% - 4px)` }}>
                     <div className="collab-session-main">
-                      <div className="agent-content">
-                        <div className="agent-chat-area">
-                          <div
-                            className="agent-main"
-                            style={{
-                              display: 'flex',
-                              flexDirection: 'column',
-                              flex: 1,
-                              minHeight: 0,
-                              overflow: 'hidden'
-                            }}
+                      <div
+                        className={`agent-content${
+                          previewFile && !overviewMode ? ' agent-content--split' : ''
+                        }`}
+                      >
+                        {previewFile && !overviewMode && (
+                          <ResizableSidebar
+                            side="left"
+                            storageKey="collab-code-viewer"
+                            defaultWidth={480}
+                            minWidth={240}
+                            maxWidth={800}
                           >
-                            <AgentChatZone
+                            <CodeViewerPanel
+                              fileRef={previewFile}
                               scope={currentScope}
-                              currentSession={currentSession}
-                              aliveSessionIds={aliveSessionIds}
-                              error={error}
-                              loading={loading}
-                              onQuickPrompt={handleQuickPrompt}
-                              onClear={handleClear}
-                              inputStyle={inputStyle}
-                              extraInputChildren={<CtrlLHandler />}
+                              onClose={() => setPreviewFile(null)}
                             />
-                          </div>
+                          </ResizableSidebar>
+                        )}
+                        <div className="agent-chat-area">
+                          <AnimatePresence mode="wait">
+                            {overviewMode ? (
+                              <motion.div
+                                key="overview"
+                                className="agent-main"
+                                {...panelCrossfade}
+                                transition={panelCrossfadeTransition}
+                              >
+                                <AgentOverviewPanel
+                                  selectedModel={selectedModel}
+                                  onModelChange={setSelectedModel}
+                                  onLoadSession={handleLoadSession}
+                                />
+                              </motion.div>
+                            ) : (
+                              <motion.div
+                                key="chat"
+                                className="agent-main"
+                                style={{
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  flex: 1,
+                                  minHeight: 0,
+                                  overflow: 'hidden'
+                                }}
+                                {...panelCrossfade}
+                                transition={panelCrossfadeTransition}
+                              >
+                                <AgentChatZone
+                                  scope={currentScope}
+                                  currentSession={currentSession}
+                                  aliveSessionIds={aliveSessionIds}
+                                  error={error}
+                                  loading={loading}
+                                  onQuickPrompt={handleQuickPrompt}
+                                  onClear={handleClear}
+                                  inputStyle={inputStyle}
+                                  extraInputChildren={<CtrlLHandler />}
+                                />
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </div>
                       </div>
                     </div>
@@ -441,70 +566,112 @@ function CollaborationPage() {
                     </div>
                   </div>
 
-                  {/* Right panel */}
-                  <div className="collab-split-pane" style={{ width: `calc(${100 - splitPct}% - 4px)` }}>
-                    <RightDrawerPanel
-                      activeTab={rightPanelTab}
-                      entityId={rightPanelEntityId}
-                      onTabChange={switchRightTab}
+                  {/* Right panel — per-session tabs */}
+                  <div
+                    className="collab-split-pane"
+                    style={{ width: `calc(${100 - splitPct}% - 4px)` }}
+                  >
+                    <UnifiedRightPanel
+                      contextId={currentSession?.id ?? null}
                       onClose={closeRightPanel}
                       onLoadSession={handleLoadSession}
-                      activeDocId={collabDocId}
-                      onActiveDocIdChange={setCollabDocId}
-                      dirtyRef={docDirtyRef}
                     />
                   </div>
                 </div>
               ) : (
                 <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
-                  {/* Session-only mode: chat + optional detail sidebar */}
+                  {/* Session-only mode: overview/chat + optional code viewer + detail sidebar */}
                   <div className="collab-session-main">
-                    <div className="agent-content">
-                      <div className="agent-chat-area">
-                        <div
-                          className="agent-main"
-                          style={{
-                            display: 'flex',
-                            flexDirection: 'column',
-                            flex: 1,
-                            minHeight: 0,
-                            overflow: 'hidden'
-                          }}
+                    <div
+                      className={`agent-content${
+                        previewFile && !overviewMode ? ' agent-content--split' : ''
+                      }`}
+                    >
+                      {previewFile && !overviewMode && (
+                        <ResizableSidebar
+                          side="left"
+                          storageKey="collab-code-viewer"
+                          defaultWidth={480}
+                          minWidth={240}
+                          maxWidth={800}
                         >
-                          <AgentChatZone
+                          <CodeViewerPanel
+                            fileRef={previewFile}
                             scope={currentScope}
-                            currentSession={currentSession}
-                            aliveSessionIds={aliveSessionIds}
-                            error={error}
-                            loading={loading}
-                            onQuickPrompt={handleQuickPrompt}
-                            onClear={handleClear}
-                            inputStyle={inputStyle}
-                            extraInputChildren={<CtrlLHandler />}
+                            onClose={() => setPreviewFile(null)}
                           />
-                        </div>
+                        </ResizableSidebar>
+                      )}
+                      <div className="agent-chat-area">
+                        <AnimatePresence mode="wait">
+                          {overviewMode ? (
+                            <motion.div
+                              key="overview"
+                              className="agent-main"
+                              {...panelCrossfade}
+                              transition={panelCrossfadeTransition}
+                            >
+                              <AgentOverviewPanel
+                                selectedModel={selectedModel}
+                                onModelChange={setSelectedModel}
+                                onLoadSession={handleLoadSession}
+                              />
+                            </motion.div>
+                          ) : (
+                            <motion.div
+                              key="chat"
+                              className="agent-main"
+                              style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                flex: 1,
+                                minHeight: 0,
+                                overflow: 'hidden'
+                              }}
+                              {...panelCrossfade}
+                              transition={panelCrossfadeTransition}
+                            >
+                              <AgentChatZone
+                                scope={currentScope}
+                                currentSession={currentSession}
+                                aliveSessionIds={aliveSessionIds}
+                                error={error}
+                                loading={loading}
+                                onQuickPrompt={handleQuickPrompt}
+                                onClear={handleClear}
+                                inputStyle={inputStyle}
+                                extraInputChildren={<CtrlLHandler />}
+                              />
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
                     </div>
                   </div>
 
                   {/* Agent detail sidebar (only when right panel is closed) */}
-                  <ResizableSidebar
-                    side="right"
-                    storageKey="collab-agent-right"
-                    defaultWidth={280}
-                    collapsed={rightDetailCollapsed}
-                    onCollapsedChange={setRightDetailCollapsed}
-                  >
-                    <AgentDetailSidebar
-                      sending={sending}
-                      error={error}
-                      currentSession={currentSession}
-                      optimisticMessages={optimisticMessages}
-                      selectedModel={selectedModel}
-                      onModelChange={setSelectedModel}
-                      scope={currentScope}
-                    />
-                  </ResizableSidebar>
+                  {!overviewMode && (
+                    <ResizableSidebar
+                      side="right"
+                      storageKey="collab-agent-right"
+                      defaultWidth={280}
+                      collapsed={rightDetailCollapsed}
+                      onCollapsedChange={setRightDetailCollapsed}
+                    >
+                      <AgentDetailSidebar
+                        sending={sending}
+                        error={error}
+                        currentSession={currentSession}
+                        optimisticMessages={optimisticMessages}
+                        selectedModel={selectedModel}
+                        onModelChange={setSelectedModel}
+                        scope={currentScope}
+                        onPreviewFile={(relativePath) =>
+                          setPreviewFile({ kind: 'document', id: relativePath })
+                        }
+                      />
+                    </ResizableSidebar>
+                  )}
                 </div>
               )}
             </ChatInputProvider>
@@ -523,7 +690,7 @@ function CollaborationPage() {
         >
           <CollabHub
             scope={currentScope}
-            sessions={sessions}
+            sessions={chatSessions}
             sessionsLoading={loading}
             workflowRuns={workflowRuns}
             workflowLoading={workflowLoading}
@@ -533,8 +700,14 @@ function CollaborationPage() {
             onNavigatePanel={handleHubNavigate}
             onLoadSession={handleHubLoadSession}
             onSelectDocument={handleHubSelectDocument}
-            onNewSession={() => { handleNewSession(); setHubDrawerOpen(false) }}
-            onNewDocument={() => { void handleNewDocument(); setHubDrawerOpen(false) }}
+            onNewSession={() => {
+              handleNewSession()
+              setHubDrawerOpen(false)
+            }}
+            onNewDocument={() => {
+              void handleNewDocument()
+              setHubDrawerOpen(false)
+            }}
             onRefresh={handleRefreshAll}
           />
         </Drawer>

@@ -42,6 +42,7 @@ import { initTokenUsageDb, closeTokenUsageDb } from './core/tokenUsageDb'
 import { lockManager } from './core/resourceLockManager'
 import { auditManager } from './core/agentAuditLog'
 import { migrateAppLevelStorage } from './core/migrate-scope-v2'
+import { migrateToolSessionsFromBackground } from './core/migrateToolSessions'
 import { getTerminalManager } from './terminal/TerminalSessionManager'
 import { TerminalWebSocketServer } from './terminal/TerminalWebSocketServer'
 import { createTerminalRoutes } from './routes/terminal'
@@ -49,7 +50,6 @@ import { clearAll as clearEventBus } from './core/eventBus'
 import { bgSessionManager } from './core/backgroundSession'
 import { cronManager } from './core/cronScheduler'
 import { chatCore } from './routes/agent/chatCore'
-import { toolLLMManager } from './llm/toolLLM'
 import type { IChatService } from './core/interfaces'
 import { registerPermissionCleanupHandler } from './core/toolPermission'
 import {
@@ -196,12 +196,13 @@ export function createPrizmServer(
     next()
   })
 
-  // 健康检查
+  // 健康检查（含 dataDir 便于排查记忆/scope 数据路径）
   app.get('/health', (_req, res) => {
     res.json({
       status: 'ok',
       service: 'prizm-server',
       timestamp: Date.now(),
+      dataDir,
       embedding: {
         state: localEmbedding.getState(),
         model: localEmbedding.getModelName(),
@@ -234,7 +235,7 @@ export function createPrizmServer(
   createEmbeddingRoutes(router)
   createScheduleRoutes(router)
   createCronRoutes(router)
-  createWorkflowRoutes(router)
+  createWorkflowRoutes(router, adapters.agent)
   createTaskRoutes(router)
   app.use('/', router)
 
@@ -281,120 +282,132 @@ export function createPrizmServer(
         return
       }
 
-      return new Promise((resolve, reject) => {
+      return (async () => {
         try {
-          server = app.listen(port, host, async () => {
-            isRunning = true
+          // 在 listen 之前完成迁移与记忆服务初始化，避免首包请求时 EverMemService 未就绪
+          try {
+            migrateAppLevelStorage(dataDir)
+          } catch (e) {
+            log.warn('App-level migration failed:', e)
+          }
+          resetStaleChatStatus()
+          try {
+            await initEverMemService()
+          } catch (e) {
+            log.warn('EverMemService init failed:', e)
+          }
+          try {
+            initTokenUsageDb()
+          } catch (e) {
+            log.warn('Token usage DB init failed:', e)
+          }
+          try {
+            lockManager.init()
+          } catch (e) {
+            log.warn('Resource lock manager init failed:', e)
+          }
+          try {
+            auditManager.init()
+          } catch (e) {
+            log.warn('Audit manager init failed:', e)
+          }
 
-            try {
-              migrateAppLevelStorage(dataDir)
-            } catch (e) {
-              log.warn('App-level migration failed:', e)
-            }
-            resetStaleChatStatus()
-            try {
-              await initEverMemService()
-            } catch (e) {
-              log.warn('EverMemService init failed:', e)
-            }
-            try {
-              initTokenUsageDb()
-            } catch (e) {
-              log.warn('Token usage DB init failed:', e)
-            }
-            try {
-              lockManager.init()
-            } catch (e) {
-              log.warn('Resource lock manager init failed:', e)
-            }
-            try {
-              auditManager.init()
-            } catch (e) {
-              log.warn('Audit manager init failed:', e)
-            }
-            const chatService: IChatService = { execute: chatCore }
-            toolLLMManager.init(adapters.agent, chatService)
-            await bgSessionManager.init(adapters.agent, chatService)
-            await cronManager.init(bgSessionManager)
-            initResumeStore()
-            migrateWorkflowDefsToFiles()
-            recoverStaleTaskRuns()
-            recoverStaleWorkflowRuns()
-            const stepExecutor = new BgSessionStepExecutor(bgSessionManager)
-            initWorkflowRunner(stepExecutor)
-            initTaskRunner(stepExecutor)
-            registerWorkflowTriggerHandlers()
-            startReminderService()
-
-            // 每 24h 清理过期任务记录 + 恢复超龄僵尸记录
-            taskPruneTimer = setInterval(() => {
-              try {
-                pruneTaskRuns(90)
-                pruneRuns(90)
-                recoverStaleTaskRunsByAge(7)
-                recoverStaleWorkflowRunsByAge(7)
-              } catch (e) {
-                log.warn('Task/workflow prune failed:', e)
-              }
-            }, 24 * 60 * 60_000)
-            if (taskPruneTimer.unref) taskPruneTimer.unref()
-
-            // ── EventBus handler 注册（在所有服务初始化之后） ──
-            registerAuditHandlers()
-            registerLockHandlers()
-            registerMemoryHandlers()
-            registerBgSessionHandlers()
-            registerScheduleHandlers()
-            registerPermissionCleanupHandler()
-            setSearchIndex(searchIndex)
-            registerSearchHandlers()
-
-            if (enableWebSocket && server) {
-              const terminalWsPath = '/ws/terminal'
-
-              wsServer = new WebSocketServer(server, clientRegistry, {
-                path: websocketPath
-              })
-              log.info('WebSocket:', `ws://${host}:${port}${websocketPath}`)
-
-              terminalWsServer = new TerminalWebSocketServer(
-                server,
-                clientRegistry,
-                terminalManager,
-                { path: terminalWsPath }
+          return new Promise<void>((resolve, reject) => {
+            server = app.listen(port, host, async () => {
+              isRunning = true
+              log.info(
+                `Prizm server started — dataDir: ${dataDir} (scope/session memory under scopes/<id>/.prizm/memory/)`
               )
-              log.info('Terminal WebSocket:', `ws://${host}:${port}${terminalWsPath}`)
-
-              // WebSocket 桥接：注册 EventBus → WebSocket 广播 handler
-              setWebSocketServer(wsServer)
-              registerWSBridgeHandlers()
-
-              // 统一 upgrade 路由 — 两个 WSS 均为 noServer 模式，
-              // 需手动根据路径分发 upgrade 请求
-              server.on('upgrade', (req, socket, head) => {
-                const pathname = new URL(req.url ?? '/', 'ws://localhost').pathname
-                if (pathname === terminalWsPath && terminalWsServer) {
-                  terminalWsServer.handleUpgrade(req, socket, head)
-                } else if (pathname === websocketPath && wsServer) {
-                  wsServer.handleUpgrade(req, socket, head)
-                } else {
-                  socket.destroy()
+              const chatService: IChatService = { execute: chatCore }
+              await bgSessionManager.init(adapters.agent, chatService)
+              await cronManager.init(bgSessionManager)
+              initResumeStore()
+              migrateWorkflowDefsToFiles()
+              try {
+                if (adapters.agent) {
+                  const { migrated } = await migrateToolSessionsFromBackground(adapters.agent)
+                  if (migrated > 0) log.info('Tool sessions migration:', migrated)
                 }
-              })
-            }
+              } catch (e) {
+                log.warn('Tool sessions migration failed:', e)
+              }
+              recoverStaleTaskRuns()
+              recoverStaleWorkflowRuns()
+              const stepExecutor = new BgSessionStepExecutor(bgSessionManager)
+              initWorkflowRunner(stepExecutor)
+              initTaskRunner(stepExecutor)
+              registerWorkflowTriggerHandlers()
+              startReminderService()
 
-            log.info('Listening on', `http://${host}:${port}`)
-            resolve()
-          })
+              // 每 24h 清理过期任务记录 + 恢复超龄僵尸记录
+              taskPruneTimer = setInterval(() => {
+                try {
+                  pruneTaskRuns(90)
+                  pruneRuns(90)
+                  recoverStaleTaskRunsByAge(7)
+                  recoverStaleWorkflowRunsByAge(7)
+                } catch (e) {
+                  log.warn('Task/workflow prune failed:', e)
+                }
+              }, 24 * 60 * 60_000)
+              if (taskPruneTimer.unref) taskPruneTimer.unref()
 
-          server.on('error', (error) => {
-            log.error('Server error:', error)
-            reject(error)
+              // ── EventBus handler 注册（在所有服务初始化之后） ──
+              registerAuditHandlers()
+              registerLockHandlers()
+              registerMemoryHandlers()
+              registerBgSessionHandlers()
+              registerScheduleHandlers()
+              registerPermissionCleanupHandler()
+              setSearchIndex(searchIndex)
+              registerSearchHandlers()
+
+              if (enableWebSocket && server) {
+                const terminalWsPath = '/ws/terminal'
+
+                wsServer = new WebSocketServer(server, clientRegistry, {
+                  path: websocketPath
+                })
+                log.info('WebSocket:', `ws://${host}:${port}${websocketPath}`)
+
+                terminalWsServer = new TerminalWebSocketServer(
+                  server,
+                  clientRegistry,
+                  terminalManager,
+                  { path: terminalWsPath }
+                )
+                log.info('Terminal WebSocket:', `ws://${host}:${port}${terminalWsPath}`)
+
+                // WebSocket 桥接：注册 EventBus → WebSocket 广播 handler
+                setWebSocketServer(wsServer)
+                registerWSBridgeHandlers()
+
+                // 统一 upgrade 路由 — 两个 WSS 均为 noServer 模式，
+                // 需手动根据路径分发 upgrade 请求
+                server.on('upgrade', (req, socket, head) => {
+                  const pathname = new URL(req.url ?? '/', 'ws://localhost').pathname
+                  if (pathname === terminalWsPath && terminalWsServer) {
+                    terminalWsServer.handleUpgrade(req, socket, head)
+                  } else if (pathname === websocketPath && wsServer) {
+                    wsServer.handleUpgrade(req, socket, head)
+                  } else {
+                    socket.destroy()
+                  }
+                })
+              }
+
+              log.info('Listening on', `http://${host}:${port}`)
+              resolve()
+            })
+            server.on('error', (error) => {
+              log.error('Server error:', error)
+              reject(error)
+            })
           })
         } catch (error) {
-          reject(error)
+          throw error
         }
-      })
+      })()
     },
 
     async stop(): Promise<void> {

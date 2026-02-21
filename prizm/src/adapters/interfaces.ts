@@ -149,12 +149,7 @@ export interface LLMStreamChunk {
    * yield 此事件后，adapter 将阻塞等待用户通过 API 确认/拒绝。
    * 客户端应显示交互卡片并通过 POST /agent/sessions/:id/interact-response 响应。
    */
-  interactRequest?: {
-    requestId: string
-    toolCallId: string
-    toolName: string
-    paths: string[]
-  }
+  interactRequest?: Record<string, unknown>
   /** 工具执行进度心跳（长时间运行的工具定期发送） */
   toolProgress?: {
     id: string
@@ -215,7 +210,7 @@ export interface IAgentAdapter {
 
   getMessages?(scope: string, sessionId: string): Promise<AgentMessage[]>
 
-  /** 更新会话（对话摘要、压缩轮次、授权路径、BG 状态等） */
+  /** 更新会话（对话摘要、压缩轮次、授权路径、BG 状态、允许的 Skills/MCP 等） */
   updateSession?(
     scope: string,
     id: string,
@@ -224,7 +219,11 @@ export interface IAgentAdapter {
       compressedThroughRound?: number
       compressionSummaries?: Array<{ throughRound: number; text: string }>
       grantedPaths?: string[]
+      allowedTools?: string[]
+      allowedSkills?: string[]
+      allowedMcpServerIds?: string[]
       kind?: import('@prizm/shared').SessionKind
+      toolMeta?: import('@prizm/shared').ToolSessionMeta
       bgMeta?: import('@prizm/shared').BgSessionMeta
       bgStatus?: import('@prizm/shared').BgStatus
       bgResult?: string
@@ -258,7 +257,9 @@ export interface IAgentAdapter {
       mcpEnabled?: boolean
       /** 是否注入 scope 上下文（便签、待办、文档等），默认 true */
       includeScopeContext?: boolean
-      /** 已激活的 skill 指令（注入系统提示） */
+      /** 渐进式发现：仅注入技能 name+description，模型按需用 prizm_get_skill_instructions 拉取全文 */
+      skillMetadataForDiscovery?: Array<{ name: string; description: string }>
+      /** 已激活的 skill 完整指令（注入系统提示）；与 skillMetadataForDiscovery 二选一 */
       activeSkillInstructions?: Array<{ name: string; instructions: string }>
       /** 外部项目规则内容 */
       rulesContent?: string
@@ -268,6 +269,8 @@ export interface IAgentAdapter {
       grantedPaths?: string[]
       /** 工具白名单（AgentDefinition.allowedTools，undefined 表示全部） */
       allowedTools?: string[]
+      /** 可用的 MCP 服务器 ID 白名单（空/未设置 = 全部） */
+      allowedMcpServerIds?: string[]
       /** 启用深度思考 */
       thinking?: boolean
       /** 记忆系统消息文本（画像 + 上下文记忆），注入到消息末尾动态区 */
@@ -276,6 +279,8 @@ export interface IAgentAdapter {
       systemPreamble?: string
       /** Slash 命令注入（本轮临时指令），注入到消息末尾动态区 */
       promptInjection?: string
+      /** 工作流管理会话：当前工作流 YAML，注入 perTurn（cache 友好，不放入 static） */
+      workflowEditContext?: string
     }
   ): AsyncIterable<LLMStreamChunk>
 }

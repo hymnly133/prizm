@@ -2,11 +2,12 @@
  * Hook Executor — 链式执行 hooks，合并决策
  *
  * deny 优先原则：只要有一个 hook 返回 deny，最终决策即为 deny。
- * ask 次优先：所有 hook 均允许或请求 ask 时，合并 ask 路径。
+ * ask 次优先：所有 hook 均允许或请求 ask 时，使用第一个 ask 的 interactDetails。
  */
 
 import { createLogger } from '../../logger'
 import { hookRegistry } from './hookRegistry'
+import type { InteractDetails } from '../toolPermission/types'
 import type {
   PreToolUsePayload,
   PreToolUseDecision,
@@ -32,7 +33,7 @@ export async function executePreToolUseHooks(
 
   let finalDecision: PreToolUseDecision = { decision: 'allow' }
   let currentArgs = payload.arguments
-  const allInteractPaths: string[] = []
+  let firstInteractDetails: InteractDetails | undefined
   const additionalContextParts: string[] = []
 
   for (const hook of hooks) {
@@ -52,7 +53,9 @@ export async function executePreToolUseHooks(
 
       if (result.decision === 'ask') {
         finalDecision = { decision: 'ask' }
-        if (result.interactPaths) allInteractPaths.push(...result.interactPaths)
+        if (result.interactDetails && !firstInteractDetails) {
+          firstInteractDetails = result.interactDetails
+        }
       }
 
       if (result.updatedArguments) currentArgs = result.updatedArguments
@@ -62,8 +65,8 @@ export async function executePreToolUseHooks(
     }
   }
 
-  if (finalDecision.decision === 'ask') {
-    finalDecision.interactPaths = [...new Set(allInteractPaths)]
+  if (finalDecision.decision === 'ask' && firstInteractDetails) {
+    finalDecision.interactDetails = firstInteractDetails
   }
   if (currentArgs !== payload.arguments) {
     finalDecision.updatedArguments = currentArgs

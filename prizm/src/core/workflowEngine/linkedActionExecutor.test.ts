@@ -110,6 +110,19 @@ describe('变量解析', () => {
     expect(doc.title).toBe('我的文档')
   })
 
+  it('应解析 $args.foo.bar dot-path（与 runner 一致）', async () => {
+    await executeLinkedActions(
+      'default',
+      [{ type: 'create_document', params: { title: '$args.meta.title', content: '$args.meta.summary' } }],
+      SAMPLE_RESULTS,
+      { meta: { title: '嵌套标题', summary: '嵌套摘要' } }
+    )
+
+    const doc = mockWriteDoc.mock.calls[0][1]
+    expect(doc.title).toBe('嵌套标题')
+    expect(doc.content).toBe('嵌套摘要')
+  })
+
   it('不存在的引用应替换为空字符串', async () => {
     await executeLinkedActions('default', [
       { type: 'create_document', params: { title: 'T', content: '$nonexistent.output' } }

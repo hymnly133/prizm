@@ -13,13 +13,11 @@ import {
   TextArea,
   toast
 } from '@lobehub/ui'
+import { Spin } from 'antd'
 import {
   BookOpen,
-  ChevronDown,
-  ChevronRight,
-  Download,
   Edit3,
-  ExternalLink,
+  FolderOpen,
   Globe,
   Import,
   Plus,
@@ -29,7 +27,10 @@ import {
   Zap
 } from 'lucide-react'
 import { Segmented } from './ui/Segmented'
+import { ContentCard, ContentCardHeader, ContentCardBody } from './ui/ContentCard'
+import { ModalSidebar } from './ui/ModalSidebar'
 import { EmptyState } from './ui/EmptyState'
+import { RegistrySkillCard } from './skills/RegistrySkillCard'
 import SearchInput from './ui/SearchInput'
 import { useCallback, useEffect, useState } from 'react'
 import type { PrizmClient } from '@prizm/client-core'
@@ -55,6 +56,8 @@ interface RegistrySkillItem {
   source: string
   htmlUrl?: string
   installed?: boolean
+  /** 来源唯一键，用于列表 key 与 installing 状态 */
+  registryKey?: string
 }
 
 type TabKey = 'installed' | 'browse' | 'import'
@@ -73,8 +76,8 @@ export function SkillsSettings({ http, onLog }: SkillsSettingsProps) {
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState({ name: '', description: '', body: '', license: '' })
 
-  // Expand/edit state
-  const [expandedSkill, setExpandedSkill] = useState<string | null>(null)
+  // 详情面板（弹出抽屉）与编辑状态
+  const [detailPanelSkill, setDetailPanelSkill] = useState<string | null>(null)
   const [editingSkill, setEditingSkill] = useState<string | null>(null)
   const [editBody, setEditBody] = useState('')
 
@@ -84,6 +87,22 @@ export function SkillsSettings({ http, onLog }: SkillsSettingsProps) {
   const [featuredSkills, setFeaturedSkills] = useState<RegistrySkillItem[]>([])
   const [searching, setSearching] = useState(false)
   const [installing, setInstalling] = useState<string | null>(null)
+  // Collection browse state
+  const [collectionOwnerRepo, setCollectionOwnerRepo] = useState('')
+  const [collectionPath, setCollectionPath] = useState('skills')
+  const [collectionSkills, setCollectionSkills] = useState<RegistrySkillItem[]>([])
+  const [loadingCollection, setLoadingCollection] = useState(false)
+  // SkillKit (built-in source) state
+  const [skillkitQuery, setSkillkitQuery] = useState('')
+  const [skillkitResults, setSkillkitResults] = useState<RegistrySkillItem[]>([])
+  const [searchingSkillkit, setSearchingSkillkit] = useState(false)
+  // SkillsMP (built-in source) state
+  const [skillsmpApiKey, setSkillsmpApiKey] = useState('')
+  const [skillsmpConfigured, setSkillsmpConfigured] = useState(false)
+  const [skillsmpQuery, setSkillsmpQuery] = useState('')
+  const [skillsmpResults, setSkillsmpResults] = useState<RegistrySkillItem[]>([])
+  const [searchingSkillsmp, setSearchingSkillsmp] = useState(false)
+  const [savingSkillsmp, setSavingSkillsmp] = useState(false)
 
   // Import state
   const [importPath, setImportPath] = useState('')
@@ -115,6 +134,20 @@ export function SkillsSettings({ http, onLog }: SkillsSettingsProps) {
         .catch(() => {})
     }
   }, [tab, http, featuredSkills.length])
+
+  // Load SkillsMP configured state when Browse tab is shown
+  useEffect(() => {
+    if (tab === 'browse' && http) {
+      http
+        .getAgentTools()
+        .then((data) =>
+          setSkillsmpConfigured(
+            !!(data.builtin as { skillsmp?: { configured?: boolean } })?.skillsmp?.configured
+          )
+        )
+        .catch(() => {})
+    }
+  }, [tab, http])
 
   const handleCreate = async () => {
     if (!http || !form.name.trim() || !form.description.trim()) {
@@ -163,25 +196,31 @@ export function SkillsSettings({ http, onLog }: SkillsSettingsProps) {
     }
   }
 
-  const handleToggleExpand = async (name: string) => {
-    if (expandedSkill === name) {
-      setExpandedSkill(null)
-      return
-    }
-    if (!http) return
-    try {
-      const full = (await http.getSkill(name)) as SkillItem
-      const idx = skills.findIndex((s) => s.name === name)
-      if (idx >= 0) {
-        const updated = [...skills]
-        updated[idx] = { ...updated[idx], body: full.body }
-        setSkills(updated)
+  const openDetailPanel = useCallback(
+    async (name: string) => {
+      setDetailPanelSkill(name)
+      const skill = skills.find((s) => s.name === name)
+      if (skill?.body !== undefined) return
+      if (!http) return
+      try {
+        const full = (await http.getSkill(name)) as SkillItem
+        const idx = skills.findIndex((s) => s.name === name)
+        if (idx >= 0) {
+          const updated = [...skills]
+          updated[idx] = { ...updated[idx], body: full.body }
+          setSkills(updated)
+        }
+      } catch {
+        // keep panel open with whatever we have
       }
-      setExpandedSkill(name)
-    } catch {
-      setExpandedSkill(name)
-    }
-  }
+    },
+    [http, skills]
+  )
+
+  const closeDetailPanel = useCallback(() => {
+    setDetailPanelSkill(null)
+    setEditingSkill(null)
+  }, [])
 
   const handleSearch = async (q: string) => {
     setSearchQuery(q)
@@ -200,22 +239,154 @@ export function SkillsSettings({ http, onLog }: SkillsSettingsProps) {
     }
   }
 
+  const getItemKey = (item: RegistrySkillItem) =>
+    item.registryKey ?? `${item.owner}/${item.repo}/${item.skillPath}`
+
   const handleInstall = async (item: RegistrySkillItem) => {
     if (!http) return
-    setInstalling(item.name)
+    const itemKey = getItemKey(item)
+    setInstalling(itemKey)
     try {
-      await http.installRegistrySkill(item.owner, item.repo, item.skillPath)
+      const source =
+        item.source === 'github' ||
+        item.source === 'curated' ||
+        item.source === 'skillkit' ||
+        item.source === 'skillsmp'
+          ? item.source
+          : undefined
+      await http.installRegistrySkill(item.owner, item.repo, item.skillPath, source)
       toast.success(`已安装 Skill: ${item.name}`)
       loadSkills()
-      // Refresh featured to update installed status
       http
         .getFeaturedSkills()
         .then((data) => setFeaturedSkills(data.skills as RegistrySkillItem[]))
         .catch(() => {})
+      if (collectionSkills.length > 0) {
+        http
+          .getCollectionSkills(
+            collectionSkills[0].owner,
+            collectionSkills[0].repo,
+            collectionPath || 'skills'
+          )
+          .then((data) => setCollectionSkills(data.skills as RegistrySkillItem[]))
+          .catch(() => {})
+      }
+      if (skillkitResults.length > 0 && skillkitQuery.trim()) {
+        http
+          .searchSkillKitRegistry(skillkitQuery.trim())
+          .then((res) => setSkillkitResults((res.items ?? []) as RegistrySkillItem[]))
+          .catch(() => {})
+      }
+      if (skillsmpResults.length > 0 && skillsmpQuery.trim()) {
+        http
+          .searchSkillsMPRegistry(skillsmpQuery.trim())
+          .then((res) => setSkillsmpResults((res.items ?? []) as RegistrySkillItem[]))
+          .catch(() => {})
+      }
     } catch (e) {
-      toast.error(`安装失败: ${e}`)
+      let msg = (e as { error?: string })?.error ?? (e instanceof Error ? e.message : String(e))
+      if (e instanceof Error && typeof msg === 'string' && msg.includes('"error"')) {
+        try {
+          const json = JSON.parse(msg.replace(/^[^:]+:\s*/, '')) as { error?: string }
+          if (typeof json?.error === 'string') msg = json.error
+        } catch {
+          // ignore parse failure
+        }
+      }
+      toast.error(msg ? (msg.length > 80 ? msg : `安装失败: ${msg}`) : '安装失败')
     } finally {
       setInstalling(null)
+    }
+  }
+
+  const handleLoadCollection = async () => {
+    const trimmed = collectionOwnerRepo.trim()
+    if (!trimmed || !http) return
+    const parts = trimmed
+      .split('/')
+      .map((p) => p.trim())
+      .filter(Boolean)
+    if (parts.length < 2) {
+      toast.error('请输入 owner/repo，如 anthropics/skills')
+      return
+    }
+    const [owner, repo] = parts
+    setLoadingCollection(true)
+    setCollectionSkills([])
+    try {
+      const data = (await http.getCollectionSkills(owner, repo, collectionPath || 'skills')) as {
+        skills: RegistrySkillItem[]
+      }
+      setCollectionSkills(data.skills)
+      if (data.skills.length === 0) {
+        toast.info('该路径下未发现 Skills')
+      }
+    } catch (e) {
+      onLog(`加载集合失败: ${e}`, 'error')
+      toast.error('加载集合失败')
+    } finally {
+      setLoadingCollection(false)
+    }
+  }
+
+  const handleSearchSkillKit = async (q: string) => {
+    setSkillkitQuery(q)
+    if (!http) return
+    if (!q.trim()) {
+      setSkillkitResults([])
+      return
+    }
+    setSearchingSkillkit(true)
+    try {
+      const result = (await http.searchSkillKitRegistry(q.trim())) as {
+        items: RegistrySkillItem[]
+        totalCount: number
+        query: string
+      }
+      setSkillkitResults(result.items ?? [])
+    } catch (e) {
+      onLog(`SkillKit 搜索失败: ${e}`, 'error')
+      setSkillkitResults([])
+    } finally {
+      setSearchingSkillkit(false)
+    }
+  }
+
+  const handleSaveSkillsMPApiKey = async () => {
+    if (!http) return
+    setSavingSkillsmp(true)
+    try {
+      await http.updateSkillsMPSettings({ apiKey: skillsmpApiKey.trim() || undefined })
+      setSkillsmpConfigured(!!skillsmpApiKey.trim())
+      setSkillsmpApiKey('')
+      toast.success('SkillsMP API Key 已保存')
+    } catch (e) {
+      toast.error(`保存失败: ${e}`)
+    } finally {
+      setSavingSkillsmp(false)
+    }
+  }
+
+  const handleSearchSkillsMP = async (q: string) => {
+    setSkillsmpQuery(q)
+    if (!http) return
+    if (!q.trim()) {
+      setSkillsmpResults([])
+      return
+    }
+    setSearchingSkillsmp(true)
+    try {
+      const result = (await http.searchSkillsMPRegistry(q.trim())) as {
+        items: RegistrySkillItem[]
+        totalCount: number
+        query: string
+      }
+      setSkillsmpResults(result.items ?? [])
+    } catch (e) {
+      onLog(`SkillsMP 搜索失败: ${e}`, 'error')
+      setSkillsmpResults([])
+    } finally {
+      setSearchingSkillsmp(false)
     }
   }
 
@@ -254,9 +425,7 @@ export function SkillsSettings({ http, onLog }: SkillsSettingsProps) {
     // Parse owner/repo/path from URL or shorthand
     const match = ghUrl
       .trim()
-      .match(
-        /(?:github\.com\/)?([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+)(?:\/(?:tree\/[^/]+\/)?(.+))?/
-      )
+      .match(/(?:github\.com\/)?([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+)(?:\/(?:tree\/[^/]+\/)?(.+))?/)
     if (!match) {
       toast.error('格式无效，请输入 owner/repo 或 owner/repo/path')
       return
@@ -276,6 +445,14 @@ export function SkillsSettings({ http, onLog }: SkillsSettingsProps) {
 
   // ---- Render: Installed Tab ----
   function renderInstalled() {
+    if (loading) {
+      return (
+        <Flexbox horizontal align="center" gap={8} style={{ padding: 24 }}>
+          <Spin size="small" />
+          <Text type="secondary">加载中...</Text>
+        </Flexbox>
+      )
+    }
     return (
       <>
         <Flexbox gap={8} style={{ marginBottom: 12 }}>
@@ -307,117 +484,83 @@ export function SkillsSettings({ http, onLog }: SkillsSettingsProps) {
             }
           />
         ) : (
-          <Flexbox gap={6}>
+          <div
+            className="skill-entry-list skill-entry-list--grid skill-entry-list--grid-installed"
+            role="list"
+            aria-label="已安装 Skills 列表"
+          >
             {skills.map((skill) => {
-              const isExpanded = expandedSkill === skill.name
               const isEditing = editingSkill === skill.name
 
               return (
-                <div key={skill.name} className="content-card content-card--default">
+                <ContentCard
+                  key={skill.name}
+                  variant="default"
+                  hoverable
+                  className="skill-entry-card"
+                  style={{ cursor: 'default' }}
+                >
                   <div
-                    className="content-card__header"
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      cursor: 'pointer',
-                      padding: '10px 12px'
+                    className="skill-entry-card__row"
+                    onClick={() => openDetailPanel(skill.name)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        openDetailPanel(skill.name)
+                      }
                     }}
-                    onClick={() => handleToggleExpand(skill.name)}
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`查看 ${skill.name} 详情`}
                   >
-                    {isExpanded ? (
-                      <ChevronDown size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-                    ) : (
-                      <ChevronRight size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-                    )}
-                    <Zap size={14} style={{ color: 'var(--ant-color-warning)', flexShrink: 0 }} />
-                    <span style={{ fontWeight: 500, flex: 1, minWidth: 0 }}>{skill.name}</span>
-                    {skill.source && skill.source !== 'prizm' && (
-                      <Tag size="small" style={{ fontSize: 10 }}>
-                        {skill.source}
-                      </Tag>
-                    )}
-                    {skill.license && (
-                      <Tag size="small" style={{ fontSize: 10 }}>
-                        {skill.license}
-                      </Tag>
-                    )}
-                    <ActionIcon
-                      icon={Edit3}
-                      size="small"
-                      title="编辑内容"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setEditingSkill(skill.name)
-                        setEditBody(skill.body ?? '')
-                        if (!isExpanded) handleToggleExpand(skill.name)
-                      }}
+                    <Zap
+                      size={16}
+                      style={{ color: 'var(--ant-color-warning)', flexShrink: 0 }}
+                      aria-hidden
                     />
-                    <ActionIcon
-                      icon={Trash2}
-                      size="small"
-                      title="删除"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleDelete(skill.name)
-                      }}
-                    />
-                  </div>
-                  <div style={{ padding: '0 12px 8px', fontSize: 12, opacity: 0.7 }}>
-                    {skill.description.length > 120
-                      ? skill.description.slice(0, 120) + '...'
-                      : skill.description}
-                  </div>
-                  {isExpanded && (
-                    <div
-                      className="content-card__body"
-                      style={{ borderTop: '1px solid var(--ant-color-border-secondary)' }}
-                    >
-                      {isEditing ? (
-                        <Flexbox gap={8}>
-                          <TextArea
-                            value={editBody}
-                            onChange={(e) => setEditBody(e.target.value)}
-                            autoSize={{ minRows: 6, maxRows: 20 }}
-                            placeholder="Skill 指令 (Markdown)"
-                          />
-                          <Flexbox horizontal gap={8}>
-                            <Button
-                              size="small"
-                              type="primary"
-                              onClick={() => handleSaveEdit(skill.name)}
-                            >
-                              保存
-                            </Button>
-                            <Button size="small" onClick={() => setEditingSkill(null)}>
-                              取消
-                            </Button>
-                          </Flexbox>
-                        </Flexbox>
-                      ) : (
-                        <div
-                          style={{
-                            maxHeight: 300,
-                            overflow: 'auto',
-                            fontSize: 13,
-                            lineHeight: 1.6
-                          }}
-                        >
-                          {skill.body ? (
-                            <Markdown>{skill.body}</Markdown>
-                          ) : (
-                            <Text type="secondary" style={{ fontSize: 12 }}>
-                              (无指令内容)
-                            </Text>
-                          )}
-                        </div>
-                      )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="skill-entry-card__title">{skill.name}</div>
+                      <div className="skill-entry-card__desc">{skill.description}</div>
                     </div>
-                  )}
-                </div>
+                    <div className="skill-entry-card__meta">
+                      {skill.source && skill.source !== 'prizm' && (
+                        <Tag size="small" style={{ fontSize: 11 }}>
+                          {skill.source}
+                        </Tag>
+                      )}
+                      {skill.license && (
+                        <Tag size="small" style={{ fontSize: 11 }}>
+                          {skill.license}
+                        </Tag>
+                      )}
+                      <ActionIcon
+                        icon={Edit3}
+                        size="small"
+                        title="编辑内容"
+                        aria-label={`编辑 ${skill.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setEditingSkill(skill.name)
+                          setEditBody(skill.body ?? '')
+                          openDetailPanel(skill.name)
+                        }}
+                      />
+                      <ActionIcon
+                        icon={Trash2}
+                        size="small"
+                        title="删除"
+                        aria-label={`删除 ${skill.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleDelete(skill.name)
+                        }}
+                      />
+                    </div>
+                  </div>
+                </ContentCard>
               )
             })}
-          </Flexbox>
+          </div>
         )}
 
         {/* Create modal */}
@@ -452,6 +595,134 @@ export function SkillsSettings({ http, onLog }: SkillsSettingsProps) {
             />
           </Flexbox>
         </Modal>
+
+        {/* Skill 内容详情：弹出抽屉 */}
+        {detailPanelSkill &&
+          (() => {
+            const skill = skills.find((s) => s.name === detailPanelSkill)
+            if (!skill) return null
+            const isEditing = editingSkill === detailPanelSkill
+            return (
+              <ModalSidebar
+                open={!!detailPanelSkill}
+                onClose={closeDetailPanel}
+                title={
+                  <Flexbox horizontal align="center" gap={8}>
+                    <Zap size={18} style={{ color: 'var(--ant-color-warning)' }} />
+                    {skill.name}
+                  </Flexbox>
+                }
+                width={520}
+                extra={
+                  !isEditing ? (
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<Edit3 size={14} />}
+                      onClick={() => {
+                        setEditingSkill(skill.name)
+                        setEditBody(skill.body ?? '')
+                      }}
+                    >
+                      编辑
+                    </Button>
+                  ) : null
+                }
+                bodyStyle={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  overflow: 'hidden',
+                  padding: 16
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    flex: 1,
+                    minHeight: 0,
+                    gap: 16
+                  }}
+                >
+                  {skill.description && (
+                    <div style={{ flexShrink: 0 }}>
+                      <Text
+                        type="secondary"
+                        style={{ fontSize: 12, display: 'block', marginBottom: 4 }}
+                      >
+                        描述
+                      </Text>
+                      <Text style={{ fontSize: 13, lineHeight: 1.5 }}>{skill.description}</Text>
+                    </div>
+                  )}
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      flex: 1,
+                      minHeight: 0,
+                      overflow: 'hidden'
+                    }}
+                  >
+                    <Text
+                      type="secondary"
+                      style={{ fontSize: 12, display: 'block', marginBottom: 8, flexShrink: 0 }}
+                    >
+                      指令内容
+                    </Text>
+                    {isEditing ? (
+                      <Flexbox gap={12} style={{ flex: 1, minHeight: 0, flexDirection: 'column' }}>
+                        <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+                          <TextArea
+                            value={editBody}
+                            onChange={(e) => setEditBody(e.target.value)}
+                            placeholder="Skill 指令 (Markdown)"
+                            style={{
+                              fontFamily: 'var(--ant-font-family-mono)',
+                              fontSize: 13,
+                              height: '100%',
+                              minHeight: 120
+                            }}
+                          />
+                        </div>
+                        <Flexbox horizontal gap={8} style={{ flexShrink: 0 }}>
+                          <Button
+                            type="primary"
+                            onClick={() => {
+                              handleSaveEdit(skill.name)
+                              setEditingSkill(null)
+                            }}
+                          >
+                            保存
+                          </Button>
+                          <Button onClick={() => setEditingSkill(null)}>取消</Button>
+                        </Flexbox>
+                      </Flexbox>
+                    ) : (
+                      <div
+                        style={{
+                          flex: 1,
+                          minHeight: 0,
+                          padding: 12,
+                          background: 'var(--ant-color-fill-quaternary)',
+                          borderRadius: 8,
+                          fontSize: 13,
+                          lineHeight: 1.6,
+                          overflow: 'auto'
+                        }}
+                      >
+                        {skill.body ? (
+                          <Markdown>{skill.body}</Markdown>
+                        ) : (
+                          <Text type="secondary">(无指令内容)</Text>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </ModalSidebar>
+            )
+          })()}
       </>
     )
   }
@@ -461,167 +732,329 @@ export function SkillsSettings({ http, onLog }: SkillsSettingsProps) {
     const displayItems = searchQuery.trim() ? searchResults : featuredSkills
 
     return (
-      <>
-        <div style={{ marginBottom: 12 }}>
-          <SearchInput
-            onSearch={handleSearch}
-            placeholder="搜索 GitHub 上的 Skills..."
-            loading={searching}
-          />
-        </div>
+      <Flexbox gap={16} style={{ flexDirection: 'column' }}>
+        <ContentCard variant="default" hoverable={false} className="settings-card">
+          <ContentCardHeader>
+            <Flexbox horizontal align="center" gap={8}>
+              <Star size={16} aria-hidden />
+              <span>精选 / 搜索 GitHub</span>
+            </Flexbox>
+          </ContentCardHeader>
+          <ContentCardBody>
+            <p className="form-hint" style={{ marginBottom: 12 }}>
+              精选 Skills 从默认集合仓库动态拉取；输入关键词可搜索 GitHub 上的 Skills。
+            </p>
+            <div style={{ marginBottom: 12 }}>
+              <SearchInput
+                onSearch={handleSearch}
+                placeholder="搜索 GitHub 上的 Skills..."
+                loading={searching}
+              />
+            </div>
+            {searching ? (
+              <Flexbox horizontal align="center" gap={8} style={{ padding: 12 }}>
+                <Spin size="small" />
+                <Text type="secondary">搜索中...</Text>
+              </Flexbox>
+            ) : displayItems.length === 0 ? (
+              <EmptyState
+                icon={Globe}
+                description={searchQuery ? '未找到匹配的 Skills' : '暂无精选数据，请先搜索'}
+              />
+            ) : (
+              <div
+                className="skill-entry-list skill-entry-list--grid"
+                role="list"
+                aria-label="Skills 列表"
+              >
+                {displayItems.map((item) => (
+                  <RegistrySkillCard
+                    key={getItemKey(item)}
+                    item={item}
+                    installed={item.installed ?? installedNames.has(item.name)}
+                    installing={installing === getItemKey(item)}
+                    onInstall={() => handleInstall(item)}
+                    showStars
+                  />
+                ))}
+              </div>
+            )}
+          </ContentCardBody>
+        </ContentCard>
 
-        {!searchQuery.trim() && (
-          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
-            精选 Skills（来自 Anthropic Agent Skills 开放规范）
-          </Text>
-        )}
-
-        {displayItems.length === 0 && !searching ? (
-          <EmptyState
-            icon={Globe}
-            description={searchQuery ? '未找到匹配的 Skills' : '加载中...'}
-          />
-        ) : (
-          <Flexbox gap={6}>
-            {displayItems.map((item) => {
-              const alreadyInstalled = installedNames.has(item.name) || (item as { installed?: boolean }).installed
-              return (
-                <div
-                  key={`${item.owner}/${item.repo}/${item.skillPath}`}
-                  className="content-card content-card--default content-card--hoverable"
-                  style={{ padding: '10px 12px' }}
-                >
-                  <Flexbox horizontal align="center" gap={8}>
-                    <Download
-                      size={14}
-                      style={{ color: 'var(--ant-color-primary)', flexShrink: 0 }}
+        {/* SkillKit 市场（内置源） */}
+        <ContentCard variant="default" hoverable={false} className="settings-card">
+          <ContentCardHeader>
+            <Flexbox horizontal align="center" gap={8}>
+              <Search size={16} aria-hidden />
+              <span>SkillKit 市场（内置源）</span>
+            </Flexbox>
+          </ContentCardHeader>
+          <ContentCardBody>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+              搜索 SkillKit 聚合的 Skills，安装后从 GitHub 拉取 SKILL.md
+              至本地。若默认托管服务不可用，可在本机运行
+              <code style={{ margin: '0 2px' }}>npx skillkit serve</code>
+              并设置环境变量{' '}
+              <code style={{ margin: '0 2px' }}>PRIZM_SKILLKIT_API_URL=http://localhost:3737</code>
+              。
+            </Text>
+            <div style={{ marginBottom: 8 }}>
+              <SearchInput
+                onSearch={handleSearchSkillKit}
+                placeholder="搜索 SkillKit 市场..."
+                loading={searchingSkillkit}
+              />
+            </div>
+            {searchingSkillkit && (
+              <Flexbox horizontal align="center" gap={8} style={{ padding: 8 }}>
+                <Spin size="small" />
+                <Text type="secondary">搜索中...</Text>
+              </Flexbox>
+            )}
+            {skillkitResults.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+                  搜索结果（{skillkitResults.length} 个）
+                </Text>
+                <div className="skill-entry-list skill-entry-list--grid">
+                  {skillkitResults.map((item) => (
+                    <RegistrySkillCard
+                      key={getItemKey(item)}
+                      item={{ ...item, score: (item as { score?: number }).score }}
+                      installed={item.installed ?? installedNames.has(item.name)}
+                      installing={installing === getItemKey(item)}
+                      onInstall={() => handleInstall(item)}
+                      showScore
                     />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 500, fontSize: 13 }}>{item.name}</div>
-                      <div
-                        style={{
-                          fontSize: 12,
-                          opacity: 0.65,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap'
-                        }}
-                      >
-                        {item.description}
-                      </div>
-                    </div>
-                    <Flexbox horizontal gap={6} align="center" style={{ flexShrink: 0 }}>
-                      {item.stars != null && item.stars > 0 && (
-                        <Flexbox
-                          horizontal
-                          gap={2}
-                          align="center"
-                          style={{ fontSize: 11, opacity: 0.6 }}
-                        >
-                          <Star size={11} />
-                          {item.stars >= 1000
-                            ? `${(item.stars / 1000).toFixed(1)}k`
-                            : item.stars}
-                        </Flexbox>
-                      )}
-                      <Text type="secondary" style={{ fontSize: 11 }}>
-                        {item.owner}/{item.repo}
-                      </Text>
-                      {item.htmlUrl && (
-                        <ActionIcon
-                          icon={ExternalLink}
-                          size="small"
-                          title="在 GitHub 上查看"
-                          onClick={() => window.open(item.htmlUrl, '_blank')}
-                        />
-                      )}
-                      {alreadyInstalled ? (
-                        <Tag color="green" style={{ fontSize: 11 }}>
-                          已安装
-                        </Tag>
-                      ) : (
-                        <Button
-                          size="small"
-                          type="primary"
-                          loading={installing === item.name}
-                          onClick={() => handleInstall(item)}
-                        >
-                          安装
-                        </Button>
-                      )}
-                    </Flexbox>
-                  </Flexbox>
+                  ))}
                 </div>
-              )
-            })}
-          </Flexbox>
-        )}
-      </>
+              </div>
+            )}
+          </ContentCardBody>
+        </ContentCard>
+
+        {/* SkillsMP 市场（内置源） */}
+        <ContentCard variant="default" hoverable={false} className="settings-card">
+          <ContentCardHeader>
+            <Flexbox horizontal align="center" gap={8}>
+              <Globe size={16} aria-hidden />
+              <span>SkillsMP 市场（内置源）</span>
+            </Flexbox>
+          </ContentCardHeader>
+          <ContentCardBody>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+              搜索 SkillsMP 聚合的 26 万+ Skills。需在
+              <a
+                href="https://skillsmp.com/auth/login"
+                target="_blank"
+                rel="noreferrer"
+                style={{ margin: '0 4px' }}
+              >
+                skillsmp.com
+              </a>
+              获取 API Key（格式 sk_live_xxx）并保存后即可搜索、一键安装。
+            </Text>
+            <Flexbox horizontal gap={8} align="center" style={{ marginBottom: 12 }}>
+              <Input
+                type="password"
+                size="small"
+                placeholder={skillsmpConfigured ? '已配置，输入新 Key 可覆盖' : 'sk_live_xxx'}
+                value={skillsmpApiKey}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setSkillsmpApiKey(e.target.value)
+                }
+                style={{ flex: 1, maxWidth: 320 }}
+              />
+              <Button
+                size="small"
+                type="primary"
+                loading={savingSkillsmp}
+                onClick={handleSaveSkillsMPApiKey}
+              >
+                保存 API Key
+              </Button>
+            </Flexbox>
+            <div style={{ marginBottom: 8 }}>
+              <SearchInput
+                onSearch={handleSearchSkillsMP}
+                placeholder="搜索 SkillsMP 市场..."
+                loading={searchingSkillsmp}
+              />
+            </div>
+            {searchingSkillsmp && (
+              <Flexbox horizontal align="center" gap={8} style={{ padding: 8 }}>
+                <Spin size="small" />
+                <Text type="secondary">搜索中...</Text>
+              </Flexbox>
+            )}
+            {skillsmpResults.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+                  搜索结果（{skillsmpResults.length} 个）
+                </Text>
+                <div className="skill-entry-list skill-entry-list--grid">
+                  {skillsmpResults.map((item) => (
+                    <RegistrySkillCard
+                      key={getItemKey(item)}
+                      item={item}
+                      installed={item.installed ?? installedNames.has(item.name)}
+                      installing={installing === getItemKey(item)}
+                      onInstall={() => handleInstall(item)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </ContentCardBody>
+        </ContentCard>
+
+        {/* 浏览集合仓库 */}
+        <ContentCard variant="default" hoverable={false} className="settings-card">
+          <ContentCardHeader>
+            <Flexbox horizontal align="center" gap={8}>
+              <BookOpen size={16} aria-hidden />
+              <span>浏览集合仓库</span>
+            </Flexbox>
+          </ContentCardHeader>
+          <ContentCardBody>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+              输入标准 skill 集合仓库的 owner/repo（可选子路径，默认
+              skills），加载后列出该仓库下全部 Skills 并支持一键安装。
+            </Text>
+            <Flexbox horizontal gap={8} style={{ marginBottom: 8 }}>
+              <Input
+                size="small"
+                placeholder="owner/repo，如 anthropics/skills"
+                value={collectionOwnerRepo}
+                onChange={(e) => setCollectionOwnerRepo(e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <Input
+                size="small"
+                placeholder="路径，默认 skills"
+                value={collectionPath}
+                onChange={(e) => setCollectionPath(e.target.value)}
+                style={{ width: 120 }}
+              />
+              <Button
+                size="small"
+                type="primary"
+                loading={loadingCollection}
+                onClick={handleLoadCollection}
+              >
+                加载
+              </Button>
+            </Flexbox>
+            {loadingCollection && (
+              <Flexbox horizontal align="center" gap={8} style={{ padding: 8 }}>
+                <Spin size="small" />
+                <Text type="secondary">加载中...</Text>
+              </Flexbox>
+            )}
+            {collectionSkills.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+                  集合内 Skills（{collectionSkills.length} 个）
+                </Text>
+                <div className="skill-entry-list skill-entry-list--grid">
+                  {collectionSkills.map((item) => (
+                    <RegistrySkillCard
+                      key={getItemKey(item)}
+                      item={item}
+                      installed={item.installed ?? installedNames.has(item.name)}
+                      installing={installing === getItemKey(item)}
+                      onInstall={() => handleInstall(item)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </ContentCardBody>
+        </ContentCard>
+      </Flexbox>
     )
   }
 
   // ---- Render: Import Tab ----
   function renderImport() {
     return (
-      <Flexbox gap={16}>
-        {/* Claude Code import */}
-        <div className="content-card content-card--default" style={{ padding: '12px' }}>
-          <div style={{ fontWeight: 500, marginBottom: 8, fontSize: 13 }}>
-            从 Claude Code 导入
-          </div>
-          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
-            自动扫描 ~/.claude/skills/ 和项目 .claude/skills/ 目录
-          </Text>
-          <Button icon={<Import size={14} />} size="small" onClick={handleImportClaudeCode}>
-            扫描并导入
-          </Button>
-        </div>
-
-        {/* Local directory */}
-        <div className="content-card content-card--default" style={{ padding: '12px' }}>
-          <div style={{ fontWeight: 500, marginBottom: 8, fontSize: 13 }}>从本地目录导入</div>
-          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
-            指定包含 SKILL.md 子目录的本地路径
-          </Text>
-          <Flexbox horizontal gap={8}>
-            <Input
-              size="small"
-              placeholder="目录路径，如 C:\skills 或 /home/user/skills"
-              value={importPath}
-              onChange={(e) => setImportPath(e.target.value)}
-              style={{ flex: 1 }}
-            />
-            <Button size="small" onClick={handleImportPath}>
-              导入
+      <Flexbox gap={16} style={{ flexDirection: 'column' }}>
+        <ContentCard variant="default" hoverable={false} className="settings-card">
+          <ContentCardHeader>
+            <Flexbox horizontal align="center" gap={8}>
+              <Import size={16} aria-hidden />
+              <span>从 Claude Code 导入</span>
+            </Flexbox>
+          </ContentCardHeader>
+          <ContentCardBody>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+              自动扫描 ~/.claude/skills/ 和项目 .claude/skills/ 目录
+            </Text>
+            <Button icon={<Import size={14} />} size="small" onClick={handleImportClaudeCode}>
+              扫描并导入
             </Button>
-          </Flexbox>
-        </div>
+          </ContentCardBody>
+        </ContentCard>
 
-        {/* GitHub URL */}
-        <div className="content-card content-card--default" style={{ padding: '12px' }}>
-          <div style={{ fontWeight: 500, marginBottom: 8, fontSize: 13 }}>从 GitHub 安装</div>
-          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
-            输入仓库路径，如 anthropics/skills/skills/code-review 或完整 GitHub URL
-          </Text>
-          <Flexbox horizontal gap={8}>
-            <Input
-              size="small"
-              placeholder="owner/repo/path 或 GitHub URL"
-              value={ghUrl}
-              onChange={(e) => setGhUrl(e.target.value)}
-              style={{ flex: 1 }}
-            />
-            <Button size="small" onClick={handleImportGitHub}>
-              安装
-            </Button>
-          </Flexbox>
-        </div>
+        <ContentCard variant="default" hoverable={false} className="settings-card">
+          <ContentCardHeader>
+            <Flexbox horizontal align="center" gap={8}>
+              <FolderOpen size={16} aria-hidden />
+              <span>从本地目录导入</span>
+            </Flexbox>
+          </ContentCardHeader>
+          <ContentCardBody>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+              指定包含 SKILL.md 子目录的本地路径
+            </Text>
+            <Flexbox horizontal gap={8}>
+              <Input
+                size="small"
+                placeholder="目录路径，如 C:\skills 或 /home/user/skills"
+                value={importPath}
+                onChange={(e) => setImportPath(e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <Button size="small" onClick={handleImportPath}>
+                导入
+              </Button>
+            </Flexbox>
+          </ContentCardBody>
+        </ContentCard>
+
+        <ContentCard variant="default" hoverable={false} className="settings-card">
+          <ContentCardHeader>
+            <Flexbox horizontal align="center" gap={8}>
+              <Globe size={16} aria-hidden />
+              <span>从标准 skill 仓库安装</span>
+            </Flexbox>
+          </ContentCardHeader>
+          <ContentCardBody>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+              输入 GitHub 仓库路径（含 SKILL.md 的目录），如 anthropics/skills/skills/code-review
+              或完整 URL
+            </Text>
+            <Flexbox horizontal gap={8}>
+              <Input
+                size="small"
+                placeholder="owner/repo/path 或 GitHub URL"
+                value={ghUrl}
+                onChange={(e) => setGhUrl(e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <Button size="small" onClick={handleImportGitHub}>
+                安装
+              </Button>
+            </Flexbox>
+          </ContentCardBody>
+        </ContentCard>
       </Flexbox>
     )
   }
 
   return (
-    <div className="settings-section">
+    <div className="settings-section" role="region" aria-label="技能设置">
       <div className="settings-section-header">
         <h2>Agent Skills</h2>
         <p className="form-hint">
@@ -630,7 +1063,7 @@ export function SkillsSettings({ http, onLog }: SkillsSettingsProps) {
         </p>
       </div>
 
-      <div style={{ marginBottom: 12 }}>
+      <div style={{ marginBottom: 12 }} role="tablist" aria-label="技能已安装、浏览、导入">
         <Segmented
           value={tab}
           onChange={(v) => setTab(v as TabKey)}
@@ -642,9 +1075,21 @@ export function SkillsSettings({ http, onLog }: SkillsSettingsProps) {
         />
       </div>
 
-      {tab === 'installed' && renderInstalled()}
-      {tab === 'browse' && renderBrowse()}
-      {tab === 'import' && renderImport()}
+      {tab === 'installed' && (
+        <div role="tabpanel" id="skills-installed-tabpanel" aria-labelledby="skills-installed-tab">
+          {renderInstalled()}
+        </div>
+      )}
+      {tab === 'browse' && (
+        <div role="tabpanel" id="skills-browse-tabpanel" aria-labelledby="skills-browse-tab">
+          {renderBrowse()}
+        </div>
+      )}
+      {tab === 'import' && (
+        <div role="tabpanel" id="skills-import-tabpanel" aria-labelledby="skills-import-tab">
+          {renderImport()}
+        </div>
+      )}
     </div>
   )
 }

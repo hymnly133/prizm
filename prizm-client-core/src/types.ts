@@ -182,6 +182,9 @@ export interface MemoryInjectedPayload {
   session: import('@prizm/shared').MemoryItem[]
 }
 
+/** 交互类型标识 */
+export type InteractKind = 'file_access' | 'terminal_command' | 'destructive_operation' | 'custom'
+
 /** 交互请求载荷：工具执行需要用户确认时发送 */
 export interface InteractRequestPayload {
   /** 唯一请求 ID，用于回传交互结果 */
@@ -190,8 +193,22 @@ export interface InteractRequestPayload {
   toolCallId: string
   /** 工具名称 */
   toolName: string
-  /** 需要授权的路径列表 */
-  paths: string[]
+  /** 交互类型 */
+  kind: InteractKind
+  /** 需要授权的路径列表 (file_access) */
+  paths?: string[]
+  /** 终端命令 (terminal_command) */
+  command?: string
+  /** 工作目录 (terminal_command) */
+  cwd?: string
+  /** 资源类型 (destructive_operation) */
+  resourceType?: string
+  /** 资源 ID (destructive_operation) */
+  resourceId?: string
+  /** 描述 (destructive_operation / custom) */
+  description?: string
+  /** 标题 (custom) */
+  title?: string
 }
 
 /** 工具调用参数增量载荷 */
@@ -232,6 +249,8 @@ export interface StreamChatOptions {
   cachedContextTurns?: number
   /** 文件路径引用，通过路径引用文件以便 agent 访问 */
   fileRefs?: import('@prizm/shared').FilePathRef[]
+  /** 工作流 run 引用 ID 列表；管理会话下服务端会据此自动 grant 对应 run/步骤工作区路径 */
+  runRefIds?: string[]
   /** 启用深度思考（reasoning / thinking chain） */
   thinking?: boolean
   onChunk?: (chunk: StreamChatChunk) => void

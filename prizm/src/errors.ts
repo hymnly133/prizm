@@ -6,6 +6,7 @@
 export type PrizmErrorCode =
 	| "NOT_FOUND"
 	| "VALIDATION"
+	| "CONFLICT"
 	| "SERVICE_UNAVAILABLE"
 	| "INTERNAL";
 
@@ -48,6 +49,14 @@ export class ValidationError extends PrizmError {
 	constructor(message: string) {
 		super(message, { code: "VALIDATION", httpStatus: 400 });
 		this.name = "ValidationError";
+	}
+}
+
+/** 409 冲突（如同名 skill 已存在） */
+export class ConflictError extends PrizmError {
+	constructor(message: string) {
+		super(message, { code: "CONFLICT", httpStatus: 409 });
+		this.name = "ConflictError";
 	}
 }
 

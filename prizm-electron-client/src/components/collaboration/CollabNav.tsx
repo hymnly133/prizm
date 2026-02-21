@@ -2,7 +2,7 @@
  * CollabNav — left sidebar for the session-first Collaboration page.
  *
  * Top: Session list (interactive sessions + background tasks grouped)
- * Bottom: Quick-access buttons to open Document / Task / Workflow in right panel
+ * Bottom: Quick-access buttons to open Document / Task / Workflow list tabs
  */
 import { memo, useMemo, useCallback } from 'react'
 import { ActionIcon, Icon } from '@lobehub/ui'
@@ -14,16 +14,13 @@ import {
   Plus,
   Zap
 } from 'lucide-react'
-import type { EnrichedSession, EnrichedDocument } from '@prizm/client-core'
-import type { WorkflowRun } from '@prizm/shared'
-import type { RightPanelTab } from './collabTypes'
+import type { EnrichedSession } from '@prizm/client-core'
+import { isChatListSession } from '@prizm/shared'
 import { AccentList } from '../ui/AccentList'
 import { EmptyState } from '../ui/EmptyState'
 import { LoadingPlaceholder } from '../ui/LoadingPlaceholder'
-import { SectionHeader } from '../ui/SectionHeader'
 
 export interface CollabNavProps {
-  /* Session data */
   sessions: EnrichedSession[]
   activeSessionId?: string
   sessionsLoading: boolean
@@ -31,20 +28,22 @@ export interface CollabNavProps {
   onLoadSession: (id: string) => void
   onNewSession: () => void
 
-  /* Background sessions */
   bgSessions: EnrichedSession[]
   bgLoading: boolean
 
-  /* Right panel state */
   rightPanelOpen: boolean
-  rightPanelTab: RightPanelTab
-  onOpenRightPanel: (tab: RightPanelTab) => void
-  onToggleRightPanel: (tab: RightPanelTab) => void
+  /** @deprecated kept for compat — use onToggleRightPanel() without args */
+  rightPanelTab?: string
+  onOpenRightPanel: () => void
+  onToggleRightPanel: () => void
 
-  /* Hub */
   onOpenHub?: () => void
 
-  /* Badge counts */
+  /** When true, show a "总览" entry at top; when active, center shows AgentOverviewPanel. */
+  showOverviewTab?: boolean
+  overviewActive?: boolean
+  onOverviewClick?: () => void
+
   documentCount?: number
   activeTaskCount?: number
   activeWorkflowCount?: number
@@ -60,16 +59,18 @@ export const CollabNav = memo(function CollabNav({
   bgSessions,
   bgLoading,
   rightPanelOpen,
-  rightPanelTab,
   onOpenRightPanel,
   onToggleRightPanel,
   onOpenHub,
+  showOverviewTab,
+  overviewActive,
+  onOverviewClick,
   documentCount,
   activeTaskCount,
   activeWorkflowCount
 }: CollabNavProps) {
   const interactiveSessions = useMemo(
-    () => sessions.filter((s) => s.kind !== 'background'),
+    () => sessions.filter((s) => isChatListSession(s)),
     [sessions]
   )
 
@@ -128,6 +129,17 @@ export const CollabNav = memo(function CollabNav({
     <div className="collab-nav">
       {/* Session list */}
       <div className="collab-nav__sessions">
+        {showOverviewTab && onOverviewClick && (
+          <button
+            type="button"
+            className={`collab-nav__overview-btn${overviewActive ? ' collab-nav__overview-btn--active' : ''}`}
+            onClick={onOverviewClick}
+            title="总览"
+          >
+            <LayoutDashboard size={14} />
+            <span className="collab-nav__overview-btn-label">总览</span>
+          </button>
+        )}
         <div className="collab-nav__sub-header">
           <span className="collab-nav__sub-title">会话</span>
           <ActionIcon icon={Plus} title="新建会话" size="small" onClick={onNewSession} />
@@ -137,7 +149,7 @@ export const CollabNav = memo(function CollabNav({
         ) : interactiveSessions.length === 0 ? (
           <EmptyState description="暂无会话" />
         ) : (
-          <AccentList activeKey={activeSessionId} items={sessionItems} />
+          <AccentList activeKey={overviewActive ? undefined : activeSessionId} items={sessionItems} />
         )}
 
         {/* Background tasks section */}
@@ -157,22 +169,22 @@ export const CollabNav = memo(function CollabNav({
           icon={FileText}
           label="文档"
           count={documentCount}
-          active={rightPanelOpen && rightPanelTab === 'document'}
-          onClick={() => onToggleRightPanel('document')}
+          active={false}
+          onClick={onToggleRightPanel}
         />
         <QuickAccessButton
           icon={Zap}
           label="任务"
           count={activeTaskCount}
-          active={rightPanelOpen && rightPanelTab === 'task'}
-          onClick={() => onToggleRightPanel('task')}
+          active={false}
+          onClick={onToggleRightPanel}
         />
         <QuickAccessButton
           icon={GitBranch}
           label="工作流"
           count={activeWorkflowCount}
-          active={rightPanelOpen && rightPanelTab === 'workflow'}
-          onClick={() => onToggleRightPanel('workflow')}
+          active={false}
+          onClick={onToggleRightPanel}
         />
         {onOpenHub && (
           <button

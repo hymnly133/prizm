@@ -24,6 +24,8 @@ export const ChatInputProvider = memo<ChatInputProviderProps>(
     allowExpand = true,
     scopeItems,
     scopeSlashCommands,
+    initialRunRef,
+    onClearInitialRunRef,
     ...rest
   }) => {
     const editor = useEditor()
@@ -61,6 +63,8 @@ export const ChatInputProvider = memo<ChatInputProviderProps>(
             sendButtonProps={sendButtonProps}
             onMarkdownContentChange={onMarkdownContentChange}
             onSend={onSend}
+            initialRunRef={initialRunRef}
+            onClearInitialRunRef={onClearInitialRunRef}
           />
           {children}
         </Provider>

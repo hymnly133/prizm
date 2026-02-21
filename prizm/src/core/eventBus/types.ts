@@ -332,6 +332,20 @@ export interface WorkflowFailedEvent {
   error: string
 }
 
+/** 工作流定义注册/更新（Tool LLM 确认或 POST /workflow/defs 后触发，用于客户端定义列表热更新） */
+export interface WorkflowDefRegisteredEvent {
+  scope: string
+  defId: string
+  name: string
+}
+
+/** 工作流定义删除（DELETE /workflow/defs/:id 后触发） */
+export interface WorkflowDefDeletedEvent {
+  scope: string
+  defId: string
+  name: string
+}
+
 // ─── 通知事件 ───
 
 export interface NotificationRequestedEvent {
@@ -401,6 +415,8 @@ export interface DomainEventMap {
   'workflow:paused': WorkflowPausedEvent
   'workflow:completed': WorkflowCompletedEvent
   'workflow:failed': WorkflowFailedEvent
+  'workflow:def.registered': WorkflowDefRegisteredEvent
+  'workflow:def.deleted': WorkflowDefDeletedEvent
 
   // Notification
   'notification:requested': NotificationRequestedEvent

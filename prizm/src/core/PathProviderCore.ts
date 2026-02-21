@@ -33,6 +33,7 @@ const WORKFLOW_META_DIR = '.meta'
 const WORKFLOW_RUNS_DIR = 'runs'
 const WORKFLOW_DEF_FILE = 'workflow.yaml'
 const WORKFLOW_DEF_META_FILE = 'def.json'
+const WORKFLOW_VERSIONS_DIR = 'versions'
 const WORKFLOW_PERSISTENT_WORKSPACE_DIR = 'workspace'
 const WORKFLOW_RUN_WORKSPACES_DIR = 'run-workspaces'
 
@@ -197,7 +198,18 @@ export function getWorkflowDefMetaPath(scopeRoot: string, workflowName: string):
   return path.join(getWorkflowWorkspaceDir(scopeRoot, workflowName), WORKFLOW_META_DIR, WORKFLOW_DEF_META_FILE)
 }
 
-/** 确保 workflow 工作区、workspace/（持久工作空间）及 .meta/runs/ 目录存在 */
+/** {workflowWorkspace}/.meta/versions/ — 流水线版本快照目录 */
+export function getWorkflowDefVersionsDir(scopeRoot: string, workflowName: string): string {
+  return path.join(getWorkflowWorkspaceDir(scopeRoot, workflowName), WORKFLOW_META_DIR, WORKFLOW_VERSIONS_DIR)
+}
+
+/** {workflowWorkspace}/.meta/versions/{versionId}.yaml — 单版本快照文件（versionId 为时间戳） */
+export function getWorkflowDefVersionPath(scopeRoot: string, workflowName: string, versionId: string): string {
+  const safe = versionId.replace(/[^a-zA-Z0-9_-]/g, '_') || 'unknown'
+  return path.join(getWorkflowDefVersionsDir(scopeRoot, workflowName), `${safe}.yaml`)
+}
+
+/** 确保 workflow 工作区、workspace/（工作流工作区）及 .meta/runs/ 目录存在 */
 export function ensureWorkflowWorkspace(scopeRoot: string, workflowName: string): string {
   const wsDir = getWorkflowWorkspaceDir(scopeRoot, workflowName)
   if (!fs.existsSync(wsDir)) {
@@ -214,7 +226,7 @@ export function ensureWorkflowWorkspace(scopeRoot: string, workflowName: string)
   return wsDir
 }
 
-/** {workflowWorkspace}/workspace/ — Workflow 级持久工作空间（跨 run 共享） */
+/** {workflowWorkspace}/workspace/ — 工作流工作区（跨 run 共享） */
 export function getWorkflowPersistentWorkspace(scopeRoot: string, workflowName: string): string {
   return path.join(getWorkflowWorkspaceDir(scopeRoot, workflowName), WORKFLOW_PERSISTENT_WORKSPACE_DIR)
 }
@@ -230,7 +242,7 @@ export function getWorkflowRunWorkspace(scopeRoot: string, workflowName: string,
   return path.join(getWorkflowRunWorkspacesDir(scopeRoot, workflowName), safeId)
 }
 
-/** 确保持久工作空间和 Run 工作空间目录存在，返回 { persistentDir, runDir } */
+/** 确保工作流工作区和运行工作区目录存在，返回 { persistentDir, runDir } */
 export function ensureRunWorkspace(
   scopeRoot: string,
   workflowName: string,

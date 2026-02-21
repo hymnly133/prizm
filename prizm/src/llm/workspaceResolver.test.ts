@@ -3,10 +3,10 @@
  *
  * 覆盖：
  * - createWorkspaceContext 各参数组合
- * - resolvePath 绝对路径匹配（workflow > session > main > granted）
- * - resolvePath 相对路径 + wsArg 组合（workflow / session / 默认）
+ * - resolvePath 绝对路径匹配（run > workflow > session > main > granted）
+ * - resolvePath 相对路径 + wsArg 组合（run / workflow / session / 默认）
  * - resolvePath 越界路径 → null
- * - resolvePath 默认 workflow 优先
+ * - resolvePath 默认 run 优先
  * - resolveFolder 绝对 / 相对 / 空字符串
  * - resolveWorkspaceType 各 wsArg 场景
  * - wsTypeLabel 返回正确标签
@@ -37,7 +37,8 @@ import * as mdStore from '../core/mdStore'
 
 const SCOPE_ROOT = path.resolve('/project/myapp')
 const SESSION_WS = path.resolve('/project/myapp/.prizm/agent-sessions/sess-1/workspace')
-const WORKFLOW_WS = path.resolve('/project/myapp/.prizm/workflows/daily-report')
+const RUN_WS = path.resolve('/project/myapp/.prizm/workflows/daily-report/run-workspaces/run-1')
+const WORKFLOW_WS = path.resolve('/project/myapp/.prizm/workflows/daily-report/workspace')
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -48,6 +49,7 @@ describe('createWorkspaceContext', () => {
     const ctx = createWorkspaceContext(SCOPE_ROOT)
     expect(ctx.scopeRoot).toBe(SCOPE_ROOT)
     expect(ctx.sessionWorkspaceRoot).toBeNull()
+    expect(ctx.runWorkspaceRoot).toBeNull()
     expect(ctx.workflowWorkspaceRoot).toBeNull()
     expect(ctx.sessionId).toBeNull()
   })
@@ -58,16 +60,22 @@ describe('createWorkspaceContext', () => {
     expect(ctx.sessionWorkspaceRoot).toBeTruthy()
   })
 
-  it('带 workflowWorkspaceDir', () => {
-    const ctx = createWorkspaceContext(SCOPE_ROOT, 'sess-1', WORKFLOW_WS)
-    expect(ctx.workflowWorkspaceRoot).toBe(WORKFLOW_WS)
+  it('带 runWorkspaceDir', () => {
+    const ctx = createWorkspaceContext(SCOPE_ROOT, 'sess-1', RUN_WS)
+    expect(ctx.runWorkspaceRoot).toBe(RUN_WS)
   })
 
-  it('无 sessionId 但有 workflowWorkspaceDir', () => {
-    const ctx = createWorkspaceContext(SCOPE_ROOT, undefined, WORKFLOW_WS)
+  it('无 sessionId 但有 runWorkspaceDir', () => {
+    const ctx = createWorkspaceContext(SCOPE_ROOT, undefined, RUN_WS)
     expect(ctx.sessionId).toBeNull()
     expect(ctx.sessionWorkspaceRoot).toBeNull()
+    expect(ctx.runWorkspaceRoot).toBe(RUN_WS)
+  })
+
+  it('带 workflowWorkspaceDir', () => {
+    const ctx = createWorkspaceContext(SCOPE_ROOT, 'sess-1', RUN_WS, WORKFLOW_WS)
     expect(ctx.workflowWorkspaceRoot).toBe(WORKFLOW_WS)
+    expect(ctx.runWorkspaceRoot).toBe(RUN_WS)
   })
 })
 
@@ -76,29 +84,41 @@ describe('resolvePath — 绝对路径', () => {
     return {
       scopeRoot: SCOPE_ROOT,
       sessionWorkspaceRoot: SESSION_WS,
+      runWorkspaceRoot: RUN_WS,
       workflowWorkspaceRoot: WORKFLOW_WS,
       sessionId: 'sess-1'
     }
   }
 
-  it('workflow 工作区内绝对路径 → workflow', () => {
+  it('运行工作区内绝对路径 → run', () => {
     const ctx = makeCtx()
-    const filePath = path.join(WORKFLOW_WS, 'data', 'output.csv')
+    const filePath = path.join(RUN_WS, 'data', 'output.csv')
+    const result = resolvePath(ctx, filePath)
+
+    expect(result).not.toBeNull()
+    expect(result!.wsType).toBe('run')
+    expect(result!.fileRoot).toBe(RUN_WS)
+    expect(result!.relativePath).toBe(path.join('data', 'output.csv'))
+  })
+
+  it('运行工作区根路径本身 → run', () => {
+    const ctx = makeCtx()
+    const result = resolvePath(ctx, RUN_WS)
+
+    expect(result).not.toBeNull()
+    expect(result!.wsType).toBe('run')
+    expect(result!.relativePath).toBe('')
+  })
+
+  it('工作流工作区内绝对路径 → workflow', () => {
+    const ctx = makeCtx()
+    const filePath = path.join(WORKFLOW_WS, 'notes', 'requirements.md')
     const result = resolvePath(ctx, filePath)
 
     expect(result).not.toBeNull()
     expect(result!.wsType).toBe('workflow')
     expect(result!.fileRoot).toBe(WORKFLOW_WS)
-    expect(result!.relativePath).toBe(path.join('data', 'output.csv'))
-  })
-
-  it('workflow 工作区根路径本身 → workflow', () => {
-    const ctx = makeCtx()
-    const result = resolvePath(ctx, WORKFLOW_WS)
-
-    expect(result).not.toBeNull()
-    expect(result!.wsType).toBe('workflow')
-    expect(result!.relativePath).toBe('')
+    expect(result!.relativePath).toBe(path.join('notes', 'requirements.md'))
   })
 
   it('session 工作区内绝对路径 → session', () => {
@@ -122,12 +142,12 @@ describe('resolvePath — 绝对路径', () => {
     expect(result!.relativePath).toBe(path.join('src', 'index.ts'))
   })
 
-  it('workflow 优先于 main（workflow 在 main 内部时）', () => {
+  it('run 优先于 main（run 在 main 内部时）', () => {
     const ctx = makeCtx()
-    const filePath = path.join(WORKFLOW_WS, 'report.md')
+    const filePath = path.join(RUN_WS, 'report.md')
     const result = resolvePath(ctx, filePath)
 
-    expect(result!.wsType).toBe('workflow')
+    expect(result!.wsType).toBe('run')
   })
 
   it('授权路径内 → granted', () => {
@@ -146,10 +166,11 @@ describe('resolvePath — 绝对路径', () => {
     expect(result).toBeNull()
   })
 
-  it('无 workflow 工作区时不匹配 workflow', () => {
+  it('无运行工作区时不匹配 run', () => {
     const ctx: WorkspaceContext = {
       scopeRoot: SCOPE_ROOT,
       sessionWorkspaceRoot: SESSION_WS,
+      runWorkspaceRoot: null,
       workflowWorkspaceRoot: null,
       sessionId: 'sess-1'
     }
@@ -162,18 +183,47 @@ describe('resolvePath — 绝对路径', () => {
 })
 
 describe('resolvePath — 相对路径', () => {
-  it('wsArg=workflow → workflow 工作区', () => {
+  it('wsArg=workflow → 工作流工作区', () => {
     const ctx: WorkspaceContext = {
       scopeRoot: SCOPE_ROOT,
       sessionWorkspaceRoot: SESSION_WS,
+      runWorkspaceRoot: RUN_WS,
       workflowWorkspaceRoot: WORKFLOW_WS,
       sessionId: 'sess-1'
     }
-    const result = resolvePath(ctx, 'data/output.csv', 'workflow')
+    const result = resolvePath(ctx, 'notes/req.md', 'workflow')
 
     expect(result).not.toBeNull()
     expect(result!.wsType).toBe('workflow')
     expect(result!.fileRoot).toBe(WORKFLOW_WS)
+    expect(result!.relativePath).toBe('notes/req.md')
+  })
+
+  it('wsArg=workflow 但无 workflowWorkspaceRoot → 回退 run 或 main', () => {
+    const ctx: WorkspaceContext = {
+      scopeRoot: SCOPE_ROOT,
+      sessionWorkspaceRoot: null,
+      runWorkspaceRoot: null,
+      workflowWorkspaceRoot: null,
+      sessionId: null
+    }
+    const result = resolvePath(ctx, 'data.csv', 'workflow')
+    expect(result!.wsType).toBe('main')
+  })
+
+  it('wsArg=run → 运行工作区', () => {
+    const ctx: WorkspaceContext = {
+      scopeRoot: SCOPE_ROOT,
+      sessionWorkspaceRoot: SESSION_WS,
+      runWorkspaceRoot: RUN_WS,
+      workflowWorkspaceRoot: WORKFLOW_WS,
+      sessionId: 'sess-1'
+    }
+    const result = resolvePath(ctx, 'data/output.csv', 'run')
+
+    expect(result).not.toBeNull()
+    expect(result!.wsType).toBe('run')
+    expect(result!.fileRoot).toBe(RUN_WS)
     expect(result!.relativePath).toBe('data/output.csv')
   })
 
@@ -181,6 +231,7 @@ describe('resolvePath — 相对路径', () => {
     const ctx: WorkspaceContext = {
       scopeRoot: SCOPE_ROOT,
       sessionWorkspaceRoot: SESSION_WS,
+      runWorkspaceRoot: RUN_WS,
       workflowWorkspaceRoot: WORKFLOW_WS,
       sessionId: 'sess-1'
     }
@@ -191,22 +242,24 @@ describe('resolvePath — 相对路径', () => {
     expect(mdStore.ensureSessionWorkspace).toHaveBeenCalled()
   })
 
-  it('无 wsArg + 有 workflow 工作区 → 默认 workflow', () => {
+  it('无 wsArg + 有运行工作区 → 默认 run', () => {
     const ctx: WorkspaceContext = {
       scopeRoot: SCOPE_ROOT,
       sessionWorkspaceRoot: SESSION_WS,
+      runWorkspaceRoot: RUN_WS,
       workflowWorkspaceRoot: WORKFLOW_WS,
       sessionId: 'sess-1'
     }
     const result = resolvePath(ctx, 'report.md')
 
-    expect(result!.wsType).toBe('workflow')
+    expect(result!.wsType).toBe('run')
   })
 
-  it('无 wsArg + 无 workflow 工作区 → 默认 main', () => {
+  it('无 wsArg + 无运行工作区 → 默认 main', () => {
     const ctx: WorkspaceContext = {
       scopeRoot: SCOPE_ROOT,
       sessionWorkspaceRoot: SESSION_WS,
+      runWorkspaceRoot: null,
       workflowWorkspaceRoot: null,
       sessionId: 'sess-1'
     }
@@ -216,31 +269,33 @@ describe('resolvePath — 相对路径', () => {
     expect(result!.fileRoot).toBe(SCOPE_ROOT)
   })
 
-  it('wsArg=workflow 但无 workflow 工作区 → 回退 main', () => {
+  it('wsArg=run 但无 runWorkspaceRoot → 回退 main', () => {
     const ctx: WorkspaceContext = {
       scopeRoot: SCOPE_ROOT,
       sessionWorkspaceRoot: null,
+      runWorkspaceRoot: null,
       workflowWorkspaceRoot: null,
       sessionId: null
     }
-    const result = resolvePath(ctx, 'data.csv', 'workflow')
+    const result = resolvePath(ctx, 'data.csv', 'run')
 
     expect(result!.wsType).toBe('main')
   })
 })
 
 describe('resolveFolder', () => {
-  it('空字符串 + 有 workflow → 默认 workflow', () => {
+  it('空字符串 + 有运行工作区 → 默认 run', () => {
     const ctx: WorkspaceContext = {
       scopeRoot: SCOPE_ROOT,
       sessionWorkspaceRoot: SESSION_WS,
+      runWorkspaceRoot: RUN_WS,
       workflowWorkspaceRoot: WORKFLOW_WS,
       sessionId: 'sess-1'
     }
     const result = resolveFolder(ctx, '', undefined)
 
     expect(result).not.toBeNull()
-    expect(result!.wsType).toBe('workflow')
+    expect(result!.wsType).toBe('run')
     expect(result!.folder).toBe('')
   })
 
@@ -248,6 +303,7 @@ describe('resolveFolder', () => {
     const ctx: WorkspaceContext = {
       scopeRoot: SCOPE_ROOT,
       sessionWorkspaceRoot: SESSION_WS,
+      runWorkspaceRoot: RUN_WS,
       workflowWorkspaceRoot: WORKFLOW_WS,
       sessionId: 'sess-1'
     }
@@ -257,10 +313,26 @@ describe('resolveFolder', () => {
     expect(mdStore.ensureSessionWorkspace).toHaveBeenCalled()
   })
 
+  it('空字符串 + wsArg=workflow → workflow', () => {
+    const ctx: WorkspaceContext = {
+      scopeRoot: SCOPE_ROOT,
+      sessionWorkspaceRoot: SESSION_WS,
+      runWorkspaceRoot: RUN_WS,
+      workflowWorkspaceRoot: WORKFLOW_WS,
+      sessionId: 'sess-1'
+    }
+    const result = resolveFolder(ctx, '', 'workflow')
+
+    expect(result).not.toBeNull()
+    expect(result!.wsType).toBe('workflow')
+    expect(result!.folder).toBe('')
+  })
+
   it('相对路径 → 保持原值', () => {
     const ctx: WorkspaceContext = {
       scopeRoot: SCOPE_ROOT,
       sessionWorkspaceRoot: null,
+      runWorkspaceRoot: null,
       workflowWorkspaceRoot: null,
       sessionId: null
     }
@@ -275,6 +347,7 @@ describe('resolveFolder', () => {
     const ctx: WorkspaceContext = {
       scopeRoot: SCOPE_ROOT,
       sessionWorkspaceRoot: null,
+      runWorkspaceRoot: null,
       workflowWorkspaceRoot: null,
       sessionId: null
     }
@@ -286,6 +359,7 @@ describe('resolveFolder', () => {
     const ctx: WorkspaceContext = {
       scopeRoot: SCOPE_ROOT,
       sessionWorkspaceRoot: null,
+      runWorkspaceRoot: null,
       workflowWorkspaceRoot: null,
       sessionId: null
     }
@@ -300,6 +374,7 @@ describe('resolveFolder', () => {
     const ctx: WorkspaceContext = {
       scopeRoot: SCOPE_ROOT,
       sessionWorkspaceRoot: null,
+      runWorkspaceRoot: null,
       workflowWorkspaceRoot: null,
       sessionId: null
     }
@@ -311,6 +386,7 @@ describe('resolveFolder', () => {
     const ctx: WorkspaceContext = {
       scopeRoot: SCOPE_ROOT,
       sessionWorkspaceRoot: null,
+      runWorkspaceRoot: null,
       workflowWorkspaceRoot: null,
       sessionId: null
     }
@@ -325,6 +401,7 @@ describe('resolveWorkspaceType', () => {
     const ctx: WorkspaceContext = {
       scopeRoot: SCOPE_ROOT,
       sessionWorkspaceRoot: null,
+      runWorkspaceRoot: RUN_WS,
       workflowWorkspaceRoot: WORKFLOW_WS,
       sessionId: null
     }
@@ -333,10 +410,36 @@ describe('resolveWorkspaceType', () => {
     expect(result.root).toBe(WORKFLOW_WS)
   })
 
+  it('wsArg=workflow + 无 workflowWorkspaceRoot → main', () => {
+    const ctx: WorkspaceContext = {
+      scopeRoot: SCOPE_ROOT,
+      sessionWorkspaceRoot: null,
+      runWorkspaceRoot: null,
+      workflowWorkspaceRoot: null,
+      sessionId: null
+    }
+    const result = resolveWorkspaceType(ctx, 'workflow')
+    expect(result.wsType).toBe('main')
+  })
+
+  it('wsArg=run + 有 runWorkspaceRoot → run', () => {
+    const ctx: WorkspaceContext = {
+      scopeRoot: SCOPE_ROOT,
+      sessionWorkspaceRoot: null,
+      runWorkspaceRoot: RUN_WS,
+      workflowWorkspaceRoot: WORKFLOW_WS,
+      sessionId: null
+    }
+    const result = resolveWorkspaceType(ctx, 'run')
+    expect(result.wsType).toBe('run')
+    expect(result.root).toBe(RUN_WS)
+  })
+
   it('wsArg=session + 有 session → session', () => {
     const ctx: WorkspaceContext = {
       scopeRoot: SCOPE_ROOT,
       sessionWorkspaceRoot: SESSION_WS,
+      runWorkspaceRoot: null,
       workflowWorkspaceRoot: null,
       sessionId: 'sess-1'
     }
@@ -345,21 +448,23 @@ describe('resolveWorkspaceType', () => {
     expect(result.root).toBe(SESSION_WS)
   })
 
-  it('无 wsArg + 有 workflowWorkspaceRoot → workflow（默认优先）', () => {
+  it('无 wsArg + 有 runWorkspaceRoot → run（默认优先）', () => {
     const ctx: WorkspaceContext = {
       scopeRoot: SCOPE_ROOT,
       sessionWorkspaceRoot: SESSION_WS,
+      runWorkspaceRoot: RUN_WS,
       workflowWorkspaceRoot: WORKFLOW_WS,
       sessionId: 'sess-1'
     }
     const result = resolveWorkspaceType(ctx, undefined)
-    expect(result.wsType).toBe('workflow')
+    expect(result.wsType).toBe('run')
   })
 
-  it('无 wsArg + 无 workflow → main', () => {
+  it('无 wsArg + 无 run → main', () => {
     const ctx: WorkspaceContext = {
       scopeRoot: SCOPE_ROOT,
       sessionWorkspaceRoot: SESSION_WS,
+      runWorkspaceRoot: null,
       workflowWorkspaceRoot: null,
       sessionId: 'sess-1'
     }
@@ -368,14 +473,15 @@ describe('resolveWorkspaceType', () => {
     expect(result.root).toBe(SCOPE_ROOT)
   })
 
-  it('wsArg=workflow + 无 workflowWorkspaceRoot → main', () => {
+  it('wsArg=run + 无 runWorkspaceRoot → main', () => {
     const ctx: WorkspaceContext = {
       scopeRoot: SCOPE_ROOT,
       sessionWorkspaceRoot: null,
+      runWorkspaceRoot: null,
       workflowWorkspaceRoot: null,
       sessionId: null
     }
-    const result = resolveWorkspaceType(ctx, 'workflow')
+    const result = resolveWorkspaceType(ctx, 'run')
     expect(result.wsType).toBe('main')
   })
 
@@ -383,6 +489,7 @@ describe('resolveWorkspaceType', () => {
     const ctx: WorkspaceContext = {
       scopeRoot: SCOPE_ROOT,
       sessionWorkspaceRoot: null,
+      runWorkspaceRoot: null,
       workflowWorkspaceRoot: null,
       sessionId: null
     }
@@ -392,6 +499,10 @@ describe('resolveWorkspaceType', () => {
 })
 
 describe('wsTypeLabel', () => {
+  it('run → 运行工作区', () => {
+    expect(wsTypeLabel('run')).toContain('运行工作区')
+  })
+
   it('workflow → 工作流工作区', () => {
     expect(wsTypeLabel('workflow')).toContain('工作流工作区')
   })

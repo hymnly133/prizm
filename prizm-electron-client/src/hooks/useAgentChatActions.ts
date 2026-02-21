@@ -14,7 +14,12 @@ export interface UseAgentChatActionsOptions {
   currentSession: EnrichedSession | null
   sending: boolean
   createSession: () => Promise<EnrichedSession | null>
-  sendMessage: (content: string, session?: EnrichedSession | null, fileRefs?: FilePathRef[]) => Promise<unknown>
+  sendMessage: (
+    content: string,
+    session?: EnrichedSession | null,
+    fileRefs?: FilePathRef[],
+    runRefIds?: string[]
+  ) => Promise<unknown>
   stopGeneration: () => Promise<void>
   setCurrentSession: (session: EnrichedSession | null) => void
   /**
@@ -85,11 +90,17 @@ export function useAgentChatActions(options: UseAgentChatActionsOptions) {
           path: r.key.replace(/%29/g, ')'),
           name: r.label
         }))
+      const runRefIds = refs.filter((r) => r.type === 'run').map((r) => r.key)
 
       draftCache.delete(DRAFT_KEY_NEW)
       if (session) draftCache.delete(session.id)
       clearContent()
-      await sendMessage(combined, session, fileRefs.length > 0 ? fileRefs : undefined)
+      await sendMessage(
+        combined,
+        session,
+        fileRefs.length > 0 ? fileRefs : undefined,
+        runRefIds?.length ? runRefIds : undefined
+      )
       onAfterSend?.()
     },
     [createSession, sendMessage, shouldCreateNewSession, onBeforeCreateSession, onAfterSend]

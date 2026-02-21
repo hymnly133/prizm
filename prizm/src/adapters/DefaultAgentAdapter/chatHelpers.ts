@@ -7,12 +7,14 @@ export const TOOL_RESULT_CHUNK_SIZE = 200
 export const TOOL_PROGRESS_THRESHOLD_MS = 3000
 export const TOOL_PROGRESS_INTERVAL_MS = 3000
 
+import type { InteractDetails } from '../../core/toolPermission/types'
+
 export interface ExecResult {
   tc: { id: string; name: string; arguments: string }
   text: string
   isError: boolean
   needsInteract?: boolean
-  interactPaths?: string[]
+  interactDetails?: InteractDetails
   parsedArgs?: Record<string, unknown>
   durationMs?: number
 }

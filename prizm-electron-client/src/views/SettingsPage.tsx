@@ -13,10 +13,9 @@ import {
   neutralColorsSwatches
 } from '@lobehub/ui'
 import { Segmented } from '../components/ui/Segmented'
-import { McpSettings } from '../components/McpSettings'
+import { SkillsAndMcpSettings } from '../components/SkillsAndMcpSettings'
 import { AgentGeneralSettings } from '../components/AgentGeneralSettings'
 import { CommandsSettings } from '../components/CommandsSettings'
-import { SkillsSettings } from '../components/SkillsSettings'
 import { AgentRulesSettings } from '../components/AgentRulesSettings'
 import { ScopeManagement } from '../components/ScopeManagement'
 import { EmbeddingStatus } from '../components/EmbeddingStatus'
@@ -32,7 +31,6 @@ import {
   FolderOpen,
   Bot,
   Cpu,
-  Plug,
   Terminal as TerminalIcon,
   Sparkles,
   ScrollText,
@@ -47,9 +45,8 @@ type SettingsCategory =
   | 'scope'
   | 'agent'
   | 'embedding'
-  | 'mcp'
+  | 'skillsAndMcp'
   | 'commands'
-  | 'skills'
   | 'rules'
   | 'actions'
 
@@ -67,9 +64,8 @@ const CATEGORIES: CategoryItem[] = [
   { key: 'scope', label: '工作区', icon: <FolderOpen size={16} />, requiresAuth: true },
   { key: 'agent', label: 'Agent', icon: <Bot size={16} />, requiresAuth: true },
   { key: 'embedding', label: '模型', icon: <Cpu size={16} />, requiresAuth: true },
-  { key: 'mcp', label: 'MCP', icon: <Plug size={16} />, requiresAuth: true },
+  { key: 'skillsAndMcp', label: '技能与 MCP', icon: <Sparkles size={16} />, requiresAuth: true },
   { key: 'commands', label: '命令', icon: <TerminalIcon size={16} />, requiresAuth: true },
-  { key: 'skills', label: '技能', icon: <Sparkles size={16} />, requiresAuth: true },
   { key: 'rules', label: '规则', icon: <ScrollText size={16} />, requiresAuth: true },
   { key: 'actions', label: '快捷操作', icon: <Zap size={16} /> }
 ]
@@ -452,14 +448,11 @@ function SettingsPage() {
       case 'embedding':
         return <EmbeddingStatus http={manager?.getHttpClient() ?? null} onLog={addLog} />
 
-      case 'mcp':
-        return <McpSettings http={manager?.getHttpClient() ?? null} onLog={addLog} />
+      case 'skillsAndMcp':
+        return <SkillsAndMcpSettings http={manager?.getHttpClient() ?? null} onLog={addLog} />
 
       case 'commands':
         return <CommandsSettings http={manager?.getHttpClient() ?? null} onLog={addLog} />
-
-      case 'skills':
-        return <SkillsSettings http={manager?.getHttpClient() ?? null} onLog={addLog} />
 
       case 'rules':
         return <AgentRulesSettings http={manager?.getHttpClient() ?? null} onLog={addLog} />

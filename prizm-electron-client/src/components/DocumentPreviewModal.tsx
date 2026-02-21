@@ -1,13 +1,15 @@
 /**
  * DocumentPreviewModal - 文档只读预览模态
- * 点击卡片弹出，Markdown 渲染预览，底部提供编辑跳转按钮
+ * 点击卡片弹出，Markdown 渲染预览，支持点击图片放大；底部提供编辑跳转按钮
  */
-import { useState, useEffect, useRef, memo } from 'react'
-import { Button, Flexbox, Markdown, Skeleton, Tag } from '@lobehub/ui'
+import { useState, useEffect, useRef, memo, useCallback } from 'react'
+import { Button, Flexbox, Skeleton, Tag } from '@lobehub/ui'
+import { PrizmMarkdown as Markdown } from './agent/PrizmMarkdown'
 import { Modal } from 'antd'
 import { Icon } from '@lobehub/ui'
 import { FileText, Pencil } from 'lucide-react'
 import { usePrizmContext } from '../context/PrizmContext'
+import ImagePreviewModal from './ImagePreviewModal'
 import type { Document as PrizmDocument } from '@prizm/client-core'
 
 export interface DocumentPreviewModalProps {
@@ -71,6 +73,9 @@ function DocumentPreviewModal({
     }
   }
 
+  const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null)
+  const handleImageClick = useCallback((src: string) => setPreviewImageSrc(src), [])
+
   return (
     <Modal
       destroyOnHidden
@@ -122,7 +127,7 @@ function DocumentPreviewModal({
             )}
             <div className="doc-preview-modal__content">
               {doc.content ? (
-                <Markdown>{doc.content}</Markdown>
+                <Markdown onImageClick={handleImageClick}>{doc.content}</Markdown>
               ) : (
                 <div
                   style={{
@@ -138,6 +143,13 @@ function DocumentPreviewModal({
           </>
         )}
       </div>
+
+      <ImagePreviewModal
+        open={!!previewImageSrc}
+        src={previewImageSrc}
+        title="图片预览"
+        onClose={() => setPreviewImageSrc(null)}
+      />
     </Modal>
   )
 }

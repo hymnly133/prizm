@@ -38,12 +38,19 @@ import { AgentDetailSidebar } from '../components/agent/AgentDetailSidebar'
 import { AgentChatZone } from '../components/agent/AgentChatZone'
 import { CodeViewerPanel } from '../components/agent/CodeViewerPanel'
 import { setSkipNextDraftRestore } from '../components/agent/chatMessageAdapter'
-import { DocumentPane } from '../components/collaboration'
+import { DocumentPane, UnifiedRightPanel } from '../components/collaboration'
 import { useDocumentNavigation } from '../context/NavigationContext'
+import { useCollabTabStore } from '../store/collabTabStore'
+import { CollabInteractionContext, useCollabInteractionValue } from '../hooks/useCollabInteraction'
+import { DocumentToolCardsConnector } from '../components/agent/DocumentToolCards'
+import { WorkflowToolCardsConnector } from '../components/agent/WorkflowToolCards'
 import { panelCrossfade, panelCrossfadeTransition } from '../theme/motionPresets'
 import '../components/agent/TerminalToolCards'
 import '../components/agent/TaskToolCards'
 import { TaskToolCardsConnector } from '../components/agent/TaskToolCards'
+import '../components/agent/DocumentToolCards'
+import '../components/agent/WorkflowToolCards'
+import '../components/agent/WorkflowBuilderCard'
 
 const LEFT_ACTIONS: ActionKeys[] = ['fileUpload', 'thinking', 'toolCompact', 'skills', 'clear']
 const RIGHT_ACTIONS: ActionKeys[] = []
@@ -251,6 +258,17 @@ function AgentPage() {
 
   const [leftCollapsed, setLeftCollapsed] = useState(false)
   const [rightCollapsed, setRightCollapsed] = useState(false)
+  /** 右侧实体标签面板（文档/任务/工作流）是否展开；为 true 时显示 RightDrawerPanel，否则显示 AgentDetailSidebar */
+  const [rightPanelOpen, setRightPanelOpen] = useState(false)
+
+  const openRightPanel = useCallback(() => setRightPanelOpen(true), [])
+  const closeRightPanel = useCallback(() => setRightPanelOpen(false), [])
+
+  const openTabAction = useCollabTabStore((s) => s.openTab)
+  const ensureTabsLoaded = useCollabTabStore((s) => s.ensureLoaded)
+  useEffect(() => {
+    ensureTabsLoaded(currentSession?.id ?? null)
+  }, [currentSession?.id, ensureTabsLoaded])
 
   const headerSlots = useMemo(
     () => ({
@@ -374,6 +392,17 @@ function AgentPage() {
     setCurrentSession(null)
   }, [setCurrentSession])
 
+  const interactionAPI = useCollabInteractionValue({
+    openTab: (sessionId, tab) => {
+      openTabAction(sessionId, tab)
+      openRightPanel()
+    },
+    closeRightPanel,
+    openRightPanel,
+    loadSession: handleLoadSession,
+    getCurrentSessionId: () => currentSessionRef.current?.id ?? null
+  })
+
   const _hooksEnd = performance.now()
   if (_hooksEnd - _renderStart > 3) {
     console.debug(
@@ -384,149 +413,59 @@ function AgentPage() {
 
   return (
     <SelectionRefProvider>
-      <TaskToolCardsConnector />
-      <section className="agent-page">
-        {/* Left: session list */}
-        <Profiler id="SessionList" onRender={_profilerCallback}>
-          <ResizableSidebar
-            side="left"
-            storageKey="agent-sessions"
-            defaultWidth={220}
-            collapsed={leftCollapsed}
-            onCollapsedChange={setLeftCollapsed}
-          >
-            <AgentSessionList
-              sessions={sessions}
-              activeSessionId={activeSessionId}
-              loading={loading}
-              pendingInteractSessionIds={pendingInteractSessionIds}
-              onDeleteSession={deleteSession}
-              onLoadSession={handleLoadSession}
-              onNewSession={handleNewSession}
-              showOverviewTab
-              overviewActive={overviewMode}
-              onOverviewClick={() => setOverviewMode(true)}
-            />
-          </ResizableSidebar>
-        </Profiler>
-
-        {/* Center: chat content */}
-        <WorkNavigationOverrideProvider value={workNavValue}>
-          <Profiler id="ChatInputProvider" onRender={_profilerCallback}>
-            <ChatInputProvider
-              leftActions={LEFT_ACTIONS}
-              rightActions={RIGHT_ACTIONS}
-              scopeItems={scopeItems}
-              scopeSlashCommands={slashCommands}
-              sendButtonProps={sendButtonProps}
-              onSend={handleSend}
-              onMarkdownContentChange={handleMarkdownContentChange}
-              allowExpand
+      <CollabInteractionContext.Provider value={interactionAPI}>
+        <TaskToolCardsConnector api={interactionAPI} />
+        <DocumentToolCardsConnector api={interactionAPI} />
+        <WorkflowToolCardsConnector api={interactionAPI} />
+        <section className="agent-page">
+          {/* Left: session list */}
+          <Profiler id="SessionList" onRender={_profilerCallback}>
+            <ResizableSidebar
+              side="left"
+              storageKey="agent-sessions"
+              defaultWidth={220}
+              collapsed={leftCollapsed}
+              onCollapsedChange={setLeftCollapsed}
             >
-              {splitMode && !overviewMode ? (
-                /* ── 分屏协作模式：聊天 + 文档并排 ── */
-                <div className="collab-split-container" ref={splitContainerRef}>
-                  <div className="collab-split-pane" style={{ width: `calc(${splitPct}% - 4px)` }}>
-                    <div className="agent-content">
-                      <div className="agent-chat-area">
-                        <motion.div
-                          key="chat-split"
-                          className="agent-main"
-                          style={{
-                            display: 'flex',
-                            flexDirection: 'column',
-                            flex: 1,
-                            minHeight: 0,
-                            overflow: 'hidden'
-                          }}
-                        >
-                          <AgentChatZone
-                            scope={currentScope}
-                            currentSession={currentSession}
-                            aliveSessionIds={aliveSessionIds}
-                            error={error}
-                            loading={loading}
-                            onQuickPrompt={handleQuickPrompt}
-                            onClear={handleClear}
-                            inputStyle={{
-                              minHeight: 72,
-                              borderRadius: 16,
-                              boxShadow: '0 8px 24px rgba(0,0,0,.03)'
-                            }}
-                            extraInputChildren={<CtrlLHandler />}
-                          />
-                        </motion.div>
-                      </div>
-                    </div>
-                  </div>
-                  <div
-                    className="collab-resize-handle"
-                    role="separator"
-                    aria-orientation="vertical"
-                    aria-valuenow={Math.round(splitPct)}
-                    onPointerDown={handleSplitPointerDown}
-                  >
-                    <div className="collab-resize-handle-bar">
-                      <GripVertical size={12} />
-                    </div>
-                  </div>
-                  <div
-                    className="collab-split-pane"
-                    style={{ width: `calc(${100 - splitPct}% - 4px)` }}
-                  >
-                    <DocumentPane
-                      onOpenFullPage={(docId) => {
-                        if (docId) navigateToDocs(docId)
-                      }}
-                      dirtyRef={docDirtyRef}
-                      sidebarSide="right"
-                      activeDocId={collabDocId}
-                      onActiveDocIdChange={setCollabDocId}
-                    />
-                  </div>
-                </div>
-              ) : (
-                /* ── 标准聊天模式 ── */
-                <>
-                  <div
-                    className={`agent-content${
-                      previewFile && !overviewMode ? ' agent-content--split' : ''
-                    }`}
-                  >
-                    {previewFile && !overviewMode && (
-                      <ResizableSidebar
-                        side="left"
-                        storageKey="agent-code-viewer"
-                        defaultWidth={480}
-                        minWidth={240}
-                        maxWidth={800}
-                      >
-                        <CodeViewerPanel
-                          fileRef={previewFile}
-                          scope={currentScope}
-                          onClose={() => setPreviewFile(null)}
-                        />
-                      </ResizableSidebar>
-                    )}
+              <AgentSessionList
+                sessions={sessions}
+                activeSessionId={activeSessionId}
+                loading={loading}
+                pendingInteractSessionIds={pendingInteractSessionIds}
+                onDeleteSession={deleteSession}
+                onLoadSession={handleLoadSession}
+                onNewSession={handleNewSession}
+                showOverviewTab
+                overviewActive={overviewMode}
+                onOverviewClick={() => setOverviewMode(true)}
+              />
+            </ResizableSidebar>
+          </Profiler>
 
-                    <div className="agent-chat-area">
-                      <AnimatePresence mode="wait">
-                        {overviewMode ? (
+          {/* Center: chat content */}
+          <WorkNavigationOverrideProvider value={workNavValue}>
+            <Profiler id="ChatInputProvider" onRender={_profilerCallback}>
+              <ChatInputProvider
+                leftActions={LEFT_ACTIONS}
+                rightActions={RIGHT_ACTIONS}
+                scopeItems={scopeItems}
+                scopeSlashCommands={slashCommands}
+                sendButtonProps={sendButtonProps}
+                onSend={handleSend}
+                onMarkdownContentChange={handleMarkdownContentChange}
+                allowExpand
+              >
+                {splitMode && !overviewMode ? (
+                  /* ── 分屏协作模式：聊天 + 文档并排 ── */
+                  <div className="collab-split-container" ref={splitContainerRef}>
+                    <div
+                      className="collab-split-pane"
+                      style={{ width: `calc(${splitPct}% - 4px)` }}
+                    >
+                      <div className="agent-content">
+                        <div className="agent-chat-area">
                           <motion.div
-                            key="overview"
-                            className="agent-main"
-                            {...panelCrossfade}
-                            transition={panelCrossfadeTransition}
-                          >
-                            <AgentOverviewPanel
-                              selectedModel={selectedModel}
-                              onModelChange={setSelectedModel}
-                              onLoadSession={handleLoadSession}
-                            />
-                          </motion.div>
-                        ) : (
-                          <motion.div
-                            key="chat-mode"
+                            key="chat-split"
                             className="agent-main"
                             style={{
                               display: 'flex',
@@ -535,8 +474,6 @@ function AgentPage() {
                               minHeight: 0,
                               overflow: 'hidden'
                             }}
-                            {...panelCrossfade}
-                            transition={panelCrossfadeTransition}
                           >
                             <AgentChatZone
                               scope={currentScope}
@@ -547,49 +484,157 @@ function AgentPage() {
                               onQuickPrompt={handleQuickPrompt}
                               onClear={handleClear}
                               inputStyle={{
-                                minHeight: 88,
-                                borderRadius: 20,
-                                boxShadow: '0 12px 32px rgba(0,0,0,.04)'
+                                minHeight: 72,
+                                borderRadius: 16,
+                                boxShadow: '0 8px 24px rgba(0,0,0,.03)'
                               }}
                               extraInputChildren={<CtrlLHandler />}
                             />
                           </motion.div>
-                        )}
-                      </AnimatePresence>
+                        </div>
+                      </div>
+                    </div>
+                    <div
+                      className="collab-resize-handle"
+                      role="separator"
+                      aria-orientation="vertical"
+                      aria-valuenow={Math.round(splitPct)}
+                      onPointerDown={handleSplitPointerDown}
+                    >
+                      <div className="collab-resize-handle-bar">
+                        <GripVertical size={12} />
+                      </div>
+                    </div>
+                    <div
+                      className="collab-split-pane"
+                      style={{ width: `calc(${100 - splitPct}% - 4px)` }}
+                    >
+                      <DocumentPane
+                        onOpenFullPage={(docId) => {
+                          if (docId) navigateToDocs(docId)
+                        }}
+                        dirtyRef={docDirtyRef}
+                        sidebarSide="right"
+                        activeDocId={collabDocId}
+                        onActiveDocIdChange={setCollabDocId}
+                      />
                     </div>
                   </div>
+                ) : (
+                  /* ── 标准聊天模式 ── */
+                  <>
+                    <div
+                      className={`agent-content${
+                        previewFile && !overviewMode ? ' agent-content--split' : ''
+                      }`}
+                    >
+                      {previewFile && !overviewMode && (
+                        <ResizableSidebar
+                          side="left"
+                          storageKey="agent-code-viewer"
+                          defaultWidth={480}
+                          minWidth={240}
+                          maxWidth={800}
+                        >
+                          <CodeViewerPanel
+                            fileRef={previewFile}
+                            scope={currentScope}
+                            onClose={() => setPreviewFile(null)}
+                          />
+                        </ResizableSidebar>
+                      )}
 
-                  {/* Right: detail sidebar */}
-                  <Profiler id="RightSidebar" onRender={_profilerCallback}>
-                    {!overviewMode && (
-                      <ResizableSidebar
-                        side="right"
-                        storageKey="agent-right"
-                        defaultWidth={280}
-                        collapsed={rightCollapsed}
-                        onCollapsedChange={setRightCollapsed}
-                      >
-                        <AgentDetailSidebar
-                          sending={sending}
-                          error={error}
-                          currentSession={currentSession}
-                          optimisticMessages={optimisticMessages}
-                          selectedModel={selectedModel}
-                          onModelChange={setSelectedModel}
-                          scope={currentScope}
-                          onPreviewFile={(relativePath) => {
-                            setPreviewFile({ kind: 'document', id: relativePath })
-                          }}
-                        />
-                      </ResizableSidebar>
-                    )}
-                  </Profiler>
-                </>
-              )}
-            </ChatInputProvider>
-          </Profiler>
-        </WorkNavigationOverrideProvider>
-      </section>
+                      <div className="agent-chat-area">
+                        <AnimatePresence mode="wait">
+                          {overviewMode ? (
+                            <motion.div
+                              key="overview"
+                              className="agent-main"
+                              {...panelCrossfade}
+                              transition={panelCrossfadeTransition}
+                            >
+                              <AgentOverviewPanel
+                                selectedModel={selectedModel}
+                                onModelChange={setSelectedModel}
+                                onLoadSession={handleLoadSession}
+                              />
+                            </motion.div>
+                          ) : (
+                            <motion.div
+                              key="chat-mode"
+                              className="agent-main"
+                              style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                flex: 1,
+                                minHeight: 0,
+                                overflow: 'hidden'
+                              }}
+                              {...panelCrossfade}
+                              transition={panelCrossfadeTransition}
+                            >
+                              <AgentChatZone
+                                scope={currentScope}
+                                currentSession={currentSession}
+                                aliveSessionIds={aliveSessionIds}
+                                error={error}
+                                loading={loading}
+                                onQuickPrompt={handleQuickPrompt}
+                                onClear={handleClear}
+                                inputStyle={{
+                                  minHeight: 88,
+                                  borderRadius: 20,
+                                  boxShadow: '0 12px 32px rgba(0,0,0,.04)'
+                                }}
+                                extraInputChildren={<CtrlLHandler />}
+                              />
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    </div>
+
+                    {/* Right: detail sidebar or entity tabs (document/task/workflow) */}
+                    <Profiler id="RightSidebar" onRender={_profilerCallback}>
+                      {!overviewMode && (
+                        <ResizableSidebar
+                          side="right"
+                          storageKey="agent-right"
+                          defaultWidth={320}
+                          minWidth={rightPanelOpen ? 280 : 240}
+                          collapsed={rightCollapsed}
+                          onCollapsedChange={setRightCollapsed}
+                        >
+                          {rightPanelOpen ? (
+                            <UnifiedRightPanel
+                              contextId={currentSession?.id ?? null}
+                              onClose={closeRightPanel}
+                              onLoadSession={handleLoadSession}
+                            />
+                          ) : (
+                            <AgentDetailSidebar
+                              sending={sending}
+                              error={error}
+                              currentSession={currentSession}
+                              optimisticMessages={optimisticMessages}
+                              selectedModel={selectedModel}
+                              onModelChange={setSelectedModel}
+                              scope={currentScope}
+                              onPreviewFile={(relativePath) => {
+                                setPreviewFile({ kind: 'document', id: relativePath })
+                              }}
+                            />
+                          )}
+                        </ResizableSidebar>
+                      )}
+                    </Profiler>
+                  </>
+                )}
+              </ChatInputProvider>
+            </Profiler>
+          </WorkNavigationOverrideProvider>
+        </section>
+      </CollabInteractionContext.Provider>
     </SelectionRefProvider>
   )
 }

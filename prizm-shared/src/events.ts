@@ -59,7 +59,10 @@ export const EVENT_TYPES = [
   'workflow:step.completed',
   'workflow:paused',
   'workflow:completed',
-  'workflow:failed'
+  'workflow:failed',
+  'workflow:def.registered',
+  'workflow:def.deleted',
+  'command:changed'
 ] as const
 
 export type EventType = (typeof EVENT_TYPES)[number]
@@ -113,7 +116,10 @@ export const EVENT_TYPES_OBJ = {
   WORKFLOW_STEP_COMPLETED: 'workflow:step.completed',
   WORKFLOW_PAUSED: 'workflow:paused',
   WORKFLOW_COMPLETED: 'workflow:completed',
-  WORKFLOW_FAILED: 'workflow:failed'
+  WORKFLOW_FAILED: 'workflow:failed',
+  WORKFLOW_DEF_REGISTERED: 'workflow:def.registered',
+  WORKFLOW_DEF_DELETED: 'workflow:def.deleted',
+  COMMAND_CHANGED: 'command:changed'
 } as const satisfies Record<string, EventType>
 
 /** 服务端全部事件类型（用于 subscribeEvents: "all"） */
@@ -161,7 +167,10 @@ export const DATA_SYNC_EVENTS = [
   'workflow:step.completed',
   'workflow:paused',
   'workflow:completed',
-  'workflow:failed'
+  'workflow:failed',
+  'workflow:def.registered',
+  'workflow:def.deleted',
+  'command:changed'
 ] as const
 
 export type DataSyncEventType = (typeof DATA_SYNC_EVENTS)[number]
@@ -367,6 +376,12 @@ export interface WorkflowFailedPayload extends EventPayloadBase {
   error: string
 }
 
+/** 自定义命令变更事件载荷 */
+export interface CommandChangedPayload extends EventPayloadBase {
+  action: 'created' | 'updated' | 'deleted' | 'imported' | 'reloaded'
+  commandId?: string
+}
+
 /** 各事件类型对应的 payload 类型 */
 export interface EventPayloadMap {
   notification: NotificationPayload
@@ -417,10 +432,11 @@ export interface EventPayloadMap {
   'workflow:paused': WorkflowPausedPayload
   'workflow:completed': WorkflowCompletedPayload
   'workflow:failed': WorkflowFailedPayload
+  'command:changed': CommandChangedPayload
 }
 
 /** 类型安全的 EventPushMessage，payload 与 eventType 对应 */
-export interface TypedEventPushMessage<T extends EventType = EventType> {
+export interface TypedEventPushMessage<T extends keyof EventPayloadMap = keyof EventPayloadMap> {
   type: 'event'
   eventType: T
   payload: EventPayloadMap[T]

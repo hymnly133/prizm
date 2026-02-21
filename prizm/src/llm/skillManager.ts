@@ -8,10 +8,14 @@ import fs from 'fs'
 import path from 'path'
 import { createLogger } from '../logger'
 import { getDataDir } from '../core/PathProviderCore'
+import { getRegistryKey, type SkillOrigin } from './skillRegistryKey'
 
 const log = createLogger('SkillManager')
 
 // ============ 类型定义 ============
+
+/** 从 registry 安装时的来源（用于已安装判断与冲突提示） */
+export type { SkillOrigin } from './skillRegistryKey'
 
 /** SKILL.md frontmatter 解析结果 */
 export interface SkillMetadata {
@@ -24,6 +28,8 @@ export interface SkillMetadata {
   metadata?: Record<string, string>
   /** 预批准的工具列表（空格分隔） */
   allowedTools?: string[]
+  /** 从 registry 安装时的来源，仅安装时写入 */
+  origin?: SkillOrigin
 }
 
 /** 运行时 skill 配置（Level 1 + 管理元数据） */
@@ -32,18 +38,8 @@ export interface SkillConfig extends SkillMetadata {
   path: string
   /** 是否启用 */
   enabled: boolean
-  /** 来源标记 */
-  source?: 'prizm' | 'claude-code' | 'github'
-}
-
-/** 会话级激活状态（Level 2 已加载） */
-export interface SkillActivation {
-  skillName: string
-  /** SKILL.md body 内容（核心指令） */
-  instructions: string
-  activatedAt: number
-  /** 是否自动激活 */
-  autoActivated: boolean
+  /** 来源标记（含 registry 安装来源） */
+  source?: 'prizm' | 'claude-code' | 'github' | 'curated' | 'skillkit' | 'skillsmp'
 }
 
 /** skill 完整内容（含 body） */
@@ -51,6 +47,9 @@ export interface SkillFullContent extends SkillConfig {
   /** SKILL.md body */
   body: string
 }
+
+/** 技能目录文件树（相对技能根）：叶子为 "file"，子树为嵌套对象 */
+export type SkillFileTree = Record<string, 'file' | SkillFileTree>
 
 // ============ 解析 ============
 
@@ -159,6 +158,28 @@ function extractMetadata(frontmatter: Record<string, unknown>): SkillMetadata | 
     metadata = frontmatter.metadata as Record<string, string>
   }
 
+  let origin: SkillOrigin | undefined
+  const o = frontmatter.origin
+  if (
+    o &&
+    typeof o === 'object' &&
+    !Array.isArray(o) &&
+    typeof (o as Record<string, unknown>).source === 'string' &&
+    typeof (o as Record<string, unknown>).owner === 'string' &&
+    typeof (o as Record<string, unknown>).repo === 'string' &&
+    typeof (o as Record<string, unknown>).skillPath === 'string'
+  ) {
+    const ro = o as Record<string, string>
+    if (['github', 'curated', 'skillkit', 'skillsmp'].includes(ro.source)) {
+      origin = {
+        source: ro.source as SkillOrigin['source'],
+        owner: ro.owner,
+        repo: ro.repo,
+        skillPath: ro.skillPath
+      }
+    }
+  }
+
   return {
     name,
     description,
@@ -166,7 +187,8 @@ function extractMetadata(frontmatter: Record<string, unknown>): SkillMetadata | 
     compatibility:
       typeof frontmatter.compatibility === 'string' ? frontmatter.compatibility : undefined,
     metadata,
-    allowedTools
+    allowedTools,
+    origin
   }
 }
 
@@ -215,7 +237,7 @@ export function loadAllSkillMetadata(): SkillConfig[] {
         ...meta,
         path: path.join(dir, entry.name),
         enabled: true,
-        source: 'prizm'
+        source: meta.origin ? meta.origin.source : 'prizm'
       })
     } catch (err) {
       log.error('Failed to load skill metadata: %s', entry.name, err)
@@ -223,6 +245,20 @@ export function loadAllSkillMetadata(): SkillConfig[] {
   }
 
   return skills
+}
+
+/**
+ * 已安装 skill 的 registryKey 集合（仅含带 origin 的项），供 skillRegistry 做精确已安装判断。
+ */
+export function getInstalledRegistryKeys(): Set<string> {
+  const skills = loadAllSkillMetadata()
+  const keys = new Set<string>()
+  for (const s of skills) {
+    if (s.origin) {
+      keys.add(getRegistryKey(s.origin))
+    }
+  }
+  return keys
 }
 
 // ============ Level 2: 完整内容加载 ============
@@ -245,7 +281,7 @@ export function loadSkillFull(name: string): SkillFullContent | null {
       ...meta,
       path: skillDir,
       enabled: true,
-      source: 'prizm',
+      source: meta.origin ? meta.origin.source : 'prizm',
       body
     }
   } catch (err) {
@@ -289,7 +325,63 @@ export function readSkillResource(name: string, resourcePath: string): string | 
   return fs.readFileSync(fullPath, 'utf-8')
 }
 
+/**
+ * 列出技能目录的文件树（相对技能根），含 SKILL.md 与 scripts/references/assets 及嵌套内容。
+ * 路径安全：仅解析技能目录内路径。
+ */
+export function getSkillFileTree(name: string): SkillFileTree | null {
+  const skillDir = path.join(getSkillsDir(), name)
+  const skillDirResolved = path.resolve(skillDir)
+  if (!fs.existsSync(skillDirResolved)) return null
+  const skillMdPath = path.join(skillDirResolved, 'SKILL.md')
+  if (!fs.existsSync(skillMdPath)) return null
+
+  function walk(dir: string): SkillFileTree {
+    const tree: SkillFileTree = {}
+    const entries = fs.readdirSync(dir, { withFileTypes: true })
+    for (const entry of entries) {
+      if (entry.name.startsWith('.')) continue
+      const fullPath = path.join(dir, entry.name)
+      const resolved = path.resolve(fullPath)
+      if (!resolved.startsWith(skillDirResolved)) continue
+      if (entry.isFile()) {
+        const rel = path.relative(skillDirResolved, resolved)
+        if (!rel.startsWith('..') && rel !== '') tree[entry.name] = 'file'
+      } else if (entry.isDirectory()) {
+        tree[entry.name] = walk(fullPath)
+      }
+    }
+    return tree
+  }
+
+  const root: SkillFileTree = {}
+  if (fs.existsSync(skillMdPath)) root['SKILL.md'] = 'file'
+  const entries = fs.readdirSync(skillDirResolved, { withFileTypes: true })
+  for (const entry of entries) {
+    if (entry.name.startsWith('.') || entry.name === 'SKILL.md') continue
+    const fullPath = path.join(skillDirResolved, entry.name)
+    const resolved = path.resolve(fullPath)
+    if (!resolved.startsWith(skillDirResolved)) continue
+    if (entry.isFile()) root[entry.name] = 'file'
+    else if (entry.isDirectory()) root[entry.name] = walk(fullPath)
+  }
+  return root
+}
+
 // ============ CRUD ============
+
+/**
+ * 构建 frontmatter 的 origin 行（多行）
+ */
+function formatOriginInFrontmatter(origin: SkillOrigin): string[] {
+  return [
+    'origin:',
+    `  source: ${origin.source}`,
+    `  owner: ${origin.owner}`,
+    `  repo: ${origin.repo}`,
+    `  skillPath: ${origin.skillPath}`
+  ]
+}
 
 /**
  * 创建 skill（写入 SKILL.md + 可选目录结构）
@@ -297,7 +389,8 @@ export function readSkillResource(name: string, resourcePath: string): string | 
 export function createSkill(
   meta: SkillMetadata,
   body: string,
-  source?: SkillConfig['source']
+  source?: SkillConfig['source'],
+  origin?: SkillOrigin
 ): SkillConfig {
   ensureSkillsDir()
   const skillDir = path.join(getSkillsDir(), meta.name)
@@ -320,6 +413,10 @@ export function createSkill(
   if (meta.allowedTools?.length) {
     fmLines.push(`allowed-tools: ${meta.allowedTools.join(' ')}`)
   }
+  const writtenOrigin = origin ?? meta.origin
+  if (writtenOrigin) {
+    fmLines.push(...formatOriginInFrontmatter(writtenOrigin))
+  }
 
   const content = `---\n${fmLines.join('\n')}\n---\n\n${body}`
   fs.writeFileSync(path.join(skillDir, 'SKILL.md'), content, 'utf-8')
@@ -327,9 +424,10 @@ export function createSkill(
   log.info('Skill created: %s', meta.name)
   return {
     ...meta,
+    origin: writtenOrigin,
     path: skillDir,
     enabled: true,
-    source: source ?? 'prizm'
+    source: source ?? writtenOrigin?.source ?? 'prizm'
   }
 }
 
@@ -357,6 +455,9 @@ export function updateSkill(
   }
   if (skill.allowedTools?.length) {
     fmLines.push(`allowed-tools: ${skill.allowedTools.join(' ')}`)
+  }
+  if (skill.origin) {
+    fmLines.push(...formatOriginInFrontmatter(skill.origin))
   }
 
   const content = `---\n${fmLines.join('\n')}\n---\n\n${body}`
@@ -438,163 +539,55 @@ function copyDirRecursive(src: string, dest: string): void {
   }
 }
 
-// ============ 会话级激活管理 ============
-
-/** 会话 → 激活 skills 映射 */
-const sessionActivations = new Map<string, SkillActivation[]>()
-
-function sessionKey(scope: string, sessionId: string): string {
-  return `${scope}:${sessionId}`
+/**
+ * 根据会话允许列表返回仅元数据（Level 1 发现用），供渐进式发现：系统提示只注入 name+description，
+ * 模型需要完整说明时通过工具 prizm_get_skill_instructions(skill_name) 按需加载。
+ * - allowedSkills 为空/未设置：返回所有已启用 skill 的 name + description
+ * - allowedSkills 非空：只返回名单内的 skill
+ */
+export function getSkillsMetadataForDiscovery(
+  _scope: string,
+  allowedSkills: string[] | undefined
+): Array<{ name: string; description: string }> {
+  const all = loadAllSkillMetadata()
+  const enabled = all.filter((s) => s.enabled)
+  if (!allowedSkills || allowedSkills.length === 0) {
+    return enabled.map((s) => ({ name: s.name, description: s.description }))
+  }
+  const set = new Set(allowedSkills)
+  return enabled.filter((s) => set.has(s.name)).map((s) => ({ name: s.name, description: s.description }))
 }
 
 /**
- * 手动激活 skill
+ * 根据会话允许列表返回要注入的 skills（单一数据源，仅用 allowedSkills）
+ * - allowedSkills 为空/未设置：返回所有已启用 skill 的 name + instructions
+ * - allowedSkills 非空：只返回名单内的 skill
  */
-export function activateSkill(
-  scope: string,
-  sessionId: string,
-  skillName: string,
-  maxActive: number = 3
-): SkillActivation | null {
-  const skill = loadSkillFull(skillName)
-  if (!skill) return null
-
-  const key = sessionKey(scope, sessionId)
-  let activations = sessionActivations.get(key) ?? []
-
-  // 检查是否已激活
-  if (activations.some((a) => a.skillName === skillName)) {
-    return activations.find((a) => a.skillName === skillName)!
+export function getSkillsToInject(
+  _scope: string,
+  allowedSkills: string[] | undefined
+): Array<{ name: string; instructions: string }> {
+  const all = loadAllSkillMetadata()
+  const enabled = all.filter((s) => s.enabled)
+  if (!allowedSkills || allowedSkills.length === 0) {
+    return enabled
+      .map((s) => {
+        const full = loadSkillFull(s.name)
+        return full ? { name: full.name, instructions: full.body } : null
+      })
+      .filter((x): x is { name: string; instructions: string } => x != null)
   }
-
-  // 检查数量限制
-  if (activations.length >= maxActive) {
-    // 移除最早激活的
-    activations = activations.slice(1)
-  }
-
-  const activation: SkillActivation = {
-    skillName,
-    instructions: skill.body,
-    activatedAt: Date.now(),
-    autoActivated: false
-  }
-
-  activations.push(activation)
-  sessionActivations.set(key, activations)
-  log.info('Skill activated: %s (session: %s)', skillName, sessionId)
-  return activation
+  const set = new Set(allowedSkills)
+  return enabled
+    .filter((s) => set.has(s.name))
+    .map((s) => {
+      const full = loadSkillFull(s.name)
+      return full ? { name: full.name, instructions: full.body } : null
+    })
+    .filter((x): x is { name: string; instructions: string } => x != null)
 }
 
-/**
- * 取消激活 skill
- */
-export function deactivateSkill(scope: string, sessionId: string, skillName: string): boolean {
-  const key = sessionKey(scope, sessionId)
-  const activations = sessionActivations.get(key)
-  if (!activations) return false
-
-  const idx = activations.findIndex((a) => a.skillName === skillName)
-  if (idx < 0) return false
-
-  activations.splice(idx, 1)
-  if (activations.length === 0) {
-    sessionActivations.delete(key)
-  }
-  log.info('Skill deactivated: %s (session: %s)', skillName, sessionId)
-  return true
-}
-
-/**
- * 获取会话中已激活的 skills
- */
-export function getActiveSkills(scope: string, sessionId: string): SkillActivation[] {
-  return sessionActivations.get(sessionKey(scope, sessionId)) ?? []
-}
-
-// ============ 自动激活：关键词匹配 ============
-
-/**
- * 基于用户消息自动激活匹配的 skills
- * 使用轻量关键词匹配（TF-IDF 风格），不调用 LLM
- */
-export function autoActivateSkills(
-  scope: string,
-  sessionId: string,
-  userMessage: string,
-  maxActive: number = 3
-): SkillActivation[] {
-  const allSkills = loadAllSkillMetadata()
-  if (allSkills.length === 0) return []
-
-  const key = sessionKey(scope, sessionId)
-  const currentActivations = sessionActivations.get(key) ?? []
-  const alreadyActive = new Set(currentActivations.map((a) => a.skillName))
-
-  // 简单关键词匹配评分
-  const msgTokens = tokenize(userMessage)
-  if (msgTokens.length === 0) return []
-
-  const candidates: Array<{ skill: SkillConfig; score: number }> = []
-
-  for (const skill of allSkills) {
-    if (!skill.enabled || alreadyActive.has(skill.name)) continue
-
-    const descTokens = tokenize(skill.description)
-    if (descTokens.length === 0) continue
-
-    // 计算关键词重合率
-    const overlap = msgTokens.filter((t) => descTokens.includes(t)).length
-    const score = overlap / Math.sqrt(descTokens.length)
-
-    if (score > 0.3) {
-      candidates.push({ skill, score })
-    }
-  }
-
-  if (candidates.length === 0) return []
-
-  // 按分数排序，取前 N 个（不超过 maxActive - 当前数量）
-  candidates.sort((a, b) => b.score - a.score)
-  const slotsLeft = Math.max(0, maxActive - currentActivations.length)
-  const toActivate = candidates.slice(0, slotsLeft)
-
-  const newActivations: SkillActivation[] = []
-  for (const { skill } of toActivate) {
-    const full = loadSkillFull(skill.name)
-    if (!full) continue
-
-    const activation: SkillActivation = {
-      skillName: skill.name,
-      instructions: full.body,
-      activatedAt: Date.now(),
-      autoActivated: true
-    }
-    newActivations.push(activation)
-  }
-
-  if (newActivations.length > 0) {
-    const updated = [...currentActivations, ...newActivations]
-    sessionActivations.set(key, updated)
-    log.info(
-      'Auto-activated %d skills: %s (session: %s)',
-      newActivations.length,
-      newActivations.map((a) => a.skillName).join(', '),
-      sessionId
-    )
-  }
-
-  return newActivations
-}
-
-/** 简易中英文分词 */
-function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-    .split(/\s+/)
-    .filter((t) => t.length >= 2)
-}
+// ============ 导入发现 ============
 
 /**
  * 发现可导入的 skill 目录

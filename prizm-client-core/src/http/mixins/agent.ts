@@ -18,20 +18,40 @@ declare module '../client' {
       scope?: string,
       sessionId?: string
     ): Promise<{ systemPrompt: string; scope: string; sessionId: string | null }>
-    getAgentScopeItems(scope?: string): Promise<{
+    getAgentScopeItems(
+      scope?: string,
+      types?: string[]
+    ): Promise<{
       refTypes: { key: string; label: string; aliases: string[] }[]
+      typeMetadata?: {
+        type: string
+        label: string
+        icon: string
+        listable: boolean
+        aliases: string[]
+      }[]
       items: {
         id: string
+        type?: string
         kind: string
         title: string
         charCount: number
-        isShort: boolean
+        isShort?: boolean
         updatedAt: number
         groupOrStatus?: string
       }[]
     }>
     getAgentSlashCommands(scope?: string): Promise<{
-      commands: { name: string; aliases: string[]; description: string }[]
+      commands: {
+        name: string
+        aliases: string[]
+        description: string
+        builtin?: boolean
+        mode?: string
+        subCommands?: { name: string; description: string }[]
+        argHints?: string[]
+        category?: string
+      }[]
     }>
     getAgentToolsMetadata(): Promise<{
       tools: Array<{
@@ -88,7 +108,12 @@ declare module '../client' {
     deleteAgentSession(id: string, scope?: string): Promise<void>
     updateAgentSession(
       id: string,
-      update: { llmSummary?: string },
+      update: {
+        llmSummary?: string
+        allowedTools?: string[]
+        allowedSkills?: string[]
+        allowedMcpServerIds?: string[]
+      },
       scope?: string
     ): Promise<AgentSession>
     grantSessionPaths(
@@ -119,27 +144,6 @@ declare module '../client' {
       skills: unknown[]
       rules: unknown[]
     }>
-    activateSessionSkill(
-      sessionId: string,
-      skillName: string,
-      scope?: string
-    ): Promise<{ skillName: string; instructions: string; activatedAt: number; autoActivated: boolean }>
-    deactivateSessionSkill(
-      sessionId: string,
-      skillName: string,
-      scope?: string
-    ): Promise<{ deactivated: boolean }>
-    getActiveSessionSkills(
-      sessionId: string,
-      scope?: string
-    ): Promise<{
-      skills: Array<{
-        skillName: string
-        instructions: string
-        activatedAt: number
-        autoActivated: boolean
-      }>
-    }>
   }
 }
 
@@ -166,24 +170,51 @@ PrizmClient.prototype.getAgentSystemPrompt = async function (
   })
 }
 
-PrizmClient.prototype.getAgentScopeItems = async function (this: PrizmClient, scope?: string) {
+PrizmClient.prototype.getAgentScopeItems = async function (
+  this: PrizmClient,
+  scope?: string,
+  types?: string[]
+) {
+  const params = new URLSearchParams()
+  if (types?.length) params.set('types', types.join(','))
+  const qs = params.toString()
   return this.request<{
     refTypes: { key: string; label: string; aliases: string[] }[]
+    typeMetadata?: {
+      type: string
+      label: string
+      icon: string
+      listable: boolean
+      aliases: string[]
+    }[]
     items: {
       id: string
+      type?: string
       kind: string
       title: string
       charCount: number
-      isShort: boolean
+      isShort?: boolean
       updatedAt: number
       groupOrStatus?: string
     }[]
-  }>('/agent/scope-items', { method: 'GET', scope: scope ?? this.defaultScope })
+  }>(`/agent/scope-items${qs ? `?${qs}` : ''}`, {
+    method: 'GET',
+    scope: scope ?? this.defaultScope
+  })
 }
 
 PrizmClient.prototype.getAgentSlashCommands = async function (this: PrizmClient, scope?: string) {
   return this.request<{
-    commands: { name: string; aliases: string[]; description: string }[]
+    commands: {
+      name: string
+      aliases: string[]
+      description: string
+      builtin?: boolean
+      mode?: string
+      subCommands?: { name: string; description: string }[]
+      argHints?: string[]
+      category?: string
+    }[]
   }>('/agent/slash-commands', { method: 'GET', scope: scope ?? this.defaultScope })
 }
 
@@ -307,7 +338,12 @@ PrizmClient.prototype.deleteAgentSession = async function (
 PrizmClient.prototype.updateAgentSession = async function (
   this: PrizmClient,
   id: string,
-  update: { llmSummary?: string },
+  update: {
+    llmSummary?: string
+    allowedTools?: string[]
+    allowedSkills?: string[]
+    allowedMcpServerIds?: string[]
+  },
   scope?: string
 ) {
   const data = await this.request<{ session: AgentSession }>(
@@ -382,6 +418,7 @@ PrizmClient.prototype.streamChat = async function (
       fullContextTurns: options?.fullContextTurns,
       cachedContextTurns: options?.cachedContextTurns,
       fileRefs: options?.fileRefs,
+      runRefIds: options?.runRefIds,
       thinking: options?.thinking
     }),
     signal: options?.signal
@@ -537,40 +574,4 @@ PrizmClient.prototype.stopAgentChat = async function (
 
 PrizmClient.prototype.getAgentCapabilities = async function (this: PrizmClient) {
   return this.request('/agent/capabilities')
-}
-
-PrizmClient.prototype.activateSessionSkill = async function (
-  this: PrizmClient,
-  sessionId: string,
-  skillName: string,
-  scope?: string
-) {
-  const s = scope ?? this.defaultScope
-  return this.request(`/skills/${encodeURIComponent(skillName)}/activate`, {
-    method: 'POST',
-    body: JSON.stringify({ scope: s, sessionId })
-  })
-}
-
-PrizmClient.prototype.deactivateSessionSkill = async function (
-  this: PrizmClient,
-  sessionId: string,
-  skillName: string,
-  scope?: string
-) {
-  const s = scope ?? this.defaultScope
-  return this.request(`/skills/${encodeURIComponent(skillName)}/deactivate`, {
-    method: 'POST',
-    body: JSON.stringify({ scope: s, sessionId })
-  })
-}
-
-PrizmClient.prototype.getActiveSessionSkills = async function (
-  this: PrizmClient,
-  sessionId: string,
-  scope?: string
-) {
-  const s = scope ?? this.defaultScope
-  const params = new URLSearchParams({ scope: s, sessionId })
-  return this.request(`/skills/active?${params.toString()}`)
 }

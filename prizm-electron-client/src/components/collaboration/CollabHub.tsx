@@ -15,9 +15,11 @@ import { Icon } from '@lobehub/ui'
 import { Tag } from 'antd'
 import { ArrowRight, Bot, FileText, GitBranch, MessageSquare, Plus, Zap } from 'lucide-react'
 import type { EnrichedSession, EnrichedDocument } from '@prizm/client-core'
-import type { WorkflowRun } from '@prizm/shared'
-import type { CollabPanelType } from './collabTypes'
+import { isChatListSession, type WorkflowRun } from '@prizm/shared'
 import { MiniPipelineView } from '../workflow/WorkflowPipelineView'
+
+/** Panel keys used by CollabHub "view all" navigation. */
+export type HubNavigatePanel = 'agent' | 'document' | 'task' | 'workflow'
 import { EmptyState } from '../ui/EmptyState'
 import { RefreshIconButton } from '../ui/RefreshIconButton'
 import { fadeUp, STAGGER_DELAY } from '../../theme/motionPresets'
@@ -32,7 +34,7 @@ export interface CollabHubProps {
   bgSessions: EnrichedSession[]
   documents: EnrichedDocument[]
   documentsLoading: boolean
-  onNavigatePanel: (panel: CollabPanelType) => void
+  onNavigatePanel: (panel: HubNavigatePanel) => void
   onLoadSession: (id: string) => void
   onSelectWorkflowRun?: (runId: string) => void
   onSelectDocument: (docId: string) => void
@@ -59,7 +61,7 @@ export const CollabHub = memo(function CollabHub({
   onRefresh
 }: CollabHubProps) {
   const recentSessions = useMemo(
-    () => sessions.filter((s) => s.kind !== 'background').slice(0, 5),
+    () => sessions.filter((s) => isChatListSession(s)).slice(0, 5),
     [sessions]
   )
 
@@ -109,7 +111,7 @@ export const CollabHub = memo(function CollabHub({
             <span>Agent 会话</span>
             <span style={{ marginLeft: 'auto', display: 'flex', gap: 4, alignItems: 'center' }}>
               <Tag>
-                {sessionsLoading ? '...' : sessions.filter((s) => s.kind !== 'background').length}
+                {sessionsLoading ? '...' : sessions.filter((s) => isChatListSession(s)).length}
               </Tag>
               <button type="button" className="collab-hub__link-btn" onClick={onNewSession}>
                 <Plus size={12} /> 新建

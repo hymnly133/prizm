@@ -4,6 +4,21 @@
 
 Workflow 系统是 Prizm 的**多步骤自动化流水线引擎**，允许用户将多个 AI Agent 任务、人工审批、数据变换步骤编排为可复用的工作流。它深度集成了 Background Session（后台会话）、EventBus（事件总线）、文件工作区等核心能力，形成一条从 **定义 → 触发 → 执行 → 审批 → 联动** 的完整链路。
 
+### 能力与限制
+
+| 维度 | 当前能力 | 限制说明 |
+|------|----------|----------|
+| 执行拓扑 | 线性管线 | 按 `steps` 顺序执行；支持 `condition` 跳过步骤；**不支持** DAG、并行分支、多步并行。 |
+| 触发方式 | 手动 + 事件 | 支持 `schedule_remind`、`todo_completed`、`document_saved` 事件触发；**cron** 在定义 schema 中合法，但**未接入调度器**，不会按 cron 表达式自动触发工作流。 |
+| 审批与恢复 | 已支持 | `approve` 步骤暂停、`resumeToken`、`resumeWorkflow(token, approved)`。 |
+| 超时 | 已支持 | 步骤级 `timeoutMs`、工作流级 `maxTotalTimeoutMs`。 |
+| 输出 | 已支持上限 | 可选 `config.maxStepOutputChars` 限制单步文本 output，超出截断并追加 `... (truncated)`。 |
+| 工作区与安全 | 工作区边界 | Agent 步骤限定在工作流工作区内；详见下文「工作区边界与安全」。 |
+
+与 OpenClaw Lobster 等方案的对比可参考《工作流引擎全面审计》结论。
+
+**可视化编辑器**：Electron 客户端工作流页提供画布编辑（`WorkflowEditor`）。图中连线仅表示**执行顺序与数据依赖**，不表示分支或并行；当前引擎为串行执行，若未来支持分支需在定义与 runner 中扩展（如 `nextStepId` / 条件分支节点）。
+
 ## 二、核心架构
 
 ```
@@ -43,7 +58,10 @@ interface WorkflowDef {
   name: string
   description?: string
   steps: WorkflowStepDef[]
-  args?: Record<string, { default?: unknown; description?: string }>
+  /** 流水线输入 schema，与 run.args 配合；每参数可带 description、default、type。有 default 即可选，不填时用默认值。合并规则：空串视为未传，使用 default。 */
+  args?: Record<string, { default?: unknown; description?: string; type?: string }>
+  /** 流水线输出 schema，与 args 形态对称（description + type），传入最后一步做结构化对齐输出 */
+  outputs?: Record<string, { type?: string; description?: string }>
   triggers?: WorkflowTriggerDef[]
 }
 ```
@@ -118,7 +136,13 @@ interface WorkflowRun {
 }
 ```
 
-### 3.5 辅助类型
+### 3.5 流水线 I/O 与数据源约定（单一数据源、无冲突分支）
+
+- **流水线输入**：仅定义一个输入，数据源为 `run.args`（运行时值）与 `def.args`（schema）。首步**仅通过 inputParams** 消费流水线输入；不鼓励在首步用 `step.input: $args.xxx` 拼文案。每次执行 agent 步骤时，系统会在该步骤的系统指令中注入本次流水线的原始输入（run.args）。
+- **流水线输出**：仅采用**最后一步**定义的输出作为流水线输出。以 schema 驱动：若 `def.outputs` 留空，使用必选单字段 **output** 作为默认；若 `def.outputs` 非空，末步必须按该格式提交并接受 schema 校验。唯一真相源为 `stepResults[lastStepId]`（`output` + `structuredData`）；`finalOutput` / `finalStructuredOutput` 仅派生不持久化。
+- **步骤状态与概览**：唯一数据源为 `WorkflowStepResult`（及 def/run.args）。步骤概览（如「有输入 · 有输出 · N 个产物」）**仅派生**自 stepResults，不新增持久化的 overview/summary 字段。
+
+### 3.6 辅助类型
 
 ```typescript
 // 步骤联动操作
@@ -225,6 +249,7 @@ runWorkflow()
 #### 条件执行（`evaluateCondition`）
 
 `condition` 字段支持：
+
 - `$stepId.approved` — 审批结果，值为 `true` / `false`
 - `$stepId.output` — 是否有输出（truthy check）
 
@@ -322,16 +347,51 @@ steps:
 ```
 
 优势：
+
 - Agent 可在工作区内直接读取历史运行记录
 - 人类可读的运行日志
 - 跨 run 上下文传递（后续 run 可以看到历史数据）
 
 主要函数：
+
 - `writeRunMeta(scopeRoot, data)` — 写入/更新
 - `readRunMeta(scopeRoot, workflowName, runId)` — 读取
 - `listRecentRuns(scopeRoot, workflowName, limit=5)` — 按修改时间倒序列出
 
-### 4.6 LinkedActionExecutor（`linkedActionExecutor.ts`）
+### 4.6 运行错误与日志
+
+工作流运行失败时，错误信息会**完整持久化**并在客户端提供查看入口。
+
+**存储位置**
+
+- **SQLite**（`workflow_runs` 表）  
+  - Run 级：`error`（简短消息）、`error_detail`（堆栈或完整详情，可选）  
+  - 步骤级：`step_results_json` 内每个步骤的 `error`、`errorDetail`（可选）
+- **Run Meta 文件**（`.meta/runs/{runId}.md`）  
+  - frontmatter 中 run 级 `errorDetail`、每个 step 的 `error` / `errorDetail`  
+  - Markdown body 中步骤失败时写 `Error: ...` 及可选的堆栈代码块
+
+**字段含义**
+
+- `error`：面向用户的简短错误消息（如 `require is not defined`）。
+- `errorDetail`：堆栈或完整错误详情，便于开发/运维排查；仅在“能拿到 Error 对象”时写入（例如步骤在 Runner 内抛错）。
+
+**何时有 errorDetail**
+
+- **步骤在 Runner 内抛错**（如执行超时、transform 异常、网络/模块加载异常）：会写入该步骤的 `error` + `errorDetail`，以及 run 级的 `error` + `error_detail`。
+- **步骤由 Executor 返回失败**（如 BG Session 返回 `status: 'failed'`）：当前仅写入 `error` 消息，堆栈可查服务端日志；后续可在 `StepExecutionOutput` 中扩展 `errorDetail`。
+
+**用户查看方式**
+
+- 在 Electron 客户端的**工作流运行详情**弹窗中（工作流 → 运行列表 → 点击某次运行）：
+  - Run 级：若存在 `run.error`，会展示错误消息；若存在 `run.errorDetail`，可展开「查看堆栈/详情」并复制。
+  - 步骤级：时间线中每个失败步骤展示 `step.error`；若存在 `step.errorDetail`，可展开「查看堆栈/详情」并复制。
+
+**服务端日志**
+
+- Runner 在步骤失败时会打日志：`log.error('Workflow step "..." failed:', err)`，便于在服务端日志中查看完整 Error（含堆栈）。
+
+### 4.7 LinkedActionExecutor（`linkedActionExecutor.ts`）
 
 **职责**：在步骤完成后执行声明式联动操作，将工作流与 Prizm 的 Todo/文档/日程/通知系统打通。
 
@@ -347,7 +407,7 @@ steps:
 
 所有参数支持 `$stepId.output`、`$args.key` 变量引用。操作完成后通过 EventBus emit 对应事件（如 `todo:mutated`、`document:saved`）。
 
-### 4.7 TriggerHandlers（`triggerHandlers.ts`）
+### 4.8 TriggerHandlers（`triggerHandlers.ts`）
 
 **职责**：订阅 EventBus 事件，当事件匹配已注册工作流的 trigger 条件时自动启动运行。
 
@@ -369,9 +429,13 @@ steps:
     └── workflows/
         └── {workflowName}/             # Workflow 持久工作区（跨 run 复用）
             ├── .meta/
-            │   └── runs/
-            │       ├── {runId-1}.md    # 运行元数据
-            │       └── {runId-2}.md
+            │   ├── runs/
+            │   │   ├── {runId-1}.md    # 运行元数据
+            │   │   └── {runId-2}.md
+            │   ├── def.json            # 定义元数据（id, createdAt, updatedAt 等）
+            │   └── versions/           # 流水线版本快照（无记忆功能，仅快照与回溯）
+            │       └── {timestamp}.yaml
+            ├── workflow.yaml           # 当前定义内容
             ├── reports/                 # Agent 产出文件（自由区域）
             ├── data/
             └── ...
@@ -384,9 +448,16 @@ steps:
 **三级存储隔离**：`scope` > `workflow` > `session`
 
 设计原则：
+
 - **文件友好**：所有数据通过文件系统组织，Agent 可直接操作
 - **持久复用**：Workflow 工作区在多次 run 间保留，后续 run 可看到历史数据
 - **按需清理**：`cleanBefore: true` 仅清空自由区域，保留 `.meta/` 历史记录
+
+#### 工作区边界与安全
+
+- Agent 步骤通过 Runner 传入的 `workspaceDir` / `runWorkspaceDir` 限定**默认文件操作根目录**，由 PathProviderCore 与工作流工作区解析得到（`ensureWorkflowWorkspace`、`ensureRunWorkspace`）。
+- 步骤内使用的 `prizm_file` 等工具在工作流上下文中应限制在该工作流工作区内，实现上通过 BG Session 的 `workspaceDir` 体现。
+- 当前无工作区外路径的显式白名单/黑名单校验；若需更严格沙箱（如禁止访问工作区外路径），可在后续版本扩展。
 
 ## 六、API 层
 
@@ -398,6 +469,10 @@ steps:
 |------|------|------|------|
 | GET | `/workflow/defs` | 列出已注册定义 | 需要 scope |
 | POST | `/workflow/defs` | 注册/更新工作流定义 | body: `{ name, yaml, description? }` |
+| GET | `/workflow/defs/:id` | 获取单条定义 | |
+| GET | `/workflow/defs/:id/versions` | 列出流水线版本列表（无记忆功能） | 按时间倒序 |
+| GET | `/workflow/defs/:id/versions/:versionId` | 获取指定版本 YAML 内容 | |
+| POST | `/workflow/defs/:id/rollback` | 一键回溯到指定版本 | body: `{ versionId }`，当前内容会先被保存为快照 |
 | DELETE | `/workflow/defs/:id` | 删除定义 | |
 | POST | `/workflow/run` | 启动运行 | body: `{ workflow_name?, yaml?, args? }` |
 | POST | `/workflow/resume` | 恢复暂停的工作流 | body: `{ resume_token, approved? }` |
@@ -453,6 +528,7 @@ interface PrizmClient {
 | `workflow:failed` | 运行失败/取消 | `{ scope, runId, workflowName, error }` |
 
 这些事件同时用于：
+
 - WebSocket 实时推送给前端
 - 客户端 `WorkflowStore` 的实时状态更新
 - 触发其他工作流（如果存在匹配的 trigger）
@@ -464,6 +540,7 @@ interface PrizmClient {
 模块：`prizm-electron-client/src/store/workflowStore.ts`
 
 状态管理，维护 `runs[]` 和 `defs[]` 列表。特性：
+
 - 通过 WebSocket 事件实时更新（debounce 500ms）
 - `patchStepResult()` — 本地即时 patch 单步状态，无需等待服务端刷新
 - `bind(http, scope)` — 切换 scope 时自动刷新
@@ -473,6 +550,7 @@ interface PrizmClient {
 模块：`prizm-electron-client/src/components/workflow/WorkflowPipelineView.tsx`
 
 流水线可视化组件：
+
 - 水平布局展示步骤节点和连接线（超过 8 步自动切换垂直布局）
 - 每个节点根据状态显示不同图标和颜色（completed=绿、running=蓝、failed=红、paused=黄）
 - 步骤类型图标：agent=机器人、approve=审批、transform=转换
@@ -572,3 +650,7 @@ prizm-electron-client/src/components/workflow/
 ├── WorkflowRunDetail.tsx                               # 运行详情面板
 └── WorkflowToolCards.tsx                               # 工具卡片
 ```
+
+## 相关文档
+
+- **[工作流管理会话「重建对话」完整流程](workflow-management-session-rebuild.md)**：从 UI 触发、客户端删除/创建会话、服务端引用校验与 def 更新，到标签页与主区状态同步的端到端说明。

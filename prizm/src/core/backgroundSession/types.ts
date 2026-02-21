@@ -20,7 +20,7 @@ export interface BgTriggerPayload {
   maxSchemaRetries?: number
   /** 函数化输入参数（schema + 实际值，注入 preamble 的 <input_params> 区块） */
   inputParams?: {
-    schema: Record<string, { type?: string; description?: string }>
+    schema: Record<string, { type?: string; description?: string; optional?: boolean }>
     values: Record<string, unknown>
   }
 }
@@ -36,6 +36,8 @@ export interface BgRunResult {
   /** 可选的产出文件列表 */
   artifacts?: string[]
   durationMs: number
+  /** 失败时的堆栈或完整错误详情（便于工作流步骤展示） */
+  errorDetail?: string
 }
 
 /** 活跃运行追踪条目 */

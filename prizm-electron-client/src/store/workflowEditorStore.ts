@@ -14,6 +14,7 @@ import {
   type OnEdgesChange,
   type Connection
 } from '@xyflow/react'
+import { message } from 'antd'
 import type { WorkflowDef, WorkflowDefConfig, WorkflowStepType, WorkflowTriggerDef } from '@prizm/shared'
 import {
   defToFlow,
@@ -84,7 +85,7 @@ export interface WorkflowEditorState {
 
 function snapshot(state: { nodes: EditorNode[]; edges: Edge[] }): Snapshot {
   return {
-    nodes: state.nodes.map((n) => ({ ...n, data: { ...n.data } })),
+    nodes: state.nodes.map((n) => ({ ...n, data: { ...n.data } })) as EditorNode[],
     edges: state.edges.map((e) => ({ ...e }))
   }
 }
@@ -114,7 +115,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()((set, get) =
       return true
     })
     set((state) => ({
-      nodes: applyNodeChanges(filteredChanges, state.nodes) as EditorNode[],
+      nodes: applyNodeChanges(filteredChanges, state.nodes as Node[]) as EditorNode[],
       dirty: true
     }))
   },
@@ -128,13 +129,27 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()((set, get) =
 
   onConnect: (connection) => {
     const { nodes, edges } = get()
-    pushUndo(get)
+    const source = connection.source!
+    const target = connection.target!
 
-    const id = `${connection.source}->${connection.target}`
+    // Serial pipeline: each step node may have at most one outgoing edge to another step node
+    const isStepNode = (id: string) => id !== INPUT_NODE_ID && id !== OUTPUT_NODE_ID
+    if (isStepNode(source) && isStepNode(target)) {
+      const hasOutToStep = edges.some(
+        (e) => e.source === source && e.target !== OUTPUT_NODE_ID
+      )
+      if (hasOutToStep) {
+        message.warning('当前仅支持串行流水线，每步只能有一个后继步骤。请先断开已有连线再连接。')
+        return
+      }
+    }
+
+    pushUndo(get)
+    const id = `${source}->${target}`
     if (edges.some((e) => e.id === id)) return
 
     set({
-      edges: [...edges, { id, source: connection.source!, target: connection.target!, animated: false }],
+      edges: [...edges, { id, source, target, animated: false }],
       dirty: true
     })
   },
@@ -194,7 +209,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()((set, get) =
     }
 
     set({
-      nodes: newNodes,
+      nodes: newNodes as EditorNode[],
       edges: newEdges,
       selectedNodeId: id,
       dirty: true
@@ -268,7 +283,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()((set, get) =
     }
 
     set({
-      nodes: [...nodes, newNode],
+      nodes: [...nodes, newNode] as EditorNode[],
       selectedNodeId: newId,
       dirty: true
     })
@@ -278,10 +293,11 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()((set, get) =
     const { nodes } = get()
     pushUndo(get)
 
+    const nextNodes = nodes.map((n) =>
+      n.id === nodeId ? { ...n, data: { ...n.data, ...data } } : n
+    ) as EditorNode[]
     set({
-      nodes: nodes.map((n) =>
-        n.id === nodeId ? { ...n, data: { ...n.data, ...data } } : n
-      ),
+      nodes: nextNodes,
       dirty: true
     })
   },
@@ -295,15 +311,18 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()((set, get) =
     const refPattern = new RegExp(`\\$${oldId}\\.`, 'g')
     const replacement = `$${newId}.`
 
-    const newNodes = nodes.map((n) => {
+    const mappedNodes = nodes.map((n) => {
       if (n.id === oldId) {
         return { ...n, id: newId, data: { ...n.data, label: newId } }
       }
-      const d = { ...n.data }
-      if (d.input) d.input = d.input.replace(refPattern, replacement)
-      if (d.condition) d.condition = d.condition.replace(refPattern, replacement)
-      return { ...n, data: d }
+      const d = n.data as Record<string, unknown>
+      const updates: Partial<StepNodeData> = {}
+      if (typeof d.input === 'string') updates.input = d.input.replace(refPattern, replacement)
+      if (typeof d.condition === 'string') updates.condition = d.condition.replace(refPattern, replacement)
+      if (Object.keys(updates).length === 0) return n
+      return { ...n, data: { ...n.data, ...updates } }
     })
+    const newNodes: EditorNode[] = mappedNodes as EditorNode[]
 
     const newEdges = edges.map((e) => {
       const src = e.source === oldId ? newId : e.source
@@ -335,7 +354,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()((set, get) =
   loadFromDef: (def) => {
     const { nodes, edges } = defToFlow(def)
     set({
-      nodes,
+      nodes: nodes as EditorNode[],
       edges,
       workflowName: def.name,
       workflowDescription: def.description ?? '',
@@ -365,8 +384,13 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()((set, get) =
   autoLayout: () => {
     const { nodes, edges } = get()
     pushUndo(get)
-    const laidOut = applyDagreLayout(nodes as Node[], edges)
-    set({ nodes: laidOut as EditorNode[], dirty: true })
+    const stepNodes = nodes.filter((n) => !isIONodeId(n.id)) as StepNode[]
+    const laidOut = applyDagreLayout(stepNodes, edges)
+    const positionMap = new Map(laidOut.map((n) => [n.id, n.position]))
+    const newNodes: EditorNode[] = nodes.map((n) =>
+      positionMap.has(n.id) ? { ...n, position: positionMap.get(n.id)! } : n
+    ) as EditorNode[]
+    set({ nodes: newNodes, dirty: true })
   },
 
   undo: () => {

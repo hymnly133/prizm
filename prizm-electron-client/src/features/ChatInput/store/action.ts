@@ -4,7 +4,7 @@ import { createClientLogger } from '@prizm/client-core'
 import type { PublicState, State, InputRef } from './initialState'
 
 const log = createClientLogger('ChatInput')
-import type { OverlayTextReplacer } from './initialState'
+import type { OverlayTextReplacer, OverlayChipInserter } from './initialState'
 import { initialState } from './initialState'
 
 export interface Action {
@@ -16,6 +16,7 @@ export interface Action {
   handleStop: () => void
   removeInputRef: (key: string) => void
   setApplyOverlayTextReplace: (fn: OverlayTextReplacer | null) => void
+  setApplyOverlayChipInsert: (fn: OverlayChipInserter | null) => void
   setDocument: (type: string, content: unknown, options?: Record<string, unknown>) => void
   setExpand: (expand: boolean) => void
   setFocusBlockInput: (fn: (() => void) | null) => void
@@ -95,6 +96,10 @@ export const store: CreateStore = (publicState) => (set, get) => ({
 
   setApplyOverlayTextReplace: (fn: OverlayTextReplacer | null) => {
     set({ applyOverlayTextReplace: fn })
+  },
+
+  setApplyOverlayChipInsert: (fn: OverlayChipInserter | null) => {
+    set({ applyOverlayChipInsert: fn })
   },
 
   setInputRefs: (refs: InputRef[]) => {

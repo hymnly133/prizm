@@ -56,6 +56,9 @@ export interface AgentSessionStoreState {
   thinkingEnabled: boolean
   toolCardCompact: boolean
 
+  /** 开发模式：每轮请求的调试信息，key = `${sessionId}:${messageId}` */
+  roundDebugByKey: Record<string, RoundDebugInfo>
+
   // --- Actions ---
   setHttpClient(http: PrizmClient): void
   refreshSessions(scope: string): Promise<void>
@@ -64,7 +67,12 @@ export interface AgentSessionStoreState {
   loadSession(id: string, scope: string): Promise<AgentSession | null>
   updateSession(
     id: string,
-    update: { llmSummary?: string },
+    update: {
+      llmSummary?: string
+      allowedTools?: string[]
+      allowedSkills?: string[]
+      allowedMcpServerIds?: string[]
+    },
     scope: string
   ): Promise<AgentSession | null>
   switchSession(id: string | null): void
@@ -73,7 +81,8 @@ export interface AgentSessionStoreState {
     content: string,
     scope: string,
     fileRefs?: FilePathRef[],
-    model?: string
+    model?: string,
+    runRefIds?: string[]
   ): Promise<string | null>
   stopGeneration(sessionId: string, scope: string): Promise<void>
   respondToInteract(
@@ -96,16 +105,43 @@ export interface AgentSessionStoreState {
   setThinkingEnabled(enabled: boolean): void
   setToolCardCompact(compact: boolean): void
   toggleToolCardCompact(): void
+  /** 仅用于 DevTools Playground：注入模拟待审批，不请求服务端 */
+  injectPlaygroundInteract(payload: InteractRequestPayload): void
+  clearPlaygroundInteract(): void
+  /** 开发模式：记录此轮请求的调试信息 */
+  setRoundDebug(
+    sessionId: string,
+    messageId: string,
+    requestPayload: RoundDebugRequestPayload
+  ): void
 }
+
+/** 开发模式：单轮请求的调试载荷（与 streamChat 入参一致） */
+export interface RoundDebugRequestPayload {
+  content: string
+  model?: string
+  fileRefs?: FilePathRef[]
+  runRefIds?: string[]
+  thinking?: boolean
+}
+
+export interface RoundDebugInfo {
+  requestPayload: RoundDebugRequestPayload
+}
+
+/** DevTools 交互 Playground 使用的虚拟 sessionId，不请求服务端 */
+export const PLAYGROUND_SESSION_ID = '__playground__'
 
 const THINKING_STORAGE_KEY = 'prizm.agent.thinkingEnabled'
 const TOOL_COMPACT_STORAGE_KEY = 'prizm.agent.toolCardCompact'
 
 function loadThinkingEnabled(): boolean {
   try {
-    return localStorage.getItem(THINKING_STORAGE_KEY) === '1'
+    const v = localStorage.getItem(THINKING_STORAGE_KEY)
+    if (v === null) return true
+    return v === '1'
   } catch {
-    return false
+    return true
   }
 }
 
@@ -203,6 +239,7 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
     selectedModel: undefined,
     thinkingEnabled: loadThinkingEnabled(),
     toolCardCompact: loadToolCardCompact(),
+    roundDebugByKey: {},
 
     // --- Actions ---
 
@@ -228,6 +265,37 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
       const next = !get().toolCardCompact
       set({ toolCardCompact: next })
       saveToolCardCompact(next)
+    },
+
+    injectPlaygroundInteract(payload: InteractRequestPayload) {
+      const internals = getInternals(PLAYGROUND_SESSION_ID)
+      internals.pendingInteractRef = payload
+      set((s) => ({
+        streamingStates: {
+          ...s.streamingStates,
+          [PLAYGROUND_SESSION_ID]: { ...DEFAULT_STREAMING_STATE, pendingInteract: payload }
+        }
+      }))
+    },
+
+    clearPlaygroundInteract() {
+      const internals = getInternals(PLAYGROUND_SESSION_ID)
+      internals.pendingInteractRef = null
+      set((s) => {
+        const { [PLAYGROUND_SESSION_ID]: _, ...rest } = s.streamingStates
+        return { streamingStates: rest }
+      })
+    },
+
+    setRoundDebug(sessionId: string, messageId: string, requestPayload: RoundDebugRequestPayload) {
+      if (typeof import.meta !== 'undefined' && !import.meta.env?.DEV) return
+      const key = `${sessionId}:${messageId}`
+      set((s) => ({
+        roundDebugByKey: {
+          ...s.roundDebugByKey,
+          [key]: { requestPayload }
+        }
+      }))
     },
 
     async refreshSessions(scope: string) {
@@ -384,7 +452,16 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
       return promise
     },
 
-    async updateSession(id: string, update: { llmSummary?: string }, scope: string) {
+    async updateSession(
+      id: string,
+      update: {
+        llmSummary?: string
+        allowedTools?: string[]
+        allowedSkills?: string[]
+        allowedMcpServerIds?: string[]
+      },
+      scope: string
+    ) {
       const http = _httpClient
       if (!http || !scope) return null
       try {
@@ -435,6 +512,12 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
       scope: string,
       paths?: string[]
     ) {
+      if (sessionId === PLAYGROUND_SESSION_ID) {
+        const internals = getInternals(sessionId)
+        internals.pendingInteractRef = null
+        updateStreamingState(setStreaming, sessionId, { pendingInteract: null })
+        return
+      }
       const http = _httpClient
       if (!http) return
       try {
@@ -638,7 +721,8 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
       content: string,
       scope: string,
       fileRefs?: FilePathRef[],
-      model?: string
+      model?: string,
+      runRefIds?: string[]
     ): Promise<string | null> {
       const http = _httpClient
       if (!http || !content.trim()) return null
@@ -691,12 +775,20 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
       const chunkCtx = { set: setStreaming, get: getStreaming, sessionId, internals, acc }
 
       const thinkingEnabled = get().thinkingEnabled
+      const requestPayload: RoundDebugRequestPayload = {
+        content: content.trim(),
+        model: selectedModel,
+        fileRefs,
+        runRefIds,
+        thinking: thinkingEnabled || undefined
+      }
       try {
         await http.streamChat(sessionId, content.trim(), {
           scope,
           signal: ac.signal,
           model: selectedModel,
           fileRefs,
+          runRefIds,
           thinking: thinkingEnabled || undefined,
           onChunk: (chunk) => processStreamChunk(chunk, chunkCtx),
           onError: (msg) => set({ error: msg })
@@ -710,6 +802,8 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
           userMsg,
           assistantMsg
         )
+        const finalMessageId = acc.lastMessageId ?? assistantMsg.id
+        get().setRoundDebug(sessionId, finalMessageId, requestPayload)
         _lastFetchTime.set(sessionId, Date.now())
         log.info('Stream completed, session:', sessionId)
         updateStreamingState(setStreaming, sessionId, { optimisticMessages: [] })

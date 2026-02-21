@@ -110,7 +110,7 @@ yarn test
 
 - `PRIZM_PORT` - Server port (default 4127)
 - `PRIZM_HOST` - Listen address (default 127.0.0.1)
-- `PRIZM_DATA_DIR` - Data directory (default .prizm-data)
+- `PRIZM_DATA_DIR` - Data directory (default .prizm-data). Resolved relative to process.cwd(); **use an absolute path** to avoid scope/session memory appearing to reset when starting the server from a different directory (e.g. `D:\prizm\.prizm-data`).
 - `PRIZM_AUTH_DISABLED=1` - Disable authentication for local development
 - `PRIZM_LOG_LEVEL` - Log level: info / warn / error
 - `PRIZM_AGENT_SCOPE_CONTEXT_MAX_CHARS` - Agent scope context max chars (default 4000)
@@ -131,6 +131,11 @@ yarn test
 **Search：**
 
 - `TAVILY_API_KEY` - Tavily 网络搜索 API key（可选，启用 Agent 网络搜索工具）
+
+**Skills（Agent Skills 浏览/安装）：**
+
+- `PRIZM_SKILLKIT_API_URL` - SkillKit 市场 API 根地址（默认 https://skillkit.sh/api），可改为自建或本地 `skillkit serve` 地址（如 http://localhost:3737）
+- `GITHUB_TOKEN` - 可选，用于 GitHub 搜索与拉取 skill 时提高限流上限
 
 <!-- END:ENVIRONMENT_VARIABLES -->
 
@@ -673,6 +678,7 @@ Connected via stdio bridge (`src/mcp/stdio-bridge.ts`).
 - `/commands/*` - Custom commands CRUD (auth)
 - `/skills/*` - Skills management CRUD (auth)
 - `/agent-rules/*` - Agent rules CRUD, user-level + scope-level (auth)
+- `/workflow/*` - Workflow definitions and runs (auth + scope). **Execution model is serial**: steps run in array order; visual editor edges represent order and data dependency only, not branching or parallelism.
 - `/notify` - Send notifications (auth)
 - `/settings/*` - Settings management (auth)
 - `/embedding/*` - Embedding model status, test, reload (auth)

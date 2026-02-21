@@ -1,6 +1,6 @@
 /**
  * skillManager 单元测试
- * 覆盖：SKILL.md 解析、渐进式加载、CRUD、激活/取消/自动激活
+ * 覆盖：SKILL.md 解析、渐进式加载、CRUD、getSkillsToInject、导入发现
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
@@ -15,13 +15,13 @@ import {
   deleteSkill,
   listSkillResources,
   readSkillResource,
-  activateSkill,
-  deactivateSkill,
-  getActiveSkills,
-  autoActivateSkills,
+  getSkillFileTree,
+  getSkillsToInject,
+  getSkillsMetadataForDiscovery,
   importSkillsFromDir,
   discoverImportableSkillSources,
-  getSkillsDir
+  getSkillsDir,
+  getInstalledRegistryKeys
 } from './skillManager'
 import { resetConfig } from '../config'
 
@@ -180,6 +180,38 @@ describe('skill resources', () => {
   })
 })
 
+// ============ getSkillFileTree ============
+
+describe('getSkillFileTree', () => {
+  beforeEach(setup)
+  afterEach(teardown)
+
+  it('不存在的 skill 返回 null', () => {
+    expect(getSkillFileTree('nope')).toBeNull()
+  })
+
+  it('仅 SKILL.md 时返回根级 SKILL.md', () => {
+    writeSkillMd('minimal', 'name: minimal\ndescription: 最小', 'body')
+    const tree = getSkillFileTree('minimal')
+    expect(tree).toEqual({ 'SKILL.md': 'file' })
+  })
+
+  it('含 scripts/references/assets 时返回完整树', () => {
+    writeSkillMd('tree-skill', 'name: tree-skill\ndescription: 树', 'body')
+    const base = path.join(getSkillsDir(), 'tree-skill')
+    fs.mkdirSync(path.join(base, 'scripts'), { recursive: true })
+    fs.mkdirSync(path.join(base, 'references'), { recursive: true })
+    fs.writeFileSync(path.join(base, 'scripts', 'run.sh'), '')
+    fs.writeFileSync(path.join(base, 'references', 'doc.md'), '')
+    const tree = getSkillFileTree('tree-skill')
+    expect(tree).toHaveProperty('SKILL.md', 'file')
+    expect(tree).toHaveProperty('scripts')
+    expect((tree as Record<string, unknown>).scripts).toEqual({ 'run.sh': 'file' })
+    expect(tree).toHaveProperty('references')
+    expect((tree as Record<string, unknown>).references).toEqual({ 'doc.md': 'file' })
+  })
+})
+
 // ============ CRUD ============
 
 describe('skill CRUD', () => {
@@ -192,6 +224,34 @@ describe('skill CRUD', () => {
     expect(skill.name).toBe('my-skill')
     expect(skill.enabled).toBe(true)
     expect(fs.existsSync(path.join(getSkillsDir(), 'my-skill', 'SKILL.md'))).toBe(true)
+  })
+
+  it('createSkill 带 origin 时持久化并可通过 getInstalledRegistryKeys 查出', () => {
+    const origin = {
+      source: 'github' as const,
+      owner: 'foo',
+      repo: 'bar',
+      skillPath: 'skills/code-review'
+    }
+    createSkill(
+      { name: 'from-registry', description: '从 registry 安装' },
+      'body',
+      'github',
+      origin
+    )
+    const meta = loadAllSkillMetadata()
+    const withOrigin = meta.find((s) => s.name === 'from-registry')
+    expect(withOrigin?.origin).toEqual(origin)
+    const keys = getInstalledRegistryKeys()
+    expect(keys.has('github:foo/bar:skills/code-review')).toBe(true)
+  })
+
+  it('getInstalledRegistryKeys 不含无 origin 的 skill', () => {
+    createSkill({ name: 'no-origin', description: '无 origin' }, 'body')
+    const keys = getInstalledRegistryKeys()
+    expect(keys.has('github:any/any:any')).toBe(false)
+    const meta = loadAllSkillMetadata()
+    expect(meta.some((s) => s.name === 'no-origin')).toBe(true)
   })
 
   it('createSkill 重复名称抛出异常', () => {
@@ -230,119 +290,71 @@ describe('skill CRUD', () => {
   })
 })
 
-// ============ 会话级激活 ============
+// ============ getSkillsToInject ============
 
-describe('skill activation', () => {
+describe('getSkillsToInject', () => {
   beforeEach(setup)
   afterEach(teardown)
 
-  it('手动激活并获取活跃 skills', () => {
-    createSkill({ name: 'act-a', description: '可激活 A' }, '指令 A')
+  it('allowedSkills 为空时返回所有已启用 skill', () => {
+    createSkill({ name: 'a', description: 'A' }, 'body A')
+    createSkill({ name: 'b', description: 'B' }, 'body B')
 
-    const activation = activateSkill('default', 'sess1', 'act-a')
-    expect(activation).not.toBeNull()
-    expect(activation!.skillName).toBe('act-a')
-    expect(activation!.autoActivated).toBe(false)
-    expect(activation!.instructions).toContain('指令 A')
-
-    const active = getActiveSkills('default', 'sess1')
-    expect(active.length).toBe(1)
+    const result = getSkillsToInject('default', undefined)
+    expect(result.length).toBe(2)
+    expect(result.map((x) => x.name).sort()).toEqual(['a', 'b'])
+    expect(result.find((x) => x.name === 'a')!.instructions).toBe('body A')
   })
 
-  it('重复激活同一 skill 返回已有激活', () => {
-    createSkill({ name: 'act-dup', description: '重复' }, 'body')
-
-    const first = activateSkill('default', 'sess2', 'act-dup')
-    const second = activateSkill('default', 'sess2', 'act-dup')
-    expect(first!.activatedAt).toBe(second!.activatedAt)
-
-    const active = getActiveSkills('default', 'sess2')
-    expect(active.length).toBe(1)
+  it('allowedSkills 为空数组时返回所有已启用 skill', () => {
+    createSkill({ name: 'only', description: 'Only' }, 'content')
+    expect(getSkillsToInject('default', [])).toHaveLength(1)
   })
 
-  it('超过 maxActive 时淘汰最早的', () => {
-    for (let i = 1; i <= 4; i++) {
-      createSkill({ name: `overflow-${i}`, description: `#${i}` }, `body ${i}`)
-    }
+  it('allowedSkills 非空时只返回名单内且已启用的 skill', () => {
+    createSkill({ name: 'in', description: 'In' }, 'body in')
+    createSkill({ name: 'out', description: 'Out' }, 'body out')
 
-    activateSkill('default', 'sess3', 'overflow-1', 3)
-    activateSkill('default', 'sess3', 'overflow-2', 3)
-    activateSkill('default', 'sess3', 'overflow-3', 3)
-    activateSkill('default', 'sess3', 'overflow-4', 3)
-
-    const active = getActiveSkills('default', 'sess3')
-    expect(active.length).toBe(3)
-    // 最早的 overflow-1 应被淘汰
-    expect(active.find((a) => a.skillName === 'overflow-1')).toBeUndefined()
-    expect(active.find((a) => a.skillName === 'overflow-4')).toBeDefined()
+    const result = getSkillsToInject('default', ['in'])
+    expect(result.length).toBe(1)
+    expect(result[0].name).toBe('in')
+    expect(result[0].instructions).toBe('body in')
   })
 
-  it('取消激活', () => {
-    createSkill({ name: 'deact', description: '待取消' }, 'body')
-    activateSkill('default', 'sess4', 'deact')
-
-    expect(deactivateSkill('default', 'sess4', 'deact')).toBe(true)
-    expect(getActiveSkills('default', 'sess4')).toEqual([])
+  it('名单外的 skill 不返回', () => {
+    createSkill({ name: 'enabled', description: 'E' }, 'body')
+    expect(getSkillsToInject('default', ['other'])).toEqual([])
   })
 
-  it('取消不存在的激活返回 false', () => {
-    expect(deactivateSkill('default', 'no-sess', 'none')).toBe(false)
-  })
-
-  it('不同会话的激活独立', () => {
-    createSkill({ name: 'iso', description: '隔离测试' }, 'body')
-
-    activateSkill('default', 'sessA', 'iso')
-    expect(getActiveSkills('default', 'sessA').length).toBe(1)
-    expect(getActiveSkills('default', 'sessB').length).toBe(0)
-  })
-
-  it('激活不存在的 skill 返回 null', () => {
-    expect(activateSkill('default', 'sess', 'ghost')).toBeNull()
+  it('仅返回已启用的 skill（enabled 由 loadAllSkillMetadata 提供）', () => {
+    createSkill({ name: 'one', description: 'One' }, 'body')
+    const result = getSkillsToInject('default', ['one'])
+    expect(result.length).toBe(1)
+    expect(result[0].name).toBe('one')
   })
 })
 
-// ============ 自动激活 ============
+// ============ getSkillsMetadataForDiscovery ============
 
-describe('autoActivateSkills', () => {
+describe('getSkillsMetadataForDiscovery', () => {
   beforeEach(setup)
   afterEach(teardown)
 
-  it('根据关键词匹配自动激活', () => {
-    // 使用空格分隔的关键词确保 tokenizer 能正确分词
-    createSkill(
-      { name: 'code-review', description: 'code review quality bugs improvements' },
-      'Review steps...'
-    )
-    createSkill(
-      { name: 'data-viz', description: 'data visualization charts dashboard' },
-      'Visualization steps...'
-    )
-
-    // 消息包含 code review quality 等关键词 → 匹配 code-review skill
-    const activated = autoActivateSkills('default', 'auto1', 'please review the code quality')
-    const names = activated.map((a) => a.skillName)
-    expect(names).toContain('code-review')
-    expect(activated.every((a) => a.autoActivated)).toBe(true)
+  it('allowedSkills 为空时返回所有已启用 skill 的 name+description', () => {
+    createSkill({ name: 'a', description: 'Desc A' }, 'body A')
+    createSkill({ name: 'b', description: 'Desc B' }, 'body B')
+    const result = getSkillsMetadataForDiscovery('default', undefined)
+    expect(result.length).toBe(2)
+    expect(result.map((x) => x.name).sort()).toEqual(['a', 'b'])
+    expect(result.find((x) => x.name === 'a')).toEqual({ name: 'a', description: 'Desc A' })
   })
 
-  it('无 skill 时返回空', () => {
-    const result = autoActivateSkills('default', 'auto2', '随便说点什么')
-    expect(result).toEqual([])
-  })
-
-  it('已激活的 skill 不会重复自动激活', () => {
-    createSkill({ name: 'unique', description: '唯一 skill 用于测试唯一激活' }, 'body')
-    activateSkill('default', 'auto3', 'unique')
-
-    const result = autoActivateSkills('default', 'auto3', '唯一 skill 测试唯一激活')
-    expect(result.length).toBe(0)
-  })
-
-  it('消息太短不触发', () => {
-    createSkill({ name: 'short', description: '测试短消息' }, 'body')
-    const result = autoActivateSkills('default', 'auto4', 'a')
-    expect(result).toEqual([])
+  it('allowedSkills 非空时只返回名单内的 skill', () => {
+    createSkill({ name: 'in', description: 'In' }, 'body')
+    createSkill({ name: 'out', description: 'Out' }, 'body')
+    const result = getSkillsMetadataForDiscovery('default', ['in'])
+    expect(result.length).toBe(1)
+    expect(result[0]).toEqual({ name: 'in', description: 'In' })
   })
 })
 

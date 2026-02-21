@@ -1,8 +1,8 @@
 /**
  * BgSessionStepExecutor — IStepExecutor 的 BG Session 实现
  *
- * 将 BackgroundSessionManager.triggerSync() 包装为 IStepExecutor 接口。
- * 当 BG Session 的触发 API 变更时，仅需修改此文件。
+ * 使用 trigger() 在创建 Session 后立即回调 onSessionCreated，便于 run 侧写入 stepResults.sessionId，
+ * 使 running 步骤在单次 run 面板中可打开会话查看；再 await 完成并返回最终结果。
  */
 
 import type { BgSessionMeta, SessionIOConfig, WorkflowStepSessionConfig } from '@prizm/shared'
@@ -18,15 +18,24 @@ export class BgSessionStepExecutor implements IStepExecutor {
     const payload = this.buildPayload(input, sc)
     const meta = this.buildMeta(input, sc)
 
-    const result = await this.bgManager.triggerSync(scope, payload, meta, { signal })
+    const tm = meta.timeoutMs ?? undefined
+    const { sessionId, promise } = await this.bgManager.trigger(
+      scope,
+      payload,
+      { ...meta, timeoutMs: tm },
+      { signal }
+    )
+    input.onSessionCreated?.(sessionId)
 
+    const result = await promise
     return {
       sessionId: result.sessionId,
       status: result.status,
       output: result.output,
       structuredData: result.structuredData,
       artifacts: result.artifacts,
-      durationMs: result.durationMs
+      durationMs: result.durationMs,
+      ...(result.errorDetail ? { errorDetail: result.errorDetail } : {})
     }
   }
 
@@ -46,8 +55,8 @@ export class BgSessionStepExecutor implements IStepExecutor {
       context: input.context,
       systemInstructions: systemInstructions || undefined,
       expectedOutputFormat: sc?.expectedOutputFormat ?? input.expectedOutputFormat,
-      outputSchema: sc?.outputSchema,
-      maxSchemaRetries: sc?.maxSchemaRetries,
+      outputSchema: input.outputSchema ?? sc?.outputSchema,
+      maxSchemaRetries: input.maxSchemaRetries ?? sc?.maxSchemaRetries,
       inputParams: input.inputParams
     }
   }
@@ -60,16 +69,28 @@ export class BgSessionStepExecutor implements IStepExecutor {
       timeoutMs: input.timeoutMs,
       autoCleanup: true,
       workspaceDir: input.workspaceDir,
+      persistentWorkspaceDir: input.persistentWorkspaceDir,
       source: input.source,
       sourceId: input.sourceId
     }
 
     if (sc) {
-      const hasAgentDef = sc.allowedTools || sc.maxTurns || sc.permissionMode || sc.systemPrompt || sc.model
+      const hasAgentDef =
+        sc.thinking !== undefined ||
+        sc.allowedTools ||
+        sc.allowedSkills ||
+        sc.allowedMcpServerIds ||
+        sc.maxTurns ||
+        sc.permissionMode ||
+        sc.systemPrompt ||
+        sc.model
       if (hasAgentDef) {
         meta.inlineAgentDef = {
           ...(sc.systemPrompt ? { systemPrompt: sc.systemPrompt } : {}),
+          ...(sc.thinking !== undefined ? { thinking: sc.thinking } : {}),
           ...(sc.allowedTools ? { allowedTools: sc.allowedTools } : {}),
+          ...(sc.allowedSkills ? { allowedSkills: sc.allowedSkills } : {}),
+          ...(sc.allowedMcpServerIds ? { allowedMcpServerIds: sc.allowedMcpServerIds } : {}),
           ...(sc.model ? { model: sc.model } : {}),
           ...(sc.maxTurns != null ? { maxTurns: sc.maxTurns } : {}),
           ...(sc.permissionMode ? { permissionMode: sc.permissionMode } : {})
@@ -89,6 +110,9 @@ export class BgSessionStepExecutor implements IStepExecutor {
     if (ioConfig.inputParams || ioConfig.outputParams) {
       meta.ioConfig = ioConfig
     }
+
+    if (input.workflowStepIds?.length) meta.workflowStepIds = input.workflowStepIds
+    if (input.workflowNextStepId !== undefined) meta.workflowNextStepId = input.workflowNextStepId
 
     return meta
   }

@@ -2,18 +2,31 @@
  * WorkflowOverview — 全局总览面板
  *
  * 当未选中任何定义时展示：Hero 区域、AccentSpotlightCard 统计卡片行、
- * 最近运行时间线、快速操作。
+ * 最近运行时间线、工作空间（可选工作流后查看工作流空间 + Run 工具）、快速操作。
  */
 
-import { useMemo } from 'react'
-import { Button, Space } from 'antd'
-import { GitBranch, Play, CheckCircle2, XCircle, Loader2, Plus, Workflow } from 'lucide-react'
+import { useMemo, useState, useCallback } from 'react'
+import { Button, Space, Select } from 'antd'
+import {
+  GitBranch,
+  Play,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  Plus,
+  Workflow,
+  MessageSquare,
+  FolderGit2
+} from 'lucide-react'
 import { Icon } from '@lobehub/ui'
 import type { WorkflowRun, WorkflowDefRecord } from '@prizm/shared'
 import { AccentSpotlightCard } from '../ui/AccentSpotlightCard'
 import { StatCard } from '../ui/StatCard'
 import { EmptyState } from '../ui/EmptyState'
+import { SectionHeader } from '../ui/SectionHeader'
+import { ContentCard } from '../ui/ContentCard'
 import { WorkflowRunCard } from './WorkflowRunCard'
+import { WorkflowWorkspacePanel } from './WorkflowWorkspacePanel'
 
 export interface WorkflowOverviewProps {
   defs: WorkflowDefRecord[]
@@ -21,6 +34,8 @@ export interface WorkflowOverviewProps {
   onSelectRun: (runId: string) => void
   onSelectDef: (defId: string) => void
   onNewWorkflow: () => void
+  /** 用对话创建：新建待创建会话并在主内容区展示 */
+  onNewSession?: () => void
   onCancelRun: (runId: string) => void
 }
 
@@ -30,6 +45,7 @@ export function WorkflowOverview({
   onSelectRun,
   onSelectDef,
   onNewWorkflow,
+  onNewSession,
   onCancelRun
 }: WorkflowOverviewProps) {
   const stats = useMemo(() => {
@@ -48,6 +64,26 @@ export function WorkflowOverview({
   const recentRuns = useMemo(() => {
     return [...runs].sort((a, b) => b.createdAt - a.createdAt).slice(0, 10)
   }, [runs])
+
+  const [selectedWorkflowForWorkspace, setSelectedWorkflowForWorkspace] = useState<string | null>(
+    null
+  )
+  const runsForSelectedWorkflow = useMemo(() => {
+    if (!selectedWorkflowForWorkspace) return []
+    return runs.filter((r) => r.workflowName === selectedWorkflowForWorkspace)
+  }, [runs, selectedWorkflowForWorkspace])
+
+  const handleWorkspaceSelectRun = useCallback(
+    (runId: string) => {
+      const run = runs.find((r) => r.id === runId)
+      if (run) {
+        const def = defs.find((d) => d.name === run.workflowName)
+        if (def) onSelectDef(def.id)
+        onSelectRun(runId)
+      }
+    },
+    [defs, runs, onSelectDef, onSelectRun]
+  )
 
   const spotlightItems = [
     {
@@ -89,7 +125,7 @@ export function WorkflowOverview({
             {stats.defCount} 个工作流 · {stats.total} 次运行 · {stats.running} 个进行中
           </p>
         </div>
-        <div className="wfp-hero__actions">
+        <div className="wfp-hero__actions" style={{ display: 'flex', gap: 8 }}>
           <Button
             type="primary"
             size="large"
@@ -98,6 +134,15 @@ export function WorkflowOverview({
           >
             新建工作流
           </Button>
+          {onNewSession && (
+            <Button
+              size="large"
+              icon={<Icon icon={MessageSquare} size={16} />}
+              onClick={onNewSession}
+            >
+              用对话创建
+            </Button>
+          )}
         </div>
       </div>
 
@@ -120,11 +165,6 @@ export function WorkflowOverview({
       <div className="wfp-recent-section">
         <div className="wfp-recent-section__header">
           <div className="wfp-recent-section__title">最近运行</div>
-          <Space size={4}>
-            <Button size="small" type="text" icon={<Icon icon={Play} size={12} />}>
-              查看全部
-            </Button>
-          </Space>
         </div>
         {recentRuns.length === 0 ? (
           <EmptyState
@@ -157,6 +197,38 @@ export function WorkflowOverview({
             ))}
           </div>
         )}
+      </div>
+
+      {/* 工作空间：选择工作流后查看其工作流空间 + Run 工具 */}
+      <div className="wfp-workspace-section">
+        <SectionHeader icon={FolderGit2} title="工作空间" />
+        <ContentCard variant="subtle" className="wfp-workspace-card">
+          <div className="wfp-workspace-select-row">
+            <Select
+              placeholder="选择工作流以查看其工作空间与 Run 工具"
+              allowClear
+              value={selectedWorkflowForWorkspace ?? undefined}
+              onChange={(v) => setSelectedWorkflowForWorkspace(v ?? null)}
+              options={defs.map((d) => ({ value: d.name, label: d.name }))}
+              style={{ minWidth: 260 }}
+              aria-label="选择工作流"
+            />
+          </div>
+          {selectedWorkflowForWorkspace ? (
+            <WorkflowWorkspacePanel
+              workflowName={selectedWorkflowForWorkspace}
+              mode="overview"
+              runsForWorkflow={runsForSelectedWorkflow}
+              onSelectRun={handleWorkspaceSelectRun}
+              onCancelRun={onCancelRun}
+            />
+          ) : (
+            <EmptyState
+              icon={FolderGit2}
+              description="在上方选择工作流后可查看其持久空间文件与 Run 列表"
+            />
+          )}
+        </ContentCard>
       </div>
     </div>
   )
