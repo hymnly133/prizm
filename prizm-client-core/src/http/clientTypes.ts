@@ -303,14 +303,15 @@ export interface ServerConfigAgent {
 /** LLM 提供商类型 */
 export type LLMProviderType = 'openai_compatible' | 'anthropic' | 'google'
 
-/** 单条 LLM 配置（脱敏响应含 configured；PATCH 时可含 apiKey） */
+/** 单条 LLM 配置（脱敏响应含 configured；PATCH 时可含 apiKey；name 可选，缺省时服务端自动生成） */
 export interface LLMConfigItemSanitized {
   id: string
-  name: string
+  name?: string
   type: LLMProviderType
   baseUrl?: string
-  defaultModel?: string
   configured?: boolean
+  /** 用户手动输入的模型列表，每行一个：modelId 或 "modelId 显示名" 或 "modelId, 显示名" */
+  customModelList?: string
 }
 
 /** PATCH 时发送的配置项（可含 apiKey） */
@@ -319,14 +320,27 @@ export interface LLMConfigItem extends LLMConfigItemSanitized {
 }
 
 export interface ServerConfigLLM {
-  defaultConfigId?: string
-  configs: LLMConfigItemSanitized[] | LLMConfigItem[]
+  defaultModel?: string
+  /** 浏览器节点使用的模型，格式 "configId:modelId" */
+  browserModel?: string
+  configs?: LLMConfigItemSanitized[] | LLMConfigItem[]
+  /** 仅更新单条配置（PATCH 时用），不传 configs 则只合并此条，保留其他配置的 apiKey */
+  updateConfig?: LLMConfigItem
+}
+
+/** 解析后的 (配置:模型) 条目 */
+export interface ModelEntry {
+  configId: string
+  configName: string
+  modelId: string
+  label: string
 }
 
 /** GET /settings/agent-models 响应 */
 export interface AgentModelsResponse {
+  defaultModel?: string
   configs: LLMConfigItemSanitized[]
-  models: Array<{ configId: string; modelId: string; label: string }>
+  entries: ModelEntry[]
 }
 
 export interface ServerConfigSkills {
@@ -347,6 +361,12 @@ export interface ServerConfig {
 /** GET /settings/server-config 响应（含只读 dataDir，敏感字段已脱敏） */
 export interface ServerConfigResponse extends ServerConfig {
   dataDir: string
+}
+
+/** 用户画像（显示名称、希望的语气），用于新手引导与 Agent 称呼/语气 */
+export interface UserProfile {
+  displayName?: string
+  preferredTone?: string
 }
 
 // ============ Agent Rules ============

@@ -419,6 +419,7 @@ PrizmClient.prototype.streamChat = async function (
       cachedContextTurns: options?.cachedContextTurns,
       fileRefs: options?.fileRefs,
       runRefIds: options?.runRefIds,
+      images: options?.images,
       thinking: options?.thinking
     }),
     signal: options?.signal

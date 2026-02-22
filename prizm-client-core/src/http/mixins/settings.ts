@@ -12,13 +12,16 @@ import type {
   UpdateAgentRuleInput,
   ServerConfig,
   ServerConfigResponse,
-  AgentModelsResponse
+  AgentModelsResponse,
+  UserProfile
 } from '../clientTypes'
 
 declare module '../client' {
   interface PrizmClient {
     getServerConfig(): Promise<ServerConfigResponse>
     updateServerConfig(patch: Partial<ServerConfig>): Promise<ServerConfigResponse>
+    getUserProfile(): Promise<UserProfile>
+    updateUserProfile(patch: Partial<UserProfile>): Promise<UserProfile>
     listMcpServers(): Promise<McpServerConfig[]>
     addMcpServer(config: McpServerConfig): Promise<McpServerConfig>
     updateMcpServer(
@@ -197,6 +200,20 @@ PrizmClient.prototype.updateServerConfig = async function (
 ) {
   return this.request<ServerConfigResponse>('/settings/server-config', {
     method: 'PATCH',
+    body: JSON.stringify(patch)
+  })
+}
+
+PrizmClient.prototype.getUserProfile = async function (this: PrizmClient) {
+  return this.request<UserProfile>('/settings/user-profile')
+}
+
+PrizmClient.prototype.updateUserProfile = async function (
+  this: PrizmClient,
+  patch: Partial<UserProfile>
+) {
+  return this.request<UserProfile>('/settings/user-profile', {
+    method: 'PUT',
     body: JSON.stringify(patch)
   })
 }

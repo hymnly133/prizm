@@ -3,7 +3,7 @@
  * 领域类型、Auth 类型、WebSocket 消息类型从 @prizm/shared 导入
  */
 
-import type { MessageUsage, TokenUsageCategory } from '@prizm/shared'
+import type { ChatImageAttachment, MessageUsage, TokenUsageCategory } from '@prizm/shared'
 
 // 从 shared 重导出，供依赖 client-core 的包使用
 export type {
@@ -23,6 +23,8 @@ export type {
   AgentMessage,
   MessagePart,
   MessagePartTool,
+  MessagePartImage,
+  ChatImageAttachment,
   MessageUsage,
   ToolCallStatus,
   SessionKind,
@@ -251,6 +253,8 @@ export interface StreamChatOptions {
   fileRefs?: import('@prizm/shared').FilePathRef[]
   /** 工作流 run 引用 ID 列表；管理会话下服务端会据此自动 grant 对应 run/步骤工作区路径 */
   runRefIds?: string[]
+  /** 图片附件列表，用于视觉模型多模态输入 */
+  images?: ChatImageAttachment[]
   /** 启用深度思考（reasoning / thinking chain） */
   thinking?: boolean
   onChunk?: (chunk: StreamChatChunk) => void
