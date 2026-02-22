@@ -15,6 +15,7 @@ import { useDocumentDetailSafe } from '../../context/DocumentDetailContext'
 import { MarkdownEditor, EditorToolbar, SplitEditor, EditorStatusBar } from './index'
 import type { EditorMode } from './MarkdownEditor'
 import DocumentHeader from '../DocumentHeader'
+import { FeedbackWidget } from '../ui/FeedbackWidget'
 
 const useStyles = createStyles(({ css }) => ({
   editorMain: css`
@@ -157,13 +158,22 @@ export const DocumentEditorZone = memo(function DocumentEditorZone({
         )}
       </div>
 
-      <EditorStatusBar
-        dirty={ctx.dirty}
-        saving={ctx.saving}
-        charCount={ctx.charCount}
-        wordCount={ctx.wordCount}
-        editorRef={ctx.editorRef}
-      />
+      <Flexbox horizontal align="center" justify="space-between" style={{ padding: '0 8px' }}>
+        <EditorStatusBar
+          dirty={ctx.dirty}
+          saving={ctx.saving}
+          charCount={ctx.charCount}
+          wordCount={ctx.wordCount}
+          editorRef={ctx.editorRef}
+        />
+        {ctx.document?.id && (
+          <FeedbackWidget
+            targetType="document"
+            targetId={ctx.document.id}
+            variant="inline"
+          />
+        )}
+      </Flexbox>
 
       <ImagePreviewModal
         open={!!previewImageSrc}

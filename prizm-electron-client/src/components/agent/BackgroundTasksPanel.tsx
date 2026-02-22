@@ -13,6 +13,7 @@ import { useAgentSessionStore } from '../../store/agentSessionStore'
 import { useScopeDataStore } from '../../store/scopeDataStore'
 import { EmptyState } from '../ui/EmptyState'
 import { ExecutionCard, ExecutionResultView } from '../execution'
+import { FeedbackWidget } from '../ui/FeedbackWidget'
 
 export interface BackgroundTasksPanelProps {
   onLoadSession?: (id: string) => void
@@ -102,6 +103,9 @@ export function BackgroundTasksPanel({ onLoadSession }: BackgroundTasksPanelProp
         ? Date.now() - s.startedAt
         : 0
 
+    const isFinished =
+      s.bgStatus === 'completed' || s.bgStatus === 'failed' || s.bgStatus === 'timeout'
+
     return (
       <ExecutionCard
         key={s.id}
@@ -115,6 +119,18 @@ export function BackgroundTasksPanel({ onLoadSession }: BackgroundTasksPanelProp
         onClick={(id) => onLoadSession?.(id)}
         onViewResult={handleViewResult}
         onJumpToSession={handleJumpToSession}
+        extra={
+          isFinished ? (
+            <span onClick={(e) => e.stopPropagation()}>
+              <FeedbackWidget
+                targetType="task_run"
+                targetId={s.id}
+                metadata={{ label: s.bgMeta?.label, status: s.bgStatus }}
+                variant="inline"
+              />
+            </span>
+          ) : undefined
+        }
       />
     )
   }

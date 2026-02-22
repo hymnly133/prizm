@@ -1435,6 +1435,54 @@ export interface NotificationPayload {
   updateId?: string
 }
 
+// ============ 反馈系统 ============
+
+/** 反馈评分 */
+export type FeedbackRating = 'like' | 'neutral' | 'dislike'
+
+/** 反馈目标类型 */
+export type FeedbackTargetType =
+  | 'chat_message'
+  | 'document'
+  | 'workflow_run'
+  | 'workflow_step'
+  | 'task_run'
+
+/** 反馈条目 */
+export interface FeedbackEntry {
+  id: string
+  scope: string
+  targetType: FeedbackTargetType
+  targetId: string
+  /** chat_message 时关联会话 */
+  sessionId?: string
+  rating: FeedbackRating
+  comment?: string
+  clientId?: string
+  /** 上下文元数据（模型、工具调用摘要等） */
+  metadata?: Record<string, unknown>
+  createdAt: number
+  updatedAt: number
+}
+
+/** 提交反馈的请求 payload */
+export interface SubmitFeedbackPayload {
+  targetType: FeedbackTargetType
+  targetId: string
+  sessionId?: string
+  rating: FeedbackRating
+  comment?: string
+  metadata?: Record<string, unknown>
+}
+
+/** 反馈聚合统计 */
+export interface FeedbackStats {
+  total: number
+  like: number
+  neutral: number
+  dislike: number
+}
+
 // ============ 路由层 DTO（富化响应类型） ============
 
 /** 富化文档 DTO — 路由返回时附加锁和版本信息，领域类型 Document 保持不变 */

@@ -42,6 +42,7 @@ import HomeTodoSection, { type TodoListGroup } from './HomeTodoSection'
 import type { TodoList, Document as PrizmDocument } from '@prizm/client-core'
 import { isChatListSession } from '@prizm/shared'
 import type { FileItem } from '../hooks/useFileList'
+import { FeedbackOverview } from '../components/home/FeedbackOverview'
 
 type DashboardTab = 'overview' | 'usage' | 'memory'
 
@@ -212,6 +213,7 @@ function HomePage({
             </div>
           </div>
         )}
+        <FeedbackOverview />
       </div>
 
       {/* ── 用量 ── */}

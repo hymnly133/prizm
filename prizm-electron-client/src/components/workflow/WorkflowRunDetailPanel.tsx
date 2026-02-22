@@ -35,6 +35,7 @@ import { LoadingPlaceholder } from '../ui/LoadingPlaceholder'
 import { SectionHeader } from '../ui/SectionHeader'
 import { ContentCard, ContentCardHeader, ContentCardBody } from '../ui/ContentCard'
 import { PrizmMarkdown } from '../agent/PrizmMarkdown'
+import { FeedbackWidget } from '../ui/FeedbackWidget'
 
 const { Text } = Typography
 
@@ -460,6 +461,17 @@ function RunSummaryCard({
           </ContentCardBody>
         </ContentCard>
       </div>
+
+      {(run.status === 'completed' || run.status === 'failed') && (
+        <div style={{ marginTop: 12 }}>
+          <FeedbackWidget
+            targetType="workflow_run"
+            targetId={run.id}
+            metadata={{ workflowName: run.workflowName, status: run.status }}
+            variant="card"
+          />
+        </div>
+      )}
     </div>
   )
 }

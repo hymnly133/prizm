@@ -62,7 +62,8 @@ export const EVENT_TYPES = [
   'workflow:failed',
   'workflow:def.registered',
   'workflow:def.deleted',
-  'command:changed'
+  'command:changed',
+  'feedback:submitted'
 ] as const
 
 export type EventType = (typeof EVENT_TYPES)[number]
@@ -119,7 +120,8 @@ export const EVENT_TYPES_OBJ = {
   WORKFLOW_FAILED: 'workflow:failed',
   WORKFLOW_DEF_REGISTERED: 'workflow:def.registered',
   WORKFLOW_DEF_DELETED: 'workflow:def.deleted',
-  COMMAND_CHANGED: 'command:changed'
+  COMMAND_CHANGED: 'command:changed',
+  FEEDBACK_SUBMITTED: 'feedback:submitted'
 } as const satisfies Record<string, EventType>
 
 /** 服务端全部事件类型（用于 subscribeEvents: "all"） */
@@ -170,7 +172,8 @@ export const DATA_SYNC_EVENTS = [
   'workflow:failed',
   'workflow:def.registered',
   'workflow:def.deleted',
-  'command:changed'
+  'command:changed',
+  'feedback:submitted'
 ] as const
 
 export type DataSyncEventType = (typeof DATA_SYNC_EVENTS)[number]
@@ -382,6 +385,16 @@ export interface CommandChangedPayload extends EventPayloadBase {
   commandId?: string
 }
 
+/** 反馈提交事件载荷 */
+export interface FeedbackSubmittedPayload extends EventPayloadBase {
+  feedbackId: string
+  targetType: import('./domain').FeedbackTargetType
+  targetId: string
+  rating: import('./domain').FeedbackRating
+  comment?: string
+  sessionId?: string
+}
+
 /** 各事件类型对应的 payload 类型 */
 export interface EventPayloadMap {
   notification: NotificationPayload
@@ -433,6 +446,7 @@ export interface EventPayloadMap {
   'workflow:completed': WorkflowCompletedPayload
   'workflow:failed': WorkflowFailedPayload
   'command:changed': CommandChangedPayload
+  'feedback:submitted': FeedbackSubmittedPayload
 }
 
 /** 类型安全的 EventPushMessage，payload 与 eventType 对应 */

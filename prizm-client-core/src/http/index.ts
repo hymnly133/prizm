@@ -27,6 +27,7 @@ import './mixins/schedule'
 import './mixins/workflow'
 import './mixins/task'
 import './mixins/toolLLM'
+import './mixins/feedback'
 
 // 重导出类型
 export * from './clientTypes'
@@ -36,3 +37,4 @@ export type { RollbackResult } from './mixins/checkpoint'
 export type { RunTaskPayload, RunTaskResult } from './mixins/task'
 export type { WorkflowFileEntry, WorkflowFileContent, WorkflowRunWorkspaceEntry, WorkflowUploadResult, WorkflowResolvedPath, WorkflowRunFullResponse } from './mixins/workflow'
 export type { ToolLLMStartPayload, ToolLLMResultPayload, ToolLLMConfirmResult } from './mixins/toolLLM'
+export type { FeedbackQueryParams } from './mixins/feedback'

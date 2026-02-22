@@ -10,7 +10,9 @@ import type { MemoryIdsByLayer } from '@prizm/shared'
 import { useCallback } from 'react'
 import { usePrizmContext } from '../../context/PrizmContext'
 import { useScope } from '../../hooks/useScope'
+import { useSessionChatSafe } from '../../context/SessionChatContext'
 import { MemoryRefsTag } from './MemoryRefsTag'
+import { FeedbackWidget } from '../ui/FeedbackWidget'
 import { createStyles } from 'antd-style'
 
 function formatToken(n: number): string {
@@ -163,6 +165,7 @@ export function AssistantMessageExtra(props: AssistantMessageExtraProps) {
   const { styles } = useStyles()
   const { manager } = usePrizmContext() ?? {}
   const { currentScope } = useScope()
+  const sessionChat = useSessionChatSafe()
   const extra = props.extra as
     | {
         model?: string
@@ -304,6 +307,16 @@ export function AssistantMessageExtra(props: AssistantMessageExtraProps) {
           onResolve={handleResolve}
           scope={currentScope}
         />
+
+        {extra?.messageId && (
+          <FeedbackWidget
+            targetType="chat_message"
+            targetId={extra.messageId}
+            sessionId={sessionChat?.sessionId}
+            metadata={extra?.model ? { model: extra.model } : undefined}
+            variant="inline"
+          />
+        )}
       </Flexbox>
     </div>
   )
