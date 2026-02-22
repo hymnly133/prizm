@@ -1,6 +1,11 @@
 <template>
   <div class="space-y-6">
-    <h1 class="text-2xl font-semibold">概览</h1>
+    <div>
+      <h1 class="text-2xl font-semibold">系统概览</h1>
+      <p class="mt-1 text-sm text-zinc-500">
+        本控制台用于查看全量数据与配置；日常使用推荐使用 Electron 客户端进行便签、文档、Agent 等操作。
+      </p>
+    </div>
 
     <div v-if="loading" class="rounded-lg border border-zinc-700 bg-zinc-800/50 p-6">
       <p class="text-zinc-400">加载中...</p>
@@ -95,6 +100,12 @@
             class="rounded bg-zinc-600 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-500"
           >
             Token 统计
+          </router-link>
+          <router-link
+            to="/audit"
+            class="rounded bg-zinc-600 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-500"
+          >
+            审计
           </router-link>
           <router-link
             to="/notify"

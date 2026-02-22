@@ -27,10 +27,14 @@ export default defineConfig({
       '/health': { target: 'http://127.0.0.1:4127' },
       '/auth': { target: 'http://127.0.0.1:4127' },
       '/todo': { target: 'http://127.0.0.1:4127' },
-      '/pomodoro': { target: 'http://127.0.0.1:4127' },
       '/clipboard': { target: 'http://127.0.0.1:4127' },
       '/documents': { target: 'http://127.0.0.1:4127' },
-      '/agent': { target: 'http://127.0.0.1:4127' }
+      '/agent': { target: 'http://127.0.0.1:4127' },
+      '/embedding': { target: 'http://127.0.0.1:4127' },
+      '/skills': { target: 'http://127.0.0.1:4127' },
+      '/agent-rules': { target: 'http://127.0.0.1:4127' },
+      '/settings': { target: 'http://127.0.0.1:4127' },
+      '/mcp': { target: 'http://127.0.0.1:4127' }
     }
   }
 })

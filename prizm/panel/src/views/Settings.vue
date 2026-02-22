@@ -5,6 +5,152 @@
       内置联网搜索与 MCP 服务器，Agent 对话时可调用。Tavily 需 API Key；MCP 支持 headers/env 鉴权。
     </p>
 
+    <!-- 服务端配置 -->
+    <details class="rounded-lg border border-zinc-700 bg-zinc-800/50 p-6">
+      <summary class="cursor-pointer text-lg font-medium">服务端配置</summary>
+      <p class="mt-2 mb-4 text-sm text-zinc-400">
+        端口、鉴权、Embedding、Agent 上下文、LLM API Key 等；与环境变量等价。修改端口/主机后需重启服务端。
+      </p>
+      <div v-if="serverConfigLoading" class="text-zinc-400">加载中...</div>
+      <form v-else class="space-y-4 max-w-2xl" @submit.prevent="saveServerConfig">
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="mb-1 block text-sm text-zinc-400">端口</label>
+            <input
+              v-model.number="serverConfigPatch.server.port"
+              type="number"
+              class="w-full rounded border border-zinc-600 bg-zinc-900 px-3 py-2 text-zinc-100 focus:border-emerald-500 focus:outline-none"
+              placeholder="4127"
+            />
+          </div>
+          <div>
+            <label class="mb-1 block text-sm text-zinc-400">监听地址</label>
+            <input
+              v-model="serverConfigPatch.server.host"
+              class="w-full rounded border border-zinc-600 bg-zinc-900 px-3 py-2 text-zinc-100 focus:border-emerald-500 focus:outline-none"
+              placeholder="127.0.0.1"
+            />
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <input v-model="serverConfigPatch.server.authDisabled" type="checkbox" class="rounded border-zinc-600" />
+          <label class="text-sm text-zinc-300">关闭鉴权（开发用）</label>
+        </div>
+        <div>
+          <label class="mb-1 block text-sm text-zinc-400">MCP 默认 Scope</label>
+          <input
+            v-model="serverConfigPatch.server.mcpScope"
+            class="w-full max-w-xs rounded border border-zinc-600 bg-zinc-900 px-3 py-2 text-zinc-100 focus:border-emerald-500 focus:outline-none"
+            placeholder="online"
+          />
+        </div>
+        <div class="border-t border-zinc-600 pt-4">
+          <h3 class="mb-2 text-sm font-medium text-zinc-300">Embedding</h3>
+          <div class="flex items-center gap-2">
+            <input v-model="serverConfigPatch.embedding.enabled" type="checkbox" class="rounded border-zinc-600" />
+            <label class="text-sm text-zinc-300">启用</label>
+          </div>
+          <input
+            v-model="serverConfigPatch.embedding.model"
+            class="mt-2 w-full max-w-md rounded border border-zinc-600 bg-zinc-900 px-3 py-2 text-zinc-100 focus:border-emerald-500 focus:outline-none"
+            placeholder="TaylorAI/bge-micro-v2"
+          />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm text-zinc-400">Agent Scope 上下文最大字符数</label>
+          <input
+            v-model.number="serverConfigPatch.agent.scopeContextMaxChars"
+            type="number"
+            min="500"
+            max="12000"
+            class="w-full max-w-xs rounded border border-zinc-600 bg-zinc-900 px-3 py-2 text-zinc-100 focus:border-emerald-500 focus:outline-none"
+            placeholder="2200"
+          />
+        </div>
+        <div class="border-t border-zinc-600 pt-4">
+          <h3 class="mb-2 text-sm font-medium text-zinc-300">LLM 配置（多配置可切换）</h3>
+          <p class="mb-3 text-xs text-zinc-500">添加 OpenAI 兼容 / Anthropic / Google，至少配置一个 API Key。可设默认配置。</p>
+          <div class="space-y-3">
+            <div
+              v-for="(c, i) in serverConfigPatch.llm.configs"
+              :key="c.id"
+              class="rounded border border-zinc-600 bg-zinc-900/50 p-3"
+            >
+              <div class="mb-2 flex items-center justify-between">
+                <label class="flex items-center gap-2 text-sm text-zinc-400">
+                  <input v-model="serverConfigPatch.llm.defaultConfigId" type="radio" :value="c.id" />
+                  默认
+                </label>
+                <button type="button" class="text-sm text-red-400 hover:text-red-300" @click="removeLlmConfig(i)">删除</button>
+              </div>
+              <div class="grid gap-2">
+                <div>
+                  <label class="mb-0.5 block text-xs text-zinc-500">名称</label>
+                  <input v-model="c.name" class="w-full rounded border border-zinc-600 bg-zinc-900 px-2 py-1.5 text-zinc-100" placeholder="例如：OpenAI" />
+                </div>
+                <div>
+                  <label class="mb-0.5 block text-xs text-zinc-500">类型</label>
+                  <select v-model="c.type" class="w-full rounded border border-zinc-600 bg-zinc-900 px-2 py-1.5 text-zinc-100">
+                    <option value="openai_compatible">OpenAI 兼容</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="google">Google</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="mb-0.5 block text-xs text-zinc-500">API Key</label>
+                  <input
+                    v-model="(c as { apiKey?: string }).apiKey"
+                    type="password"
+                    class="w-full rounded border border-zinc-600 bg-zinc-900 px-2 py-1.5 text-zinc-100"
+                    :placeholder="configuredLlmMap[c.id] ? '已配置，输入新值覆盖' : 'API Key'"
+                  />
+                </div>
+                <div v-if="c.type === 'openai_compatible'">
+                  <label class="mb-0.5 block text-xs text-zinc-500">Base URL</label>
+                  <input v-model="c.baseUrl" class="w-full rounded border border-zinc-600 bg-zinc-900 px-2 py-1.5 text-zinc-100" placeholder="https://api.openai.com/v1" />
+                </div>
+                <div>
+                  <label class="mb-0.5 block text-xs text-zinc-500">默认模型</label>
+                  <input v-model="c.defaultModel" class="w-full rounded border border-zinc-600 bg-zinc-900 px-2 py-1.5 text-zinc-100" placeholder="gpt-4o-mini" />
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="rounded border border-dashed border-zinc-600 px-3 py-2 text-sm text-zinc-400 hover:border-zinc-500 hover:text-zinc-300"
+              @click="addLlmConfig"
+            >
+              添加 LLM 配置
+            </button>
+          </div>
+        </div>
+        <div>
+          <label class="mb-1 block text-sm text-zinc-400">SkillKit API 地址</label>
+          <input
+            v-model="serverConfigPatch.skills.skillKitApiUrl"
+            class="w-full max-w-md rounded border border-zinc-600 bg-zinc-900 px-3 py-2 text-zinc-100 focus:border-emerald-500 focus:outline-none"
+            placeholder="https://skillkit.sh/api"
+          />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm text-zinc-400">GitHub Token（可选）</label>
+          <input
+            v-model="serverConfigPatch.skills.githubToken"
+            type="password"
+            class="w-full max-w-md rounded border border-zinc-600 bg-zinc-900 px-3 py-2 text-zinc-100 focus:border-emerald-500 focus:outline-none"
+            :placeholder="serverConfig?.skills?.configured ? '已配置' : 'ghp_...'"
+          />
+        </div>
+        <button
+          type="submit"
+          class="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+          :disabled="serverConfigSaving"
+        >
+          {{ serverConfigSaving ? '保存中...' : '保存服务端配置' }}
+        </button>
+      </form>
+    </details>
+
     <!-- 内置工具：Tavily -->
     <div class="rounded-lg border border-zinc-700 bg-zinc-800/50 p-6">
       <h2 class="mb-4 text-lg font-medium">Tavily 联网搜索</h2>
@@ -179,6 +325,143 @@
       </div>
     </div>
 
+    <!-- Embedding 模型状态 -->
+    <div class="rounded-lg border border-zinc-700 bg-zinc-800/50 p-6">
+      <h2 class="mb-4 text-lg font-medium">Embedding 模型状态</h2>
+      <p class="mb-4 text-sm text-zinc-400">本地向量模型运行状态；完整配置在「服务端配置」中。</p>
+      <div v-if="embeddingLoading" class="text-zinc-400">加载中...</div>
+      <div v-else-if="embeddingError" class="text-red-400">{{ embeddingError }}</div>
+      <div v-else-if="embeddingStatus" class="space-y-3">
+        <div class="flex flex-wrap items-center gap-4">
+          <span class="text-zinc-300">状态</span>
+          <span
+            :class="
+              embeddingStatus.state === 'ready'
+                ? 'text-emerald-400'
+                : embeddingStatus.state === 'loading'
+                  ? 'text-amber-400'
+                  : 'text-zinc-500'
+            "
+          >
+            {{ embeddingStatus.state }}
+          </span>
+          <span class="text-zinc-500">|</span>
+          <span class="text-zinc-300">模型</span>
+          <span class="font-mono text-sm text-zinc-200">{{ embeddingStatus.modelName }}</span>
+          <span class="text-zinc-500">|</span>
+          <span class="text-zinc-300">维度</span>
+          <span class="text-zinc-200">{{ embeddingStatus.dimension }}</span>
+          <span class="text-zinc-500">|</span>
+          <span class="text-zinc-300">启用</span>
+          <span class="text-zinc-200">{{ embeddingStatus.enabled ? '是' : '否' }}</span>
+        </div>
+        <div v-if="embeddingStatus.stats" class="text-xs text-zinc-500">
+          调用 {{ embeddingStatus.stats.totalCalls }} 次，错误 {{ embeddingStatus.stats.totalErrors }}，字符 {{ embeddingStatus.stats.totalCharsProcessed ?? 0 }}，P95 延迟 {{ embeddingStatus.stats.p95LatencyMs ?? 0 }}ms
+        </div>
+        <button
+          type="button"
+          class="rounded bg-zinc-600 px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-500 disabled:opacity-50"
+          :disabled="embeddingReloading"
+          @click="reloadEmbedding"
+        >
+          {{ embeddingReloading ? '重载中...' : '重载模型' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Skills -->
+    <div class="rounded-lg border border-zinc-700 bg-zinc-800/50 p-6">
+      <h2 class="mb-4 text-lg font-medium">Skills</h2>
+      <p class="mb-4 text-sm text-zinc-400">已安装的 Agent Skills；安装/发现建议使用 Electron 客户端。</p>
+      <div v-if="skillsLoading" class="text-zinc-400">加载中...</div>
+      <div v-else-if="skillsError" class="text-red-400">{{ skillsError }}</div>
+      <div v-else-if="skillsList.length === 0" class="text-zinc-500">暂无 Skill</div>
+      <div v-else class="space-y-2">
+        <div
+          v-for="s in skillsList"
+          :key="s.name"
+          class="flex items-center justify-between rounded border border-zinc-600 bg-zinc-900/50 px-4 py-2"
+        >
+          <div>
+            <span class="font-medium text-zinc-200">{{ s.name }}</span>
+            <span v-if="s.description" class="ml-2 text-sm text-zinc-500">{{ s.description }}</span>
+          </div>
+          <label class="flex items-center gap-2 text-sm text-zinc-400">
+            <input
+              type="checkbox"
+              :checked="s.enabled !== false"
+              class="rounded border-zinc-600"
+              @change="toggleSkill(s)"
+            />
+            启用
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Agent 规则 -->
+    <div class="rounded-lg border border-zinc-700 bg-zinc-800/50 p-6">
+      <h2 class="mb-4 text-lg font-medium">Agent 规则</h2>
+      <p class="mb-4 text-sm text-zinc-400">用户级与 Scope 级规则；新建/编辑建议使用 Electron 客户端。</p>
+      <div class="mb-3 flex items-center gap-2">
+        <span class="text-sm text-zinc-500">Scope（仅影响 Scope 级规则列表）：</span>
+        <select
+          v-model="rulesScope"
+          class="rounded border border-zinc-600 bg-zinc-900 px-2 py-1 text-sm text-zinc-100"
+        >
+          <option v-for="sc in rulesScopes" :key="sc" :value="sc">{{ sc }}</option>
+        </select>
+      </div>
+      <div v-if="rulesLoading" class="text-zinc-400">加载中...</div>
+      <div v-else-if="rulesError" class="text-red-400">{{ rulesError }}</div>
+      <div v-else class="space-y-4">
+        <div>
+          <h3 class="mb-2 text-sm font-medium text-zinc-400">用户级</h3>
+          <div v-if="userRules.length === 0" class="text-zinc-500 text-sm">暂无</div>
+          <div v-else class="space-y-2">
+            <div
+              v-for="r in userRules"
+              :key="r.id"
+              class="flex items-center justify-between rounded border border-zinc-600 bg-zinc-900/50 px-4 py-2"
+            >
+              <span class="font-medium text-zinc-200">{{ r.title }}</span>
+              <label class="flex items-center gap-2 text-sm text-zinc-400">
+                <input
+                  type="checkbox"
+                  :checked="r.enabled"
+                  class="rounded border-zinc-600"
+                  @change="toggleRule(r, 'user')"
+                />
+                启用
+              </label>
+            </div>
+          </div>
+        </div>
+        <div>
+          <h3 class="mb-2 text-sm font-medium text-zinc-400">Scope 级</h3>
+          <div v-if="scopeRules.length === 0" class="text-zinc-500 text-sm">暂无</div>
+          <div v-else class="space-y-2">
+            <div
+              v-for="r in scopeRules"
+              :key="r.id"
+              class="flex items-center justify-between rounded border border-zinc-600 bg-zinc-900/50 px-4 py-2"
+            >
+              <span class="font-medium text-zinc-200">{{ r.title }}</span>
+              <label class="flex items-center gap-2 text-sm text-zinc-400">
+                <input
+                  type="checkbox"
+                  :checked="r.enabled"
+                  class="rounded border-zinc-600"
+                  @change="toggleRule(r, 'scope')"
+                />
+                启用
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- MCP 添加/编辑 Modal（简化版，完整功能建议用 Electron 客户端） -->
     <div
       v-if="mcpModalOpen"
@@ -261,19 +544,75 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import {
   getAgentTools,
   getAgentModels,
   updateAgentTools,
   updateTavilySettings,
+  getServerConfig,
+  updateServerConfig,
   listMcpServers,
   addMcpServer,
   updateMcpServer,
   deleteMcpServer,
+  getEmbeddingStatus,
+  postEmbeddingReload,
+  getSkills,
+  patchSkill,
+  getAgentRules,
+  patchAgentRule,
+  getScopes,
   type TavilySettings,
-  type AgentToolsSettings
+  type AgentToolsSettings,
+  type ServerConfigResponse,
+  type EmbeddingStatus,
+  type SkillMeta,
+  type AgentRule
 } from '../api/client'
+
+const serverConfig = ref<ServerConfigResponse | null>(null)
+const serverConfigLoading = ref(true)
+const serverConfigSaving = ref(false)
+const serverConfigPatch = ref<Partial<ServerConfigResponse> & {
+  server: Record<string, unknown>
+  embedding: Record<string, unknown>
+  agent: Record<string, unknown>
+  llm: { defaultConfigId?: string; configs: Array<{ id: string; name: string; type: string; apiKey?: string; baseUrl?: string; defaultModel?: string }> }
+  skills: Record<string, unknown>
+}>({
+  server: {},
+  embedding: {},
+  agent: {},
+  llm: { configs: [] },
+  skills: {}
+})
+
+async function loadServerConfigData() {
+  serverConfigLoading.value = true
+  try {
+    serverConfig.value = await getServerConfig()
+    serverConfigPatch.value = {
+      server: { ...serverConfig.value.server },
+      embedding: { ...serverConfig.value.embedding },
+      agent: { ...serverConfig.value.agent },
+      llm: serverConfig.value.llm ? { defaultConfigId: serverConfig.value.llm.defaultConfigId, configs: [...(serverConfig.value.llm.configs ?? [])] } : { configs: [] },
+      skills: { ...serverConfig.value.skills }
+    }
+  } finally {
+    serverConfigLoading.value = false
+  }
+}
+
+async function saveServerConfig() {
+  serverConfigSaving.value = true
+  try {
+    await updateServerConfig(serverConfigPatch.value)
+    await loadServerConfigData()
+  } finally {
+    serverConfigSaving.value = false
+  }
+}
 
 const tavily = ref<TavilySettings | null>(null)
 const tavilyLoading = ref(true)
@@ -297,6 +636,22 @@ const mcpForm = ref({
   enabled: true
 })
 
+const embeddingStatus = ref<EmbeddingStatus | null>(null)
+const embeddingLoading = ref(true)
+const embeddingError = ref('')
+const embeddingReloading = ref(false)
+
+const skillsList = ref<SkillMeta[]>([])
+const skillsLoading = ref(true)
+const skillsError = ref('')
+
+const userRules = ref<AgentRule[]>([])
+const scopeRules = ref<AgentRule[]>([])
+const rulesScopes = ref<string[]>(['default'])
+const rulesScope = ref('default')
+const rulesLoading = ref(true)
+const rulesError = ref('')
+
 const agentLoading = ref(true)
 const agentSaving = ref(false)
 const agentModels = ref<Array<{ id: string; label: string }>>([])
@@ -307,11 +662,38 @@ const convSummaryEnabled = ref(true)
 const convSummaryInterval = ref(10)
 const convSummaryModel = ref('')
 
+const configuredLlmMap = computed(() => {
+  const m: Record<string, boolean> = {}
+  serverConfig.value?.llm?.configs?.forEach((c: { id: string; configured?: boolean }) => {
+    m[c.id] = !!c.configured
+  })
+  return m
+})
+
+function genLlmConfigId() {
+  return `llm-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`
+}
+
+function addLlmConfig() {
+  const configs = [...(serverConfigPatch.value.llm?.configs ?? [])]
+  configs.push({ id: genLlmConfigId(), name: '新配置', type: 'openai_compatible' })
+  if (!serverConfigPatch.value.llm) serverConfigPatch.value.llm = { configs: [] }
+  serverConfigPatch.value.llm.configs = configs
+  if (!serverConfigPatch.value.llm.defaultConfigId) serverConfigPatch.value.llm.defaultConfigId = configs[configs.length - 1]!.id
+}
+
+function removeLlmConfig(index: number) {
+  const configs = serverConfigPatch.value.llm?.configs ?? []
+  const next = configs.filter((_, i) => i !== index)
+  const removedId = configs[index]?.id
+  serverConfigPatch.value.llm = { ...serverConfigPatch.value.llm, configs: next, defaultConfigId: serverConfigPatch.value.llm?.defaultConfigId === removedId ? next[0]?.id : serverConfigPatch.value.llm?.defaultConfigId }
+}
+
 async function loadAgent() {
   agentLoading.value = true
   try {
     const [tools, modelsRes] = await Promise.all([getAgentTools(), getAgentModels()])
-    agentModels.value = modelsRes.models ?? []
+    agentModels.value = (modelsRes.models ?? []).map((m) => ({ id: `${m.configId}:${m.modelId}`, label: m.label }))
     agentDefaultModel.value = tools.agent?.defaultModel ?? ''
     docSummaryEnabled.value = tools.agent?.documentSummary?.enabled !== false
     docSummaryMinLen.value = tools.agent?.documentSummary?.minLen ?? 500
@@ -455,9 +837,104 @@ async function deleteMcp(id: string) {
   }
 }
 
+async function loadEmbedding() {
+  embeddingLoading.value = true
+  embeddingError.value = ''
+  try {
+    embeddingStatus.value = await getEmbeddingStatus()
+  } catch (e) {
+    embeddingError.value = e instanceof Error ? e.message : String(e)
+    embeddingStatus.value = null
+  } finally {
+    embeddingLoading.value = false
+  }
+}
+
+async function reloadEmbedding() {
+  embeddingReloading.value = true
+  try {
+    await postEmbeddingReload()
+    await loadEmbedding()
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e))
+  } finally {
+    embeddingReloading.value = false
+  }
+}
+
+async function loadSkills() {
+  skillsLoading.value = true
+  skillsError.value = ''
+  try {
+    skillsList.value = await getSkills()
+  } catch (e) {
+    skillsError.value = e instanceof Error ? e.message : String(e)
+    skillsList.value = []
+  } finally {
+    skillsLoading.value = false
+  }
+}
+
+async function toggleSkill(s: SkillMeta) {
+  const next = s.enabled !== false ? false : true
+  try {
+    await patchSkill(s.name, { enabled: next })
+    await loadSkills()
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e))
+  }
+}
+
+async function loadRulesScopes() {
+  try {
+    const r = await getScopes()
+    rulesScopes.value = r.scopes?.length ? r.scopes : ['default']
+    if (!rulesScopes.value.includes(rulesScope.value)) rulesScope.value = rulesScopes.value[0]
+  } catch {
+    rulesScopes.value = ['default']
+  }
+}
+
+async function loadAgentRules() {
+  rulesLoading.value = true
+  rulesError.value = ''
+  try {
+    const [user, scope] = await Promise.all([
+      getAgentRules('user'),
+      getAgentRules('scope', rulesScope.value)
+    ])
+    userRules.value = user
+    scopeRules.value = scope
+  } catch (e) {
+    rulesError.value = e instanceof Error ? e.message : String(e)
+    userRules.value = []
+    scopeRules.value = []
+  } finally {
+    rulesLoading.value = false
+  }
+}
+
+async function toggleRule(r: AgentRule, level: 'user' | 'scope') {
+  const next = !r.enabled
+  try {
+    await patchAgentRule(r.id, { enabled: next }, level, level === 'scope' ? rulesScope.value : undefined)
+    await loadAgentRules()
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e))
+  }
+}
+
+watch(rulesScope, () => {
+  if (rulesScopes.value.length) loadAgentRules()
+})
+
 onMounted(() => {
+  loadServerConfigData()
   loadTavily()
   loadAgent()
   loadMcp()
+  loadEmbedding()
+  loadSkills()
+  loadRulesScopes().then(() => loadAgentRules())
 })
 </script>

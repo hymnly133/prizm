@@ -10,7 +10,6 @@ import type {
   UpdateNotePayload,
   TodoList,
   TodoItem,
-  PomodoroSession,
   ClipboardItem,
   ClipboardItemType,
   Document,
@@ -29,7 +28,6 @@ export type {
   UpdateNotePayload,
   TodoList,
   TodoItem,
-  PomodoroSession,
   ClipboardItem,
   ClipboardItemType,
   Document,
@@ -199,30 +197,6 @@ export const deleteTodoList = (scope: string, listId: string) =>
     scope
   })
 
-// Pomodoro（支持 scope）
-export const getPomodoroSessions = (
-  scope: string,
-  filters?: { taskId?: string; from?: number; to?: number }
-) => {
-  let url = `/pomodoro/sessions?scope=${encodeURIComponent(scope)}`
-  if (filters?.taskId) url += `&taskId=${encodeURIComponent(filters.taskId)}`
-  if (filters?.from != null) url += `&from=${filters.from}`
-  if (filters?.to != null) url += `&to=${filters.to}`
-  return request<{ sessions: PomodoroSession[] }>(url)
-}
-export const startPomodoro = (payload?: { taskId?: string; tag?: string }, scope?: string) =>
-  request<{ session: PomodoroSession }>('/pomodoro/start', {
-    method: 'POST',
-    body: JSON.stringify(payload ?? {}),
-    scope
-  })
-export const stopPomodoro = (id: string, scope?: string) =>
-  request<{ session: PomodoroSession }>('/pomodoro/stop', {
-    method: 'POST',
-    body: JSON.stringify({ id }),
-    scope
-  })
-
 // Clipboard（支持 scope）
 export const getClipboardHistory = (scope: string, limit?: number) => {
   let url = `/clipboard/history?scope=${encodeURIComponent(scope)}`
@@ -373,10 +347,12 @@ export interface AgentToolsSettings {
 
 export const getAgentTools = () => request<AgentToolsSettings>('/settings/agent-tools')
 
+export interface AgentModelsResponse {
+  configs: Array<{ id: string; name: string; type: string; baseUrl?: string; defaultModel?: string; configured?: boolean }>
+  models: Array<{ configId: string; modelId: string; label: string }>
+}
 export const getAgentModels = () =>
-  request<{ provider: string; models: Array<{ id: string; label: string; provider: string }> }>(
-    '/settings/agent-models'
-  )
+  request<AgentModelsResponse>('/settings/agent-models')
 
 export const updateAgentTools = (patch: Partial<AgentToolsSettings>) =>
   request<AgentToolsSettings>('/settings/agent-tools', {
@@ -417,6 +393,231 @@ export const getMcpServerTools = (id: string) =>
   request<{
     tools: Array<{ serverId: string; name: string; fullName: string; description?: string }>
   }>(`/mcp/servers/${encodeURIComponent(id)}/tools`)
+
+// 审计日志（支持 scope）
+export interface AuditEntry {
+  id: string
+  scope: string
+  actorType: 'agent' | 'user' | 'system'
+  sessionId?: string
+  clientId?: string
+  toolName: string
+  action: string
+  resourceType: string
+  resourceId?: string
+  resourceTitle?: string
+  detail?: string
+  result: string
+  errorMessage?: string
+  timestamp: number
+}
+
+export interface AuditFilter {
+  scope?: string
+  sessionId?: string
+  resourceType?: string
+  resourceId?: string
+  action?: string
+  result?: string
+  since?: number
+  until?: number
+  limit?: number
+  offset?: number
+}
+
+export function getAudit(filter?: AuditFilter) {
+  const params = new URLSearchParams()
+  if (filter?.scope) params.set('scope', filter.scope)
+  if (filter?.sessionId) params.set('sessionId', filter.sessionId)
+  if (filter?.resourceType) params.set('resourceType', filter.resourceType)
+  if (filter?.resourceId) params.set('resourceId', filter.resourceId)
+  if (filter?.action) params.set('action', filter.action)
+  if (filter?.result) params.set('result', filter.result)
+  if (filter?.since != null) params.set('since', String(filter.since))
+  if (filter?.until != null) params.set('until', String(filter.until))
+  if (filter?.limit != null) params.set('limit', String(filter.limit))
+  if (filter?.offset != null) params.set('offset', String(filter.offset))
+  const qs = params.toString()
+  return request<{ entries: AuditEntry[]; total: number }>(
+    `/agent/audit${qs ? '?' + qs : ''}`
+  )
+}
+
+export function getAuditResourceHistory(
+  resourceType: string,
+  resourceId: string,
+  scope?: string,
+  limit?: number
+) {
+  let url = `/agent/audit/resource/${encodeURIComponent(resourceType)}/${encodeURIComponent(resourceId)}`
+  if (scope) url += `?scope=${encodeURIComponent(scope)}`
+  if (limit != null) url += (url.includes('?') ? '&' : '?') + `limit=${limit}`
+  return request<{ entries: AuditEntry[] }>(url)
+}
+
+// 资源锁（支持 scope）
+export interface ResourceLock {
+  id: string
+  resourceType: 'document' | 'todo_list'
+  resourceId: string
+  scope: string
+  sessionId: string
+  fenceToken: number
+  reason?: string
+  acquiredAt: number
+  lastHeartbeat: number
+  ttlMs: number
+}
+
+export function getLocks(scope?: string) {
+  return request<{ data: ResourceLock[] }>('/agent/locks', { scope }).then((r) => r.data ?? [])
+}
+
+export function forceReleaseLock(
+  resourceType: 'document' | 'todo_list',
+  resourceId: string,
+  scope?: string,
+  body?: { reason?: string }
+) {
+  return request<{
+    released: boolean
+    previousHolder?: { sessionId: string; acquiredAt: number; reason?: string }
+  }>(`/agent/locks/${encodeURIComponent(resourceType)}/${encodeURIComponent(resourceId)}/force-release`, {
+    method: 'POST',
+    body: JSON.stringify(body ?? {}),
+    scope
+  })
+}
+
+// Embedding 状态
+export interface EmbeddingStatus {
+  state: string
+  modelName: string
+  dimension: number
+  enabled: boolean
+  stats: {
+    totalCalls: number
+    totalErrors: number
+    totalCharsProcessed: number
+    lastError: string | null
+    p95LatencyMs: number
+    minLatencyMs: number
+    maxLatencyMs: number
+    modelLoadTimeMs: number
+  }
+  cacheDir: string
+  processMemoryMb: number
+  upSinceMs: number | null
+}
+
+export const getEmbeddingStatus = () => request<EmbeddingStatus>('/embedding/status')
+
+export const postEmbeddingReload = () =>
+  request<{ message: string }>('/embedding/reload', { method: 'POST' })
+
+// Skills 列表（只读 + 启用/禁用）
+export interface SkillMeta {
+  name: string
+  description?: string
+  enabled?: boolean
+  [key: string]: unknown
+}
+
+export const getSkills = () =>
+  request<{ skills: SkillMeta[] }>('/skills').then((r) => r.skills ?? [])
+
+export function patchSkill(name: string, patch: { enabled?: boolean }) {
+  return request<SkillMeta>(`/skills/${encodeURIComponent(name)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch)
+  })
+}
+
+// Agent 规则（user / scope）
+export interface AgentRule {
+  id: string
+  title: string
+  enabled: boolean
+  alwaysApply?: boolean
+  level: 'user' | 'scope'
+  scope?: string
+  [key: string]: unknown
+}
+
+export function getAgentRules(level: 'user' | 'scope', scope?: string) {
+  const params = new URLSearchParams()
+  params.set('level', level)
+  if (scope) params.set('scope', scope)
+  return request<{ rules: AgentRule[] }>(`/agent-rules?${params}`).then((r) => r.rules ?? [])
+}
+
+export function patchAgentRule(
+  id: string,
+  patch: { enabled?: boolean; title?: string; alwaysApply?: boolean },
+  level: 'user' | 'scope' = 'user',
+  scope?: string
+) {
+  const params = new URLSearchParams()
+  params.set('level', level)
+  if (scope) params.set('scope', scope)
+  return request<AgentRule>(`/agent-rules/${encodeURIComponent(id)}?${params}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch)
+  })
+}
+
+export function deleteAgentRule(
+  id: string,
+  level: 'user' | 'scope' = 'user',
+  scope?: string
+) {
+  const params = new URLSearchParams()
+  params.set('level', level)
+  if (scope) params.set('scope', scope)
+  return request<void>(`/agent-rules/${encodeURIComponent(id)}?${params}`, {
+    method: 'DELETE'
+  })
+}
+
+// 服务端配置（可视化，脱敏）
+export interface ServerConfigResponse {
+  dataDir: string
+  server?: {
+    port?: number
+    host?: string
+    authDisabled?: boolean
+    logLevel?: string
+    mcpScope?: string
+  }
+  embedding?: {
+    enabled?: boolean
+    model?: string
+    cacheDir?: string
+    dtype?: string
+    maxConcurrency?: number
+  }
+  agent?: { scopeContextMaxChars?: number }
+  llm?: {
+    defaultConfigId?: string
+    configs?: Array<{
+      id: string
+      name: string
+      type: 'openai_compatible' | 'anthropic' | 'google'
+      baseUrl?: string
+      defaultModel?: string
+      configured?: boolean
+    }>
+  }
+  skills?: { skillKitApiUrl?: string; configured?: boolean }
+}
+
+export const getServerConfig = () => request<ServerConfigResponse>('/settings/server-config')
+
+export const updateServerConfig = (patch: Partial<ServerConfigResponse>) =>
+  request<ServerConfigResponse>('/settings/server-config', {
+    method: 'PATCH',
+    body: JSON.stringify(patch)
+  })
 
 /** 流式对话，返回 ReadableStream，解析 SSE 事件 */
 export async function sendAgentChat(

@@ -1,5 +1,8 @@
 <template>
   <div class="space-y-6">
+    <p class="rounded-lg border border-amber-900/30 bg-amber-950/20 px-3 py-2 text-sm text-amber-200/90">
+      本页用于查看会话与调试；日常对话与工具调用请使用 Electron 客户端协作页。
+    </p>
     <div class="flex flex-wrap items-center justify-between gap-4">
       <h1 class="text-2xl font-semibold">Agent 会话 (Scope: {{ currentScope }})</h1>
       <button

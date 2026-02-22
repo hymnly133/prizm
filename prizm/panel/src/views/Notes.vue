@@ -1,5 +1,8 @@
 <template>
   <div class="space-y-6">
+    <p class="rounded-lg border border-zinc-700/50 bg-zinc-800/30 px-3 py-2 text-sm text-zinc-400">
+      本页可查看与应急管理便签；日常编辑推荐使用 Electron 客户端。
+    </p>
     <div class="flex items-center justify-between">
       <h1 class="text-2xl font-semibold">便签 (Scope: {{ currentScope }})</h1>
       <button

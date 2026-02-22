@@ -1,5 +1,8 @@
 <template>
   <div class="space-y-6">
+    <p class="rounded-lg border border-zinc-700/50 bg-zinc-800/30 px-3 py-2 text-sm text-zinc-400">
+      本页可查看与应急管理任务；日常使用推荐使用 Electron 客户端。
+    </p>
     <div class="flex flex-wrap items-center justify-between gap-4">
       <h1 class="text-2xl font-semibold">TODO 列表 (Scope: {{ currentScope }})</h1>
       <div class="flex flex-wrap items-center gap-3">
