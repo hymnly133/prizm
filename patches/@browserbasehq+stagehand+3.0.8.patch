@@ -1,0 +1,28 @@
+diff --git a/node_modules/@browserbasehq/stagehand/dist/index.js b/node_modules/@browserbasehq/stagehand/dist/index.js
+index a0120e7..9a74278 100644
+--- a/node_modules/@browserbasehq/stagehand/dist/index.js
++++ b/node_modules/@browserbasehq/stagehand/dist/index.js
+@@ -37781,10 +37781,7 @@ var AgentProvider = class _AgentProvider {
+     if (normalized in modelToAgentProviderMap) {
+       return modelToAgentProviderMap[normalized];
+     }
+-    throw new UnsupportedModelError(
+-      Object.keys(modelToAgentProviderMap),
+-      "Computer Use Agent"
+-    );
++    return "openai";
+   }
+ };
+ 
+@@ -66105,10 +66102,7 @@ var LLMProvider = class {
+         logger: this.logger
+       });
+     }
+-    const provider = modelToProviderMap[modelName];
+-    if (!provider) {
+-      throw new UnsupportedModelError(Object.keys(modelToProviderMap));
+-    }
++    const provider = modelToProviderMap[modelName] || "openai";
+     const availableModel = modelName;
+     switch (provider) {
+       case "openai":
