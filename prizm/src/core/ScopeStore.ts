@@ -1,7 +1,7 @@
 /**
  * Prizm ScopeStore V3 - 双层架构
  * scope 根目录可为任意路径，.prizm/ 存放配置与系统数据
- * 移除 notes/pomodoroSessions，保留 documents/todoLists/clipboard/agentSessions
+ * 移除 notes，保留 documents/todoLists/clipboard/agentSessions
  */
 
 import fs from 'fs'

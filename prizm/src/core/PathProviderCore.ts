@@ -89,11 +89,6 @@ export function getClipboardDir(scopeRoot: string): string {
   return path.join(getPrizmDir(scopeRoot), CLIPBOARD_DIR)
 }
 
-/** @deprecated 番茄钟已移除，仅用于迁移清理 */
-export function getPomodoroDir(scopeRoot: string): string {
-  return path.join(getPrizmDir(scopeRoot), 'pomodoro')
-}
-
 export function getScopeRegistryPath(): string {
   return path.join(getDataDir(), SCOPE_REGISTRY_FILE)
 }
@@ -179,11 +174,19 @@ export function getWorkflowWorkspaceDir(scopeRoot: string, workflowName: string)
 
 /** {workflowWorkspace}/.meta/runs/ */
 export function getWorkflowRunMetaDir(scopeRoot: string, workflowName: string): string {
-  return path.join(getWorkflowWorkspaceDir(scopeRoot, workflowName), WORKFLOW_META_DIR, WORKFLOW_RUNS_DIR)
+  return path.join(
+    getWorkflowWorkspaceDir(scopeRoot, workflowName),
+    WORKFLOW_META_DIR,
+    WORKFLOW_RUNS_DIR
+  )
 }
 
 /** {workflowWorkspace}/.meta/runs/{runId}.md */
-export function getWorkflowRunMetaPath(scopeRoot: string, workflowName: string, runId: string): string {
+export function getWorkflowRunMetaPath(
+  scopeRoot: string,
+  workflowName: string,
+  runId: string
+): string {
   const safeId = runId.replace(/[^a-zA-Z0-9_-]/g, '_') || 'unknown'
   return path.join(getWorkflowRunMetaDir(scopeRoot, workflowName), `${safeId}.md`)
 }
@@ -195,16 +198,28 @@ export function getWorkflowDefPath(scopeRoot: string, workflowName: string): str
 
 /** {workflowWorkspace}/.meta/def.json — 工作流定义元数据 */
 export function getWorkflowDefMetaPath(scopeRoot: string, workflowName: string): string {
-  return path.join(getWorkflowWorkspaceDir(scopeRoot, workflowName), WORKFLOW_META_DIR, WORKFLOW_DEF_META_FILE)
+  return path.join(
+    getWorkflowWorkspaceDir(scopeRoot, workflowName),
+    WORKFLOW_META_DIR,
+    WORKFLOW_DEF_META_FILE
+  )
 }
 
 /** {workflowWorkspace}/.meta/versions/ — 流水线版本快照目录 */
 export function getWorkflowDefVersionsDir(scopeRoot: string, workflowName: string): string {
-  return path.join(getWorkflowWorkspaceDir(scopeRoot, workflowName), WORKFLOW_META_DIR, WORKFLOW_VERSIONS_DIR)
+  return path.join(
+    getWorkflowWorkspaceDir(scopeRoot, workflowName),
+    WORKFLOW_META_DIR,
+    WORKFLOW_VERSIONS_DIR
+  )
 }
 
 /** {workflowWorkspace}/.meta/versions/{versionId}.yaml — 单版本快照文件（versionId 为时间戳） */
-export function getWorkflowDefVersionPath(scopeRoot: string, workflowName: string, versionId: string): string {
+export function getWorkflowDefVersionPath(
+  scopeRoot: string,
+  workflowName: string,
+  versionId: string
+): string {
   const safe = versionId.replace(/[^a-zA-Z0-9_-]/g, '_') || 'unknown'
   return path.join(getWorkflowDefVersionsDir(scopeRoot, workflowName), `${safe}.yaml`)
 }
@@ -228,7 +243,10 @@ export function ensureWorkflowWorkspace(scopeRoot: string, workflowName: string)
 
 /** {workflowWorkspace}/workspace/ — 工作流工作区（跨 run 共享） */
 export function getWorkflowPersistentWorkspace(scopeRoot: string, workflowName: string): string {
-  return path.join(getWorkflowWorkspaceDir(scopeRoot, workflowName), WORKFLOW_PERSISTENT_WORKSPACE_DIR)
+  return path.join(
+    getWorkflowWorkspaceDir(scopeRoot, workflowName),
+    WORKFLOW_PERSISTENT_WORKSPACE_DIR
+  )
 }
 
 /** {workflowWorkspace}/run-workspaces/ — Run 级工作空间父目录 */
@@ -237,7 +255,11 @@ export function getWorkflowRunWorkspacesDir(scopeRoot: string, workflowName: str
 }
 
 /** {workflowWorkspace}/run-workspaces/{runId}/ — 单次 Run 的独立工作空间 */
-export function getWorkflowRunWorkspace(scopeRoot: string, workflowName: string, runId: string): string {
+export function getWorkflowRunWorkspace(
+  scopeRoot: string,
+  workflowName: string,
+  runId: string
+): string {
   const safeId = runId.replace(/[^a-zA-Z0-9_-]/g, '_') || 'unknown'
   return path.join(getWorkflowRunWorkspacesDir(scopeRoot, workflowName), safeId)
 }

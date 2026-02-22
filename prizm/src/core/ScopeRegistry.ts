@@ -45,14 +45,7 @@ const DEFAULT_TYPES_JSON = {
     updatedAt: 'number'
   },
   selectOptions: {
-    prizm_type: [
-      'note',
-      'document',
-      'todo_list',
-      'pomodoro_session',
-      'clipboard_item',
-      'agent_session'
-    ],
+    prizm_type: ['note', 'document', 'todo_list', 'clipboard_item', 'agent_session'],
     status: ['todo', 'doing', 'done']
   }
 }
