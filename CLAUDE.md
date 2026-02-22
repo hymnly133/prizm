@@ -15,7 +15,16 @@ This is a Yarn workspace monorepo containing the following packages:
 5. **`packages/evermemos/`** - TypeScript memory system (`@prizm/evermemos`), LanceDB + SQLite storage
 6. **`EverMemOS/`** - Python FastAPI long-term memory system (standalone, not in TS workspace)
 
-The server provides an API layer for desktop efficiency tools including sticky notes, todo lists, documents, clipboard history, pomodoro timer, memory management, terminal sessions, and AI agent chat. It can run standalone with default adapters or integrate into larger applications.
+The server provides an API layer for desktop efficiency tools including sticky notes, todo lists, documents, clipboard history, memory management, terminal sessions, and AI agent chat. It can run standalone with default adapters or integrate into larger applications.
+
+### Panel vs Electron Client（产品定位）
+
+| 入口 | 定位 | 用途 |
+|------|------|------|
+| **内置面板**（Vue，`/dashboard/`） | **系统控制台** | 全面数据呈现（概览、便签、任务、文档、剪贴板、Agent 会话、Token 等）与系统级配置（权限、Agent 工具、LLM、MCP 等） |
+| **Electron 客户端** | **用户交互入口** | 日常使用：工作台、文档编辑、Agent 协作、工作流、记忆与用量等，提供完整交互与实时同步 |
+
+开发与运维时用控制台查看全量数据与改配置；日常使用推荐以 Electron 客户端为主。
 
 <!-- END:PROJECT_STRUCTURE -->
 
@@ -115,11 +124,7 @@ yarn test
 - `PRIZM_LOG_LEVEL` - Log level: info / warn / error
 - `PRIZM_AGENT_SCOPE_CONTEXT_MAX_CHARS` - Agent scope context max chars (default 4000)
 
-**LLM (Agent)：** 默认优先 MiMo，选择优先级 XIAOMIMIMO > ZHIPU > OPENAI
-
-- `XIAOMIMIMO_API_KEY` - 小米 MiMo（默认优先），可选 `XIAOMIMIMO_MODEL`（默认 mimo-v2-flash）
-- `ZHIPU_API_KEY` - 智谱 AI，可选 `ZHIPU_MODEL`（默认 glm-4-flash）
-- `OPENAI_API_KEY` - OpenAI 兼容，可选 `OPENAI_API_URL`、`OPENAI_MODEL`（默认 gpt-4o-mini）
+**LLM (Agent)：** 由服务端设置中的「LLM 配置」管理，支持多套配置（OpenAI 兼容 / Anthropic / Google），可在设置页或 Panel 中配置 API Key、Base URL、默认模型，并选择默认配置。不再通过环境变量覆盖。
 
 **Local Embedding：** 本地向量模型，默认启用
 
@@ -134,7 +139,7 @@ yarn test
 
 **Skills（Agent Skills 浏览/安装）：**
 
-- `PRIZM_SKILLKIT_API_URL` - SkillKit 市场 API 根地址（默认 https://skillkit.sh/api），可改为自建或本地 `skillkit serve` 地址（如 http://localhost:3737）
+- `PRIZM_SKILLKIT_API_URL` - SkillKit 市场 API 根地址（默认 <https://skillkit.sh/api），可改为自建或本地> `skillkit serve` 地址（如 <http://localhost:3737）>
 - `GITHUB_TOKEN` - 可选，用于 GitHub 搜索与拉取 skill 时提高限流上限
 
 <!-- END:ENVIRONMENT_VARIABLES -->
@@ -210,8 +215,11 @@ prizm/src/
 │   ├── UserStore.ts             # User store
 │   ├── documentVersionStore.ts  # Document versioning
 │   ├── tokenUsageDb.ts          # Token usage database
-│   ├── migrate-scope-v2.ts      # Scope migration V2
-│   └── migrate-v3.ts            # Migration V3 (mdStore directory layout)
+│   ├── backgroundSession/       # Background session manager
+│   ├── cronScheduler/          # Cron scheduler
+│   ├── workflowEngine/         # Workflow definition and execution
+│   ├── scheduleReminder/       # Schedule reminder service
+│   └── toolPermission/          # Tool permission cleanup
 ├── llm/                         # LLM providers and AI services
 │   ├── builtinTools/            # Built-in agent tools (modular)
 │   │   ├── definitions.ts       # Tool schema definitions (OpenAI function format)
@@ -225,9 +233,9 @@ prizm/src/
 │   │   ├── knowledgeTools.ts    # Knowledge base tools
 │   │   └── terminalTools.ts     # Terminal execution tools
 │   ├── builtinTools.ts          # Built-in tools re-export and registration
-│   ├── OpenAILikeProvider.ts    # OpenAI-compatible provider
-│   ├── ZhipuProvider.ts         # Zhipu AI provider
-│   ├── XiaomiMiMoProvider.ts    # Xiaomi MiMo provider
+│   ├── aiSdkBridge/             # LLM provider bridge (OpenAI/Anthropic/Google via server config)
+│   ├── modelLists.ts            # Model list definitions
+│   ├── prizmLLMAdapter.ts       # LLM adapter used by DefaultAgentAdapter
 │   ├── EverMemService.ts        # Memory system integration
 │   ├── localEmbedding.ts        # Local embedding model (TaylorAI/bge-micro-v2)
 │   ├── systemPrompt.ts          # System prompt builder
@@ -276,6 +284,10 @@ prizm/src/
 │   ├── agentRules.ts            # Agent rules CRUD (user + scope level)
 │   ├── settings.ts              # Settings management
 │   ├── embedding.ts             # Embedding model status, test, reload
+│   ├── workflow.ts              # Workflow definitions and runs
+│   ├── task.ts                  # Background task runs
+│   ├── schedule.ts              # Schedule/reminder
+│   ├── cron.ts                  # Cron configuration
 │   └── mcpConfig.ts             # MCP server configuration
 ├── terminal/                    # Terminal session management
 │   ├── TerminalSessionManager.ts # Session lifecycle (create/resize/kill)
@@ -316,6 +328,7 @@ prizm/src/
 │   └── ripgrepSearch.ts         # Ripgrep file search
 ├── settings/                    # Settings management
 │   ├── agentToolsStore.ts       # Agent tools configuration store
+│   ├── serverConfigStore.ts     # Server config (LLM configs, etc.)
 │   └── types.ts
 ├── utils/                       # Utility functions
 │   └── todoItems.ts             # Todo item utilities
@@ -579,7 +592,7 @@ Scope is specified via `X-Prizm-Scope` header or `?scope=` query parameter. Clie
 Routes are modular, each exporting a factory function that receives a Router instance:
 
 ```typescript
-export function createNotesRoutes(router: Router, adapter?: IStickyNotesAdapter): void {
+export function createTodoListRoutes(router: Router, adapter?: ITodoListAdapter): void {
   // Route handlers here, all scoped by scope
   // Middleware extracts scope from header/query/params
 }
@@ -605,9 +618,9 @@ Auth routes mounted separately at `/auth/*` to avoid path conflicts with the mai
 1. Express app + middleware setup
 2. Route mounting (all route modules)
 3. HTTP server listen
-4. Data migration (`migrateAppLevelStorage`)
-5. Service init: `initEverMemService()`, `initTokenUsageDb()`, `lockManager.init()`, `auditManager.init()`
-6. EventBus handler registration: audit / lock / memory handlers
+4. Service init: `initEverMemService()`, `initTokenUsageDb()`, `lockManager.init()`, `auditManager.init()`
+5. Workflow/task engine init: `bgSessionManager.init`, `cronManager.init`, `migrateWorkflowDefsToFiles`, workflow/task recovery, `initWorkflowRunner`/`initTaskRunner`, `registerWorkflowTriggerHandlers`, `startReminderService`
+6. EventBus handler registration: audit / lock / memory / bgSession / schedule handlers, `registerPermissionCleanupHandler`, `setSearchIndex`, `registerSearchHandlers`
 7. WebSocket servers: event WS at `/ws`, terminal WS at `/ws/terminal`
 8. WS bridge handler registration (domain events → WS broadcast)
 
@@ -627,7 +640,7 @@ Server created via `createPrizmServer(adapters, options)` with options for `port
 ### Data Persistence
 
 - Client registry: `.prizm-data/clients.json`
-- Scope data: `.prizm-data/scopes/{scope}/` 下 notes/、groups/、todo/、documents/、sessions/ 等 .md 单文件
+- Scope data: `.prizm-data/scopes/{scope}/` 下按类型分 documents、todo、clipboard、sessions 等 .md 单文件
 - Markdown with frontmatter: Metadata stored in YAML frontmatter, content in Markdown body
 - Auto-save: Mutations trigger immediate disk write via `ScopeStore` / `mdStore`
 - Resource locks: `.prizm-data/resource_locks.db` (SQLite)
@@ -639,7 +652,6 @@ Server created via `createPrizmServer(adapters, options)` with options for `port
 
 The server exposes a Model Context Protocol (MCP) server providing tools for:
 
-- Sticky notes management
 - Todo list operations
 - Document operations
 - File operations
@@ -679,6 +691,9 @@ Connected via stdio bridge (`src/mcp/stdio-bridge.ts`).
 - `/skills/*` - Skills management CRUD (auth)
 - `/agent-rules/*` - Agent rules CRUD, user-level + scope-level (auth)
 - `/workflow/*` - Workflow definitions and runs (auth + scope). **Execution model is serial**: steps run in array order; visual editor edges represent order and data dependency only, not branching or parallelism.
+- `/task/*` - Background task runs (auth + scope)
+- `/schedule/*` - Schedule/reminder (auth)
+- `/cron/*` - Cron configuration (auth)
 - `/notify` - Send notifications (auth)
 - `/settings/*` - Settings management (auth)
 - `/embedding/*` - Embedding model status, test, reload (auth)
