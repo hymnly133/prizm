@@ -64,7 +64,7 @@ import { EmptyState } from '../components/ui/EmptyState'
 />
 ```
 
-**禁止**: 自行编写 `<p className="xxx-empty">` 或使用 `<Empty>` from antd。
+**禁止**: 自行编写 `<p className="xxx-empty">`、使用 antd 或 LobeHub 的 `<Empty>` 做整块空态。空态一律使用 `EmptyState`。
 
 ### LoadingPlaceholder — 加载占位
 
@@ -75,7 +75,7 @@ import { LoadingPlaceholder } from '../components/ui/LoadingPlaceholder'
 <LoadingPlaceholder text="正在获取..." />  // 自定义文案
 ```
 
-**禁止**: 自行组合 `<Loader2 className="spinning" /> + <span>加载中</span>` 或使用 `xxx-loading` CSS 类。
+**禁止**: 自行组合 `<Loader2 className="spinning" /> + <span>加载中</span>`、自定义「加载中…」文案或 `xxx-loading` CSS 类。整块加载态一律使用 `LoadingPlaceholder`。
 
 ### SectionHeader — 区段标题
 
@@ -87,6 +87,8 @@ import { SectionHeader } from '../components/ui/SectionHeader'
 ```
 
 **禁止**: 自行定义 `xxx-section-header` / `xxx-title` CSS 类。
+
+**侧栏小标题约定**：Agent 右侧栏等窄侧栏使用小号标题样式（如 `agent-right-section-title`：11px、uppercase、letter-spacing），与内容区 SectionHeader（14px、font-weight 600）区分，不在侧栏内使用 SectionHeader 组件。
 
 ### RefreshIconButton — 刷新按钮
 
@@ -142,7 +144,7 @@ import { StatCard } from '../components/ui/StatCard'
 | 组件               | 用途                             |
 | ------------------ | -------------------------------- |
 | `SearchInput`      | 带 debounce 的搜索输入框        |
-| `AccentList`       | 基于 LobeUI List 的带强调色列表 |
+| `AccentList`       | 基于 LobeUI List 的带强调色列表；**可选中/可点击的单项列表统一使用 AccentList**；仅展示的简单列表使用 shared 的 `.list-simple` / `.list-simple__item` 或 AccentList（不传 `activeKey`）。禁止在「可选/可点击列表」场景新增与 AccentList 语义相同的自定义 ul/li 列表。 |
 | `Select`           | 统一下拉选择器                   |
 | `Segmented`        | 统一分段控制器                   |
 | `TagSelector`      | 标签选择器                       |
@@ -190,6 +192,7 @@ border: 1px solid #e8e8e8;
 - `.section-header` / `.section-header__title` / `.section-header__extra`
 - `.content-card` / `.content-card__header` / `.content-card__body`（含 `--default` / `--elevated` / `--subtle` / `--hoverable` / `--clickable` 修饰符）
 - `.stat-card` / `.stat-card__icon` / `.stat-card__info` / `.stat-card__value` / `.stat-card__label` / `.stat-card__desc`（含 `--normal` / `--compact` / `--clickable` 修饰符）
+- `.list-simple` / `.list-simple__item` — 非 AccentList 的简单展示列表基类（ul 容器 + li 行）
 
 ## 组件规范
 
@@ -218,8 +221,15 @@ border: 1px solid #e8e8e8;
 ## 动画
 
 - 使用 `theme/motionPresets.ts` 中的预设函数（`fadeUp`、`fadeUpStagger`、`STAGGER_DELAY`、`EASE_SMOOTH`）
+- 列表/面板/模态等使用 `motion` 时需 spread `getReducedMotionProps()`，以尊重系统「减少动态效果」偏好（见 `theme/motionPresets.ts`）
 - 列表动画使用 `AnimatePresence` + `mode="popLayout"`
 - 避免自行定义重复的 `initial` / `animate` / `transition` 对象
+
+## 无障碍
+
+- 仅图标按钮必须带 `title` 或 `aria-label`（如 `ActionIcon` 的 `title` 属性）
+- 可点击的卡片/列表项：`role="button"`、`tabIndex={0}`，并处理 `Enter`/`Space` 键
+- 模态/抽屉打开时焦点移入、关闭时还原；支持 `Escape` 关闭
 
 ## 导入顺序
 
