@@ -28,6 +28,7 @@ import * as cronTools from './cronTools'
 import * as workflowTools from './workflowTools'
 import * as skillTools from './skillTools'
 import { executeCreateWorkflow, executeUpdateWorkflow } from '../toolLLM/workflowSubmitTool'
+import { updateUserProfile } from '../../settings/userProfileStore'
 import type { IAgentAdapter } from '../../adapters/interfaces'
 
 /**
@@ -43,7 +44,8 @@ export async function executeBuiltinTool(
   sessionId?: string,
   _userId?: string,
   grantedPaths?: string[],
-  adapter?: IAgentAdapter
+  adapter?: IAgentAdapter,
+  clientId?: string
 ): Promise<BuiltinToolResult> {
   const data = scopeStore.getScopeData(scope)
   const scopeRoot = scopeStore.getScopeRootPath(scope)
@@ -53,7 +55,8 @@ export async function executeBuiltinTool(
     (session as { toolMeta?: { runWorkspaceDir?: string } })?.toolMeta?.runWorkspaceDir
   const workflowWsDir =
     session?.bgMeta?.persistentWorkspaceDir ??
-    (session as { toolMeta?: { persistentWorkspaceDir?: string } })?.toolMeta?.persistentWorkspaceDir
+    (session as { toolMeta?: { persistentWorkspaceDir?: string } })?.toolMeta
+      ?.persistentWorkspaceDir
   const wsCtx = createWorkspaceContext(scopeRoot, sessionId, runWsDir, workflowWsDir)
 
   const record = (itemId: string, itemKind: ScopeActivityItemKind, action: ScopeActivityAction) => {
@@ -93,7 +96,8 @@ export async function executeBuiltinTool(
     emitAudit,
     wsArg,
     sessionId,
-    grantedPaths
+    grantedPaths,
+    clientId
   }
 
   try {
@@ -134,6 +138,32 @@ export async function executeBuiltinTool(
         return workflowTools.dispatchNavigate(ctx)
       case 'prizm_get_skill_instructions':
         return skillTools.executeGetSkillInstructions(ctx)
+      case 'prizm_browser':
+        return dispatchBrowser(ctx)
+      case 'prizm_set_user_profile': {
+        if (!ctx.clientId?.trim()) {
+          return { text: '未认证，无法更新用户画像', isError: true }
+        }
+        const displayName =
+          typeof args.displayName === 'string' ? args.displayName.trim() || undefined : undefined
+        const preferredTone =
+          typeof args.preferredTone === 'string'
+            ? args.preferredTone.trim() || undefined
+            : undefined
+        if (!displayName && !preferredTone) {
+          return { text: '请至少提供 displayName 或 preferredTone 之一', isError: true }
+        }
+        try {
+          const updated = updateUserProfile(ctx.clientId, { displayName, preferredTone })
+          const parts: string[] = []
+          if (updated.displayName) parts.push(`称呼：${updated.displayName}`)
+          if (updated.preferredTone) parts.push(`语气：${updated.preferredTone}`)
+          return { text: `已更新用户画像。${parts.join('；')}`, isError: false }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          return { text: `更新用户画像失败: ${msg}`, isError: true }
+        }
+      }
       case WORKFLOW_MANAGEMENT_TOOL_CREATE_WORKFLOW: {
         const wfJson =
           typeof args.workflow_json === 'string'
@@ -176,6 +206,10 @@ function dispatchFile(ctx: BuiltinToolContext): Promise<BuiltinToolResult> | Bui
       return fileTools.executeFileMove(ctx)
     case 'delete':
       return fileTools.executeFileDelete(ctx)
+    case 'grep':
+      return fileTools.executeFileGrep(ctx)
+    case 'glob':
+      return fileTools.executeFileGlob(ctx)
     default:
       return { text: `prizm_file: 未知 action "${getAction(ctx)}"`, isError: true }
   }
@@ -312,4 +346,16 @@ function dispatchCron(ctx: BuiltinToolContext): Promise<BuiltinToolResult> | Bui
     default:
       return { text: `prizm_cron: 未知 action "${getAction(ctx)}"`, isError: true }
   }
+}
+
+async function dispatchBrowser(ctx: BuiltinToolContext): Promise<BuiltinToolResult> {
+  const browserTools = await import('./browserTools')
+  const executor = new browserTools.BrowserExecutor()
+
+  const resultText = await executor.execute(ctx.args, {
+    clientId: ctx.clientId ?? 'unknown',
+    sessionId: ctx.sessionId
+  })
+
+  return { text: resultText, isError: resultText.startsWith('Failed') }
 }

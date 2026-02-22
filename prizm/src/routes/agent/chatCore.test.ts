@@ -32,7 +32,9 @@ vi.mock('../../llm/slashCommands', () => ({
 }))
 
 vi.mock('../../llm/skillManager', () => ({
-  getSkillsToInject: vi.fn(() => [])
+  getSkillsToInject: vi.fn(() => []),
+  getSkillsMetadataForDiscovery: vi.fn(() => []),
+  loadAllSkillMetadata: vi.fn(() => [])
 }))
 
 vi.mock('../../llm/rulesLoader', () => ({

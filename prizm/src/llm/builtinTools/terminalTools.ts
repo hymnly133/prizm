@@ -3,9 +3,19 @@
  */
 
 import path from 'path'
-import { getTerminalManager, stripAnsi } from '../../terminal/TerminalSessionManager'
+import {
+  getTerminalManager,
+  stripAnsi,
+  type ExecWorkspaceType
+} from '../../terminal/TerminalSessionManager'
 import { createWorkspaceContext, resolveWorkspaceType } from '../workspaceResolver'
 import type { BuiltinToolContext, BuiltinToolResult } from './types'
+
+function toExecWorkspaceType(wsType: string): ExecWorkspaceType {
+  if (wsType === 'granted') return 'main'
+  if (wsType === 'run') return 'session'
+  return wsType as ExecWorkspaceType
+}
 
 export async function executeTerminalExecute(ctx: BuiltinToolContext): Promise<BuiltinToolResult> {
   const command = typeof ctx.args.command === 'string' ? ctx.args.command : ''
@@ -26,7 +36,7 @@ export async function executeTerminalExecute(ctx: BuiltinToolContext): Promise<B
     timeoutMs: timeoutSec * 1000,
     sessionType: 'exec',
     title: `exec: ${command.slice(0, 40)}`,
-    workspaceType: wsType === 'granted' ? 'main' : wsType
+    workspaceType: toExecWorkspaceType(wsType)
   })
   const MAX_OUTPUT = 8192
   let output = result.output

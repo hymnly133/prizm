@@ -20,7 +20,13 @@ export type AuditAction =
   | 'bg_cancel'
 
 /** 审计资源类型，复用 ScopeActivityItemKind 并扩展 */
-export type AuditResourceType = ScopeActivityItemKind | 'todo_list' | 'memory' | 'session'
+export type AuditResourceType =
+  | ScopeActivityItemKind
+  | 'todo_list'
+  | 'memory'
+  | 'session'
+  | 'schedule'
+  | 'cron_job'
 
 /** 审计结果 */
 export type AuditResult = 'success' | 'error' | 'denied'

@@ -1,16 +1,17 @@
 /**
  * LLM 提供商工厂与选择逻辑
- * 基于 server-config.json 的 llm.configs，使用 Vercel AI SDK 桥接
+ * 基于 server-config.json 的 llm.configs，解析为 (配置:模型) 条目列表，下游仅选择条目。
  */
 
 import { getConfig } from '../config'
-import { getEffectiveServerConfig } from '../settings/serverConfigStore'
-import { sanitizeServerConfig } from '../settings/serverConfigStore'
-import type { ServerConfigLLMSanitized, LLMConfigItemSanitized } from '../settings/serverConfigTypes'
+import { getEffectiveServerConfig, sanitizeServerConfig, autoGenerateName } from '../settings/serverConfigStore'
+import type { ServerConfigLLMSanitized, LLMConfigItemSanitized, ModelEntry } from '../settings/serverConfigTypes'
 import type { ILLMProvider } from '../adapters/interfaces'
 import { resolveModel, getDefaultModelForType } from './aiSdkBridge'
 import { getProviderForConfig, clearProviderCache } from './aiSdkBridge'
-import { getPresetModelsForType } from './modelLists'
+import { fetchModelsForConfig } from './modelLists'
+
+export type { ModelEntry }
 
 export interface AvailableModel {
   id: string
@@ -18,10 +19,11 @@ export interface AvailableModel {
   provider: string
 }
 
-/** 供客户端模型选择器：配置 + 模型列表，model 传参格式为 configId:modelId 或仅 modelId（默认配置） */
+/** 供客户端模型选择器：系统默认 + 解析后的 (配置:模型) 条目列表 */
 export interface AgentModelsResponse {
+  defaultModel?: string
   configs: LLMConfigItemSanitized[]
-  models: Array<{ configId: string; modelId: string; label: string }>
+  entries: ModelEntry[]
 }
 
 function getLLMConfig(): ServerConfigLLMSanitized | undefined {
@@ -30,20 +32,17 @@ function getLLMConfig(): ServerConfigLLMSanitized | undefined {
   return sanitized.llm
 }
 
-/** 根据默认配置返回 LLM 提供商（用于摘要、记忆等未指定 model 的调用） */
+/** 根据系统默认模型返回 LLM 提供商（用于摘要、记忆等未指定 model 的调用） */
 export function getLLMProvider(): ILLMProvider | null {
   const llm = getEffectiveServerConfig(getConfig().dataDir).llm
   if (!llm?.configs?.length) return null
-  const defaultConfig = llm.defaultConfigId
-    ? llm.configs.find((c) => c.id === llm.defaultConfigId)
-    : llm.configs[0]
-  if (!defaultConfig?.apiKey?.trim()) return null
-  return getProviderForConfig(defaultConfig)
+  const resolved = resolveModel(undefined, llm)
+  if (!resolved) return null
+  return getProviderForConfig(resolved.config)
 }
 
 /**
- * 根据 model 字符串解析出配置与 modelId，返回对应的 provider。
- * 供 DefaultAgentAdapter 使用；调用方应传 options.model 为 modelStr，chat 时传 resolved modelId。
+ * 根据 model 字符串（configId:modelId）解析出配置与 modelId，返回对应的 provider。
  */
 export function getProviderForModel(modelStr: string | undefined): {
   provider: ILLMProvider
@@ -54,9 +53,10 @@ export function getProviderForModel(modelStr: string | undefined): {
   const resolved = resolveModel(modelStr, llm)
   if (!resolved) return null
   const provider = getProviderForConfig(resolved.config)
+  const configName = resolved.config.name ?? autoGenerateName(resolved.config)
   return {
     provider,
-    config: { id: resolved.config.id, name: resolved.config.name },
+    config: { id: resolved.config.id, name: configName },
     modelId: resolved.modelId
   }
 }
@@ -70,13 +70,12 @@ export function resetLLMProvider(): void {
 export function getLLMProviderName(): string {
   const llm = getEffectiveServerConfig(getConfig().dataDir).llm
   if (!llm?.configs?.length) return 'unknown'
-  const defaultConfig = llm.defaultConfigId
-    ? llm.configs.find((c) => c.id === llm.defaultConfigId)
-    : llm.configs[0]
-  return defaultConfig?.name ?? 'unknown'
+  const resolved = resolveModel(undefined, llm)
+  if (!resolved) return 'unknown'
+  return resolved.config.name ?? autoGenerateName(resolved.config)
 }
 
-/** 解析后的 model 显示名（configId:modelId 或 modelId） */
+/** 解析后的 model 显示名（ConfigName: modelId） */
 export function getModelDisplayName(modelStr: string | undefined): string {
   const resolved = getProviderForModel(modelStr)
   if (!resolved) return modelStr ?? 'unknown'
@@ -84,37 +83,44 @@ export function getModelDisplayName(modelStr: string | undefined): string {
 }
 
 /**
- * 返回所有已配置的 configs（脱敏）及可用模型列表（含 configId 供前端传参）
+ * 返回系统默认模型 + 解析后的 (配置:模型) 条目列表，供下游仅选择条目。
  */
-export function getAvailableModels(): AgentModelsResponse {
+export async function getAvailableModels(): Promise<AgentModelsResponse> {
   const llm = getEffectiveServerConfig(getConfig().dataDir).llm
   const sanitized = getLLMConfig()
   const configs = sanitized?.configs?.filter((c) => c.configured) ?? []
-  const models: Array<{ configId: string; modelId: string; label: string }> = []
+  const entries: ModelEntry[] = []
 
   if (!llm?.configs) {
-    return { configs: [], models: [] }
+    return { defaultModel: undefined, configs: [], entries: [] }
   }
 
   const configsWithKey = llm.configs.filter((c) => c.apiKey?.trim())
-  for (const config of configsWithKey) {
-    const preset = getPresetModelsForType(config.type)
-    const defaultId = config.defaultModel?.trim() || getDefaultModelForType(config.type)
+  const fetched = await Promise.all(configsWithKey.map((c) => fetchModelsForConfig(c)))
+
+  for (let i = 0; i < configsWithKey.length; i++) {
+    const config = configsWithKey[i]!
+    const apiModels = fetched[i]!
+    const configName = config.name ?? autoGenerateName(config)
     const seen = new Set<string>()
-    for (const m of preset) {
+    for (const m of apiModels) {
       if (seen.has(m.id)) continue
       seen.add(m.id)
-      models.push({ configId: config.id, modelId: m.id, label: m.label })
-    }
-    if (defaultId && !seen.has(defaultId)) {
-      models.push({ configId: config.id, modelId: defaultId, label: defaultId })
+      entries.push({
+        configId: config.id,
+        configName,
+        modelId: m.id,
+        label: `${configName}: ${m.label}`
+      })
     }
   }
 
   return {
+    defaultModel: llm.defaultModel,
     configs,
-    models
+    entries
   }
 }
 
 export { resolveModel, getDefaultModelForType } from './aiSdkBridge'
+export { clearModelCache } from './modelLists'

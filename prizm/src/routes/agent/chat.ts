@@ -37,10 +37,28 @@ export function registerChatRoutes(router: Router, adapter?: IAgentAdapter): voi
         return res.status(404).json({ error: 'Session not found' })
       }
 
-      const { content, fileRefs: bodyFileRefs, runRefIds: bodyRunRefIds } = req.body ?? {}
+      const { content, images: bodyImages, fileRefs: bodyFileRefs, runRefIds: bodyRunRefIds } =
+        req.body ?? {}
       if (typeof content !== 'string' || !content.trim()) {
         return res.status(400).json({ error: 'content is required' })
       }
+
+      const images: Array<{ url?: string; base64?: string; mimeType?: string }> =
+        Array.isArray(bodyImages)
+          ? bodyImages
+              .filter(
+                (r: unknown): r is { url?: string; base64?: string; mimeType?: string } =>
+                  r !== null &&
+                  typeof r === 'object' &&
+                  (typeof (r as { url?: unknown }).url === 'string' ||
+                    typeof (r as { base64?: unknown }).base64 === 'string')
+              )
+              .map((r) => ({
+                url: typeof r.url === 'string' ? r.url : undefined,
+                base64: typeof r.base64 === 'string' ? r.base64 : undefined,
+                mimeType: typeof r.mimeType === 'string' ? r.mimeType : undefined
+              }))
+          : []
 
       const fileRefPaths: string[] = Array.isArray(bodyFileRefs)
         ? bodyFileRefs
@@ -102,6 +120,7 @@ export function registerChatRoutes(router: Router, adapter?: IAgentAdapter): voi
             scope,
             sessionId: id,
             content: content.trim(),
+            images: images.length > 0 ? images : undefined,
             model: typeof bodyModel === 'string' && bodyModel.trim() ? bodyModel.trim() : undefined,
             fileRefPaths,
             runRefIds: runRefIds.length > 0 ? runRefIds : undefined,
@@ -121,6 +140,7 @@ export function registerChatRoutes(router: Router, adapter?: IAgentAdapter): voi
               res.flush?.()
             }
             if (chunk.reasoning) {
+              log.debug(`[SSE] sending reasoning chunk len=${chunk.reasoning.length}`)
               res.write(
                 `data: ${JSON.stringify({ type: 'reasoning', value: chunk.reasoning })}\n\n`
               )
@@ -302,6 +322,7 @@ export function registerChatRoutes(router: Router, adapter?: IAgentAdapter): voi
           res.write(`data: ${JSON.stringify({ type: 'text', value: chunk.text })}\n\n`)
         }
         if (chunk.reasoning) {
+          log.debug(`[SSE observe] sending reasoning chunk len=${chunk.reasoning.length}`)
           res.write(`data: ${JSON.stringify({ type: 'reasoning', value: chunk.reasoning })}\n\n`)
         }
         if (chunk.toolCallArgsDelta) {

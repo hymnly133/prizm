@@ -18,7 +18,7 @@ export interface SessionDataForFilter {
 
 /** 是否为工作流管理会话（待创建或已绑定）— 委托 shared 判断 */
 export function isWorkflowManagementSession(sessionData?: SessionDataForFilter | null): boolean {
-  return isWorkflowManagementSessionShared(sessionData ?? null)
+  return isWorkflowManagementSessionShared((sessionData ?? null) as Parameters<typeof isWorkflowManagementSessionShared>[0])
 }
 
 const PRIZM_NAVIGATE_TOOL_NAME = 'prizm_navigate'

@@ -5,6 +5,7 @@
 import type { LLMStreamChunk } from '../../../adapters/interfaces'
 import type {
   AgentMessage,
+  ChatImageAttachment,
   MemoryIdsByLayer,
   MemoryItem,
   MemoryRefs,
@@ -16,6 +17,8 @@ export interface ChatCoreOptions {
   scope: string
   sessionId: string
   content: string
+  /** 图片附件列表，用于视觉模型多模态输入 */
+  images?: ChatImageAttachment[]
   model?: string
   fileRefPaths?: string[]
   /** Run 引用 ID 列表；管理会话下会据此自动 grant 对应 run/步骤工作区路径 */

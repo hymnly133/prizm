@@ -12,6 +12,17 @@ vi.mock('../settings/serverConfigStore', () => ({
   sanitizeServerConfig: (config: unknown) => mockSanitizeServerConfig(config)
 }))
 
+vi.mock('./modelLists', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./modelLists')>()
+  return {
+    ...actual,
+    fetchModelsForConfig: vi.fn(async () => [
+      { id: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+      { id: 'gpt-4o', label: 'GPT-4o' }
+    ])
+  }
+})
+
 const mockGetProviderForConfig = vi.fn()
 vi.mock('./aiSdkBridge', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./aiSdkBridge')>()
@@ -60,12 +71,12 @@ describe('getLLMProvider', () => {
     )
   })
 
-  it('使用 defaultConfigId 指定的配置', async () => {
+  it('使用 defaultModel 指定的配置', async () => {
     const fakeProvider = { chat: async function* () {} }
     mockGetProviderForConfig.mockReturnValue(fakeProvider)
     mockGetEffectiveServerConfig.mockReturnValue({
       llm: {
-        defaultConfigId: 'c2',
+        defaultModel: 'c2:gpt-4o',
         configs: [
           { id: 'c1', name: 'A', type: 'openai_compatible', apiKey: 'key1' },
           { id: 'c2', name: 'B', type: 'openai_compatible', apiKey: 'key2' }
@@ -94,8 +105,7 @@ describe('getProviderForModel', () => {
       id: 'c1',
       name: 'OpenAI',
       type: 'openai_compatible',
-      apiKey: 'sk-xxx',
-      defaultModel: 'gpt-4o-mini'
+      apiKey: 'sk-xxx'
     }
     mockGetEffectiveServerConfig.mockReturnValue({
       llm: { configs: [defaultConfig] }
@@ -114,10 +124,7 @@ describe('getProviderForModel', () => {
     const c2 = { id: 'c2', name: 'Zhipu', type: 'openai_compatible', apiKey: 'zhipu-key' }
     mockGetEffectiveServerConfig.mockReturnValue({
       llm: {
-        configs: [
-          { id: 'c1', name: 'OpenAI', type: 'openai_compatible', apiKey: 'sk-xxx' },
-          c2
-        ]
+        configs: [{ id: 'c1', name: 'OpenAI', type: 'openai_compatible', apiKey: 'sk-xxx' }, c2]
       }
     })
     const { getProviderForModel } = await import('./index')
@@ -134,12 +141,12 @@ describe('getAvailableModels', () => {
     mockGetEffectiveServerConfig.mockReturnValue({ llm: { configs: [] } })
     mockSanitizeServerConfig.mockImplementation((c: { llm?: ServerConfigLLM }) => c)
     const { getAvailableModels } = await import('./index')
-    const res = getAvailableModels()
+    const res = await getAvailableModels()
     expect(res.configs).toEqual([])
-    expect(res.models).toEqual([])
+    expect(res.entries).toEqual([])
   })
 
-  it('有已配置的 config 时返回脱敏 configs 与模型列表', async () => {
+  it('有已配置的 config 时返回脱敏 configs 与 entries', async () => {
     mockGetEffectiveServerConfig.mockReturnValue({
       llm: {
         configs: [
@@ -147,8 +154,7 @@ describe('getAvailableModels', () => {
             id: 'c1',
             name: 'OpenAI',
             type: 'openai_compatible',
-            apiKey: 'sk-xxx',
-            defaultModel: 'gpt-4o-mini'
+            apiKey: 'sk-xxx'
           }
         ]
       }
@@ -169,10 +175,10 @@ describe('getAvailableModels', () => {
       }
     })
     const { getAvailableModels } = await import('./index')
-    const res = getAvailableModels()
+    const res = await getAvailableModels()
     expect(res.configs.length).toBeGreaterThan(0)
     expect(res.configs[0]).toMatchObject({ id: 'c1', name: 'OpenAI', configured: true })
-    expect(res.models.some((m) => m.configId === 'c1' && m.modelId === 'gpt-4o-mini')).toBe(true)
+    expect(res.entries.some((e) => e.configId === 'c1' && e.modelId === 'gpt-4o-mini')).toBe(true)
   })
 })
 

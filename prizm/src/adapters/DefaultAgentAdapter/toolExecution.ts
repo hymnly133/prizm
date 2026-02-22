@@ -35,6 +35,8 @@ export interface ToolExecContext {
   sessionId: string
   grantedPaths: string[]
   signal?: AbortSignal
+  /** 当前请求的客户端 ID（用于浏览器 Relay 与 Electron provider 匹配） */
+  clientId?: string
 }
 
 /**
@@ -117,7 +119,8 @@ export async function executeToolCalls(
             sessionId,
             undefined,
             grantedPaths,
-            adapter
+            adapter,
+            ctx.clientId
           )
           text = result.text
           isError = result.isError ?? false
@@ -205,7 +208,8 @@ export async function executeToolCalls(
                 sessionId,
                 undefined,
                 grantedPaths,
-                adapter
+                adapter,
+                ctx.clientId
               )
               text = result.text
               isError = result.isError ?? false
@@ -290,7 +294,8 @@ export async function handleInteractions(
             sessionId,
             undefined,
             runtimeGrantedPaths,
-            adapter
+            adapter,
+            ctx.clientId
           )
           execResults[i] = {
             tc: r.tc,
@@ -367,7 +372,8 @@ export async function handleInteractions(
           sessionId,
           undefined,
           runtimeGrantedPaths,
-          adapter
+          adapter,
+          ctx.clientId
         )
         execResults[i] = {
           tc: r.tc,

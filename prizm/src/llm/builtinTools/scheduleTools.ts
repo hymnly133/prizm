@@ -72,7 +72,9 @@ export function executeRead(ctx: BuiltinToolContext): BuiltinToolResult {
     item.recurrence ? `循环: ${JSON.stringify(item.recurrence)}` : null,
     item.reminders?.length ? `提醒: 提前 ${item.reminders.join(', ')} 分钟` : null,
     item.tags?.length ? `标签: ${item.tags.join(', ')}` : null,
-    item.linkedItems?.length ? `关联: ${item.linkedItems.map((l) => `${l.type}:${l.id}`).join(', ')}` : null,
+    item.linkedItems?.length
+      ? `关联: ${item.linkedItems.map((l) => `${l.type}:${l.id}`).join(', ')}`
+      : null,
     `ID: ${item.id}`
   ].filter(Boolean)
 
@@ -86,18 +88,24 @@ export async function executeCreate(ctx: BuiltinToolContext): Promise<BuiltinToo
 
   const startTimeStr = typeof ctx.args.startTime === 'string' ? ctx.args.startTime : ''
   const startTime = startTimeStr ? new Date(startTimeStr).getTime() : 0
-  if (!startTime || isNaN(startTime)) return { text: '需要有效的 startTime (ISO 日期格式)', isError: true }
+  if (!startTime || isNaN(startTime))
+    return { text: '需要有效的 startTime (ISO 日期格式)', isError: true }
 
   const endTimeStr = typeof ctx.args.endTime === 'string' ? ctx.args.endTime : ''
   const endTime = endTimeStr ? new Date(endTimeStr).getTime() : undefined
 
-  const type = typeof ctx.args.type === 'string' && ['event', 'reminder', 'deadline'].includes(ctx.args.type)
-    ? (ctx.args.type as ScheduleItem['type'])
-    : 'event'
+  const type =
+    typeof ctx.args.type === 'string' && ['event', 'reminder', 'deadline'].includes(ctx.args.type)
+      ? (ctx.args.type as ScheduleItem['type'])
+      : 'event'
 
   let recurrence: RecurrenceRule | undefined
   if (typeof ctx.args.recurrence === 'string') {
-    try { recurrence = JSON.parse(ctx.args.recurrence) } catch { /* ignore */ }
+    try {
+      recurrence = JSON.parse(ctx.args.recurrence)
+    } catch {
+      /* ignore */
+    }
   }
 
   const reminders = Array.isArray(ctx.args.reminders)
@@ -115,7 +123,9 @@ export async function executeCreate(ctx: BuiltinToolContext): Promise<BuiltinToo
     allDay: typeof ctx.args.allDay === 'boolean' ? ctx.args.allDay : undefined,
     recurrence,
     reminders,
-    tags: Array.isArray(ctx.args.tags) ? ctx.args.tags.filter((t): t is string => typeof t === 'string') : undefined,
+    tags: Array.isArray(ctx.args.tags)
+      ? ctx.args.tags.filter((t): t is string => typeof t === 'string')
+      : undefined,
     status: 'upcoming',
     relativePath: '',
     createdAt: now,
@@ -124,7 +134,6 @@ export async function executeCreate(ctx: BuiltinToolContext): Promise<BuiltinToo
 
   const relativePath = writeSingleSchedule(ctx.scopeRoot, item)
   item.relativePath = relativePath
-  scopeStore.markDirty(ctx.scope)
 
   const opCtx = buildOpCtx(ctx)
   void emit('schedule:created', {
@@ -145,7 +154,11 @@ export async function executeCreate(ctx: BuiltinToolContext): Promise<BuiltinToo
     result: 'success'
   })
 
-  return { text: `日程已创建: "${item.title}" (${item.type}) | ${new Date(item.startTime).toLocaleString()} | id:${item.id}` }
+  return {
+    text: `日程已创建: "${item.title}" (${item.type}) | ${new Date(
+      item.startTime
+    ).toLocaleString()} | id:${item.id}`
+  }
 }
 
 export async function executeUpdate(ctx: BuiltinToolContext): Promise<BuiltinToolResult> {
@@ -160,7 +173,10 @@ export async function executeUpdate(ctx: BuiltinToolContext): Promise<BuiltinToo
 
   if (typeof ctx.args.title === 'string') updated.title = ctx.args.title
   if (typeof ctx.args.description === 'string') updated.description = ctx.args.description
-  if (typeof ctx.args.type === 'string' && ['event', 'reminder', 'deadline'].includes(ctx.args.type)) {
+  if (
+    typeof ctx.args.type === 'string' &&
+    ['event', 'reminder', 'deadline'].includes(ctx.args.type)
+  ) {
     updated.type = ctx.args.type as ScheduleItem['type']
   }
   if (typeof ctx.args.startTime === 'string') {
@@ -181,7 +197,6 @@ export async function executeUpdate(ctx: BuiltinToolContext): Promise<BuiltinToo
   }
 
   writeSingleSchedule(ctx.scopeRoot, updated)
-  scopeStore.markDirty(ctx.scope)
 
   const opCtx = buildOpCtx(ctx)
   void emit('schedule:updated', {
@@ -213,8 +228,6 @@ export async function executeDelete(ctx: BuiltinToolContext): Promise<BuiltinToo
 
   const deleted = deleteSingleSchedule(ctx.scopeRoot, id)
   if (!deleted) return { text: '删除失败', isError: true }
-
-  scopeStore.markDirty(ctx.scope)
 
   const opCtx = buildOpCtx(ctx)
   void emit('schedule:deleted', {
@@ -260,7 +273,6 @@ export async function executeLink(ctx: BuiltinToolContext): Promise<BuiltinToolR
   existing.updatedAt = Date.now()
 
   writeSingleSchedule(ctx.scopeRoot, existing)
-  scopeStore.markDirty(ctx.scope)
 
   void emit('schedule:updated', {
     scope: ctx.scope,
@@ -293,7 +305,6 @@ export async function executeUnlink(ctx: BuiltinToolContext): Promise<BuiltinToo
   existing.updatedAt = Date.now()
 
   writeSingleSchedule(ctx.scopeRoot, existing)
-  scopeStore.markDirty(ctx.scope)
 
   void emit('schedule:updated', {
     scope: ctx.scope,

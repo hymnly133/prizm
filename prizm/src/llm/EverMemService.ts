@@ -245,19 +245,27 @@ export async function runVectorBackfill(): Promise<void> {
 }
 
 async function doVectorBackfill(): Promise<void> {
-  log.info('[VectorBackfill] Starting vector backfill scan...')
+  log.debug('[VectorBackfill] Starting vector backfill scan...')
 
   const embeddingProvider = new PrizmLLMAdapter('__backfill__')
   let totalBackfilled = 0
   let totalFailed = 0
 
   try {
-    // 补全 user-level 记忆（LanceDB add 是幂等的，重复写入不会报错）
+    // 补全 user-level 记忆（仅对向量库中尚不存在的 id 做 embedding + 写入）
     const userManagers = getUserManagers()
     const userAll = await userManagers.memory.listAllMemories(DEFAULT_USER_ID)
     if (userAll.length > 0) {
-      log.info(`[VectorBackfill] Scanning ${userAll.length} user memories for vector backfill`)
-      for (const mem of userAll) {
+      const userTypes = [...new Set(userAll.map((m) => m.type))]
+      const userExisting = new Map<string, Set<string>>()
+      for (const t of userTypes) {
+        userExisting.set(t, await userManagers.memory.getExistingVectorIds(t))
+      }
+      const userNeeds = userAll.filter((m) => !userExisting.get(m.type)?.has(m.id))
+      log.debug(
+        `[VectorBackfill] Scanning ${userAll.length} user memories, ${userNeeds.length} need backfill`
+      )
+      for (const mem of userNeeds) {
         const ok = await userManagers.memory.backfillVector(
           mem.id,
           mem.type,
@@ -276,10 +284,16 @@ async function doVectorBackfill(): Promise<void> {
       try {
         const scopeAll = await managers.scopeOnlyMemory.listAllMemories(DEFAULT_USER_ID)
         if (scopeAll.length > 0) {
-          log.info(
-            `[VectorBackfill] Scanning ${scopeAll.length} scope[${scopeId}] memories for vector backfill`
+          const scopeTypes = [...new Set(scopeAll.map((m) => m.type))]
+          const scopeExisting = new Map<string, Set<string>>()
+          for (const t of scopeTypes) {
+            scopeExisting.set(t, await managers.scopeOnlyMemory.getExistingVectorIds(t))
+          }
+          const scopeNeeds = scopeAll.filter((m) => !scopeExisting.get(m.type)?.has(m.id))
+          log.debug(
+            `[VectorBackfill] Scanning ${scopeAll.length} scope[${scopeId}] memories, ${scopeNeeds.length} need backfill`
           )
-          for (const mem of scopeAll) {
+          for (const mem of scopeNeeds) {
             const ok = await managers.scopeOnlyMemory.backfillVector(
               mem.id,
               mem.type,
@@ -303,7 +317,7 @@ async function doVectorBackfill(): Promise<void> {
   if (totalBackfilled > 0 || totalFailed > 0) {
     log.info(`[VectorBackfill] Complete: ${totalBackfilled} backfilled, ${totalFailed} failed`)
   } else {
-    log.info('[VectorBackfill] No memories need vector backfill')
+    log.debug('[VectorBackfill] No memories need vector backfill')
   }
 }
 

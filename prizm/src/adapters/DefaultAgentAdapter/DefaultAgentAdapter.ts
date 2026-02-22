@@ -3,7 +3,13 @@
  */
 
 import { createLogger } from '../../logger'
-import type { IAgentAdapter, LLMStreamChunk, LLMTool, LLMChatMessage } from '../interfaces'
+import type {
+  IAgentAdapter,
+  LLMStreamChunk,
+  LLMTool,
+  LLMChatMessage,
+  LLMMessageContentPart
+} from '../interfaces'
 import type { AgentSession, AgentMessage } from '../../types'
 import type { SessionIOConfig } from '@prizm/shared'
 import { scopeStore } from '../../core/ScopeStore'
@@ -233,7 +239,7 @@ export class DefaultAgentAdapter implements IAgentAdapter {
   async *chat(
     scope: string,
     sessionId: string,
-    messages: Array<{ role: string; content: string }>,
+    messages: LLMChatMessage[],
     options?: {
       model?: string
       signal?: AbortSignal
@@ -251,6 +257,8 @@ export class DefaultAgentAdapter implements IAgentAdapter {
       systemPreamble?: string
       promptInjection?: string
       workflowEditContext?: string
+      /** 当前请求的客户端 ID（用于浏览器 Relay 与 Electron provider 匹配） */
+      clientId?: string
     }
   ): AsyncIterable<LLMStreamChunk> {
     const defaultModel = getAgentLLMSettings().defaultModel
@@ -297,9 +305,7 @@ export class DefaultAgentAdapter implements IAgentAdapter {
 
     const staticContent = sessionStatic
 
-    const baseMessages: Array<{ role: string; content: string }> = [
-      { role: 'system', content: staticContent }
-    ]
+    const baseMessages: LLMChatMessage[] = [{ role: 'system', content: staticContent }]
 
     const dynamicMode = getDynamicContextMode()
 
@@ -310,15 +316,24 @@ export class DefaultAgentAdapter implements IAgentAdapter {
       return parts
     }
 
+    function getTextFromUserContent(content: string | LLMMessageContentPart[]): string {
+      if (typeof content === 'string') return content
+      return content
+        .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+        .map((p) => p.text)
+        .join('')
+    }
+
     if (messages.length > 0) {
       const last = messages[messages.length - 1]
       const rest = messages.slice(0, -1)
-      if (last.role === 'user' && typeof last.content === 'string') {
+      if (last.role === 'user' && (typeof last.content === 'string' || Array.isArray(last.content))) {
+        const lastText = getTextFromUserContent(last.content)
         const fileRefPaths = options?.grantedPaths
         const { injectedPrefix, message } = await processMessageAtRefs(
           scope,
           sessionId,
-          last.content,
+          lastText,
           { fileRefPaths, grantedPaths: options?.grantedPaths }
         )
 
@@ -326,15 +341,29 @@ export class DefaultAgentAdapter implements IAgentAdapter {
         const dynamicParts = collectDynamic(injectedPrefix)
 
         if (dynamicMode === 'user_prefix' && dynamicParts.length > 0) {
-          // 方式 B: 动态上下文作为 user 消息前缀（XML 标签包裹）
           const prefix = '<context>\n' + dynamicParts.join('\n\n') + '\n</context>\n\n'
-          baseMessages.push({ role: 'user', content: prefix + message })
+          if (typeof last.content === 'string') {
+            baseMessages.push({ role: 'user', content: prefix + message })
+          } else {
+            const newParts: LLMMessageContentPart[] = [
+              { type: 'text', text: prefix + message },
+              ...last.content.filter((p): p is { type: 'image'; image: string; mimeType?: string } => p.type === 'image')
+            ]
+            baseMessages.push({ role: 'user', content: newParts })
+          }
         } else {
-          // 方式 A: 独立 system 消息
           if (dynamicParts.length > 0) {
             baseMessages.push({ role: 'system', content: dynamicParts.join('\n\n') })
           }
-          baseMessages.push({ role: 'user', content: message })
+          if (typeof last.content === 'string') {
+            baseMessages.push({ role: 'user', content: message })
+          } else {
+            const newParts: LLMMessageContentPart[] = [
+              { type: 'text', text: message },
+              ...last.content.filter((p): p is { type: 'image'; image: string; mimeType?: string } => p.type === 'image')
+            ]
+            baseMessages.push({ role: 'user', content: newParts })
+          }
         }
       } else {
         baseMessages.push(...messages)
@@ -661,7 +690,8 @@ export class DefaultAgentAdapter implements IAgentAdapter {
         scope,
         sessionId,
         grantedPaths: runtimeGrantedPaths,
-        signal: options?.signal
+        signal: options?.signal,
+        clientId: options?.clientId
       }
 
       const execResults = await executeToolCalls(toolCalls, ctx, progressBuffer, this)

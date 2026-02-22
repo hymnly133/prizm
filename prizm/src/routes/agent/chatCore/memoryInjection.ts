@@ -4,7 +4,7 @@
  * 将用户画像、工作区记忆、会话记忆注入到 history 消息数组中。
  */
 
-import type { MemoryItem, MemoryIdsByLayer, SessionMemoryPolicy } from '@prizm/shared'
+import type { MemoryItem, MemoryIdsByLayer, MemoryInjectPolicy } from '@prizm/shared'
 import {
   isMemoryEnabled,
   listAllUserProfiles,
@@ -12,6 +12,7 @@ import {
   searchThreeLevelMemories,
   updateMemoryRefStats
 } from '../../../llm/EverMemService'
+import { getUserProfile } from '../../../settings/userProfileStore'
 import { executePreMemoryInjectHooks } from '../../../core/agentHooks'
 import { createLogger } from '../../../logger'
 
@@ -29,7 +30,9 @@ export interface MemoryInjectionInput {
   compressedThrough: number
   isFirstMessage: boolean
   skipMemory: boolean
-  memInjectPolicy?: SessionMemoryPolicy
+  /** 当前请求的 clientId，用于注入该客户端的用户画像（displayName / preferredTone） */
+  clientId?: string
+  memInjectPolicy?: MemoryInjectPolicy
 }
 
 export interface MemoryInjectionResult {
@@ -59,6 +62,7 @@ export async function injectMemories(input: MemoryInjectionInput): Promise<Memor
     compressedThrough,
     isFirstMessage,
     skipMemory,
+    clientId,
     memInjectPolicy
   } = input
 
@@ -71,21 +75,52 @@ export async function injectMemories(input: MemoryInjectionInput): Promise<Memor
 
   const shouldInjectProfile = memInjectPolicy?.injectProfile !== false
 
+  const profileLines: string[] = []
+  if (memoryEnabled && shouldInjectProfile && clientId) {
+    try {
+      const storeProfile = getUserProfile(clientId)
+      if (storeProfile?.displayName?.trim()) {
+        profileLines.push(`- 用户希望被称呼为：${storeProfile.displayName.trim()}`)
+      }
+      if (storeProfile?.preferredTone?.trim()) {
+        profileLines.push(`- 希望助手语气：${storeProfile.preferredTone.trim()}`)
+      }
+    } catch (storeErr) {
+      log.warn('User profile store read failed:', storeErr)
+    }
+  }
+
   let profileMem: MemoryItem[] = []
   if (memoryEnabled && shouldInjectProfile) {
     try {
       profileMem = await listAllUserProfiles()
       if (profileMem.length > 0) {
+        profileMem.forEach((m) => profileLines.push(`- ${m.memory}`))
+      }
+      if (profileLines.length > 0) {
         const profilePrompt =
           '【用户画像 — 只读，由系统自动维护】\n' +
-          profileMem.map((m) => `- ${m.memory}`).join('\n') +
+          profileLines.join('\n') +
           '\n\n严格遵守以上画像中的称呼和偏好。画像由记忆系统自动更新，不要为此创建文档。'
         memorySystemTexts.push(profilePrompt)
-        log.info('Injected user profile: %d items (always-on)', profileMem.length)
+        log.info('Injected user profile: %d items (store + memory)', profileLines.length)
       }
     } catch (profileErr) {
+      if (profileLines.length > 0) {
+        const profilePrompt =
+          '【用户画像 — 只读，由系统自动维护】\n' +
+          profileLines.join('\n') +
+          '\n\n严格遵守以上画像中的称呼和偏好。'
+        memorySystemTexts.push(profilePrompt)
+      }
       log.warn('User profile loading failed, proceeding without:', profileErr)
     }
+  } else if (profileLines.length > 0) {
+    const profilePrompt =
+      '【用户画像 — 只读，由系统自动维护】\n' +
+      profileLines.join('\n') +
+      '\n\n严格遵守以上画像中的称呼和偏好。'
+    memorySystemTexts.push(profilePrompt)
   }
 
   const shouldInjectContextMemory =

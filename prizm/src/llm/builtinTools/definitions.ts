@@ -57,18 +57,43 @@ export function getBuiltinTools(): LLMTool[] {
     // ── 文件（复合） ──
     tool(
       'prizm_file',
-      '文件操作。action: list(列出目录)/read(读取)/write(写入,不存在则创建)/move(移动或重命名)/delete(删除,需确认)',
+      '文件操作。action: list(列出目录)/read(读取)/write(写入,不存在则创建)/move(移动或重命名)/delete(删除,需确认)/grep(目录内全文搜索)/glob(按通配符列出文件)',
       {
         properties: {
           action: {
             type: 'string',
             description: '操作类型',
-            enum: ['list', 'read', 'write', 'move', 'delete']
+            enum: ['list', 'read', 'write', 'move', 'delete', 'grep', 'glob']
           },
-          path: { type: 'string', description: '文件或目录路径 (list/read/write/delete)' },
+          path: {
+            type: 'string',
+            description:
+              '文件或目录路径 (list/read/write/delete)；grep/glob 时为要搜索的目录，空表示工作区根'
+          },
           content: { type: 'string', description: '写入内容 (write)' },
           from: { type: 'string', description: '源路径 (move)' },
           to: { type: 'string', description: '目标路径 (move)' },
+          pattern: {
+            type: 'string',
+            description:
+              'grep: 要搜索的文本（固定字符串）；glob: 通配符如 *.ts、**/*.md、src/**/*.ts'
+          },
+          caseSensitive: {
+            type: 'boolean',
+            description: 'grep 是否区分大小写，默认 false'
+          },
+          fileGlob: {
+            type: 'string',
+            description: 'grep 时限制文件类型，如 "*.ts"、"*.md"，默认 "*.md"'
+          },
+          maxFiles: {
+            type: 'number',
+            description: 'grep 最多返回文件数，默认 50'
+          },
+          maxMatchesPerFile: {
+            type: 'number',
+            description: 'grep 每文件最多匹配行数，默认 5'
+          },
           workspace: WORKSPACE_PARAM
         },
         required: ['action']
@@ -290,7 +315,8 @@ export function getBuiltinTools(): LLMTool[] {
         properties: {
           output: {
             type: 'string',
-            description: '本步产出的结果内容（仅结果本身，勿含总结、过渡语或描述性文字；可为文本/Markdown）'
+            description:
+              '本步产出的结果内容（仅结果本身，勿含总结、过渡语或描述性文字；可为文本/Markdown）'
           },
           status: {
             type: 'string',
@@ -497,12 +523,49 @@ export function getBuiltinTools(): LLMTool[] {
         },
         required: ['skill_name']
       }
+    ),
+    // ── 用户画像（引导/对话中由助手写入称呼与语气） ──
+    tool(
+      'prizm_set_user_profile',
+      '更新当前用户的画像：显示名称（希望被如何称呼）与希望的语气。用于新手引导或用户明确说出偏好时调用。',
+      {
+        properties: {
+          displayName: {
+            type: 'string',
+            description: '用户希望被称呼的名字，如：小明、Alex'
+          },
+          preferredTone: {
+            type: 'string',
+            description: '希望助手的回复语气，如：简洁专业、友好随意、中性克制'
+          }
+        },
+        required: []
+      }
+    ),
+    // ── Browser Automation（独立） ──
+    tool(
+      'prizm_browser',
+      'Browser control using Stagehand. action: navigate(跳转)/act(执行操作)/extract(提取信息)/observe(观察页面)/close(关闭会话)',
+      {
+        properties: {
+          action: {
+            type: 'string',
+            description: '操作类型',
+            enum: ['navigate', 'act', 'extract', 'observe', 'close']
+          },
+          url: { type: 'string', description: '目标网址 (navigate 时必填)' },
+          instruction: { type: 'string', description: '自然语言指令 (act/extract/observe 时必填)' }
+        },
+        required: ['action']
+      }
     )
   ]
 }
 
 /** 内置工具名称集合，用于判断是否为内置工具 */
 export const BUILTIN_TOOL_NAMES = new Set([
+  'prizm_set_user_profile',
+  'prizm_browser',
   'prizm_file',
   'prizm_todo',
   'prizm_document',

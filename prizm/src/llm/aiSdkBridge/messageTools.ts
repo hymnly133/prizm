@@ -2,22 +2,69 @@
  * 将 Prizm LLMChatMessage / LLMTool 转为 AI SDK 的 messages / tools 格式
  */
 
-import type { LLMChatMessage, LLMTool } from '../../adapters/interfaces'
+import type { LLMChatMessage, LLMTool, LLMMessageContentPart } from '../../adapters/interfaces'
 import { tool as aiTool, jsonSchema } from 'ai'
 
+/** AI SDK user/system 多模态 content： string 或 文本+图片 段落数组 */
+export type AISDKUserContent =
+  | string
+  | Array<{ type: 'text'; text: string } | { type: 'image'; image: string; mimeType?: string }>
+
+/** AI SDK tool message: content must be an array of tool-result parts (ModelMessage schema) */
 export type AISDKMessage =
-  | { role: 'system'; content: string }
-  | { role: 'user'; content: string }
+  | { role: 'system'; content: AISDKUserContent }
+  | { role: 'user'; content: AISDKUserContent }
   | {
       role: 'assistant'
-      content: string | Array<{ type: 'text'; text: string } | { type: 'tool-call'; toolCallId: string; toolName: string; args: unknown }>
+      content:
+        | string
+        | Array<
+            | { type: 'text'; text: string }
+            | { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown }
+          >
     }
-  | { role: 'tool'; toolCallId: string; content: string }
+  | {
+      role: 'tool'
+      content: Array<{
+        type: 'tool-result'
+        toolCallId: string
+        toolName: string
+        output: { type: 'text'; value: string } | { type: 'error-text'; value: string }
+      }>
+    }
+
+function getToolNameForCallId(messages: LLMChatMessage[], toolCallId: string): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (msg.role === 'assistant' && 'tool_calls' in msg && Array.isArray(msg.tool_calls)) {
+      const tc = msg.tool_calls.find((c) => c.id === toolCallId)
+      if (tc) return tc.function?.name ?? ''
+    }
+  }
+  return ''
+}
+
+function mapContentPartsToAISDK(parts: LLMMessageContentPart[]): AISDKUserContent {
+  const arr: Array<
+    { type: 'text'; text: string } | { type: 'image'; image: string; mimeType?: string }
+  > = []
+  for (const p of parts) {
+    if (p.type === 'text') arr.push({ type: 'text', text: p.text })
+    if (p.type === 'image') arr.push({ type: 'image', image: p.image, mimeType: p.mimeType })
+  }
+  return arr.length === 0 ? '' : arr.length === 1 && arr[0].type === 'text' ? arr[0].text : arr
+}
 
 export function mapMessagesToAISDK(messages: LLMChatMessage[]): AISDKMessage[] {
-  return messages.map((m) => {
+  return messages.map((m, index) => {
     if (m.role === 'system' || m.role === 'user') {
-      return { role: m.role, content: typeof m.content === 'string' ? m.content : '' }
+      const content =
+        typeof m.content === 'string'
+          ? m.content
+          : Array.isArray(m.content) && m.content.length > 0
+          ? mapContentPartsToAISDK(m.content)
+          : ''
+      return { role: m.role, content }
     }
     if (m.role === 'assistant') {
       const content = typeof m.content === 'string' ? m.content : (m.content ?? '') || ''
@@ -32,24 +79,38 @@ export function mapMessagesToAISDK(messages: LLMChatMessage[]): AISDKMessage[] {
       if (toolCalls.length === 0) {
         return { role: 'assistant', content }
       }
-      const parts: Array<{ type: 'text'; text: string } | { type: 'tool-call'; toolCallId: string; toolName: string; args: unknown }> = []
+      // AI SDK / OpenAI 兼容层用 part.input 序列化为 function.arguments，须用 input 而非 args
+      const parts: Array<
+        | { type: 'text'; text: string }
+        | { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown }
+      > = []
       if (content) parts.push({ type: 'text', text: content })
       for (const tc of toolCalls) {
-        let args: unknown = {}
+        let input: unknown = {}
         try {
-          args = JSON.parse(tc.arguments || '{}')
+          input = JSON.parse(tc.arguments || '{}')
         } catch {
-          args = {}
+          input = {}
         }
-        parts.push({ type: 'tool-call', toolCallId: tc.id, toolName: tc.name, args })
+        parts.push({ type: 'tool-call', toolCallId: tc.id, toolName: tc.name, input })
       }
       return { role: 'assistant', content: parts }
     }
     if (m.role === 'tool' && 'tool_call_id' in m) {
+      const toolCallId = m.tool_call_id
+      const text = typeof m.content === 'string' ? m.content : ''
+      const toolName = getToolNameForCallId(messages.slice(0, index), toolCallId)
+      const isError = text.startsWith('Failed to execute')
       return {
         role: 'tool',
-        toolCallId: m.tool_call_id,
-        content: typeof m.content === 'string' ? m.content : ''
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId,
+            toolName,
+            output: isError ? { type: 'error-text', value: text } : { type: 'text', value: text }
+          }
+        ]
       }
     }
     return { role: 'user', content: String((m as { content?: unknown }).content ?? '') }

@@ -72,7 +72,7 @@ function loadRaw(): AgentToolsSettings {
       mcpServers: getBuiltinMcpServerDefaults(getDataDir()),
       updatedAt: Date.now()
     }
-    if (data.mcpServers.length > 0) {
+    if ((data.mcpServers?.length ?? 0) > 0) {
       saveRaw(data)
     }
     return data

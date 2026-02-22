@@ -25,4 +25,6 @@ export interface BuiltinToolContext {
   wsArg: string | undefined
   sessionId: string | undefined
   grantedPaths: string[] | undefined
+  /** 当前请求的客户端 ID，用于浏览器 Relay 与 Electron provider 会话匹配 */
+  clientId?: string
 }

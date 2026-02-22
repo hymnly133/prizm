@@ -6,6 +6,7 @@
  */
 
 import { getLLMProvider, getLLMProviderName } from './index'
+import type { LLMChatMessage } from '../adapters/interfaces'
 import type { ICompletionProvider, CompletionRequest } from '@prizm/evermemos'
 import { recordTokenUsage } from './tokenUsage'
 import { logLLMCall, buildMessagesSummary, formatUsage } from './llmCallLogger'
@@ -61,12 +62,12 @@ export class BasePrizmLLMAdapter implements ICompletionProvider {
     if (!provider) {
       throw new Error('No LLM provider configured. Please add and configure at least one LLM in settings.')
     }
-    const messages: Array<{ role: string; content: string }> = request.systemPrompt
+    const messages: LLMChatMessage[] = request.systemPrompt
       ? [
-          { role: 'system', content: request.systemPrompt },
-          { role: 'user', content: request.prompt }
+          { role: 'system' as const, content: request.systemPrompt },
+          { role: 'user' as const, content: request.prompt }
         ]
-      : [{ role: 'user', content: request.prompt }]
+      : [{ role: 'user' as const, content: request.prompt }]
     const model = getLLMProviderName()
     const category = (request.operationTag ?? this._defaultCategory) as string
 

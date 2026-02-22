@@ -16,7 +16,12 @@
  * - Scope 活动记录
  */
 
-import type { IAgentAdapter, LLMStreamChunk } from '../../../adapters/interfaces'
+import type {
+  IAgentAdapter,
+  LLMChatMessage,
+  LLMMessageContentPart,
+  LLMStreamChunk
+} from '../../../adapters/interfaces'
 import type {
   AgentMessage,
   AgentSession,
@@ -95,6 +100,7 @@ export async function chatCore(
     scope,
     sessionId: id,
     content,
+    images: optionsImages,
     signal,
     mcpEnabled,
     includeScopeContext,
@@ -183,9 +189,23 @@ export async function chatCore(
     initSnapshotCollector(id)
   }
 
+  const userParts: MessagePart[] = [{ type: 'text', content: content.trim() }]
+  if (optionsImages?.length) {
+    for (const im of optionsImages) {
+      if (im.url) {
+        userParts.push({ type: 'image', url: im.url, mimeType: im.mimeType })
+      } else if (im.base64) {
+        userParts.push({
+          type: 'image',
+          base64: im.base64,
+          mimeType: im.mimeType ?? 'image/png'
+        })
+      }
+    }
+  }
   await adapter.appendMessage(scope, id, {
     role: 'user',
-    parts: [{ type: 'text', content: content.trim() }]
+    parts: userParts
   })
 
   if (turnCheckpoint) {
@@ -324,15 +344,32 @@ export async function chatCore(
 
   // 构建消息历史（对话轮次 + 压缩摘要链）
   // 排列：[压缩摘要链] → [未压缩 user/assistant 轮次] → [当前用户消息]
-  const currentUserMsg = { role: 'user' as const, content: content.trim() }
-  let history: Array<{ role: string; content: string }>
+  const currentUserMsg: LLMChatMessage =
+    optionsImages?.length &&
+    optionsImages.some((im) => im.url || im.base64)
+      ? (() => {
+          const parts: LLMMessageContentPart[] = [{ type: 'text', text: content.trim() }]
+          for (const im of optionsImages) {
+            if (im.url) {
+              parts.push({ type: 'image', image: im.url, mimeType: im.mimeType })
+            } else if (im.base64) {
+              const dataUrl = `data:${im.mimeType ?? 'image/png'};base64,${im.base64}`
+              parts.push({ type: 'image', image: dataUrl, mimeType: im.mimeType })
+            }
+          }
+          return { role: 'user', content: parts }
+        })()
+      : { role: 'user', content: content.trim() }
+
+  let history: LLMChatMessage[]
 
   const withTools = { includeToolSummary: true }
 
   // 压缩摘要链注入为 system 消息（只追加不修改，形成稳定缓存前缀）
-  const summaryMessages: Array<{ role: string; content: string }> = compressionSummaries.map(
-    (s) => ({ role: 'system', content: `[对话回顾 R1-${s.throughRound}]\n${s.text}` })
-  )
+  const summaryMessages: LLMChatMessage[] = compressionSummaries.map((s) => ({
+    role: 'system',
+    content: `[对话回顾 R1-${s.throughRound}]\n${s.text}`
+  }))
 
   if (completeRounds < fullContextTurns + cachedContextTurns) {
     history = [
@@ -342,7 +379,7 @@ export async function chatCore(
     ]
   } else {
     const systemMsgs = session.messages.filter((m) => m.role === 'system')
-    const systemPrefix =
+    const systemPrefix: LLMChatMessage[] =
       systemMsgs.length > 0
         ? systemMsgs.map((m) => ({ role: m.role, content: getTextContent(m) }))
         : []
@@ -368,6 +405,7 @@ export async function chatCore(
     compressedThrough,
     isFirstMessage,
     skipMemory,
+    clientId: actor?.clientId,
     memInjectPolicy
   })
 
@@ -639,6 +677,7 @@ export async function chatCore(
       allowedTools: finalAllowedTools,
       allowedMcpServerIds: sessionAllowedMcpServerIds,
       thinking: resolvedThinking,
+      clientId: actor?.clientId,
       memoryTexts: memorySystemTexts.length > 0 ? memorySystemTexts : undefined,
       systemPreamble: systemPreamble || undefined,
       promptInjection: promptInjection ? `[命令指令]\n${promptInjection}` : undefined,

@@ -161,7 +161,7 @@ export async function runVectorBackfill(): Promise<void> {
         log.info('[VectorBackfill] No local embedding provider — skipping')
         return
       }
-      log.info('[VectorBackfill] Starting backfill scan...')
+      log.debug('[VectorBackfill] Starting backfill scan...')
 
       let totalBackfilled = 0
       let totalFailed = 0
@@ -214,7 +214,7 @@ export async function runVectorBackfill(): Promise<void> {
       if (totalBackfilled > 0 || totalFailed > 0) {
         log.info(`[VectorBackfill] Complete: ${totalBackfilled} backfilled, ${totalFailed} failed`)
       } else {
-        log.info('[VectorBackfill] No memories need vector backfill')
+        log.debug('[VectorBackfill] No memories need vector backfill')
       }
     } finally {
       _backfillPromise = null

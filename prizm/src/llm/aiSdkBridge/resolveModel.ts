@@ -1,6 +1,6 @@
 /**
- * 解析请求中的 model 字符串，得到 configId 与 modelId
- * 支持格式：modelId（使用默认配置）或 configId:modelId
+ * 解析请求中的 model 字符串，得到 config 与 modelId
+ * 格式：configId:modelId；空时使用 llm.defaultModel，再回退到首配置 + 类型默认模型
  */
 
 import type { ServerConfigLLM, LLMConfigItem } from '../../settings/serverConfigTypes'
@@ -12,7 +12,7 @@ export interface ResolvedModel {
 
 /**
  * 从 llm 配置中解析 model 字符串
- * @param modelStr 请求中的 model，如 "gpt-4o" 或 "cfg-xxx:gpt-4o"
+ * @param modelStr 请求中的 model，如 "configId:gpt-4o"；空则用 llm.defaultModel
  * @param llm 当前 server-config 的 llm
  * @returns 解析结果，若无有效配置则 null
  */
@@ -22,17 +22,19 @@ export function resolveModel(
 ): ResolvedModel | null {
   if (!llm?.configs?.length) return null
 
-  const defaultConfig = llm.defaultConfigId
-    ? llm.configs.find((c) => c.id === llm.defaultConfigId)
-    : llm.configs[0]
-  if (!defaultConfig?.apiKey?.trim()) return null
+  const firstConfigWithKey = llm.configs.find((c) => c.apiKey?.trim())
+  if (!firstConfigWithKey) return null
 
-  if (!modelStr || !modelStr.trim()) {
-    const modelId = defaultConfig.defaultModel?.trim() || getDefaultModelForType(defaultConfig.type)
-    return { config: defaultConfig, modelId }
+  const trimmed = modelStr?.trim()
+  if (!trimmed) {
+    if (llm.defaultModel?.trim()) {
+      const resolved = parseConfigModel(llm.defaultModel.trim(), llm)
+      if (resolved) return resolved
+    }
+    const modelId = getDefaultModelForType(firstConfigWithKey.type)
+    return { config: firstConfigWithKey, modelId }
   }
 
-  const trimmed = modelStr.trim()
   const colonIndex = trimmed.indexOf(':')
   if (colonIndex > 0) {
     const configId = trimmed.slice(0, colonIndex).trim()
@@ -44,9 +46,23 @@ export function resolveModel(
   }
 
   return {
-    config: defaultConfig,
+    config: firstConfigWithKey,
     modelId: trimmed
   }
+}
+
+function parseConfigModel(
+  str: string,
+  llm: ServerConfigLLM
+): ResolvedModel | null {
+  const colonIndex = str.indexOf(':')
+  if (colonIndex <= 0) return null
+  const configId = str.slice(0, colonIndex).trim()
+  const modelId = str.slice(colonIndex + 1).trim()
+  if (!modelId) return null
+  const config = llm.configs.find((c) => c.id === configId && c.apiKey?.trim())
+  if (!config) return null
+  return { config, modelId }
 }
 
 export function getDefaultModelForType(type: string): string {

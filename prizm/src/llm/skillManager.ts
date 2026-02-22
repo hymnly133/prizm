@@ -49,7 +49,9 @@ export interface SkillFullContent extends SkillConfig {
 }
 
 /** 技能目录文件树（相对技能根）：叶子为 "file"，子树为嵌套对象 */
-export type SkillFileTree = Record<string, 'file' | SkillFileTree>
+export interface SkillFileTree {
+  [key: string]: 'file' | SkillFileTree
+}
 
 // ============ 解析 ============
 

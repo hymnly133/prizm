@@ -7,6 +7,7 @@
 
 import { scopeStore } from '../core/ScopeStore'
 import { getLLMProvider, getLLMProviderName } from './index'
+import type { LLMChatMessage } from '../adapters/interfaces'
 import { createLogger } from '../logger'
 import { getConversationSummarySettings } from '../settings/agentToolsStore'
 import { recordTokenUsage } from './tokenUsage'
@@ -75,7 +76,7 @@ export function scheduleTurnSummary(scope: string, sessionId: string, userConten
     let lastUsage:
       | { totalInputTokens?: number; totalOutputTokens?: number; totalTokens?: number }
       | undefined
-    let summaryMessages: Array<{ role: string; content: string }> = []
+    let summaryMessages: LLMChatMessage[] = []
     let summaryStartTime = Date.now()
     try {
       if (ac.signal.aborted) return
@@ -107,8 +108,8 @@ export function scheduleTurnSummary(scope: string, sessionId: string, userConten
         return
       }
       summaryMessages = [
-        { role: 'system', content: SUMMARY_SYSTEM_PROMPT },
-        { role: 'user', content: userPrompt }
+        { role: 'system' as const, content: SUMMARY_SYSTEM_PROMPT },
+        { role: 'user' as const, content: userPrompt }
       ]
       summaryStartTime = Date.now()
 

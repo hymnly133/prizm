@@ -164,9 +164,15 @@ export interface LLMTool {
   function: { name: string; description?: string; parameters?: object }
 }
 
-/** 消息类型：支持 assistant（含 tool_calls）和 tool 角色，用于多轮工具调用 */
+/** 多模态内容段落（文本或图片），用于 user/system 消息的 content 数组形式 */
+export type LLMMessageContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; image: string; mimeType?: string }
+
+/** 消息类型：支持 assistant（含 tool_calls）和 tool 角色，用于多轮工具调用；user/system 支持多模态 content */
 export type LLMChatMessage =
-  | { role: string; content: string }
+  | { role: 'system'; content: string | LLMMessageContentPart[] }
+  | { role: 'user'; content: string | LLMMessageContentPart[] }
   | {
       role: 'assistant'
       content: string | null
@@ -246,11 +252,11 @@ export interface IAgentAdapter {
    */
   forkSession?(scope: string, sourceSessionId: string, checkpointId?: string): Promise<AgentSession>
 
-  /** 流式对话，返回 SSE 流 */
+  /** 流式对话，返回 SSE 流；messages 支持多模态（user/system 的 content 可为 string 或 ContentPart 数组） */
   chat?(
     scope: string,
     sessionId: string,
-    messages: Array<{ role: string; content: string }>,
+    messages: LLMChatMessage[],
     options?: {
       model?: string
       signal?: AbortSignal
@@ -281,6 +287,8 @@ export interface IAgentAdapter {
       promptInjection?: string
       /** 工作流管理会话：当前工作流 YAML，注入 perTurn（cache 友好，不放入 static） */
       workflowEditContext?: string
+      /** 当前请求的 clientId，用于工具执行与审计 */
+      clientId?: string
     }
   ): AsyncIterable<LLMStreamChunk>
 }

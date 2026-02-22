@@ -125,7 +125,7 @@ function estimateTokens(text: string): number {
  * 兼容 { role, content, tool_calls? } 格式。
  */
 export function buildMessagesSummary(
-  messages: Array<{ role: string; content?: string | null; tool_calls?: unknown[] }>
+  messages: Array<{ role: string; content?: string | null | unknown[]; tool_calls?: unknown[] }>
 ): MessageSummary[] {
   return messages.map((m) => {
     const content = typeof m.content === 'string' ? m.content : ''

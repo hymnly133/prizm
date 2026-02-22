@@ -92,6 +92,7 @@ describe('handleInteractions', () => {
       's1',
       undefined,
       ['/allowed/path'],
+      undefined,
       undefined
     )
     expect(updatedGrantedPaths).toEqual(['/allowed/path'])

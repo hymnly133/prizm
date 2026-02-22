@@ -23,7 +23,7 @@ import {
 import { scopeStore } from '../../core/ScopeStore'
 import { emit } from '../../core/eventBus'
 import * as defStore from '../../core/workflowEngine/workflowDefStore'
-import type { WorkflowDef } from '@prizm/shared'
+import type { WorkflowDef, BgSessionMeta } from '@prizm/shared'
 
 const WORKFLOW_JSON_PARAM = {
   type: 'string' as const,
@@ -149,7 +149,7 @@ export async function executeCreateWorkflow(
         }
       })
     } else if (existing && 'bgMeta' in existing && existing.bgMeta) {
-      const bg = existing.bgMeta as Record<string, unknown>
+      const bg = existing.bgMeta as BgSessionMeta
       await adapter.updateSession(scope, sessionId, {
         bgMeta: {
           ...bg,

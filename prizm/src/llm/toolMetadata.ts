@@ -376,6 +376,14 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     }
   },
 
+  prizm_set_user_profile: {
+    name: 'prizm_set_user_profile',
+    displayName: '更新用户画像',
+    description: '更新用户希望被称呼的名字与希望的语气',
+    category: 'other',
+    scopeActivity: 'none'
+  },
+
   // === 联网搜索 ===
   prizm_web_search: {
     name: 'prizm_web_search',
