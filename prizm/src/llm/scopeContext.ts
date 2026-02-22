@@ -9,6 +9,8 @@
  * - 末尾附加统一字数统计（基于 ScopeItemRegistry）
  */
 
+import { getConfig } from '../config'
+import { getEffectiveServerConfig } from '../settings/serverConfigStore'
 import { scopeStore } from '../core/ScopeStore'
 import type { ScopeData } from '../core/ScopeStore'
 import { getScopeStats } from './scopeItemRegistry'
@@ -29,7 +31,9 @@ const MAX_TODO_DONE = 3
 const MAX_DOCUMENTS = 5
 
 function getMaxSummaryLen(): number {
-  const v = process.env.PRIZM_AGENT_SCOPE_CONTEXT_MAX_CHARS?.trim()
+  const fileVal = getEffectiveServerConfig(getConfig().dataDir).agent?.scopeContextMaxChars
+  const envVal = process.env.PRIZM_AGENT_SCOPE_CONTEXT_MAX_CHARS?.trim()
+  const v = envVal || (fileVal != null ? String(fileVal) : '')
   if (!v) return DEFAULT_MAX_SUMMARY_LEN
   const n = parseInt(v, 10)
   return Number.isNaN(n) || n < 500 ? DEFAULT_MAX_SUMMARY_LEN : Math.min(n, 12000)

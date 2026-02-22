@@ -102,6 +102,10 @@ export function scheduleTurnSummary(scope: string, sessionId: string, userConten
 
       const userPrompt = buildSummaryUserPrompt(userTexts)
       const provider = getLLMProvider()
+      if (!provider) {
+        log.warn('No LLM provider configured; skipping turn summary:', sessionId)
+        return
+      }
       summaryMessages = [
         { role: 'system', content: SUMMARY_SYSTEM_PROMPT },
         { role: 'user', content: userPrompt }

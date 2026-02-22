@@ -1,16 +1,18 @@
 /**
  * Prizm 配置管理
- * 从环境变量读取，支持 PRIZM_ 前缀覆盖默认值
+ * 合并顺序：默认值 ← server-config.json ← 环境变量（env 覆盖文件）
+ * dataDir 仅来自环境变量，用于定位 server-config.json
  */
 
 import path from 'path'
+import { loadServerConfig } from './settings/serverConfigStore'
 
 export interface PrizmConfig {
   /** 服务端口 */
   port: number
   /** 监听地址 */
   host: string
-  /** 数据目录（便签、客户端等持久化） */
+  /** 数据目录（便签、客户端等持久化，仅来自 env） */
   dataDir: string
   /** 是否启用鉴权 */
   authEnabled: boolean
@@ -39,10 +41,10 @@ export interface PrizmConfig {
   embeddingMaxConcurrency: number
 }
 
-function parsePort(v: string | undefined): number {
-  if (!v) return 4127
+function parsePort(v: string | undefined): number | undefined {
+  if (v === undefined || v === '') return undefined
   const n = parseInt(v, 10)
-  return Number.isNaN(n) ? 4127 : n
+  return Number.isNaN(n) ? undefined : n
 }
 
 function parseBool(v: string | undefined, defaultValue: boolean): boolean {
@@ -53,36 +55,59 @@ function parseBool(v: string | undefined, defaultValue: boolean): boolean {
 let _config: PrizmConfig | null = null
 
 /**
- * 获取当前配置（环境变量覆盖默认值）
+ * 获取当前配置（server-config.json 与环境变量合并，env 优先）
  */
 export function getConfig(): PrizmConfig {
   if (_config) return _config
 
   const env = process.env
+  const dataDirFromEnv = path.resolve(process.cwd(), env.PRIZM_DATA_DIR ?? '.prizm-data')
+  const fileConfig = loadServerConfig(dataDirFromEnv)
+  const s = fileConfig.server
+  const e = fileConfig.embedding
+
   _config = {
-    port: parsePort(env.PRIZM_PORT),
-    host: env.PRIZM_HOST ?? '127.0.0.1',
-    dataDir: path.resolve(process.cwd(), env.PRIZM_DATA_DIR ?? '.prizm-data'),
-    authEnabled: !parseBool(env.PRIZM_AUTH_DISABLED, false),
-    enableCors: parseBool(env.PRIZM_CORS_ENABLED, true),
-    enableWebSocket: parseBool(env.PRIZM_WEBSOCKET_ENABLED, true),
-    websocketPath: env.PRIZM_WEBSOCKET_PATH ?? '/ws',
+    port: parsePort(env.PRIZM_PORT) ?? s?.port ?? 4127,
+    host: (env.PRIZM_HOST?.trim() || s?.host) ?? '127.0.0.1',
+    dataDir: dataDirFromEnv,
+    authEnabled:
+      env.PRIZM_AUTH_DISABLED !== undefined
+        ? !parseBool(env.PRIZM_AUTH_DISABLED, false)
+        : s?.authDisabled === true
+        ? false
+        : true,
+    enableCors:
+      env.PRIZM_CORS_ENABLED !== undefined
+        ? parseBool(env.PRIZM_CORS_ENABLED, true)
+        : s?.corsEnabled ?? true,
+    enableWebSocket:
+      env.PRIZM_WEBSOCKET_ENABLED !== undefined
+        ? parseBool(env.PRIZM_WEBSOCKET_ENABLED, true)
+        : s?.websocketEnabled ?? true,
+    websocketPath: (env.PRIZM_WEBSOCKET_PATH?.trim() || s?.websocketPath) ?? '/ws',
     logLevel:
       env.PRIZM_LOG_LEVEL === 'warn' || env.PRIZM_LOG_LEVEL === 'error'
         ? env.PRIZM_LOG_LEVEL
-        : 'info',
-    mcpScope: env.PRIZM_MCP_SCOPE?.trim() || undefined,
+        : s?.logLevel ?? 'info',
+    mcpScope: env.PRIZM_MCP_SCOPE?.trim() || s?.mcpScope?.trim() || undefined,
 
-    embeddingEnabled: parseBool(env.PRIZM_EMBEDDING_ENABLED, true),
-    embeddingModel: env.PRIZM_EMBEDDING_MODEL?.trim() || 'TaylorAI/bge-micro-v2',
+    embeddingEnabled:
+      env.PRIZM_EMBEDDING_ENABLED !== undefined
+        ? parseBool(env.PRIZM_EMBEDDING_ENABLED, true)
+        : e?.enabled ?? true,
+    embeddingModel:
+      env.PRIZM_EMBEDDING_MODEL?.trim() || e?.model?.trim() || 'TaylorAI/bge-micro-v2',
     embeddingCacheDir:
       env.PRIZM_EMBEDDING_CACHE_DIR?.trim() ||
-      path.join(path.resolve(process.cwd(), env.PRIZM_DATA_DIR ?? '.prizm-data'), 'models'),
+      e?.cacheDir?.trim() ||
+      path.join(dataDirFromEnv, 'models'),
     embeddingDtype: ['q4', 'q8', 'fp16', 'fp32'].includes(env.PRIZM_EMBEDDING_DTYPE ?? '')
       ? (env.PRIZM_EMBEDDING_DTYPE as 'q4' | 'q8' | 'fp16' | 'fp32')
-      : 'q8',
-    embeddingMaxConcurrency: parseInt(env.PRIZM_EMBEDDING_MAX_CONCURRENCY ?? '1', 10) || 1
+      : e?.dtype ?? 'q8',
+    embeddingMaxConcurrency:
+      (parseInt(env.PRIZM_EMBEDDING_MAX_CONCURRENCY ?? '', 10) || e?.maxConcurrency) ?? 1
   }
+  if (_config.embeddingMaxConcurrency < 1) _config.embeddingMaxConcurrency = 1
   return _config
 }
 

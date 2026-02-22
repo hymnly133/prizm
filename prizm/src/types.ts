@@ -11,7 +11,6 @@ import type {
   TodoItemStatus,
   CreateTodoItemPayload,
   UpdateTodoItemPayload,
-  PomodoroSession,
   ClipboardItem,
   ClipboardItemType,
   Document,
@@ -70,8 +69,6 @@ export type {
   TodoItemStatus,
   CreateTodoItemPayload,
   UpdateTodoItemPayload,
-  /** @deprecated 番茄钟已移除，仅用于迁移 */
-  PomodoroSession,
   ClipboardItem,
   ClipboardItemType,
   Document,

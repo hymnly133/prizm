@@ -102,7 +102,7 @@ describe("DefaultAgentAdapter", () => {
 				if (c.text) chunks.push(c.text);
 			}
 
-			expect(chunks.join("")).toContain("请配置");
+			expect(chunks.join("")).toMatch(/请.*配置|API Key/);
 			if (orig) process.env.OPENAI_API_KEY = orig;
 			if (origZhipu) process.env.ZHIPU_API_KEY = origZhipu;
 			if (origMimo) process.env.XIAOMIMIMO_API_KEY = origMimo;

@@ -58,6 +58,9 @@ export class BasePrizmLLMAdapter implements ICompletionProvider {
 
   async generate(request: CompletionRequest): Promise<string> {
     const provider = getLLMProvider()
+    if (!provider) {
+      throw new Error('No LLM provider configured. Please add and configure at least one LLM in settings.')
+    }
     const messages: Array<{ role: string; content: string }> = request.systemPrompt
       ? [
           { role: 'system', content: request.systemPrompt },
@@ -138,15 +141,15 @@ export class BasePrizmLLMAdapter implements ICompletionProvider {
     }
 
     const provider = getLLMProvider()
-    if ('embed' in provider) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const resp = await (provider as any).embed([text])
-      return resp[0]
+    if (!provider || !('embed' in provider)) {
+      if (!this._mockEmbeddingWarned) {
+        this._mockEmbeddingWarned = true
+      }
+      return []
     }
 
-    if (!this._mockEmbeddingWarned) {
-      this._mockEmbeddingWarned = true
-    }
-    return []
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const resp = await (provider as any).embed([text])
+    return resp[0]
   }
 }

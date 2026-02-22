@@ -1,89 +1,202 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import {
-  getLLMProvider,
-  resetLLMProvider,
-  OpenAILikeLLMProvider,
-  ZhipuLLMProvider,
-  XiaomiMiMoLLMProvider
-} from './index'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import type { ServerConfigLLM, LLMConfigItem } from '../settings/serverConfigTypes'
+
+vi.mock('../config', () => ({
+  getConfig: () => ({ dataDir: '/tmp' })
+}))
+
+const mockGetEffectiveServerConfig = vi.fn()
+const mockSanitizeServerConfig = vi.fn()
+vi.mock('../settings/serverConfigStore', () => ({
+  getEffectiveServerConfig: (dataDir: string) => mockGetEffectiveServerConfig(dataDir),
+  sanitizeServerConfig: (config: unknown) => mockSanitizeServerConfig(config)
+}))
+
+const mockGetProviderForConfig = vi.fn()
+vi.mock('./aiSdkBridge', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./aiSdkBridge')>()
+  return {
+    ...actual,
+    getProviderForConfig: (config: LLMConfigItem) => mockGetProviderForConfig(config),
+    resolveModel: actual.resolveModel
+  }
+})
+
+beforeEach(async () => {
+  vi.clearAllMocks()
+  const { resetLLMProvider } = await import('./index')
+  resetLLMProvider()
+})
 
 describe('getLLMProvider', () => {
-  const origOpenAI = process.env.OPENAI_API_KEY
-  const origZhipu = process.env.ZHIPU_API_KEY
-  const origMimo = process.env.XIAOMIMIMO_API_KEY
-
-  afterEach(() => {
-    resetLLMProvider()
-    if (origOpenAI !== undefined) process.env.OPENAI_API_KEY = origOpenAI
-    else delete process.env.OPENAI_API_KEY
-    if (origZhipu !== undefined) process.env.ZHIPU_API_KEY = origZhipu
-    else delete process.env.ZHIPU_API_KEY
-    if (origMimo !== undefined) process.env.XIAOMIMIMO_API_KEY = origMimo
-    else delete process.env.XIAOMIMIMO_API_KEY
+  it('无 configs 时返回 null', async () => {
+    mockGetEffectiveServerConfig.mockReturnValue({ llm: { configs: [] } })
+    const { getLLMProvider } = await import('./index')
+    expect(getLLMProvider()).toBeNull()
   })
 
-  it('仅 ZHIPU_API_KEY 时返回 ZhipuLLMProvider', () => {
-    process.env.ZHIPU_API_KEY = 'zhipu-key'
-    delete process.env.XIAOMIMIMO_API_KEY
-    delete process.env.OPENAI_API_KEY
-
-    const provider = getLLMProvider()
-    expect(provider).toBeInstanceOf(ZhipuLLMProvider)
+  it('默认配置无 apiKey 时返回 null', async () => {
+    mockGetEffectiveServerConfig.mockReturnValue({
+      llm: {
+        configs: [{ id: 'c1', name: 'Test', type: 'openai_compatible', apiKey: '' }]
+      }
+    })
+    const { getLLMProvider } = await import('./index')
+    expect(getLLMProvider()).toBeNull()
   })
 
-  it('XIAOMIMIMO 优先于 ZHIPU（多个 key 时）', () => {
-    process.env.XIAOMIMIMO_API_KEY = 'mimo-key'
-    process.env.ZHIPU_API_KEY = 'zhipu-key'
-    delete process.env.OPENAI_API_KEY
-
-    const provider = getLLMProvider()
-    expect(provider).toBeInstanceOf(XiaomiMiMoLLMProvider)
+  it('有默认配置且含 apiKey 时返回 provider', async () => {
+    const fakeProvider = { chat: async function* () {} }
+    mockGetProviderForConfig.mockReturnValue(fakeProvider)
+    mockGetEffectiveServerConfig.mockReturnValue({
+      llm: {
+        configs: [{ id: 'c1', name: 'OpenAI', type: 'openai_compatible', apiKey: 'sk-xxx' }]
+      }
+    })
+    const { getLLMProvider } = await import('./index')
+    expect(getLLMProvider()).toBe(fakeProvider)
+    expect(mockGetProviderForConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'c1', apiKey: 'sk-xxx' })
+    )
   })
 
-  it('仅 XIAOMIMIMO_API_KEY 时返回 XiaomiMiMoLLMProvider', () => {
-    delete process.env.ZHIPU_API_KEY
-    process.env.XIAOMIMIMO_API_KEY = 'mimo-key'
-    delete process.env.OPENAI_API_KEY
+  it('使用 defaultConfigId 指定的配置', async () => {
+    const fakeProvider = { chat: async function* () {} }
+    mockGetProviderForConfig.mockReturnValue(fakeProvider)
+    mockGetEffectiveServerConfig.mockReturnValue({
+      llm: {
+        defaultConfigId: 'c2',
+        configs: [
+          { id: 'c1', name: 'A', type: 'openai_compatible', apiKey: 'key1' },
+          { id: 'c2', name: 'B', type: 'openai_compatible', apiKey: 'key2' }
+        ]
+      }
+    })
+    const { getLLMProvider } = await import('./index')
+    expect(getLLMProvider()).toBe(fakeProvider)
+    expect(mockGetProviderForConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'c2', apiKey: 'key2' })
+    )
+  })
+})
 
-    const provider = getLLMProvider()
-    expect(provider).toBeInstanceOf(XiaomiMiMoLLMProvider)
+describe('getProviderForModel', () => {
+  it('无 configs 时返回 null', async () => {
+    mockGetEffectiveServerConfig.mockReturnValue({ llm: { configs: [] } })
+    const { getProviderForModel } = await import('./index')
+    expect(getProviderForModel('gpt-4o')).toBeNull()
   })
 
-  it('仅 OPENAI_API_KEY 时返回 OpenAILikeLLMProvider', () => {
-    delete process.env.ZHIPU_API_KEY
-    delete process.env.XIAOMIMIMO_API_KEY
-    process.env.OPENAI_API_KEY = 'openai-key'
-
-    const provider = getLLMProvider()
-    expect(provider).toBeInstanceOf(OpenAILikeLLMProvider)
+  it('仅 modelId 时使用默认配置与传入的 modelId', async () => {
+    const fakeProvider = { chat: async function* () {} }
+    mockGetProviderForConfig.mockReturnValue(fakeProvider)
+    const defaultConfig = {
+      id: 'c1',
+      name: 'OpenAI',
+      type: 'openai_compatible',
+      apiKey: 'sk-xxx',
+      defaultModel: 'gpt-4o-mini'
+    }
+    mockGetEffectiveServerConfig.mockReturnValue({
+      llm: { configs: [defaultConfig] }
+    })
+    const { getProviderForModel } = await import('./index')
+    const result = getProviderForModel('gpt-4o')
+    expect(result).not.toBeNull()
+    expect(result!.provider).toBe(fakeProvider)
+    expect(result!.modelId).toBe('gpt-4o')
+    expect(result!.config.id).toBe('c1')
   })
 
-  it('无任何 key 时返回 OpenAILikeLLMProvider', () => {
-    delete process.env.ZHIPU_API_KEY
-    delete process.env.XIAOMIMIMO_API_KEY
-    delete process.env.OPENAI_API_KEY
+  it('configId:modelId 时使用指定配置', async () => {
+    const fakeProvider = { chat: async function* () {} }
+    mockGetProviderForConfig.mockReturnValue(fakeProvider)
+    const c2 = { id: 'c2', name: 'Zhipu', type: 'openai_compatible', apiKey: 'zhipu-key' }
+    mockGetEffectiveServerConfig.mockReturnValue({
+      llm: {
+        configs: [
+          { id: 'c1', name: 'OpenAI', type: 'openai_compatible', apiKey: 'sk-xxx' },
+          c2
+        ]
+      }
+    })
+    const { getProviderForModel } = await import('./index')
+    const result = getProviderForModel('c2:glm-4-flash')
+    expect(result).not.toBeNull()
+    expect(result!.modelId).toBe('glm-4-flash')
+    expect(result!.config.id).toBe('c2')
+    expect(mockGetProviderForConfig).toHaveBeenCalledWith(expect.objectContaining({ id: 'c2' }))
+  })
+})
 
-    const provider = getLLMProvider()
-    expect(provider).toBeInstanceOf(OpenAILikeLLMProvider)
+describe('getAvailableModels', () => {
+  it('无 configs 时返回空列表', async () => {
+    mockGetEffectiveServerConfig.mockReturnValue({ llm: { configs: [] } })
+    mockSanitizeServerConfig.mockImplementation((c: { llm?: ServerConfigLLM }) => c)
+    const { getAvailableModels } = await import('./index')
+    const res = getAvailableModels()
+    expect(res.configs).toEqual([])
+    expect(res.models).toEqual([])
   })
 
-  it('返回单例', () => {
-    process.env.OPENAI_API_KEY = 'key'
-    const p1 = getLLMProvider()
-    const p2 = getLLMProvider()
-    expect(p1).toBe(p2)
+  it('有已配置的 config 时返回脱敏 configs 与模型列表', async () => {
+    mockGetEffectiveServerConfig.mockReturnValue({
+      llm: {
+        configs: [
+          {
+            id: 'c1',
+            name: 'OpenAI',
+            type: 'openai_compatible',
+            apiKey: 'sk-xxx',
+            defaultModel: 'gpt-4o-mini'
+          }
+        ]
+      }
+    })
+    mockSanitizeServerConfig.mockImplementation((c: unknown) => {
+      const cfg = c as { llm?: ServerConfigLLM }
+      return {
+        ...cfg,
+        llm: cfg.llm
+          ? {
+              ...cfg.llm,
+              configs: (cfg.llm.configs ?? []).map((x) => ({
+                ...x,
+                configured: true
+              }))
+            }
+          : undefined
+      }
+    })
+    const { getAvailableModels } = await import('./index')
+    const res = getAvailableModels()
+    expect(res.configs.length).toBeGreaterThan(0)
+    expect(res.configs[0]).toMatchObject({ id: 'c1', name: 'OpenAI', configured: true })
+    expect(res.models.some((m) => m.configId === 'c1' && m.modelId === 'gpt-4o-mini')).toBe(true)
+  })
+})
+
+describe('getLLMProviderName', () => {
+  it('无 configs 时返回 unknown', async () => {
+    mockGetEffectiveServerConfig.mockReturnValue({ llm: { configs: [] } })
+    const { getLLMProviderName } = await import('./index')
+    expect(getLLMProviderName()).toBe('unknown')
   })
 
-  it('resetLLMProvider 后重新选择', () => {
-    delete process.env.XIAOMIMIMO_API_KEY
-    process.env.ZHIPU_API_KEY = 'zhipu'
-    const p1 = getLLMProvider()
-    expect(p1).toBeInstanceOf(ZhipuLLMProvider)
+  it('有默认配置时返回配置 name', async () => {
+    mockGetEffectiveServerConfig.mockReturnValue({
+      llm: {
+        configs: [{ id: 'c1', name: 'My OpenAI', type: 'openai_compatible', apiKey: 'x' }]
+      }
+    })
+    const { getLLMProviderName } = await import('./index')
+    expect(getLLMProviderName()).toBe('My OpenAI')
+  })
+})
 
-    resetLLMProvider()
-    delete process.env.ZHIPU_API_KEY
-    process.env.OPENAI_API_KEY = 'openai'
-    const p2 = getLLMProvider()
-    expect(p2).toBeInstanceOf(OpenAILikeLLMProvider)
+describe('resetLLMProvider', () => {
+  it('可调用且不抛错', async () => {
+    const { resetLLMProvider } = await import('./index')
+    expect(() => resetLLMProvider()).not.toThrow()
   })
 })

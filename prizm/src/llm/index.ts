@@ -1,88 +1,120 @@
 /**
  * LLM 提供商工厂与选择逻辑
- * 默认优先：XIAOMIMIMO_API_KEY > ZHIPU_API_KEY > OPENAI_API_KEY
+ * 基于 server-config.json 的 llm.configs，使用 Vercel AI SDK 桥接
  */
 
+import { getConfig } from '../config'
+import { getEffectiveServerConfig } from '../settings/serverConfigStore'
+import { sanitizeServerConfig } from '../settings/serverConfigStore'
+import type { ServerConfigLLMSanitized, LLMConfigItemSanitized } from '../settings/serverConfigTypes'
 import type { ILLMProvider } from '../adapters/interfaces'
-import { OpenAILikeLLMProvider } from './OpenAILikeProvider'
-import { ZhipuLLMProvider } from './ZhipuProvider'
-import { XiaomiMiMoLLMProvider } from './XiaomiMiMoProvider'
+import { resolveModel, getDefaultModelForType } from './aiSdkBridge'
+import { getProviderForConfig, clearProviderCache } from './aiSdkBridge'
+import { getPresetModelsForType } from './modelLists'
 
-let _defaultProvider: ILLMProvider | null = null
-
-/**
- * 根据环境变量选择 LLM 提供商
- * - XIAOMIMIMO_API_KEY: 小米 MiMo（默认优先）
- * - ZHIPU_API_KEY: 智谱 AI (GLM)
- * - OPENAI_API_KEY: OpenAI 或兼容 API
- */
-export function getLLMProvider(): ILLMProvider {
-  if (_defaultProvider) return _defaultProvider
-
-  if (process.env.XIAOMIMIMO_API_KEY?.trim()) {
-    _defaultProvider = new XiaomiMiMoLLMProvider()
-  } else if (process.env.ZHIPU_API_KEY?.trim()) {
-    _defaultProvider = new ZhipuLLMProvider()
-  } else {
-    _defaultProvider = new OpenAILikeLLMProvider()
-  }
-
-  return _defaultProvider
-}
-
-/**
- * 重置默认提供商（用于测试）
- */
-export function resetLLMProvider(): void {
-  _defaultProvider = null
-}
-
-/** 返回当前 LLM 提供商名称（用于 token 统计记录） */
-export function getLLMProviderName(): string {
-  const provider = getLLMProvider()
-  if (provider instanceof XiaomiMiMoLLMProvider) return 'xiaomi'
-  if (provider instanceof ZhipuLLMProvider) return 'zhipu'
-  return 'openai'
-}
-
-/** 可用模型项，供客户端模型选择器使用 */
 export interface AvailableModel {
   id: string
   label: string
-  provider: 'xiaomi' | 'zhipu' | 'openai'
+  provider: string
 }
 
-/** 各 Provider 支持的模型列表（参照 LobeHub 常用配置） */
-const XIAOMI_MODELS: AvailableModel[] = [
-  { id: 'mimo-v2-flash', label: 'MiMo v2 Flash', provider: 'xiaomi' },
-  { id: 'mimo-v2', label: 'MiMo v2', provider: 'xiaomi' }
-]
+/** 供客户端模型选择器：配置 + 模型列表，model 传参格式为 configId:modelId 或仅 modelId（默认配置） */
+export interface AgentModelsResponse {
+  configs: LLMConfigItemSanitized[]
+  models: Array<{ configId: string; modelId: string; label: string }>
+}
 
-const ZHIPU_MODELS: AvailableModel[] = [
-  { id: 'glm-4-flash', label: 'GLM-4 Flash', provider: 'zhipu' },
-  { id: 'glm-4', label: 'GLM-4', provider: 'zhipu' },
-  { id: 'glm-4-plus', label: 'GLM-4 Plus', provider: 'zhipu' }
-]
+function getLLMConfig(): ServerConfigLLMSanitized | undefined {
+  const config = getEffectiveServerConfig(getConfig().dataDir)
+  const sanitized = sanitizeServerConfig(config)
+  return sanitized.llm
+}
 
-const OPENAI_MODELS: AvailableModel[] = [
-  { id: 'gpt-4o-mini', label: 'GPT-4o Mini', provider: 'openai' },
-  { id: 'gpt-4o', label: 'GPT-4o', provider: 'openai' },
-  { id: 'gpt-4-turbo', label: 'GPT-4 Turbo', provider: 'openai' }
-]
+/** 根据默认配置返回 LLM 提供商（用于摘要、记忆等未指定 model 的调用） */
+export function getLLMProvider(): ILLMProvider | null {
+  const llm = getEffectiveServerConfig(getConfig().dataDir).llm
+  if (!llm?.configs?.length) return null
+  const defaultConfig = llm.defaultConfigId
+    ? llm.configs.find((c) => c.id === llm.defaultConfigId)
+    : llm.configs[0]
+  if (!defaultConfig?.apiKey?.trim()) return null
+  return getProviderForConfig(defaultConfig)
+}
 
 /**
- * 根据当前配置的 API Key 返回可用模型列表
+ * 根据 model 字符串解析出配置与 modelId，返回对应的 provider。
+ * 供 DefaultAgentAdapter 使用；调用方应传 options.model 为 modelStr，chat 时传 resolved modelId。
  */
-export function getAvailableModels(): { provider: string; models: AvailableModel[] } {
-  if (process.env.XIAOMIMIMO_API_KEY?.trim()) {
-    return { provider: 'xiaomi', models: XIAOMI_MODELS }
+export function getProviderForModel(modelStr: string | undefined): {
+  provider: ILLMProvider
+  config: { id: string; name: string }
+  modelId: string
+} | null {
+  const llm = getEffectiveServerConfig(getConfig().dataDir).llm
+  const resolved = resolveModel(modelStr, llm)
+  if (!resolved) return null
+  const provider = getProviderForConfig(resolved.config)
+  return {
+    provider,
+    config: { id: resolved.config.id, name: resolved.config.name },
+    modelId: resolved.modelId
   }
-  if (process.env.ZHIPU_API_KEY?.trim()) {
-    return { provider: 'zhipu', models: ZHIPU_MODELS }
-  }
-  return { provider: 'openai', models: OPENAI_MODELS }
 }
 
-export { OpenAILikeLLMProvider } from './OpenAILikeProvider'
-export { ZhipuLLMProvider } from './ZhipuProvider'
-export { XiaomiMiMoLLMProvider } from './XiaomiMiMoProvider'
+/** 重置提供商缓存（配置变更后调用） */
+export function resetLLMProvider(): void {
+  clearProviderCache()
+}
+
+/** 返回当前默认配置名称（用于 token 统计展示） */
+export function getLLMProviderName(): string {
+  const llm = getEffectiveServerConfig(getConfig().dataDir).llm
+  if (!llm?.configs?.length) return 'unknown'
+  const defaultConfig = llm.defaultConfigId
+    ? llm.configs.find((c) => c.id === llm.defaultConfigId)
+    : llm.configs[0]
+  return defaultConfig?.name ?? 'unknown'
+}
+
+/** 解析后的 model 显示名（configId:modelId 或 modelId） */
+export function getModelDisplayName(modelStr: string | undefined): string {
+  const resolved = getProviderForModel(modelStr)
+  if (!resolved) return modelStr ?? 'unknown'
+  return `${resolved.config.name} · ${resolved.modelId}`
+}
+
+/**
+ * 返回所有已配置的 configs（脱敏）及可用模型列表（含 configId 供前端传参）
+ */
+export function getAvailableModels(): AgentModelsResponse {
+  const llm = getEffectiveServerConfig(getConfig().dataDir).llm
+  const sanitized = getLLMConfig()
+  const configs = sanitized?.configs?.filter((c) => c.configured) ?? []
+  const models: Array<{ configId: string; modelId: string; label: string }> = []
+
+  if (!llm?.configs) {
+    return { configs: [], models: [] }
+  }
+
+  const configsWithKey = llm.configs.filter((c) => c.apiKey?.trim())
+  for (const config of configsWithKey) {
+    const preset = getPresetModelsForType(config.type)
+    const defaultId = config.defaultModel?.trim() || getDefaultModelForType(config.type)
+    const seen = new Set<string>()
+    for (const m of preset) {
+      if (seen.has(m.id)) continue
+      seen.add(m.id)
+      models.push({ configId: config.id, modelId: m.id, label: m.label })
+    }
+    if (defaultId && !seen.has(defaultId)) {
+      models.push({ configId: config.id, modelId: defaultId, label: defaultId })
+    }
+  }
+
+  return {
+    configs,
+    models
+  }
+}
+
+export { resolveModel, getDefaultModelForType } from './aiSdkBridge'

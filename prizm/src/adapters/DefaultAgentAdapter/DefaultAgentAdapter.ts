@@ -9,12 +9,13 @@ import type { SessionIOConfig } from '@prizm/shared'
 import { scopeStore } from '../../core/ScopeStore'
 import { genUniqueId } from '../../id'
 import { deleteMemoriesByGroupId } from '../../llm/EverMemService'
-import { getLLMProvider, getLLMProviderName } from '../../llm'
+import { getProviderForModel, getModelDisplayName } from '../../llm'
 import { getMcpClientManager } from '../../mcp-client/McpClientManager'
 import {
   getTavilySettings,
   getToolGroupConfig,
-  getDynamicContextMode
+  getDynamicContextMode,
+  getAgentLLMSettings
 } from '../../settings/agentToolsStore'
 import { filterToolsByGroups } from '../../llm/builtinTools/toolGroups'
 import {
@@ -252,7 +253,17 @@ export class DefaultAgentAdapter implements IAgentAdapter {
       workflowEditContext?: string
     }
   ): AsyncIterable<LLMStreamChunk> {
-    const provider = getLLMProvider()
+    const defaultModel = getAgentLLMSettings().defaultModel
+    const modelStr = options?.model ?? defaultModel
+    const resolved = getProviderForModel(modelStr)
+    if (!resolved) {
+      yield {
+        text: '（请先在设置中添加并配置至少一个 LLM 提供商，并选择默认模型）'
+      }
+      yield { done: true }
+      return
+    }
+    const { provider, config, modelId } = resolved
     const mcpEnabled = options?.mcpEnabled !== false
     const includeScopeContext = options?.includeScopeContext !== false
 
@@ -491,7 +502,7 @@ export class DefaultAgentAdapter implements IAgentAdapter {
           ? 'chat:workflow'
           : 'chat:task'
         : 'chat:user'
-    const logModel = getLLMProviderName()
+    const logModel = `${config.name}:${modelId}`
 
     while (true) {
       if (options?.signal?.aborted) break
@@ -499,7 +510,7 @@ export class DefaultAgentAdapter implements IAgentAdapter {
       const roundStartTime = Date.now()
 
       const stream = provider.chat(currentMessages, {
-        model: options?.model,
+        model: modelId,
         temperature: 0.7,
         signal: options?.signal,
         tools: llmTools.length > 0 ? llmTools : undefined,

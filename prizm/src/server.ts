@@ -41,7 +41,6 @@ import { initEverMemService } from './llm/EverMemService'
 import { initTokenUsageDb, closeTokenUsageDb } from './core/tokenUsageDb'
 import { lockManager } from './core/resourceLockManager'
 import { auditManager } from './core/agentAuditLog'
-import { migrateAppLevelStorage } from './core/migrate-scope-v2'
 import { migrateToolSessionsFromBackground } from './core/migrateToolSessions'
 import { getTerminalManager } from './terminal/TerminalSessionManager'
 import { TerminalWebSocketServer } from './terminal/TerminalWebSocketServer'
@@ -284,12 +283,7 @@ export function createPrizmServer(
 
       return (async () => {
         try {
-          // 在 listen 之前完成迁移与记忆服务初始化，避免首包请求时 EverMemService 未就绪
-          try {
-            migrateAppLevelStorage(dataDir)
-          } catch (e) {
-            log.warn('App-level migration failed:', e)
-          }
+          // 在 listen 之前完成记忆服务初始化，避免首包请求时 EverMemService 未就绪
           resetStaleChatStatus()
           try {
             await initEverMemService()

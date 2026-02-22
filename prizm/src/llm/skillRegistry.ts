@@ -11,6 +11,8 @@
 import fs from 'fs'
 import path from 'path'
 import { createLogger } from '../logger'
+import { getConfig } from '../config'
+import { getEffectiveServerConfig } from '../settings/serverConfigStore'
 import { getSkillsMPSettings } from '../settings/agentToolsStore'
 import { createSkill, getInstalledRegistryKeys, loadAllSkillMetadata } from './skillManager'
 import type { SkillConfig, SkillMetadata } from './skillManager'
@@ -151,10 +153,21 @@ interface CacheEntry<T> {
 const cache = new Map<string, CacheEntry<unknown>>()
 const CACHE_TTL_MS = 5 * 60 * 1000
 
-/** SkillKit API base URL (hosted: https://skillkit.sh/api); override with PRIZM_SKILLKIT_API_URL */
-const SKILLKIT_API_BASE =
-  (typeof process !== 'undefined' && process.env?.PRIZM_SKILLKIT_API_URL) ||
-  'https://skillkit.sh/api'
+function getSkillKitApiBase(): string {
+  if (typeof process === 'undefined') return 'https://skillkit.sh/api'
+  const url =
+    getEffectiveServerConfig(getConfig().dataDir).skills?.skillKitApiUrl?.trim() ||
+    process.env?.PRIZM_SKILLKIT_API_URL?.trim()
+  return url || 'https://skillkit.sh/api'
+}
+
+function getGitHubToken(): string | undefined {
+  if (typeof process === 'undefined') return undefined
+  return (
+    getEffectiveServerConfig(getConfig().dataDir).skills?.githubToken?.trim() ||
+    process.env.GITHUB_TOKEN?.trim()
+  )
+}
 
 function getCached<T>(key: string): T | null {
   const entry = cache.get(key)
@@ -177,7 +190,7 @@ async function githubFetch<T>(url: string): Promise<T> {
     Accept: 'application/vnd.github.v3+json',
     'User-Agent': 'Prizm-SkillRegistry/1.0'
   }
-  const token = process.env.GITHUB_TOKEN
+  const token = getGitHubToken()
   if (token) {
     headers.Authorization = `Bearer ${token}`
   }
@@ -357,7 +370,7 @@ export async function searchSkillKit(
   const cached = getCached<RegistrySearchResult>(cacheKey)
   if (cached) return cached
 
-  const url = `${SKILLKIT_API_BASE.replace(/\/+$/, '')}/search?q=${encodeURIComponent(
+  const url = `${getSkillKitApiBase().replace(/\/+$/, '')}/search?q=${encodeURIComponent(
     q
   )}&limit=${limit}`
   try {
@@ -658,7 +671,7 @@ async function downloadSkillResources(
     for (const branch of branches) {
       const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${skillPath}/${subDir}?ref=${branch}`
       try {
-        const token = process.env.GITHUB_TOKEN
+        const token = getGitHubToken()
         const headers: Record<string, string> = {
           Accept: 'application/vnd.github.v3+json',
           'User-Agent': 'Prizm-SkillRegistry/1.0'

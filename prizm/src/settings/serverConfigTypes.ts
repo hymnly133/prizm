@@ -1,6 +1,6 @@
 /**
  * 服务端可视化配置类型
- * 持久化到 .prizm-data/server-config.json，环境变量可覆盖
+ * 持久化到 .prizm-data/server-config.json
  */
 
 export interface ServerConfigServer {
@@ -26,19 +26,23 @@ export interface ServerConfigAgent {
   scopeContextMaxChars?: number
 }
 
-export interface LLMProviderConfig {
-  apiKey?: string
-  model?: string
-}
+/** LLM 提供商类型：OpenAI 兼容 / Anthropic / Google */
+export type LLMProviderType = 'openai_compatible' | 'anthropic' | 'google'
 
-export interface OpenAILLMConfig extends LLMProviderConfig {
+/** 单条 LLM 配置（用户可添加多条，在配置间切换） */
+export interface LLMConfigItem {
+  id: string
+  name: string
+  type: LLMProviderType
+  apiKey?: string
+  /** 仅 openai_compatible 使用 */
   baseUrl?: string
+  defaultModel?: string
 }
 
 export interface ServerConfigLLM {
-  xiaomimimo?: LLMProviderConfig
-  zhipu?: LLMProviderConfig
-  openai?: OpenAILLMConfig
+  defaultConfigId?: string
+  configs: LLMConfigItem[]
 }
 
 export interface ServerConfigSkills {
@@ -55,19 +59,14 @@ export interface ServerConfig {
   updatedAt?: number
 }
 
-/** 脱敏后的 LLM 配置（API Key 不返回原文） */
-export interface LLMProviderConfigSanitized extends Omit<LLMProviderConfig, 'apiKey'> {
-  configured?: boolean
-}
-
-export interface OpenAILLMConfigSanitized extends Omit<OpenAILLMConfig, 'apiKey'> {
+/** 脱敏后的单条 LLM 配置（API Key 不返回原文） */
+export interface LLMConfigItemSanitized extends Omit<LLMConfigItem, 'apiKey'> {
   configured?: boolean
 }
 
 export interface ServerConfigLLMSanitized {
-  xiaomimimo?: LLMProviderConfigSanitized
-  zhipu?: LLMProviderConfigSanitized
-  openai?: OpenAILLMConfigSanitized
+  defaultConfigId?: string
+  configs: LLMConfigItemSanitized[]
 }
 
 export interface ServerConfigSkillsSanitized {

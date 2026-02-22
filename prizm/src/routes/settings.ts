@@ -21,7 +21,15 @@ import {
   getToolGroupConfig,
   updateToolGroupConfig
 } from '../settings/agentToolsStore'
-import { getAvailableModels } from '../llm'
+import {
+  loadServerConfig,
+  saveServerConfig,
+  getEffectiveServerConfig,
+  sanitizeServerConfig
+} from '../settings/serverConfigStore'
+import type { ServerConfig } from '../settings/serverConfigTypes'
+import { getConfig, resetConfig } from '../config'
+import { getAvailableModels, resetLLMProvider } from '../llm'
 import { getAvailableShells } from '../terminal/shellDetector'
 import type {
   AgentToolsSettings,
@@ -37,6 +45,14 @@ import type {
 import { resolveGroupStates } from '../llm/builtinTools/toolGroups'
 
 const log = createLogger('Settings')
+
+function omit<T extends Record<string, unknown>>(obj: T, keys: string[]): T {
+  const out = { ...obj }
+  for (const k of keys) {
+    delete (out as Record<string, unknown>)[k]
+  }
+  return out
+}
 
 /** 脱敏：Tavily / SkillsMP apiKey 不返回原文，仅标记 configured */
 function sanitizeForGet(settings: AgentToolsSettings): AgentToolsSettings {
@@ -61,11 +77,69 @@ function sanitizeForGet(settings: AgentToolsSettings): AgentToolsSettings {
 }
 
 export function createSettingsRoutes(router: Router): void {
-  // GET /settings/agent-models - 获取当前可用的 LLM 模型列表（供客户端模型选择器）
+  // GET /settings/server-config - 获取服务端配置（脱敏）
+  router.get('/settings/server-config', (_req: Request, res: Response) => {
+    try {
+      const dataDir = getConfig().dataDir
+      const effective = getEffectiveServerConfig(dataDir)
+      const file = loadServerConfig(dataDir)
+      const merged = { ...file, ...effective }
+      const withRuntime = {
+        ...sanitizeServerConfig(merged),
+        dataDir: dataDir
+      }
+      res.json(withRuntime)
+    } catch (error) {
+      log.error('get server-config error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // PATCH /settings/server-config - 部分更新服务端配置
+  router.patch('/settings/server-config', (req: Request, res: Response) => {
+    try {
+      const raw = req.body as Partial<ServerConfig> & {
+        llm?: { configs?: Array<Record<string, unknown> & { configured?: boolean }> }
+        skills?: { configured?: boolean }
+      }
+      if (!raw || typeof raw !== 'object') {
+        return res.status(400).json({ error: 'Invalid request body' })
+      }
+      const patch: Partial<ServerConfig> = { ...raw }
+      if (patch.llm?.configs) {
+        patch.llm = {
+          ...patch.llm,
+          configs: patch.llm.configs.map((c) => omit(c, ['configured']))
+        }
+      }
+      if (patch.skills) {
+        patch.skills = omit(patch.skills, ['configured'])
+      }
+      const dataDir = getConfig().dataDir
+      saveServerConfig(dataDir, patch)
+      resetConfig()
+      if (patch.llm) resetLLMProvider()
+      const effective = getEffectiveServerConfig(dataDir)
+      const file = loadServerConfig(dataDir)
+      const merged = { ...file, ...effective }
+      const withRuntime = {
+        ...sanitizeServerConfig(merged),
+        dataDir: dataDir
+      }
+      res.json(withRuntime)
+    } catch (error) {
+      log.error('patch server-config error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // GET /settings/agent-models - 获取当前可用的 LLM 配置与模型列表（供客户端模型选择器）
   router.get('/settings/agent-models', (_req: Request, res: Response) => {
     try {
-      const { provider, models } = getAvailableModels()
-      res.json({ provider, models })
+      const result = getAvailableModels()
+      res.json(result)
     } catch (error) {
       log.error('get agent-models error:', error)
       const { status, body } = toErrorResponse(error)
