@@ -67,7 +67,7 @@ export function mapToolsToAISDK(tools: LLMTool[]): Record<string, ReturnType<typ
     const schema = (fn.parameters as object) || { type: 'object', properties: {} }
     out[fn.name] = aiTool({
       description: fn.description ?? '',
-      parameters: jsonSchema(schema as { type: string; properties?: unknown; required?: string[] })
+      inputSchema: jsonSchema(schema as { type: string; properties?: unknown; required?: string[] })
     })
   }
   return out
