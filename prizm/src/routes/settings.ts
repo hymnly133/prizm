@@ -22,6 +22,11 @@ import {
   updateToolGroupConfig
 } from '../settings/agentToolsStore'
 import {
+  getUserProfile,
+  updateUserProfile,
+  type UserProfileEntry
+} from '../settings/userProfileStore'
+import {
   loadServerConfig,
   saveServerConfig,
   getEffectiveServerConfig,
@@ -29,7 +34,7 @@ import {
 } from '../settings/serverConfigStore'
 import type { ServerConfig } from '../settings/serverConfigTypes'
 import { getConfig, resetConfig } from '../config'
-import { getAvailableModels, resetLLMProvider } from '../llm'
+import { getAvailableModels, resetLLMProvider, clearModelCache } from '../llm'
 import { getAvailableShells } from '../terminal/shellDetector'
 import type {
   AgentToolsSettings,
@@ -110,16 +115,23 @@ export function createSettingsRoutes(router: Router): void {
       if (patch.llm?.configs) {
         patch.llm = {
           ...patch.llm,
-          configs: patch.llm.configs.map((c) => omit(c, ['configured']))
+          configs: patch.llm.configs.map((c) =>
+            omit(c as unknown as Record<string, unknown>, ['configured'])
+          ) as unknown as NonNullable<ServerConfig['llm']>['configs']
         }
       }
       if (patch.skills) {
-        patch.skills = omit(patch.skills, ['configured'])
+        patch.skills = omit(patch.skills as unknown as Record<string, unknown>, [
+          'configured'
+        ]) as ServerConfig['skills']
       }
       const dataDir = getConfig().dataDir
       saveServerConfig(dataDir, patch)
       resetConfig()
-      if (patch.llm) resetLLMProvider()
+      if (patch.llm) {
+        resetLLMProvider()
+        clearModelCache()
+      }
       const effective = getEffectiveServerConfig(dataDir)
       const file = loadServerConfig(dataDir)
       const merged = { ...file, ...effective }
@@ -136,9 +148,9 @@ export function createSettingsRoutes(router: Router): void {
   })
 
   // GET /settings/agent-models - 获取当前可用的 LLM 配置与模型列表（供客户端模型选择器）
-  router.get('/settings/agent-models', (_req: Request, res: Response) => {
+  router.get('/settings/agent-models', async (_req: Request, res: Response) => {
     try {
-      const result = getAvailableModels()
+      const result = await getAvailableModels()
       res.json(result)
     } catch (error) {
       log.error('get agent-models error:', error)
@@ -287,6 +299,39 @@ export function createSettingsRoutes(router: Router): void {
       res.json({ groups })
     } catch (error) {
       log.error('put tool-groups error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // GET /settings/user-profile - 获取当前客户端的用户画像（显示名称、希望的语气）
+  router.get('/settings/user-profile', (req: Request, res: Response) => {
+    try {
+      const clientId = req.prizmClient?.clientId
+      const profile = clientId ? getUserProfile(clientId) : null
+      res.json(profile ?? { displayName: undefined, preferredTone: undefined })
+    } catch (error) {
+      log.error('get user-profile error:', error)
+      const { status, body } = toErrorResponse(error)
+      res.status(status).json(body)
+    }
+  })
+
+  // PUT /settings/user-profile - 更新当前客户端的用户画像
+  router.put('/settings/user-profile', (req: Request, res: Response) => {
+    try {
+      const clientId = req.prizmClient?.clientId
+      if (!clientId) {
+        return res.status(401).json({ error: 'Authentication required' })
+      }
+      const body = req.body as Partial<UserProfileEntry>
+      if (!body || typeof body !== 'object') {
+        return res.status(400).json({ error: 'Invalid request body' })
+      }
+      const updated = updateUserProfile(clientId, body)
+      res.json(updated)
+    } catch (error) {
+      log.error('put user-profile error:', error)
       const { status, body } = toErrorResponse(error)
       res.status(status).json(body)
     }

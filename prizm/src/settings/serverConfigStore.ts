@@ -30,6 +30,31 @@ function ensureDataDir(dataDir: string): void {
   }
 }
 
+/** 根据 type + baseUrl 自动生成配置显示名 */
+export function autoGenerateName(config: { type: string; baseUrl?: string }): string {
+  switch (config.type) {
+    case 'anthropic':
+      return 'Anthropic'
+    case 'google':
+      return 'Google'
+    case 'openai_compatible': {
+      const url = config.baseUrl?.trim()
+      if (!url) return 'OpenAI 兼容'
+      try {
+        const u = new URL(url.startsWith('http') ? url : `https://${url}`)
+        const host = u.hostname.replace(/^api\./, '')
+        return host.split('.')[0]
+          ? host.split('.')[0].charAt(0).toUpperCase() + host.split('.')[0].slice(1)
+          : 'OpenAI 兼容'
+      } catch {
+        return 'OpenAI 兼容'
+      }
+    }
+    default:
+      return 'OpenAI 兼容'
+  }
+}
+
 /** 旧版 llm 结构（迁移用） */
 interface LegacyLLM {
   xiaomimimo?: { apiKey?: string; model?: string }
@@ -48,40 +73,52 @@ function isLegacyLlm(llm: unknown): llm is LegacyLLM {
 
 function migrateLegacyLlmToNew(legacy: LegacyLLM): ServerConfigLLM {
   const configs: LLMConfigItem[] = []
+  let firstDefaultModel: string | undefined
   if (legacy.xiaomimimo?.apiKey?.trim()) {
+    const id = genUniqueId()
+    const model = legacy.xiaomimimo.model?.trim() || 'mimo-v2-flash'
+    if (!firstDefaultModel) firstDefaultModel = `${id}:${model}`
     configs.push({
-      id: genUniqueId(),
+      id,
       name: '小米 MiMo',
       type: 'openai_compatible',
       apiKey: legacy.xiaomimimo.apiKey.trim(),
-      baseUrl: 'https://api.xiaomimimo.com/v1',
-      defaultModel: legacy.xiaomimimo.model?.trim() || 'mimo-v2-flash'
+      baseUrl: 'https://api.xiaomimimo.com/v1'
     })
   }
   if (legacy.zhipu?.apiKey?.trim()) {
+    const id = genUniqueId()
+    const model = legacy.zhipu.model?.trim() || 'glm-4-flash'
+    if (!firstDefaultModel) firstDefaultModel = `${id}:${model}`
     configs.push({
-      id: genUniqueId(),
+      id,
       name: '智谱',
       type: 'openai_compatible',
       apiKey: legacy.zhipu.apiKey.trim(),
-      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-      defaultModel: legacy.zhipu.model?.trim() || 'glm-4-flash'
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4'
     })
   }
   if (legacy.openai?.apiKey?.trim()) {
+    const id = genUniqueId()
+    const model = legacy.openai.model?.trim() || 'gpt-4o-mini'
+    if (!firstDefaultModel) firstDefaultModel = `${id}:${model}`
     configs.push({
-      id: genUniqueId(),
+      id,
       name: 'OpenAI',
       type: 'openai_compatible',
       apiKey: legacy.openai.apiKey.trim(),
-      baseUrl: legacy.openai.baseUrl?.trim(),
-      defaultModel: legacy.openai.model?.trim() || 'gpt-4o-mini'
+      baseUrl: legacy.openai.baseUrl?.trim()
     })
   }
   return {
-    defaultConfigId: configs[0]?.id,
+    defaultModel: firstDefaultModel,
     configs
   }
+}
+
+/** 旧格式：config 上带 defaultModel、顶层带 defaultConfigId */
+interface LegacyConfigWithDefaultModel extends LLMConfigItem {
+  defaultModel?: string
 }
 
 function normalizeLlm(llm: unknown): ServerConfigLLM | undefined {
@@ -89,11 +126,32 @@ function normalizeLlm(llm: unknown): ServerConfigLLM | undefined {
   if (isLegacyLlm(llm)) {
     return migrateLegacyLlmToNew(llm)
   }
-  const o = llm as ServerConfigLLM
+  const o = llm as ServerConfigLLM & { defaultConfigId?: string }
   if (!Array.isArray(o.configs)) return undefined
+
+  let defaultModel = o.defaultModel
+  if (!defaultModel && o.defaultConfigId) {
+    const defaultConfig = o.configs.find((c) => c.id === o.defaultConfigId) as
+      | LegacyConfigWithDefaultModel
+      | undefined
+    if (defaultConfig?.defaultModel?.trim()) {
+      defaultModel = `${defaultConfig.id}:${defaultConfig.defaultModel.trim()}`
+    }
+  }
+
+  const configs: LLMConfigItem[] = o.configs.map((c) => {
+    const { defaultModel: _dm, ...rest } = c as LegacyConfigWithDefaultModel
+    const item: LLMConfigItem = { ...rest }
+    if (!item.name?.trim()) {
+      item.name = autoGenerateName({ type: item.type, baseUrl: item.baseUrl })
+    }
+    return item
+  })
+
   return {
-    defaultConfigId: o.defaultConfigId,
-    configs: o.configs
+    defaultModel,
+    browserModel: o.browserModel,
+    configs
   }
 }
 
@@ -145,15 +203,69 @@ export function saveServerConfig(dataDir: string, partial: Partial<ServerConfig>
 
   const llm: ServerConfigLLM | undefined =
     partial.llm !== undefined
-      ? {
-          defaultConfigId:
-            partial.llm.defaultConfigId !== undefined
-              ? partial.llm.defaultConfigId
-              : current.llm?.defaultConfigId,
-          configs: Array.isArray(partial.llm.configs)
-            ? partial.llm.configs.filter((c) => c?.id && c?.name && c?.type)
-            : current.llm?.configs ?? []
-        }
+      ? (() => {
+          const currentConfigs = current.llm?.configs ?? []
+          const byId = new Map(currentConfigs.map((c) => [c.id, c]))
+
+          let configs: LLMConfigItem[]
+
+          const updateOne = (partial.llm as { updateConfig?: LLMConfigItem }).updateConfig
+          if (updateOne?.id && updateOne?.type) {
+            const existing = byId.get(updateOne.id)
+            const apiKey =
+              updateOne.apiKey !== undefined && updateOne.apiKey !== ''
+                ? updateOne.apiKey
+                : existing?.apiKey
+            const merged: LLMConfigItem = {
+              id: updateOne.id,
+              name:
+                updateOne.name?.trim() ||
+                autoGenerateName({ type: updateOne.type, baseUrl: updateOne.baseUrl }),
+              type: updateOne.type,
+              baseUrl: updateOne.baseUrl,
+              ...(apiKey !== undefined ? { apiKey } : {}),
+              ...(updateOne.customModelList !== undefined
+                ? { customModelList: updateOne.customModelList }
+                : {})
+            }
+            const next = existing
+              ? currentConfigs.map((c) => (c.id === updateOne.id ? merged : c))
+              : [...currentConfigs, merged]
+            configs = next
+          } else if (Array.isArray(partial.llm.configs)) {
+            configs = partial.llm.configs
+              .filter((c) => c?.id && c?.type)
+              .map((c) => {
+                const existing = byId.get(c.id)
+                const apiKey =
+                  c.apiKey !== undefined && c.apiKey !== '' ? c.apiKey : existing?.apiKey
+                return {
+                  id: c.id,
+                  name: c.name?.trim() || autoGenerateName({ type: c.type, baseUrl: c.baseUrl }),
+                  type: c.type,
+                  baseUrl: c.baseUrl,
+                  ...(apiKey !== undefined ? { apiKey } : {}),
+                  ...((c as LLMConfigItem).customModelList !== undefined
+                    ? { customModelList: (c as LLMConfigItem).customModelList }
+                    : {})
+                }
+              })
+          } else {
+            configs = currentConfigs
+          }
+
+          return {
+            defaultModel:
+              partial.llm.defaultModel !== undefined
+                ? partial.llm.defaultModel
+                : current.llm?.defaultModel,
+            browserModel:
+              partial.llm.browserModel !== undefined
+                ? partial.llm.browserModel
+                : current.llm?.browserModel,
+            configs
+          }
+        })()
       : current.llm
 
   const merged: ServerConfig = {
@@ -213,14 +325,15 @@ export function sanitizeServerConfig(config: ServerConfig): ServerConfigSanitize
   const out: ServerConfigSanitized = { ...config }
   if (config.llm?.configs) {
     out.llm = {
-      defaultConfigId: config.llm.defaultConfigId,
+      defaultModel: config.llm.defaultModel,
+      browserModel: config.llm.browserModel,
       configs: config.llm.configs.map((c) => ({
         id: c.id,
-        name: c.name,
+        name: c.name ?? autoGenerateName({ type: c.type, baseUrl: c.baseUrl }),
         type: c.type,
         baseUrl: c.baseUrl,
-        defaultModel: c.defaultModel,
-        configured: !!c.apiKey?.trim()
+        configured: !!c.apiKey?.trim(),
+        ...(c.customModelList !== undefined ? { customModelList: c.customModelList } : {})
       }))
     }
   }

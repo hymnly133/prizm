@@ -29,20 +29,34 @@ export interface ServerConfigAgent {
 /** LLM 提供商类型：OpenAI 兼容 / Anthropic / Google */
 export type LLMProviderType = 'openai_compatible' | 'anthropic' | 'google'
 
-/** 单条 LLM 配置（用户可添加多条，在配置间切换） */
+/** 单条 LLM 配置（用户仅填 type / baseUrl / apiKey；name 可选，缺省时服务端自动生成） */
 export interface LLMConfigItem {
   id: string
-  name: string
+  name?: string
   type: LLMProviderType
   apiKey?: string
   /** 仅 openai_compatible 使用 */
   baseUrl?: string
-  defaultModel?: string
+  /** 用户手动输入的模型列表，每行一个：modelId 或 "modelId 显示名" 或 "modelId, 显示名"，会与接口/预设列表合并 */
+  customModelList?: string
 }
 
 export interface ServerConfigLLM {
-  defaultConfigId?: string
-  configs: LLMConfigItem[]
+  /** 系统默认模型，格式 "configId:modelId" */
+  defaultModel?: string
+  /** 浏览器节点使用的模型，格式 "configId:modelId"。Stagehand 需要具体模型；未设置时使用系统默认。 */
+  browserModel?: string
+  configs?: LLMConfigItem[]
+  /** PATCH 时可选：仅更新单条配置，不传 configs 则只合并此条并保留其他配置的 apiKey */
+  updateConfig?: LLMConfigItem
+}
+
+/** 解析后的 (配置:模型) 条目，API 返回，不持久化 */
+export interface ModelEntry {
+  configId: string
+  configName: string
+  modelId: string
+  label: string
 }
 
 export interface ServerConfigSkills {
@@ -65,7 +79,8 @@ export interface LLMConfigItemSanitized extends Omit<LLMConfigItem, 'apiKey'> {
 }
 
 export interface ServerConfigLLMSanitized {
-  defaultConfigId?: string
+  defaultModel?: string
+  browserModel?: string
   configs: LLMConfigItemSanitized[]
 }
 
