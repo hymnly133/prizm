@@ -38,6 +38,8 @@ export interface ValidateResult {
 export class ClientRegistry {
   private dataPath: string
   private clients = new Map<string, ClientRecord>()
+  /** Hash of API key -> record, for O(1) validate */
+  private hashToRecord = new Map<string, ClientRecord>()
 
   constructor(dataDir?: string) {
     const dir = dataDir ? path.resolve(dataDir) : getDataDir()
@@ -60,6 +62,7 @@ export class ClientRegistry {
       const content = fs.readFileSync(this.dataPath, 'utf-8')
       const arr = JSON.parse(content) as ClientRecord[]
       this.clients.clear()
+      this.hashToRecord.clear()
       let migrated = false
       for (const r of arr) {
         // 迁移：online 是公共 scope，确保所有客户端都包含
@@ -68,6 +71,7 @@ export class ClientRegistry {
           migrated = true
         }
         this.clients.set(r.clientId, r)
+        this.hashToRecord.set(r.apiKeyHash, r)
       }
       if (migrated) {
         this.save()
@@ -106,8 +110,11 @@ export class ClientRegistry {
     if (existing) {
       // 复用已有 clientId，只重新生成 apiKey 并更新 scopes
       const apiKey = generateApiKey()
-      existing.apiKeyHash = hashApiKey(apiKey)
+      const newHash = hashApiKey(apiKey)
+      this.hashToRecord.delete(existing.apiKeyHash)
+      existing.apiKeyHash = newHash
       existing.allowedScopes = scopes
+      this.hashToRecord.set(newHash, existing)
       this.save()
       log.info(`Re-registered existing client "${name}" (clientId=${existing.clientId}), apiKey refreshed`)
       return { clientId: existing.clientId, apiKey }
@@ -126,6 +133,7 @@ export class ClientRegistry {
       createdAt: Date.now()
     }
     this.clients.set(clientId, record)
+    this.hashToRecord.set(apiKeyHash, record)
     this.save()
     return { clientId, apiKey }
   }
@@ -144,7 +152,10 @@ export class ClientRegistry {
     const record = this.clients.get(clientId)
     if (!record) return null
     const apiKey = generateApiKey()
-    record.apiKeyHash = hashApiKey(apiKey)
+    const newHash = hashApiKey(apiKey)
+    this.hashToRecord.delete(record.apiKeyHash)
+    record.apiKeyHash = newHash
+    this.hashToRecord.set(newHash, record)
     this.save()
     return apiKey
   }
@@ -153,26 +164,25 @@ export class ClientRegistry {
    * 吊销客户端
    */
   revoke(clientId: string): boolean {
-    if (!this.clients.has(clientId)) return false
+    const record = this.clients.get(clientId)
+    if (!record) return false
+    this.hashToRecord.delete(record.apiKeyHash)
     this.clients.delete(clientId)
     this.save()
     return true
   }
 
   /**
-   * 校验 API Key
+   * 校验 API Key（O(1) via hash index）
    */
   validate(apiKey: string): ValidateResult | null {
     const hash = hashApiKey(apiKey)
-    for (const record of this.clients.values()) {
-      if (record.apiKeyHash === hash) {
-        return {
-          clientId: record.clientId,
-          allowedScopes: record.allowedScopes
-        }
-      }
+    const record = this.hashToRecord.get(hash)
+    if (!record) return null
+    return {
+      clientId: record.clientId,
+      allowedScopes: record.allowedScopes
     }
-    return null
   }
 }
 

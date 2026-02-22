@@ -23,10 +23,22 @@ declare global {
   }
 }
 
-const EXEMPT_PATHS = ['/', '/health', '/dashboard', '/auth']
+const EXEMPT_PATHS = ['/', '/health', '/dashboard']
 
+/** Paths that are exempt regardless of method */
 function isExemptPath(pathname: string): boolean {
   return EXEMPT_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))
+}
+
+/**
+ * Auth routes that remain exempt (no API key required).
+ * Only POST /auth/register and GET /auth/scopes (read-only) are exempt;
+ * GET /auth/clients, DELETE /auth/clients/:id, POST .../regenerate-key require auth.
+ */
+function isAuthExemptPath(method: string, pathname: string): boolean {
+  if (pathname === '/auth/register' && method === 'POST') return true
+  if (pathname === '/auth/scopes' && method === 'GET') return true
+  return false
 }
 
 function extractApiKey(req: Request): string | null {
@@ -59,7 +71,7 @@ export function createAuthMiddleware(options: CreateAuthMiddlewareOptions) {
       return
     }
 
-    if (isExemptPath(req.path)) {
+    if (isExemptPath(req.path) || isAuthExemptPath(req.method, req.path)) {
       next()
       return
     }
