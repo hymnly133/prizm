@@ -5,13 +5,21 @@
  * 验证完整数据链路：创建 → 执行 → 持久化 → 查询。
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
 
 const _tmpDir = path.join(os.tmpdir(), `task-integ-${Date.now()}-${Math.random().toString(36).slice(2)}`)
 fs.mkdirSync(_tmpDir, { recursive: true })
+
+afterAll(() => {
+  try {
+    fs.rmSync(_tmpDir, { recursive: true, force: true })
+  } catch {
+    // ignore cleanup errors
+  }
+})
 
 vi.mock('../eventBus/eventBus', () => ({
   emit: vi.fn().mockResolvedValue(undefined)

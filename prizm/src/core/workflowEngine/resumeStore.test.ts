@@ -10,17 +10,27 @@
  * - stale recovery
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
 
+let _resumeStoreTmpDir: string
+
 vi.mock('../PathProviderCore', () => {
-  const tmpDir = path.join(os.tmpdir(), `wf-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-  fs.mkdirSync(tmpDir, { recursive: true })
+  _resumeStoreTmpDir = path.join(os.tmpdir(), `wf-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+  fs.mkdirSync(_resumeStoreTmpDir, { recursive: true })
   return {
-    getDataDir: () => tmpDir,
-    ensureDataDir: () => fs.mkdirSync(tmpDir, { recursive: true })
+    getDataDir: () => _resumeStoreTmpDir,
+    ensureDataDir: () => fs.mkdirSync(_resumeStoreTmpDir, { recursive: true })
+  }
+})
+
+afterAll(() => {
+  try {
+    if (_resumeStoreTmpDir) fs.rmSync(_resumeStoreTmpDir, { recursive: true, force: true })
+  } catch {
+    // ignore cleanup errors
   }
 })
 

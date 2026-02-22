@@ -25,8 +25,10 @@ export function registerScheduleHandlers(): void {
       try {
         if (!data.itemId || !data.scope) return
 
-        const isDone = data.action === 'item_done'
-        const isUndone = data.action === 'item_undone'
+        const isDone =
+          data.action === 'updated' && data.resourceType === 'item' && data.status === 'done'
+        const isUndone =
+          data.action === 'updated' && data.resourceType === 'item' && data.status !== 'done'
         if (!isDone && !isUndone) return
 
         const scopeRoot = scopeStore.getScopeRootPath(data.scope)
@@ -40,7 +42,7 @@ export function registerScheduleHandlers(): void {
               schedule.completedAt = Date.now()
               schedule.updatedAt = Date.now()
               writeSingleSchedule(scopeRoot, schedule)
-              scopeStore.markDirty(data.scope)
+              // Schedule 存 mdStore，无需刷新 ScopeStore
 
               void emit('schedule:updated', {
                 scope: data.scope,
@@ -63,7 +65,7 @@ export function registerScheduleHandlers(): void {
             schedule.completedAt = undefined
             schedule.updatedAt = Date.now()
             writeSingleSchedule(scopeRoot, schedule)
-            scopeStore.markDirty(data.scope)
+            // Schedule 存 mdStore，无需刷新 ScopeStore
 
             void emit('schedule:updated', {
               scope: data.scope,
@@ -97,7 +99,7 @@ export function registerScheduleHandlers(): void {
             schedule.status = 'active'
             schedule.updatedAt = Date.now()
             writeSingleSchedule(scopeRoot, schedule)
-            scopeStore.markDirty(data.scope)
+            // Schedule 存 mdStore，无需刷新 ScopeStore
 
             void emit('schedule:updated', {
               scope: data.scope,

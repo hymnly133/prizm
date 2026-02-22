@@ -13,7 +13,7 @@
  * - 大工作流（10 步）
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
@@ -27,6 +27,14 @@ const _integTmpDir = path.join(
   `wf-integ-${Date.now()}-${Math.random().toString(36).slice(2)}`
 )
 fs.mkdirSync(_integTmpDir, { recursive: true })
+
+afterAll(() => {
+  try {
+    fs.rmSync(_integTmpDir, { recursive: true, force: true })
+  } catch {
+    // ignore cleanup errors
+  }
+})
 
 vi.mock('../PathProviderCore', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../PathProviderCore')>()

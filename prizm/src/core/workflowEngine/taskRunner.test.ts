@@ -12,13 +12,21 @@
  * - signal 传递: abort signal 透传到 executor
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
 
 const _tmpDir = path.join(os.tmpdir(), `task-runner-${Date.now()}-${Math.random().toString(36).slice(2)}`)
 fs.mkdirSync(_tmpDir, { recursive: true })
+
+afterAll(() => {
+  try {
+    fs.rmSync(_tmpDir, { recursive: true, force: true })
+  } catch {
+    // ignore cleanup errors
+  }
+})
 
 vi.mock('../eventBus/eventBus', () => ({
   emit: vi.fn().mockResolvedValue(undefined)

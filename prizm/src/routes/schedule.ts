@@ -25,7 +25,12 @@ import {
   findSchedulesByLinkedItem,
   detectConflicts
 } from '../core/mdStore'
-import type { ScheduleItem, CreateSchedulePayload, UpdateSchedulePayload, ScheduleStatus } from '../types'
+import type {
+  ScheduleItem,
+  CreateSchedulePayload,
+  UpdateSchedulePayload,
+  ScheduleStatus
+} from '../types'
 
 const log = createLogger('Schedule')
 
@@ -105,27 +110,26 @@ export function createScheduleRoutes(router: Router): void {
   })
 
   // GET /schedule/:id — 获取单个日程
-  router.get('/schedule/:id', (req: Request, res: Response) => {
+  router.get('/schedule/:id', async (req: Request, res: Response) => {
     try {
       const id = ensureStringParam(req.params.id)
-      const { scope, scopeRoot } = getScopeForReadById(req, id, (root) =>
-        readSingleScheduleById(root, id) != null
-      )
-      if (!scope || !scopeRoot) {
-        const result = findAcrossScopes(id, (root) => readSingleScheduleById(root, id))
-        if (result) {
-          res.json(result.data)
+      const scopeHint = getScopeForReadById(req)
+      if (scopeHint) {
+        const scopeRoot = scopeStore.getScopeRootPath(scopeHint)
+        const item = readSingleScheduleById(scopeRoot, id)
+        if (item) {
+          res.json(item)
           return
         }
-        res.status(404).json({ error: 'Schedule not found' })
+      }
+      const result = await findAcrossScopes(req, async (sc) =>
+        readSingleScheduleById(scopeStore.getScopeRootPath(sc), id)
+      )
+      if (result) {
+        res.json(result.item)
         return
       }
-      const item = readSingleScheduleById(scopeRoot, id)
-      if (!item) {
-        res.status(404).json({ error: 'Schedule not found' })
-        return
-      }
-      res.json(item)
+      res.status(404).json({ error: 'Schedule not found' })
     } catch (err) {
       log.error('GET /schedule/:id error:', err)
       res.status(500).json(toErrorResponse(err))
@@ -165,7 +169,6 @@ export function createScheduleRoutes(router: Router): void {
 
       const relativePath = writeSingleSchedule(scopeRoot, item)
       item.relativePath = relativePath
-      scopeStore.markDirty(scope)
 
       void emit('schedule:created', {
         scope,
@@ -218,7 +221,6 @@ export function createScheduleRoutes(router: Router): void {
 
       const relativePath = writeSingleSchedule(scopeRoot, updated)
       updated.relativePath = relativePath
-      scopeStore.markDirty(scope)
 
       void emit('schedule:updated', {
         scope,
@@ -248,8 +250,6 @@ export function createScheduleRoutes(router: Router): void {
         return
       }
 
-      scopeStore.markDirty(scope)
-
       void emit('schedule:deleted', {
         scope,
         scheduleId: id,
@@ -264,22 +264,26 @@ export function createScheduleRoutes(router: Router): void {
   })
 
   // GET /schedule/:id/linked — 获取关联的 todo/document
-  router.get('/schedule/:id/linked', (req: Request, res: Response) => {
+  router.get('/schedule/:id/linked', async (req: Request, res: Response) => {
     try {
       const id = ensureStringParam(req.params.id)
-      const { scope, scopeRoot } = getScopeForReadById(req, id, (root) =>
-        readSingleScheduleById(root, id) != null
+      const scopeHint = getScopeForReadById(req)
+      if (scopeHint) {
+        const scopeRoot = scopeStore.getScopeRootPath(scopeHint)
+        const item = readSingleScheduleById(scopeRoot, id)
+        if (item) {
+          res.json(item.linkedItems ?? [])
+          return
+        }
+      }
+      const result = await findAcrossScopes(req, async (sc) =>
+        readSingleScheduleById(scopeStore.getScopeRootPath(sc), id)
       )
-      if (!scope || !scopeRoot) {
-        res.status(404).json({ error: 'Schedule not found' })
+      if (result) {
+        res.json(result.item.linkedItems ?? [])
         return
       }
-      const item = readSingleScheduleById(scopeRoot, id)
-      if (!item) {
-        res.status(404).json({ error: 'Schedule not found' })
-        return
-      }
-      res.json(item.linkedItems ?? [])
+      res.status(404).json({ error: 'Schedule not found' })
     } catch (err) {
       log.error('GET /schedule/:id/linked error:', err)
       res.status(500).json(toErrorResponse(err))

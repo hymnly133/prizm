@@ -117,7 +117,8 @@ async function executeCreateTodo(
   const now = Date.now()
   const list: TodoList = {
     id: genUniqueId(),
-    name: params.name || '工作流生成待办',
+    title: params.name || params.title || '工作流生成待办',
+    relativePath: '',
     items: [{
       id: genUniqueId(),
       title: params.title || params.name || '待办事项',
@@ -181,6 +182,7 @@ async function executeCreateDocument(
     title: params.title || '工作流生成文档',
     content: params.content || '',
     tags: params.tags ? params.tags.split(',').map((t) => t.trim()) : [],
+    relativePath: '',
     createdAt: now,
     updatedAt: now
   }
@@ -189,7 +191,7 @@ async function executeCreateDocument(
     scope,
     documentId: doc.id,
     title: doc.title,
-    content: doc.content,
+    content: doc.content ?? '',
     actor: { type: 'system', source: 'workflow:linked_action' }
   })
 }
@@ -206,15 +208,16 @@ async function executeUpdateSchedule(
   if (!item) return
 
   const validStatuses = ['active', 'completed', 'cancelled'] as const
-  if (status && validStatuses.includes(status as ScheduleItem['status'])) {
-    item.status = status as ScheduleItem['status']
+  if (status && validStatuses.includes(status as 'active' | 'completed' | 'cancelled')) {
+    const newStatus = status as 'active' | 'completed' | 'cancelled'
+    item.status = newStatus
     if (status === 'completed') item.completedAt = Date.now()
     item.updatedAt = Date.now()
     writeSingleSchedule(scopeRoot, item)
     void emit('schedule:updated', {
       scope,
       scheduleId,
-      status,
+      status: newStatus,
       actor: { type: 'system', source: 'workflow:linked_action' }
     })
   }

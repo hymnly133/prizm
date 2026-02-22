@@ -18,9 +18,10 @@ const log = createLogger('CronManager')
 /** Grace period for recovering missed one-time jobs after restart (10 min) */
 const ONCE_RECOVERY_GRACE_MS = 10 * 60_000
 
+type ScheduledTask = ReturnType<typeof cron.schedule>
 interface ActiveCronTask {
   jobId: string
-  task: cron.ScheduledTask
+  task: ScheduledTask
 }
 
 export class CronManager {
@@ -200,7 +201,7 @@ export class CronManager {
       return
     }
 
-    const options: cron.ScheduleOptions = {
+    const options: Parameters<typeof cron.schedule>[2] = {
       timezone: job.timezone || undefined
     }
 
