@@ -636,5 +636,28 @@ export function registerWSBridgeHandlers(): void {
     'wsBridge.notificationRequested'
   )
 
+  // ─── Feedback 事件 ───
+
+  subscribe(
+    'feedback:submitted',
+    (data) => {
+      if (!wsServer) return
+      wsServer.broadcast(
+        EVENT_TYPES_OBJ.FEEDBACK_SUBMITTED as EventType,
+        {
+          feedbackId: data.feedbackId,
+          targetType: data.targetType,
+          targetId: data.targetId,
+          rating: data.rating,
+          comment: data.comment,
+          sessionId: data.sessionId,
+          scope: data.scope
+        },
+        data.scope
+      )
+    },
+    'wsBridge.feedbackSubmitted'
+  )
+
   log.info('WebSocket bridge event handlers registered')
 }

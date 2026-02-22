@@ -42,6 +42,7 @@ import { initEverMemService } from './llm/EverMemService'
 import { initTokenUsageDb, closeTokenUsageDb } from './core/tokenUsageDb'
 import { lockManager } from './core/resourceLockManager'
 import { auditManager } from './core/agentAuditLog'
+import { feedbackManager } from './core/feedback'
 import { migrateToolSessionsFromBackground } from './core/migrateToolSessions'
 import { getTerminalManager } from './terminal/TerminalSessionManager'
 import { TerminalWebSocketServer } from './terminal/TerminalWebSocketServer'
@@ -81,7 +82,8 @@ import {
   registerSearchHandlers,
   setSearchIndex,
   registerBgSessionHandlers,
-  registerScheduleHandlers
+  registerScheduleHandlers,
+  registerFeedbackHandlers
 } from './core/eventBus/handlers'
 import { createEmbeddingRoutes } from './routes/embedding'
 import { createScheduleRoutes } from './routes/schedule'
@@ -89,6 +91,7 @@ import { createCronRoutes } from './routes/cron'
 import { createWorkflowRoutes } from './routes/workflow'
 import { createTaskRoutes } from './routes/task'
 import { createBrowserRoutes } from './routes/browser'
+import { createFeedbackRoutes } from './routes/feedback'
 import { localEmbedding } from './llm/localEmbedding'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -245,6 +248,7 @@ export function createPrizmServer(
   createWorkflowRoutes(router, adapters.agent)
   createTaskRoutes(router)
   createBrowserRoutes(router, () => browserRelayServer)
+  createFeedbackRoutes(router)
   app.use('/', router)
 
   // MCP 端点：供 Cursor、LobeChat 等 Agent 连接（wsServer 在 start 后注入）
@@ -314,6 +318,11 @@ export function createPrizmServer(
           } catch (e) {
             log.warn('Audit manager init failed:', e)
           }
+          try {
+            feedbackManager.init()
+          } catch (e) {
+            log.warn('Feedback manager init failed:', e)
+          }
 
           return new Promise<void>((resolve, reject) => {
             server = app.listen(port, host, async () => {
@@ -364,6 +373,7 @@ export function createPrizmServer(
               registerMemoryHandlers()
               registerBgSessionHandlers()
               registerScheduleHandlers()
+              registerFeedbackHandlers()
               registerPermissionCleanupHandler()
               setSearchIndex(searchIndex)
               registerSearchHandlers()
@@ -467,6 +477,7 @@ export function createPrizmServer(
       await bgSessionManager.shutdown()
       lockManager.shutdown()
       auditManager.shutdown()
+      feedbackManager.shutdown()
 
       return new Promise((resolve, reject) => {
         server!.close((error) => {

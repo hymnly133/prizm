@@ -355,6 +355,19 @@ export interface NotificationRequestedEvent {
   source?: string
 }
 
+// ─── 反馈事件 ───
+
+export interface FeedbackSubmittedEvent {
+  scope: string
+  feedbackId: string
+  targetType: string
+  targetId: string
+  rating: string
+  comment?: string
+  sessionId?: string
+  actor?: OperationActor
+}
+
 // ─── 统一领域事件映射 ───
 
 export interface DomainEventMap {
@@ -420,6 +433,9 @@ export interface DomainEventMap {
 
   // Notification
   'notification:requested': NotificationRequestedEvent
+
+  // Feedback
+  'feedback:submitted': FeedbackSubmittedEvent
 }
 
 /** 领域事件名称 */

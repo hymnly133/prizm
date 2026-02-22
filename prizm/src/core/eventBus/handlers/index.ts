@@ -5,3 +5,4 @@ export { registerWSBridgeHandlers, setWebSocketServer } from './wsBridgeHandlers
 export { registerSearchHandlers, setSearchIndex } from './searchHandlers'
 export { registerBgSessionHandlers } from './bgSessionHandlers'
 export { registerScheduleHandlers } from './scheduleHandlers'
+export { registerFeedbackHandlers } from './feedbackHandlers'

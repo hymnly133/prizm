@@ -27,6 +27,7 @@ export type AuditResourceType =
   | 'session'
   | 'schedule'
   | 'cron_job'
+  | 'feedback'
 
 /** 审计结果 */
 export type AuditResult = 'success' | 'error' | 'denied'
