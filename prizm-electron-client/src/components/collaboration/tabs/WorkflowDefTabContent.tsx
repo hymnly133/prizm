@@ -273,7 +273,7 @@ export const WorkflowDefTabContent = memo(function WorkflowDefTabContent({
         footer={null}
         width="90vw"
         className="wfe-modal"
-        destroyOnClose
+        destroyOnHidden
       >
         <WorkflowEditor
           defRecord={defRecord}

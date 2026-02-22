@@ -30,6 +30,12 @@
   transform: translateY(-2px);
 }
 
+.wf-step:focus-visible {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+
 .wf-pipeline--vertical .wf-step {
   flex-direction: row;
   max-width: none;
@@ -99,8 +105,13 @@
 }
 
 @keyframes wf-pulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.08); }
+  0%, 100% {
+    box-shadow: 0 0 0 4px var(--ant-color-primary-bg), 0 4px 16px rgba(0, 0, 0, 0.08);
+  }
+  50% {
+    box-shadow: 0 0 0 8px color-mix(in srgb, var(--ant-color-primary-bg) 50%, transparent),
+      0 4px 16px rgba(0, 0, 0, 0.08);
+  }
 }
 
 .wf-step__label {

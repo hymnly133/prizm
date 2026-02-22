@@ -185,7 +185,7 @@ function HomePage({
           <HomeTodoSection todoLists={todoLists} loading={data.fileListLoading} onOpenTodoList={handleOpenTodoList} onViewAll={onNavigateToWork} animationIndex={2} />
         </div>
         <div>
-          <SectionHeader icon={FileText} title="最近文档" count={data.stats.documentsCount} extra={<><Button size="small" icon={<Icon icon={Plus} size="small" />} onClick={handleNewDocument}>新建</Button><Button size="small" type="text" icon={<Icon icon={ArrowRight} size="small" />} iconPosition="end" onClick={onNavigateToWork}>查看全部</Button></>} />
+          <SectionHeader icon={FileText} title="最近文档" count={data.stats.documentsCount} extra={<><Button size="small" icon={<Icon icon={Plus} size="small" />} onClick={handleNewDocument}>新建</Button><Button size="small" type="text" icon={<Icon icon={ArrowRight} size="small" />} iconPlacement="end" onClick={onNavigateToWork}>查看全部</Button></>} />
           {data.fileListLoading ? <LoadingPlaceholder /> : recentDocuments.length === 0 ? (
             <EmptyState icon={FileText} description="暂无文档" actions={<Button icon={<Icon icon={Plus} size="small" />} onClick={handleNewDocument}>新建文档</Button>} />
           ) : (
@@ -197,7 +197,7 @@ function HomePage({
             <div className="home-clipboard-strip__header">
               <Icon icon={Clipboard} size="small" />
               <span className="home-card__title">最近剪贴板</span>
-              <span className="section-header__extra"><Button size="small" type="text" icon={<Icon icon={ArrowRight} size="small" />} iconPosition="end" onClick={onNavigateToWork}>查看全部</Button></span>
+              <span className="section-header__extra"><Button size="small" type="text" icon={<Icon icon={ArrowRight} size="small" />} iconPlacement="end" onClick={onNavigateToWork}>查看全部</Button></span>
             </div>
             <div className="home-clipboard-strip__items">
               {data.clipboard.map((item) => (

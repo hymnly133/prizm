@@ -85,7 +85,7 @@ export default function RecentSessionsSection({
               size="small"
               type="text"
               icon={<Icon icon={ArrowRight} size="small" />}
-              iconPosition="end"
+              iconPlacement="end"
               onClick={onViewAll}
             >
               查看全部

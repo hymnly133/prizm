@@ -7,12 +7,13 @@
  */
 import { memo, useMemo, useCallback } from 'react'
 import { Button, Tag } from 'antd'
-import { Blocks, FileText, GitBranch, MessageSquare, Plus, Zap } from 'lucide-react'
+import { Blocks, FileText, GitBranch, Zap } from 'lucide-react'
 import type { EnrichedDocument } from '@prizm/client-core'
 import type { TaskRun, WorkflowDefRecord, WorkflowRun } from '@prizm/shared'
 import { useScopeDataStore } from '../../../store/scopeDataStore'
 import { useTaskStore } from '../../../store/taskStore'
 import { useWorkflowStore } from '../../../store/workflowStore'
+import { AccentList } from '../../ui/AccentList'
 import { EmptyState } from '../../ui/EmptyState'
 import { LoadingPlaceholder } from '../../ui/LoadingPlaceholder'
 import { SectionHeader } from '../../ui/SectionHeader'
@@ -41,6 +42,26 @@ export const DocumentListTab = memo(function DocumentListTab({
     [onOpenEntity]
   )
 
+  const documentListItems = useMemo(
+    () =>
+      sorted.map((doc) => ({
+        key: doc.id,
+        title: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            <FileText size={13} style={{ flexShrink: 0, opacity: 0.5 }} />
+            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {doc.title || '未命名'}
+            </span>
+            <span style={{ flexShrink: 0, fontSize: 11, color: 'var(--ant-color-text-quaternary)' }}>
+              {formatRelativeTime(doc.updatedAt)}
+            </span>
+          </span>
+        ),
+        onClick: () => handleOpen(doc)
+      })),
+    [sorted, handleOpen]
+  )
+
   return (
     <div className="collab-tab-list">
       <div className="collab-tab-list__toolbar">
@@ -53,22 +74,7 @@ export const DocumentListTab = memo(function DocumentListTab({
         ) : sorted.length === 0 ? (
           <EmptyState icon={FileText} description="暂无文档" />
         ) : (
-          <ul className="collab-tab-list__items">
-            {sorted.map((doc) => (
-              <li
-                key={doc.id}
-                className="collab-tab-list__item"
-                role="button"
-                tabIndex={0}
-                onClick={() => handleOpen(doc)}
-                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && handleOpen(doc)}
-              >
-                <FileText size={13} style={{ flexShrink: 0, opacity: 0.5 }} />
-                <span className="collab-tab-list__item-label">{doc.title || '未命名'}</span>
-                <span className="collab-tab-list__item-meta">{formatRelativeTime(doc.updatedAt)}</span>
-              </li>
-            ))}
-          </ul>
+          <AccentList items={documentListItems} />
         )}
       </div>
     </div>
@@ -97,6 +103,24 @@ export const TaskListTab = memo(function TaskListTab({
     [onOpenEntity]
   )
 
+  const taskListItems = useMemo(
+    () =>
+      sorted.map((t) => ({
+        key: t.id,
+        title: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            <Zap size={13} style={{ flexShrink: 0, opacity: 0.5 }} />
+            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {t.label ?? t.id.slice(0, 8)}
+            </span>
+            <TaskStatusTag status={t.status} />
+          </span>
+        ),
+        onClick: () => handleOpen(t)
+      })),
+    [sorted, handleOpen]
+  )
+
   return (
     <div className="collab-tab-list">
       <div className="collab-tab-list__toolbar">
@@ -109,22 +133,7 @@ export const TaskListTab = memo(function TaskListTab({
         ) : sorted.length === 0 ? (
           <EmptyState icon={Zap} description="暂无任务" />
         ) : (
-          <ul className="collab-tab-list__items">
-            {sorted.map((t) => (
-              <li
-                key={t.id}
-                className="collab-tab-list__item"
-                role="button"
-                tabIndex={0}
-                onClick={() => handleOpen(t)}
-                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && handleOpen(t)}
-              >
-                <Zap size={13} style={{ flexShrink: 0, opacity: 0.5 }} />
-                <span className="collab-tab-list__item-label">{t.label ?? t.id.slice(0, 8)}</span>
-                <TaskStatusTag status={t.status} />
-              </li>
-            ))}
-          </ul>
+          <AccentList items={taskListItems} />
         )}
       </div>
     </div>
@@ -183,6 +192,47 @@ export const WorkflowListTab = memo(function WorkflowListTab({
     void Promise.all([refreshDefs(), refreshRuns()])
   }, [refreshDefs, refreshRuns])
 
+  const defListItems = useMemo(
+    () =>
+      sortedDefs.map((d) => ({
+        key: d.id,
+        title: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            <Blocks size={13} style={{ flexShrink: 0, opacity: 0.5 }} />
+            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {d.name}
+            </span>
+            <span style={{ flexShrink: 0, fontSize: 11, color: 'var(--ant-color-text-quaternary)' }}>
+              {formatRelativeTime(d.updatedAt)}
+            </span>
+          </span>
+        ),
+        onClick: () => handleOpenDef(d)
+      })),
+    [sortedDefs, handleOpenDef]
+  )
+
+  const runListItems = useMemo(
+    () =>
+      sortedRuns.map((r) => ({
+        key: r.id,
+        title: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            <GitBranch size={13} style={{ flexShrink: 0, opacity: 0.5 }} />
+            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {r.workflowName}
+            </span>
+            <TaskStatusTag status={r.status} />
+            <span style={{ flexShrink: 0, fontSize: 11, color: 'var(--ant-color-text-quaternary)' }}>
+              {new Date(r.createdAt).toLocaleDateString()}
+            </span>
+          </span>
+        ),
+        onClick: () => handleOpenRun(r)
+      })),
+    [sortedRuns, handleOpenRun]
+  )
+
   return (
     <div className="collab-tab-list">
       <div className="collab-tab-list__toolbar">
@@ -196,60 +246,22 @@ export const WorkflowListTab = memo(function WorkflowListTab({
           <EmptyState icon={GitBranch} description="暂无工作流" />
         ) : (
           <>
-            {/* Definitions section */}
             {sortedDefs.length > 0 && (
               <div className="collab-tab-list__section">
                 <div className="collab-tab-list__section-header">
                   <Blocks size={12} style={{ opacity: 0.5 }} />
                   <span>定义 ({sortedDefs.length})</span>
                 </div>
-                <ul className="collab-tab-list__items">
-                  {sortedDefs.map((d) => (
-                    <li
-                      key={d.id}
-                      className="collab-tab-list__item"
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => handleOpenDef(d)}
-                      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && handleOpenDef(d)}
-                    >
-                      <Blocks size={13} style={{ flexShrink: 0, opacity: 0.5 }} />
-                      <span className="collab-tab-list__item-label">{d.name}</span>
-                      <span className="collab-tab-list__item-meta">
-                        {formatRelativeTime(d.updatedAt)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                <AccentList items={defListItems} />
               </div>
             )}
-
-            {/* Runs section */}
             {sortedRuns.length > 0 && (
               <div className="collab-tab-list__section">
                 <div className="collab-tab-list__section-header">
                   <GitBranch size={12} style={{ opacity: 0.5 }} />
                   <span>运行记录 ({sortedRuns.length})</span>
                 </div>
-                <ul className="collab-tab-list__items">
-                  {sortedRuns.map((r) => (
-                    <li
-                      key={r.id}
-                      className="collab-tab-list__item"
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => handleOpenRun(r)}
-                      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && handleOpenRun(r)}
-                    >
-                      <GitBranch size={13} style={{ flexShrink: 0, opacity: 0.5 }} />
-                      <span className="collab-tab-list__item-label">{r.workflowName}</span>
-                      <TaskStatusTag status={r.status} />
-                      <span className="collab-tab-list__item-meta">
-                        {new Date(r.createdAt).toLocaleDateString()}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                <AccentList items={runListItems} />
               </div>
             )}
           </>

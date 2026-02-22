@@ -5,8 +5,9 @@
  */
 import { memo } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Button, Empty, Skeleton } from '@lobehub/ui'
+import { Button, Skeleton } from '@lobehub/ui'
 import DataCard from './DataCard'
+import { EmptyState } from './ui/EmptyState'
 import type { FileItem } from '../hooks/useFileList'
 
 export type FileCardGridVariants = {
@@ -63,16 +64,15 @@ function FileCardGrid({
   if (filteredLength === 0) {
     return (
       <div className="work-page__empty">
-        <Empty
+        <EmptyState
           description={
             fileListLength === 0
               ? '暂无内容，创建文档或待办开始工作'
               : '没有符合条件的项，勾选上方类别筛选'
           }
-          imageSize={80}
-          action={
+          actions={
             fileListLength === 0 ? (
-              <div className="work-page__empty-actions">
+              <div className="work-page__empty-actions empty-state__actions">
                 <Button type="primary" onClick={onAddDocument}>
                   新建文档
                 </Button>

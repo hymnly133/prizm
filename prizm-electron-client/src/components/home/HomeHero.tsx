@@ -12,6 +12,7 @@ import { createStyles } from 'antd-style'
 import { Segmented } from '../ui/Segmented'
 import { usePrizmContext } from '../../context/PrizmContext'
 import { useScope } from '../../hooks/useScope'
+import { useUserProfile } from '../../hooks/useUserProfile'
 
 function getGreeting(): string {
   const hour = new Date().getHours()
@@ -180,6 +181,7 @@ export function HomeHero({
   const { styles, cx } = useStyles()
   const { manager, config } = usePrizmContext()
   const { currentScope, getScopeLabel } = useScope()
+  const { profile } = useUserProfile()
   const [connectedSince] = useState(() => Date.now())
   const [uptime, setUptime] = useState('0秒')
   const [stuck, setStuck] = useState(false)
@@ -212,7 +214,7 @@ export function HomeHero({
   }, [navEl])
 
   const isConnected = !!manager
-  const clientName = config?.client?.name || 'Prizm Client'
+  const displayName = profile?.displayName?.trim() || config?.client?.name || 'Prizm Client'
 
   return (
     <>
@@ -224,7 +226,7 @@ export function HomeHero({
           <div className={styles.info}>
             <div className={styles.greetingRow}>
               <span>{getGreeting()},</span>
-              <span className={styles.clientName}>{clientName}</span>
+              <span className={styles.clientName}>{displayName}</span>
             </div>
             <span className={styles.scopeRow}>
               工作区 <Tag size="small">{getScopeLabel(currentScope)}</Tag>

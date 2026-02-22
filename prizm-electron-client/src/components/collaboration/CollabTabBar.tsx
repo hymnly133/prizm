@@ -234,7 +234,9 @@ export const CollabTabBar = memo(function CollabTabBar({
 
         <div className="collab-tab-bar__actions">
           <Dropdown menu={{ items: addMenuItems }} trigger={['click']} placement="bottomRight">
-            <ActionIcon icon={Plus} size="small" title="打开标签页" />
+            <span className="collab-tab-bar__dropdown-trigger">
+              <ActionIcon icon={Plus} size="small" title="打开标签页" />
+            </span>
           </Dropdown>
           {onClosePanel && (
             <ActionIcon icon={X} size="small" title="关闭面板" onClick={onClosePanel} />

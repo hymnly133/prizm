@@ -27,6 +27,37 @@
   gap: 6px;
 }
 
+/* ── List (simple) — 非 AccentList 的简单展示列表基类 ── */
+
+.list-simple {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.list-simple__item {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+  font-size: 13px;
+  color: var(--ant-color-text);
+}
+
+.list-simple__item:last-child {
+  border-bottom: none;
+}
+
+/* panel list container: flex column + gap, for card/list body */
+.panel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+}
+
 /* ── Empty State ── */
 
 .empty-state {

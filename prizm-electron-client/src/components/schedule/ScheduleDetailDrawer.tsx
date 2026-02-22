@@ -123,7 +123,7 @@ export function ScheduleDetailDrawer({ open, scheduleId, onClose }: ScheduleDeta
 
   if (!item) {
     return (
-      <Drawer open={open} onClose={onClose} title="日程详情" width={420}>
+      <Drawer open={open} onClose={onClose} title="日程详情" size={420}>
         <div style={{ textAlign: 'center', padding: 40, opacity: 0.5 }}>日程不存在</div>
       </Drawer>
     )
@@ -144,7 +144,7 @@ export function ScheduleDetailDrawer({ open, scheduleId, onClose }: ScheduleDeta
           <span>{editing ? '编辑日程' : '日程详情'}</span>
         </div>
       }
-      width={420}
+      size={420}
       extra={
         editing ? (
           <Space>

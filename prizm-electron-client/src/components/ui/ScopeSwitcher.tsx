@@ -207,6 +207,7 @@ export default function ScopeSwitcher() {
         title="添加工作区"
         footer={null}
         width={460}
+        mask={{ closable: true }}
       >
         <Form layout="vertical" style={{ marginTop: 16 }}>
           <Form.Item label="文件夹" required>

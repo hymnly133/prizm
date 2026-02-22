@@ -20,9 +20,10 @@ import { MiniPipelineView } from '../workflow/WorkflowPipelineView'
 
 /** Panel keys used by CollabHub "view all" navigation. */
 export type HubNavigatePanel = 'agent' | 'document' | 'task' | 'workflow'
+import { AccentList } from '../ui/AccentList'
 import { EmptyState } from '../ui/EmptyState'
 import { RefreshIconButton } from '../ui/RefreshIconButton'
-import { fadeUp, STAGGER_DELAY } from '../../theme/motionPresets'
+import { fadeUp, getReducedMotionProps, STAGGER_DELAY } from '../../theme/motionPresets'
 import { formatRelativeTime } from '../../utils/formatRelativeTime'
 
 export interface CollabHubProps {
@@ -84,12 +85,98 @@ export const CollabHub = memo(function CollabHub({
     [documents]
   )
 
+  const sessionListItems = useMemo(
+    () =>
+      recentSessions.map((s) => ({
+        key: s.id,
+        title: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+            <MessageSquare size={12} style={{ flexShrink: 0, opacity: 0.5 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+              {s.llmSummary?.trim() || '新会话'}
+            </span>
+            <span style={{ flexShrink: 0, fontSize: 11, color: 'var(--ant-color-text-tertiary)' }}>
+              {formatRelativeTime(s.updatedAt)}
+            </span>
+          </span>
+        ),
+        onClick: () => onLoadSession(s.id)
+      })),
+    [recentSessions, onLoadSession]
+  )
+
+  const workflowListItems = useMemo(
+    () =>
+      activeWorkflows.map((r) => ({
+        key: r.id,
+        title: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+              {r.workflowName}
+            </span>
+            <MiniPipelineView stepResults={r.stepResults} />
+          </span>
+        ),
+        onClick: () => onSelectWorkflowRun?.(r.id)
+      })),
+    [activeWorkflows, onSelectWorkflowRun]
+  )
+
+  const taskListItems = useMemo(
+    () =>
+      bgSessions.slice(0, 4).map((s) => ({
+        key: s.id,
+        title: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+            <Zap size={12} style={{ flexShrink: 0, opacity: 0.5 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+              {s.bgMeta?.label ?? s.id.slice(0, 8)}
+            </span>
+            <span
+              style={{
+                fontSize: 10,
+                padding: '1px 4px',
+                borderRadius: 3,
+                background: bgStatusBg(s.bgStatus ?? 'pending'),
+                color: bgStatusColor(s.bgStatus ?? 'pending'),
+                flexShrink: 0
+              }}
+            >
+              {bgStatusLabel(s.bgStatus ?? 'pending')}
+            </span>
+          </span>
+        ),
+        onClick: () => onLoadSession(s.id)
+      })),
+    [bgSessions, onLoadSession]
+  )
+
+  const documentListItems = useMemo(
+    () =>
+      recentDocs.map((d) => ({
+        key: d.id,
+        title: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+            <FileText size={12} style={{ flexShrink: 0, opacity: 0.5 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+              {d.title || '未命名'}
+            </span>
+            <span style={{ flexShrink: 0, fontSize: 11, color: 'var(--ant-color-text-tertiary)' }}>
+              {formatRelativeTime(d.updatedAt)}
+            </span>
+          </span>
+        ),
+        onClick: () => onSelectDocument(d.id)
+      })),
+    [recentDocs, onSelectDocument]
+  )
+
   let idx = 0
 
   return (
     <div className="collab-hub">
       {/* Header */}
-      <motion.div className="collab-hub__header" {...fadeUp(idx++ * STAGGER_DELAY)}>
+      <motion.div className="collab-hub__header" {...fadeUp(idx++ * STAGGER_DELAY)} {...getReducedMotionProps()}>
         <div>
           <h2 className="collab-hub__title">协作中心</h2>
           <Tag color="blue" style={{ marginTop: 2 }}>
@@ -105,6 +192,7 @@ export const CollabHub = memo(function CollabHub({
         <motion.div
           className="content-card content-card--default content-card--hoverable"
           {...fadeUp(idx++ * STAGGER_DELAY)}
+          {...getReducedMotionProps()}
         >
           <div className="content-card__header">
             <Bot size={16} />
@@ -122,24 +210,7 @@ export const CollabHub = memo(function CollabHub({
             {recentSessions.length === 0 ? (
               <EmptyState description="暂无会话" />
             ) : (
-              <ul className="collab-hub__list">
-                {recentSessions.map((s) => (
-                  <li
-                    key={s.id}
-                    className="collab-hub__list-item collab-hub__list-item--clickable"
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => onLoadSession(s.id)}
-                    onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onLoadSession(s.id)}
-                  >
-                    <MessageSquare size={12} style={{ flexShrink: 0, opacity: 0.5 }} />
-                    <span className="collab-hub__list-text">
-                      {s.llmSummary?.trim() || '新会话'}
-                    </span>
-                    <span className="collab-hub__list-time">{formatRelativeTime(s.updatedAt)}</span>
-                  </li>
-                ))}
-              </ul>
+              <AccentList items={sessionListItems} />
             )}
             <ViewAllButton onClick={() => onNavigatePanel('agent')} />
           </div>
@@ -149,6 +220,7 @@ export const CollabHub = memo(function CollabHub({
         <motion.div
           className="content-card content-card--default content-card--hoverable"
           {...fadeUp(idx++ * STAGGER_DELAY)}
+          {...getReducedMotionProps()}
         >
           <div className="content-card__header">
             <GitBranch size={16} />
@@ -161,23 +233,7 @@ export const CollabHub = memo(function CollabHub({
             {activeWorkflows.length === 0 ? (
               <EmptyState description="暂无活跃工作流" />
             ) : (
-              <ul className="collab-hub__list">
-                {activeWorkflows.map((r) => (
-                  <li
-                    key={r.id}
-                    className="collab-hub__list-item collab-hub__list-item--clickable"
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => onSelectWorkflowRun?.(r.id)}
-                    onKeyDown={(e) =>
-                      (e.key === 'Enter' || e.key === ' ') && onSelectWorkflowRun?.(r.id)
-                    }
-                  >
-                    <span className="collab-hub__list-text">{r.workflowName}</span>
-                    <MiniPipelineView stepResults={r.stepResults} />
-                  </li>
-                ))}
-              </ul>
+              <AccentList items={workflowListItems} />
             )}
             <ViewAllButton onClick={() => onNavigatePanel('workflow')} />
           </div>
@@ -187,6 +243,7 @@ export const CollabHub = memo(function CollabHub({
         <motion.div
           className="content-card content-card--default content-card--hoverable"
           {...fadeUp(idx++ * STAGGER_DELAY)}
+          {...getReducedMotionProps()}
         >
           <div className="content-card__header">
             <Zap size={16} />
@@ -201,32 +258,7 @@ export const CollabHub = memo(function CollabHub({
             {bgSessions.length === 0 ? (
               <EmptyState description="暂无后台任务" />
             ) : (
-              <ul className="collab-hub__list">
-                {bgSessions.slice(0, 4).map((s) => (
-                  <li
-                    key={s.id}
-                    className="collab-hub__list-item collab-hub__list-item--clickable"
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => onLoadSession(s.id)}
-                    onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onLoadSession(s.id)}
-                  >
-                    <Zap size={12} style={{ flexShrink: 0, opacity: 0.5 }} />
-                    <span className="collab-hub__list-text">
-                      {s.bgMeta?.label ?? s.id.slice(0, 8)}
-                    </span>
-                    <span
-                      className="collab-hub__status-tag"
-                      style={{
-                        background: bgStatusBg(s.bgStatus ?? 'pending'),
-                        color: bgStatusColor(s.bgStatus ?? 'pending')
-                      }}
-                    >
-                      {bgStatusLabel(s.bgStatus ?? 'pending')}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              <AccentList items={taskListItems} />
             )}
             <ViewAllButton onClick={() => onNavigatePanel('task')} />
           </div>
@@ -236,6 +268,7 @@ export const CollabHub = memo(function CollabHub({
         <motion.div
           className="content-card content-card--default content-card--hoverable"
           {...fadeUp(idx++ * STAGGER_DELAY)}
+          {...getReducedMotionProps()}
         >
           <div className="content-card__header">
             <FileText size={16} />
@@ -253,24 +286,7 @@ export const CollabHub = memo(function CollabHub({
             {recentDocs.length === 0 ? (
               <EmptyState description="暂无文档" />
             ) : (
-              <ul className="collab-hub__list">
-                {recentDocs.map((d) => (
-                  <li
-                    key={d.id}
-                    className="collab-hub__list-item collab-hub__list-item--clickable"
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => onSelectDocument(d.id)}
-                    onKeyDown={(e) =>
-                      (e.key === 'Enter' || e.key === ' ') && onSelectDocument(d.id)
-                    }
-                  >
-                    <FileText size={12} style={{ flexShrink: 0, opacity: 0.5 }} />
-                    <span className="collab-hub__list-text">{d.title || '未命名'}</span>
-                    <span className="collab-hub__list-time">{formatRelativeTime(d.updatedAt)}</span>
-                  </li>
-                ))}
-              </ul>
+              <AccentList items={documentListItems} />
             )}
             <ViewAllButton onClick={() => onNavigatePanel('document')} />
           </div>

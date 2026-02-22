@@ -135,6 +135,16 @@
 .page-keep-alive {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.page-keep-alive > * {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 .page-keep-alive--hidden {
   display: none !important;

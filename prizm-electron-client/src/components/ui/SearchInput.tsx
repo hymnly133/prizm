@@ -9,6 +9,7 @@ import { Search, X } from 'lucide-react'
 interface SearchInputProps {
   onSearch: (query: string) => void
   placeholder?: string
+  'aria-label'?: string
   loading?: boolean
   debounceMs?: number
   className?: string
@@ -19,6 +20,7 @@ interface SearchInputProps {
 export default function SearchInput({
   onSearch,
   placeholder = '搜索...',
+  'aria-label': ariaLabel,
   loading = false,
   debounceMs = 300,
   className,
@@ -61,6 +63,7 @@ export default function SearchInput({
       value={value}
       onChange={handleChange}
       placeholder={placeholder}
+      aria-label={ariaLabel}
       prefix={loading ? <Spin size="small" /> : <Search size={14} style={{ opacity: 0.5 }} />}
       suffix={
         value ? (

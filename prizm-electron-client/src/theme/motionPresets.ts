@@ -114,12 +114,17 @@ export const TOOL_STATUS_COLORS = {
 } as const
 
 /* ── reduced-motion 辅助 ── */
-export function getReducedMotionProps() {
+/** 用于 motion 组件，在「减少动态效果」时禁用动画；spread 到 motion.div 等时需与类型兼容，故不传 exit。 */
+export function getReducedMotionProps(): {
+  initial: false
+  animate: false
+  transition: { duration: number }
+} | Record<string, never> {
   if (
     typeof window !== 'undefined' &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches
   ) {
-    return { initial: false, animate: false, exit: false, transition: { duration: 0 } }
+    return { initial: false, animate: false, transition: { duration: 0 } }
   }
   return {}
 }

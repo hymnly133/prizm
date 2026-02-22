@@ -353,7 +353,7 @@ const TodoCards = memo(function TodoCards({
                   percent={pct}
                   size="small"
                   strokeColor="var(--ant-color-success)"
-                  trailColor="var(--ant-color-fill-secondary)"
+                  railColor="var(--ant-color-fill-secondary)"
                   showInfo={false}
                   className="ws-todo-card__progress"
                 />
@@ -1146,7 +1146,7 @@ function WorkPage() {
         {genericFilePreview && (
           <div style={{ paddingTop: 16, maxHeight: '80vh', overflowY: 'auto' }}>
             {genericFilePreview.loading ? (
-              <div style={{ padding: 24, textAlign: 'center', opacity: 0.5 }}>加载中…</div>
+              <LoadingPlaceholder />
             ) : genericFilePreview.imageUrl ? (
               <div style={{ textAlign: 'center' }}>
                 <img
