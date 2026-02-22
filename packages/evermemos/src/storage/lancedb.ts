@@ -78,4 +78,27 @@ export class LanceDBAdapter implements VectorStoreAdapter {
       // ignore if table doesn't exist
     }
   }
+
+  /** 列出表中已有向量的 id，用于 backfill 时只补全缺失项 */
+  async listIds(collectionName: string): Promise<string[]> {
+    const db = await this.getDb()
+    const ids: string[] = []
+    try {
+      const table = await db.openTable(collectionName)
+      const query = table.query() as Iterable<unknown> | AsyncIterable<unknown>
+      const it = Symbol.asyncIterator in Object(query) ? (query as AsyncIterable<unknown>)[Symbol.asyncIterator]() : null
+      if (!it) return []
+      for (let next = await it.next(); !next.done; next = await it.next()) {
+        const batch = next.value
+        const arr = Array.isArray(batch) ? batch : (batch && typeof batch === 'object' && 'toArray' in batch ? (batch as { toArray: () => unknown[] }).toArray() : [batch])
+        for (const row of arr) {
+          const id = row && typeof row === 'object' && 'id' in row ? (row as { id: unknown }).id : undefined
+          if (id != null && id !== '') ids.push(String(id))
+        }
+      }
+    } catch {
+      // table does not exist or query not supported → no ids
+    }
+    return ids
+  }
 }

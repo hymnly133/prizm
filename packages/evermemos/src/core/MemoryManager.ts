@@ -1538,8 +1538,20 @@ export class MemoryManager {
   }
 
   /**
+   * 返回指定 type 在向量库中已存在的 memory id 集合（用于 backfill 时跳过已补全项）。
+   * 若适配器未实现 listIds，返回空 Set，调用方会对所有记忆尝试 backfill。
+   */
+  async getExistingVectorIds(type: string): Promise<Set<string>> {
+    const listIds = this.storage.vector.listIds
+    if (!listIds) return new Set()
+    const ids = await listIds.call(this.storage.vector, type)
+    return new Set(ids ?? [])
+  }
+
+  /**
    * 为单条记忆补全向量。
    * 从 content 生成 embedding 并写入 LanceDB。SQLite 不受影响（embedding 不存 SQLite）。
+   * 若向量库已存在该 id（且适配器支持 listIds），则直接返回 true 不重复写入。
    */
   async backfillVector(
     memoryId: string,
@@ -1550,6 +1562,12 @@ export class MemoryManager {
     embeddingProvider: IEmbeddingProvider
   ): Promise<boolean> {
     try {
+      const listIds = this.storage.vector.listIds
+      if (listIds) {
+        const ids = await listIds.call(this.storage.vector, type)
+        if (ids?.includes(memoryId)) return true
+      }
+
       const embedding = await embeddingProvider.getEmbedding(content)
       if (!embedding?.length) return false
 

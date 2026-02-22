@@ -4,6 +4,8 @@ export interface VectorStoreAdapter {
   delete(collection: string, id: string): Promise<void>
   /** 删除整个集合（可选实现） */
   dropCollection?(collection: string): Promise<void>
+  /** 列出集合中已有向量的 id（可选实现，用于 backfill 时跳过已存在项） */
+  listIds?(collection: string): Promise<string[]>
 }
 
 export interface RelationalStoreAdapter {
