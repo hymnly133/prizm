@@ -275,6 +275,80 @@ export interface EmbeddingReloadResult {
   loadTimeMs: number
 }
 
+// ============ Server Config（可视化配置，脱敏响应） ============
+
+export interface ServerConfigServer {
+  port?: number
+  host?: string
+  authDisabled?: boolean
+  logLevel?: 'info' | 'warn' | 'error'
+  mcpScope?: string
+  corsEnabled?: boolean
+  websocketEnabled?: boolean
+  websocketPath?: string
+}
+
+export interface ServerConfigEmbedding {
+  enabled?: boolean
+  model?: string
+  cacheDir?: string
+  dtype?: 'q4' | 'q8' | 'fp16' | 'fp32'
+  maxConcurrency?: number
+}
+
+export interface ServerConfigAgent {
+  scopeContextMaxChars?: number
+}
+
+/** LLM 提供商类型 */
+export type LLMProviderType = 'openai_compatible' | 'anthropic' | 'google'
+
+/** 单条 LLM 配置（脱敏响应含 configured；PATCH 时可含 apiKey） */
+export interface LLMConfigItemSanitized {
+  id: string
+  name: string
+  type: LLMProviderType
+  baseUrl?: string
+  defaultModel?: string
+  configured?: boolean
+}
+
+/** PATCH 时发送的配置项（可含 apiKey） */
+export interface LLMConfigItem extends LLMConfigItemSanitized {
+  apiKey?: string
+}
+
+export interface ServerConfigLLM {
+  defaultConfigId?: string
+  configs: LLMConfigItemSanitized[] | LLMConfigItem[]
+}
+
+/** GET /settings/agent-models 响应 */
+export interface AgentModelsResponse {
+  configs: LLMConfigItemSanitized[]
+  models: Array<{ configId: string; modelId: string; label: string }>
+}
+
+export interface ServerConfigSkills {
+  skillKitApiUrl?: string
+  githubToken?: string
+  configured?: boolean
+}
+
+export interface ServerConfig {
+  server?: ServerConfigServer
+  embedding?: ServerConfigEmbedding
+  agent?: ServerConfigAgent
+  llm?: ServerConfigLLM
+  skills?: ServerConfigSkills
+  updatedAt?: number
+}
+
+/** GET /settings/server-config 响应（含只读 dataDir，敏感字段已脱敏） */
+export interface ServerConfigResponse extends ServerConfig {
+  dataDir: string
+}
+
 // ============ Agent Rules ============
 
 export type RuleLevel = 'user' | 'scope'

@@ -21,9 +21,7 @@ export const EVENT_LABELS: Record<string, { title: string; body?: string }> = {
   'clipboard:itemDeleted': { title: '剪贴板', body: '记录已删除' },
   'document:created': { title: '新文档', body: '' },
   'document:updated': { title: '文档已更新', body: '' },
-  'document:deleted': { title: '文档已删除', body: '' },
-  'pomodoro:started': { title: '番茄钟', body: '已开始' },
-  'pomodoro:stopped': { title: '番茄钟', body: '已结束' }
+  'document:deleted': { title: '文档已删除', body: '' }
 }
 
 /** 事件类型到 UI 展示标签的映射（用于设置页等） */
@@ -43,9 +41,7 @@ export const EVENT_LABELS_UI: Record<string, string> = {
   'clipboard:itemDeleted': '剪贴板删除',
   'document:created': '新文档',
   'document:updated': '文档更新',
-  'document:deleted': '文档删除',
-  'pomodoro:started': '番茄钟开始',
-  'pomodoro:stopped': '番茄钟结束'
+  'document:deleted': '文档删除'
 }
 
 /**

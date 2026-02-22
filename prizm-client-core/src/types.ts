@@ -16,7 +16,6 @@ export type {
   TodoItemStatus,
   CreateTodoItemPayload,
   UpdateTodoItemPayload,
-  PomodoroSession,
   ClipboardItem,
   ClipboardItemType,
   Document,
@@ -72,7 +71,8 @@ export type {
 
 // ============ 客户端配置（仅 client-core） ============
 
-export interface ServerConfig {
+/** 客户端连接用：服务器 host/port */
+export interface ServerConnectionConfig {
   host: string
   port: string
 }
@@ -90,7 +90,7 @@ export interface TrayConfig {
 }
 
 export interface PrizmConfig {
-  server: ServerConfig
+  server: ServerConnectionConfig
   client: ClientConfig
   api_key: string
   tray: TrayConfig
@@ -278,10 +278,16 @@ export interface SessionTokenSummary {
   /** 对话轮次数 */
   rounds: number
   /** 按模型分组统计 */
-  byModel: Record<string, { input: number; output: number; total: number; cached?: number; count: number }>
+  byModel: Record<
+    string,
+    { input: number; output: number; total: number; cached?: number; count: number }
+  >
   /** 按功能类别统计 */
   byCategory?: Partial<
-    Record<TokenUsageCategory, { input: number; output: number; total: number; cached?: number; count: number }>
+    Record<
+      TokenUsageCategory,
+      { input: number; output: number; total: number; cached?: number; count: number }
+    >
   >
 }
 

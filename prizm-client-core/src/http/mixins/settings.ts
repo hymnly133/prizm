@@ -5,16 +5,20 @@ import type {
   TavilySettings,
   SkillsMPSettings,
   AgentToolsSettings,
-  AvailableModel,
   ShellInfo,
   AgentRule,
   RuleLevel,
   CreateAgentRuleInput,
-  UpdateAgentRuleInput
+  UpdateAgentRuleInput,
+  ServerConfig,
+  ServerConfigResponse,
+  AgentModelsResponse
 } from '../clientTypes'
 
 declare module '../client' {
   interface PrizmClient {
+    getServerConfig(): Promise<ServerConfigResponse>
+    updateServerConfig(patch: Partial<ServerConfig>): Promise<ServerConfigResponse>
     listMcpServers(): Promise<McpServerConfig[]>
     addMcpServer(config: McpServerConfig): Promise<McpServerConfig>
     updateMcpServer(
@@ -23,7 +27,7 @@ declare module '../client' {
     ): Promise<McpServerConfig>
     deleteMcpServer(id: string): Promise<void>
     getMcpServerTools(id: string): Promise<{ tools: McpTool[] }>
-    getAgentModels(): Promise<{ provider: string; models: AvailableModel[] }>
+    getAgentModels(): Promise<AgentModelsResponse>
     getAvailableShells(): Promise<{ shells: ShellInfo[] }>
     getAgentTools(): Promise<AgentToolsSettings>
     updateAgentTools(patch: Partial<AgentToolsSettings>): Promise<AgentToolsSettings>
@@ -183,6 +187,20 @@ declare module '../client' {
   }
 }
 
+PrizmClient.prototype.getServerConfig = async function (this: PrizmClient) {
+  return this.request<ServerConfigResponse>('/settings/server-config')
+}
+
+PrizmClient.prototype.updateServerConfig = async function (
+  this: PrizmClient,
+  patch: Partial<ServerConfig>
+) {
+  return this.request<ServerConfigResponse>('/settings/server-config', {
+    method: 'PATCH',
+    body: JSON.stringify(patch)
+  })
+}
+
 PrizmClient.prototype.listMcpServers = async function (this: PrizmClient) {
   const data = await this.request<{ mcpServers: McpServerConfig[] }>('/mcp/servers')
   return data.mcpServers ?? []
@@ -217,7 +235,7 @@ PrizmClient.prototype.getMcpServerTools = async function (this: PrizmClient, id:
 }
 
 PrizmClient.prototype.getAgentModels = async function (this: PrizmClient) {
-  return this.request<{ provider: string; models: AvailableModel[] }>('/settings/agent-models')
+  return this.request<AgentModelsResponse>('/settings/agent-models')
 }
 
 PrizmClient.prototype.getAvailableShells = async function (this: PrizmClient) {

@@ -68,18 +68,6 @@ export interface UpdateTodoListPayload {
   updateItems?: Array<{ id: string } & UpdateTodoItemPayload>
 }
 
-// ============ 番茄钟（已废弃） ============
-
-/** @deprecated 番茄钟已移除，仅用于迁移兼容 */
-export interface PomodoroSession {
-  id: string
-  taskId?: string
-  startedAt: number
-  endedAt: number
-  durationMinutes: number
-  tag?: string
-}
-
 // ============ 剪贴板 ============
 
 export type ClipboardItemType = 'text' | 'image' | 'file' | 'other'
