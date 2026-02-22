@@ -12,11 +12,12 @@ description: Quick lookup for the Prizm monorepo—where features live (agent ch
 | 包 | 路径 | 入口/用途 |
 |----|------|------------|
 | Server | `prizm/` | `prizm/src/server.ts` 组装 Express、路由、WS |
-| Electron 客户端 | `prizm-electron-client/` | `src/App.tsx`，React 19 + Ant Design |
+| **内置面板** | `prizm/panel/` | Vue 3 **系统控制台**，`/dashboard/` — 全面数据呈现与系统配置 |
+| **Electron 客户端** | `prizm-electron-client/` | `src/App.tsx`，**用户交互入口** — 工作台、文档、协作、工作流等丰富交互 |
+| 管理面板 | `prizm/panel/` | Vue 3 仪表盘，`/dashboard/` |
 | Client SDK | `prizm-client-core/` | HTTP/WS 客户端、Agent 工具封装 |
 | 共享类型 | `prizm-shared/` | `domain.ts`、`events.ts`、`constants.ts` |
 | 记忆系统 | `packages/evermemos/` | 长期记忆 TS 实现 |
-| 管理面板 | `prizm/panel/` | Vue 3 仪表盘，`/dashboard/` |
 
 ## 按功能快速定位
 
@@ -27,7 +28,7 @@ description: Quick lookup for the Prizm monorepo—where features live (agent ch
 | **Agent 会话/聊天** | `routes/agent/`（sessions.ts, chat.ts）、`adapters/DefaultAgentAdapter/` |
 | **流式聊天核心** | `routes/agent/chatCore/`、`adapters/DefaultAgentAdapter/chatHelpers.ts` |
 | **内置工具定义与执行** | `llm/builtinTools/`（definitions.ts, executor.ts, documentTools.ts 等） |
-| **LLM 调用与工具流** | `adapters/DefaultAgentAdapter/`、`llm/OpenAILikeProvider.ts` 等 Provider |
+| **LLM 调用与工具流** | `adapters/DefaultAgentAdapter/`、`llm/aiSdkBridge/`、`llm/prizmLLMAdapter.ts`，LLM 配置见服务端设置（`settings/serverConfigStore.ts`） |
 | **文档 CRUD** | `routes/documents.ts`、`core/mdStore/documentStore.ts`、`llm/builtinTools/documentTools.ts` |
 | **Todo** | `routes/todoList.ts`、`core/mdStore/todoStore.ts`、`llm/builtinTools/todoTools.ts` |
 | **剪贴板** | `routes/clipboard.ts`、`core/mdStore/clipboardStore.ts` |
