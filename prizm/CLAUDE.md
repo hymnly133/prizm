@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Prizm Server is a Node.js HTTP API server (`@prizm/server`) that provides an API layer for desktop efficiency tools including sticky notes, todo lists, documents, clipboard history, terminal sessions, memory management, and AI agent chat. It uses TypeScript (ESM source, built via tsup), Express 5.x, and includes a Vue 3 dashboard (`panel/`).
+Prizm Server is a Node.js HTTP API server (`@prizm/server`) that provides an API layer for desktop efficiency tools including todo lists, documents (including legacy sticky-note style content), clipboard history, terminal sessions, memory management, and AI agent chat. It uses TypeScript (ESM source, built via tsup), Express 5.x, and includes a Vue 3 dashboard (`panel/`).
 
 The server can run standalone with default adapters or be integrated into a larger Electron/Node application with custom adapters. It's maintained as a Git submodule and workspace dependency.
 
@@ -61,11 +61,7 @@ yarn build:panel
 - `PRIZM_LOG_LEVEL` - Log level: info / warn / error
 - `PRIZM_AGENT_SCOPE_CONTEXT_MAX_CHARS` - Agent scope context max chars (default 4000)
 
-**LLM (Agent)：** 默认优先 MiMo，选择优先级 XIAOMIMIMO > ZHIPU > OPENAI
-
-- `XIAOMIMIMO_API_KEY` - 小米 MiMo（默认优先），可选 `XIAOMIMIMO_MODEL`（默认 mimo-v2-flash）
-- `ZHIPU_API_KEY` - 智谱 AI，可选 `ZHIPU_MODEL`（默认 glm-4-flash）
-- `OPENAI_API_KEY` - OpenAI 兼容，可选 `OPENAI_API_URL`、`OPENAI_MODEL`（默认 gpt-4o-mini）
+**LLM (Agent)：** 由服务端设置中的「LLM 配置」管理，支持多套配置（OpenAI 兼容 / Anthropic / Google），在设置页或 Panel 中配置，不再通过环境变量覆盖。
 
 **Local Embedding：** 本地向量模型，默认启用
 
@@ -125,8 +121,11 @@ src/
 │   ├── MetadataCache.ts         # Metadata caching
 │   ├── documentVersionStore.ts  # Document versioning
 │   ├── tokenUsageDb.ts          # Token usage database
-│   ├── migrate-scope-v2.ts      # Scope migration V2
-│   └── migrate-v3.ts            # Migration V3 (mdStore directory layout)
+│   ├── backgroundSession/       # Background session manager
+│   ├── cronScheduler/          # Cron scheduler
+│   ├── workflowEngine/         # Workflow definition and execution
+│   ├── scheduleReminder/       # Schedule reminder service
+│   └── toolPermission/          # Tool permission cleanup
 ├── llm/                         # LLM providers and AI services
 │   ├── builtinTools/            # Built-in agent tools (modular)
 │   │   ├── definitions.ts       # Tool schema definitions (OpenAI function format)
@@ -138,9 +137,9 @@ src/
 │   │   ├── searchTools.ts       # Search tools
 │   │   ├── knowledgeTools.ts    # Knowledge base tools
 │   │   └── terminalTools.ts     # Terminal execution tools
-│   ├── OpenAILikeProvider.ts    # OpenAI-compatible provider
-│   ├── ZhipuProvider.ts         # Zhipu AI provider
-│   ├── XiaomiMiMoProvider.ts    # Xiaomi MiMo provider
+│   ├── aiSdkBridge/             # LLM provider bridge (OpenAI/Anthropic/Google via server config)
+│   ├── modelLists.ts           # Model list definitions
+│   ├── prizmLLMAdapter.ts      # LLM adapter used by DefaultAgentAdapter
 │   ├── EverMemService.ts        # Memory system integration
 │   ├── localEmbedding.ts        # Local embedding model
 │   ├── systemPrompt.ts          # System prompt builder
@@ -176,6 +175,10 @@ src/
 │   ├── notify.ts                # Notification sending
 │   ├── settings.ts              # Settings management
 │   ├── embedding.ts             # Embedding model management
+│   ├── workflow.ts              # Workflow definitions and runs
+│   ├── task.ts                  # Background task runs
+│   ├── schedule.ts              # Schedule/reminder
+│   ├── cron.ts                  # Cron configuration
 │   └── mcpConfig.ts             # MCP server configuration
 ├── terminal/                    # Terminal session management
 │   ├── TerminalSessionManager.ts # Session lifecycle
@@ -185,7 +188,7 @@ src/
 ├── mcp/                         # MCP server (tools/ + stdio-tools/)
 ├── mcp-client/                  # External MCP server connections
 ├── search/                      # Search service (MiniSearch + ripgrep)
-├── settings/                    # Agent tools configuration
+├── settings/                    # Agent tools + server config (LLM configs via serverConfigStore)
 ├── websocket/                   # WebSocket event push server
 ├── server.ts                    # Express app creation, route mounting, lifecycle
 ├── index.ts                     # Main exports
@@ -296,7 +299,7 @@ Auth routes mounted separately at `/auth/*` to avoid path conflicts.
 
 ### Server Lifecycle
 
-**Startup:** HTTP listen → migration → service init (EverMem, TokenUsage, LockManager, AuditManager) → EventBus handler registration → WebSocket servers (event + terminal) → WS bridge handlers
+**Startup:** HTTP listen → service init (EverMem, TokenUsage, LockManager, AuditManager) → workflow/task engine (bgSessionManager, cronManager, workflow recovery, reminder service) → EventBus handler registration (audit, lock, memory, bgSession, schedule, search) → WebSocket servers (event + terminal) → WS bridge handlers
 
 **Shutdown:** Terminal WS → Terminal manager → Event WS → EventBus clear → TokenUsage DB → Lock manager → Audit manager → HTTP close
 
@@ -323,6 +326,10 @@ Server created via `createPrizmServer(adapters, options)` with options for `port
 - `/commands/*` - Custom commands CRUD (auth)
 - `/skills/*` - Skills management (auth)
 - `/agent-rules/*` - Agent rules CRUD, user-level + scope-level (auth)
+- `/workflow/*` - Workflow definitions and runs (auth + scope)
+- `/task/*` - Background task runs (auth + scope)
+- `/schedule/*` - Schedule/reminder (auth)
+- `/cron/*` - Cron configuration (auth)
 - `/notify` - Notifications (auth)
 - `/settings/*` - Settings (auth)
 - `/embedding/*` - Embedding model management (auth)
@@ -334,7 +341,7 @@ Server created via `createPrizmServer(adapters, options)` with options for `port
 ### Data Persistence
 
 - Client registry: `.prizm-data/clients.json`
-- Scope data: `.prizm-data/scopes/{scope}/` 下 notes/、groups/、todo/、documents/、sessions/ 等 .md 单文件
+- Scope data: `.prizm-data/scopes/{scope}/` 下按类型分 documents、todo、clipboard、sessions 等 .md 单文件
 - Resource locks: `.prizm-data/resource_locks.db` (SQLite)
 - Audit log: `.prizm-data/agent_audit.db` (SQLite)
 - Token usage: `.prizm-data/token_usage.db` (SQLite)

@@ -5,8 +5,7 @@ export default defineConfig({
     index: 'src/index.ts',
     cli: 'src/cli.ts',
     example: 'src/example.ts',
-    'mcp/stdio-bridge': 'src/mcp/stdio-bridge.ts',
-    'core/migrate-scope-v2': 'src/core/migrate-scope-v2.ts'
+    'mcp/stdio-bridge': 'src/mcp/stdio-bridge.ts'
   },
   format: ['esm'],
   target: 'es2022',

@@ -30,8 +30,7 @@
     "test:example": "node dist/example.js",
     "test:scope": "node scripts/scope-test.mjs",
     "test:scope:client": "node scripts/scope-test-client.mjs",
-    "mcp:stdio": "node dist/mcp/stdio-bridge.js",
-    "migrate:scope-v2": "node dist/core/migrate-scope-v2.js"
+    "mcp:stdio": "node dist/mcp/stdio-bridge.js"
   },
   "keywords": [
     "prizm",
@@ -43,11 +42,15 @@
   "author": "Prizm Team",
   "license": "PolyForm-Noncommercial-1.0.0",
   "dependencies": {
+    "@ai-sdk/anthropic": "^2.0.0",
+    "@ai-sdk/google": "^2.0.0",
+    "@ai-sdk/openai-compatible": "^2.0.0",
     "@huggingface/transformers": "^3.8.1",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@node-rs/jieba": "^2.0.1",
     "@prizm/evermemos": "workspace:*",
     "@vscode/ripgrep": "^1.17.0",
+    "ai": "^5.0.0",
     "better-sqlite3": "^12.6.2",
     "compression": "^1.8.1",
     "cors": "^2.8.6",

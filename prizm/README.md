@@ -1,10 +1,10 @@
 # Prizm Server
 
-Prizm 效率服务器 - 为桌面效率工具提供 HTTP API 访问接口。
+Prizm 效率服务器 - 为桌面效率工具提供 HTTP API 访问接口。详细使用与部署见 [USAGE.md](USAGE.md)，与 Cursor/LobeChat 集成见 [MCP-CONFIG.md](MCP-CONFIG.md)。
 
 ## 管理面板
 
-启动服务后访问 `http://127.0.0.1:4127/dashboard/` 打开内置管理面板，可可视化管理便签、发送通知等。Panel 请求自带 `X-Prizm-Panel: true`，无需 API Key。
+启动服务后访问 `http://127.0.0.1:4127/dashboard/` 打开内置管理面板，可查看概览、文档、待办、剪贴板、Agent 会话、审计、设置等并发送通知。Panel 请求自带 `X-Prizm-Panel: true`，无需 API Key。
 
 ## 鉴权与 Scope
 
@@ -15,9 +15,10 @@ Prizm 效率服务器 - 为桌面效率工具提供 HTTP API 访问接口。
 
 ## 功能特性
 
-- **便签管理**：便签和分组的 CRUD 操作
+- **文档管理**：文档 CRUD（Markdown，按 Scope 隔离），可与 Agent 共享上下文
+- **待办与剪贴板**：待办列表、剪贴板历史 CRUD
 - **通知信号**：发送通知事件（下游实现具体展示）
-- **Agent 对话**：LLM 驱动的会话与流式对话（支持智谱、小米 MiMo、OpenAI 兼容接口）
+- **Agent 对话**：LLM 驱动的会话与流式对话（LLM 由服务端设置中的「LLM 配置」管理，支持 OpenAI 兼容 / Anthropic / Google）
 
 ## 安装
 
@@ -54,12 +55,12 @@ console.log('Prizm Server running at', server.getAddress())
 
 ```typescript
 import { createPrizmServer } from '@prizm/server'
-import type { IStickyNotesAdapter, INotificationAdapter } from '@prizm/server'
+import type { IDocumentsAdapter, INotificationAdapter } from '@prizm/server'
 
 // 创建适配器，对接主应用的服务
-const notesAdapter: IStickyNotesAdapter = {
-  async getAllNotes() {
-    return await myApp.stickyNotesManager.getAllNotes()
+const documentsAdapter: IDocumentsAdapter = {
+  async getAllDocuments(scope) {
+    return await myApp.documentsManager.getAll(scope)
   },
   // ... 其他方法
 }
@@ -72,46 +73,16 @@ const notificationAdapter: INotificationAdapter = {
 
 // 启动服务器
 const server = createPrizmServer({
-  notes: notesAdapter,
+  documents: documentsAdapter,
   notification: notificationAdapter
 })
 
 await server.start()
 ```
 
-## LLM 提供商配置
+## LLM 配置
 
-Agent 对话功能根据环境变量自动选择 LLM 提供商，**默认优先小米 MiMo**，优先级：**小米 MiMo > 智谱 > OpenAI 兼容**。
-
-| 提供商 | 环境变量 | 可选模型变量 | 默认模型 |
-|--------|----------|-------------|----------|
-| 小米 MiMo（默认优先） | `XIAOMIMIMO_API_KEY` | `XIAOMIMIMO_MODEL` | mimo-v2-flash |
-| 智谱 AI (GLM) | `ZHIPU_API_KEY` | `ZHIPU_MODEL` | glm-4-flash |
-| OpenAI 兼容 | `OPENAI_API_KEY` | `OPENAI_MODEL` | gpt-4o-mini |
-| OpenAI 兼容 | `OPENAI_API_URL` | - | <https://api.openai.com/v1> |
-
-配置任一提供商的 API Key 后，Agent 将自动使用对应服务。未配置时返回提示消息。
-
-### 小米 MiMo 配置步骤
-
-1. **注册并申请 API**：打开 [MiMo Studio](https://aistudio.xiaomimimo.com/)，使用小米账号登录，在页面底部进入「API Platform」提交 API 申请。
-2. **获取 API Key**：申请通过后，在平台中创建 API Key 并复制。
-3. **设置环境变量**：
-
-   ```bash
-   # Windows PowerShell
-   $env:XIAOMIMIMO_API_KEY = "你的API-Key"
-
-   # 方式一：项目根目录 .env 文件（推荐）
-   XIAOMIMIMO_API_KEY=你的API-Key
-
-   # 方式二：Linux/macOS 当前会话
-   export XIAOMIMIMO_API_KEY=你的API-Key
-   ```
-
-   服务器启动时会自动加载 `.env`（项目根 `d:\prizm\.env` 或 `prizm/.env` 均可）。
-
-4. **可选**：指定模型 `XIAOMIMIMO_MODEL`（默认 `mimo-v2-flash`）。
+Agent 对话使用的 LLM 由**服务端设置**中的「LLM 配置」管理，支持多套配置（OpenAI 兼容 / Anthropic / Google）。在 **Dashboard 设置页**或 **Electron 客户端 → 设置 → 服务端配置** 中添加配置项，填写 API Key、Base URL（仅 OpenAI 兼容）、默认模型，并选择默认配置即可。无需再通过环境变量配置 LLM。
 
 ## API 文档
 
@@ -121,45 +92,26 @@ Agent 对话功能根据环境变量自动选择 LLM 提供商，**默认优先�
 GET /health
 ```
 
-### 便签管理
+### 文档管理
 
 ```bash
-# 获取所有便签
-GET /notes
+# 列出文档
+GET /documents?scope=default
 
-# 获取单条便签
-GET /notes/:id
+# 获取单篇文档
+GET /documents/:id?scope=default
 
-# 创建便签
-POST /notes
+# 创建文档
+POST /documents
 Content-Type: application/json
-{
-  "content": "便签内容",
-  "groupId": "可选分组ID"
-}
+{ "title": "标题", "content": "内容" }
 
-# 更新便签
-PATCH /notes/:id
-{
-  "content": "新内容"
-}
+# 更新文档
+PATCH /documents/:id
+{ "title": "新标题", "content": "新内容" }
 
-# 删除便签
-DELETE /notes/:id
-
-# 获取所有分组
-GET /notes/groups
-
-# 创建分组
-POST /notes/groups
-{ "name": "分组名称" }
-
-# 更新分组
-PATCH /notes/groups/:id
-{ "name": "新名称" }
-
-# 删除分组
-DELETE /notes/groups/:id
+# 删除文档
+DELETE /documents/:id
 ```
 
 ### 通知
@@ -203,20 +155,12 @@ Content-Type: application/json
 # 健康检查
 curl http://127.0.0.1:4127/health
 
-# 创建便签
-curl -X POST http://127.0.0.1:4127/notes \
-  -H "Content-Type: application/json" \
-  -d '{"content":"测试便签"}'
-
-# 获取所有便签
-curl http://127.0.0.1:4127/notes
-
 # 发送通知
 curl -X POST http://127.0.0.1:4127/notify \
   -H "Content-Type: application/json" \
   -d '{"title":"测试通知","body":"Hello from Prizm"}'
 
-# Agent 对话（需先注册获取 API Key，并配置 LLM 环境变量）
+# Agent 对话（需先注册获取 API Key，并在服务端设置中配置 LLM）
 curl -X POST "http://127.0.0.1:4127/agent/sessions" \
   -H "Authorization: Bearer <apiKey>" \
   -H "X-Prizm-Scope: default"
@@ -226,16 +170,20 @@ curl -X POST "http://127.0.0.1:4127/agent/sessions" \
 
 Prizm 通过适配器模式与底层服务解耦，你需要实现以下接口：
 
-- `IStickyNotesAdapter` - 便签管理
+- `IDocumentsAdapter` - 文档 CRUD（可选）
+- `ITodoListAdapter` - 待办列表（可选）
+- `IClipboardAdapter` - 剪贴板历史（可选）
 - `INotificationAdapter` - 通知发送
 - `IAgentAdapter` - Agent 会话与 LLM 对话（可选）
 
 默认提供的适配器：
 
-- `DefaultStickyNotesAdapter` - 内存存储
+- `DefaultDocumentsAdapter` - Markdown 文件存储
+- `DefaultTodoListAdapter` - Markdown 文件存储
+- `DefaultClipboardAdapter` - Markdown 文件存储
 - `DefaultNotificationAdapter` - 控制台输出
-- `DefaultAgentAdapter` - 基于 ScopeStore 的会话管理，LLM 由环境变量选型（智谱 / 小米 MiMo / OpenAI 兼容）
+- `DefaultAgentAdapter` - 基于 ScopeStore 的会话管理，LLM 由服务端设置中的「LLM 配置」管理
 
 ## 许可证
 
-MIT
+本仓库采用 [PolyForm Noncommercial 1.0.0](../LICENSE) 许可证，仅供非商业使用。

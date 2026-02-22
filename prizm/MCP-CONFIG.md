@@ -1,6 +1,8 @@
 # Prizm MCP 完整说明
 
-Prizm 通过 MCP（Model Context Protocol）向 Cursor、LobeChat 等 Agent 暴露本机统一上下文（便签、任务、剪贴板、文档），使其可以读取和操作桌面数据。
+Prizm 通过 MCP（Model Context Protocol）向 Cursor、LobeChat 等 Agent 暴露本机统一上下文（任务、剪贴板、文档等），使其可以读取和操作桌面数据。
+
+**说明**：便签能力已由文档（documents）承载，服务端不再提供 `/notes` API。若 MCP 工具列表中仍出现 `prizm_list_notes`、`prizm_create_note` 等，这些工具当前依赖已废弃的 `/notes` 接口，可能不可用；建议通过文档（`/documents`）相关接口操作内容。
 
 ## 前置条件
 
@@ -49,7 +51,7 @@ yarn build
 
 ### 3. 重启 Cursor
 
-保存配置后重启 Cursor，或在 MCP 设置中刷新。工具列表中应出现 `prizm_list_notes`、`prizm_create_note`、`prizm_list_todo_list` 等。
+保存配置后重启 Cursor，或在 MCP 设置中刷新。工具列表中应出现 `prizm_list_todo_list`、文档与剪贴板等工具（注：`prizm_list_notes` / `prizm_create_note` 依赖已废弃的 `/notes` API，当前可能不可用，请使用文档接口）。
 
 ---
 
@@ -117,7 +119,7 @@ cloudflared tunnel --url http://127.0.0.1:4127
 
 ## Scope 说明
 
-Scope 用于隔离不同工作场景的数据（便签、任务、剪贴板等）。MCP 会话在建立时确定 scope，所有工具调用均在该 scope 内执行。
+Scope 用于隔离不同工作场景的数据（任务、剪贴板、文档等）。MCP 会话在建立时确定 scope，所有工具调用均在该 scope 内执行。
 
 | Scope | 说明 |
 |-------|------|
@@ -290,7 +292,7 @@ Prizm Agent 对话支持**调用**用户配置的外部 MCP 服务器，使 LLM 
 ## 故障排查
 
 1. **stdio-bridge 启动失败**：确认 `yarn build` 已执行，`dist/mcp/stdio-bridge.js` 存在
-2. **Cursor 看不到工具**：检查 `args` 路径是否正确，Prizm 服务是否在运行
+2. **客户端 看不到工具**：检查 `args` 路径是否正确，Prizm 服务是否在运行
 3. **401 鉴权错误**：在 `env` 中正确设置 `PRIZM_API_KEY`，或在 Dashboard 中创建新 Key
 4. **云端连接超时**：确认隧道（ngrok/Cloudflare/Tailscale）正常运行，防火墙未拦截
 5. **scope 无权限**：客户端注册时需在 `requestedScopes` 中包含目标 scope，或使用 `*` 获取全部 scope
