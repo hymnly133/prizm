@@ -20,6 +20,8 @@ export type SendButtonHandler = (params: {
   editor: IEditor | null
   getMarkdownContent: () => string
   getInputRefs: () => InputRef[]
+  /** 当前待发送的图片附件（粘贴或上传），用于视觉模型多模态输入 */
+  getImageAttachments?: () => import('@prizm/client-core').ChatImageAttachment[]
 }) => Promise<void> | void
 
 export interface SendButtonProps {
@@ -102,6 +104,8 @@ export interface State extends PublicState {
   editor?: IEditor
   /** 当前输入附带的引用列表（显示在引用栏，不嵌入编辑器） */
   inputRefs: InputRef[]
+  /** 待发送的图片附件（粘贴或上传），发送后清空 */
+  pendingImages: import('@prizm/client-core').ChatImageAttachment[]
   focusBlockInput: (() => void) | null
   isContentEmpty: boolean
   markdownContent: string
@@ -115,6 +119,7 @@ export const initialState: State = {
   applyOverlayChipInsert: null,
   expand: false,
   inputRefs: [],
+  pendingImages: [],
   focusBlockInput: null,
   isContentEmpty: false,
   leftActions: [],

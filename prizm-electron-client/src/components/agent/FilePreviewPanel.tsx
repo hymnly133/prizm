@@ -7,6 +7,7 @@ import type { Document as PrizmDocument, TodoList } from '@prizm/client-core'
 import { X } from 'lucide-react'
 import { useEffect, useState, useCallback } from 'react'
 import { usePrizmContext } from '../../context/PrizmContext'
+import { LoadingPlaceholder } from '../ui/LoadingPlaceholder'
 import ImagePreviewModal from '../ImagePreviewModal'
 import type { FileKind } from '../../hooks/useFileList'
 
@@ -82,7 +83,7 @@ export function FilePreviewPanel({ fileRef, scope, onClose }: FilePreviewPanelPr
       </div>
       <div className="file-preview-panel__body">
         {loading ? (
-          <div style={{ padding: 24, textAlign: 'center', opacity: 0.5 }}>加载中…</div>
+          <LoadingPlaceholder />
         ) : error ? (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--ant-color-error)' }}>
             {error}

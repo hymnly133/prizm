@@ -59,7 +59,12 @@ export interface SessionChatContextValue {
   scrollToBottom: () => void
   handleMessagesScroll: () => void
 
-  sendMessage: (content: string, fileRefs?: FilePathRef[], runRefIds?: string[]) => Promise<string | null>
+  sendMessage: (
+    content: string,
+    fileRefs?: FilePathRef[],
+    runRefIds?: string[],
+    images?: import('@prizm/client-core').ChatImageAttachment[]
+  ) => Promise<string | null>
   stopGeneration: () => Promise<void>
   respondToInteract: (requestId: string, approved: boolean, paths?: string[]) => Promise<void>
   rollbackToCheckpoint: (
@@ -206,10 +211,15 @@ export const SessionChatProvider = memo(function SessionChatProvider({ sessionId
 
   // --- Actions (bound to sessionId + scope) ---
   const sendMessage = useCallback(
-    (content: string, fileRefs?: FilePathRef[], runRefIds?: string[]) => {
+    (
+      content: string,
+      fileRefs?: FilePathRef[],
+      runRefIds?: string[],
+      images?: import('@prizm/client-core').ChatImageAttachment[]
+    ) => {
       return useAgentSessionStore
         .getState()
-        .sendMessage(sessionId, content, scope, fileRefs, undefined, runRefIds)
+        .sendMessage(sessionId, content, scope, fileRefs, undefined, runRefIds, images)
     },
     [sessionId, scope]
   )

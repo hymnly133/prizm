@@ -40,7 +40,7 @@ const PrizmMarkdown = memo(({ children, onImageClick, components: propComponents
   }, [onImageClick, propComponents])
 
   return (
-    <Markdown {...props} allowHtml components={components}>
+    <Markdown {...props} allowHtml components={components as MarkdownProps['components']}>
       {processed as string}
     </Markdown>
   )

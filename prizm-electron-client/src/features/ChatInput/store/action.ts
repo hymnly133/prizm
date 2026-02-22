@@ -9,12 +9,15 @@ import { initialState } from './initialState'
 
 export interface Action {
   addInputRef: (ref: InputRef) => void
+  addPendingImage: (image: import('@prizm/client-core').ChatImageAttachment) => void
   clearInputRefs: () => void
+  clearPendingImages: () => void
   getJSONState: () => unknown
   getMarkdownContent: () => string
   handleSendButton: () => void
   handleStop: () => void
   removeInputRef: (key: string) => void
+  removePendingImage: (index: number) => void
   setApplyOverlayTextReplace: (fn: OverlayTextReplacer | null) => void
   setApplyOverlayChipInsert: (fn: OverlayChipInserter | null) => void
   setDocument: (type: string, content: unknown, options?: Record<string, unknown>) => void
@@ -42,8 +45,16 @@ export const store: CreateStore = (publicState) => (set, get) => ({
     set({ inputRefs: [...existing, ref] })
   },
 
+  addPendingImage: (image: import('@prizm/client-core').ChatImageAttachment) => {
+    set({ pendingImages: [...get().pendingImages, image] })
+  },
+
   clearInputRefs: () => {
     set({ inputRefs: [] })
+  },
+
+  clearPendingImages: () => {
+    set({ pendingImages: [] })
   },
 
   getJSONState: () => {
@@ -59,10 +70,12 @@ export const store: CreateStore = (publicState) => (set, get) => ({
       clearContent: () => {
         get().setMarkdownContent('')
         get().clearInputRefs()
+        get().clearPendingImages()
       },
       editor: editor ?? null,
       getMarkdownContent: get().getMarkdownContent,
-      getInputRefs: () => get().inputRefs
+      getInputRefs: () => get().inputRefs,
+      getImageAttachments: () => get().pendingImages
     })
     const focusEditor = () => get().editor?.focus() ?? get().focusBlockInput?.()
     if (result && typeof (result as Promise<unknown>)?.then === 'function') {
@@ -92,6 +105,12 @@ export const store: CreateStore = (publicState) => (set, get) => ({
 
   removeInputRef: (key: string) => {
     set({ inputRefs: get().inputRefs.filter((r) => r.key !== key) })
+  },
+
+  removePendingImage: (index: number) => {
+    const list = get().pendingImages
+    if (index < 0 || index >= list.length) return
+    set({ pendingImages: list.filter((_, i) => i !== index) })
   },
 
   setApplyOverlayTextReplace: (fn: OverlayTextReplacer | null) => {

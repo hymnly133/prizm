@@ -426,16 +426,17 @@ const MentionSlashOverlay = memo(() => {
       byCategory.get(cat)!.push({ cmd, index })
     })
     const sections: React.ReactNode[] = []
-    const orderedKeys = [
+    type SlashCat = (typeof SLASH_CATEGORY_ORDER)[number]
+    const orderedKeys: (SlashCat | string | undefined)[] = [
       ...SLASH_CATEGORY_ORDER,
-      ...Array.from(byCategory.keys()).filter((k) => k !== undefined && !SLASH_CATEGORY_ORDER.includes(k)),
+      ...Array.from(byCategory.keys()).filter((k) => k !== undefined && !SLASH_CATEGORY_ORDER.includes(k as SlashCat)),
       undefined
     ]
     for (const catKey of orderedKeys) {
       const group = byCategory.get(catKey)
       if (!group?.length) continue
       const label = catKey ? (SLASH_CATEGORY_CONFIG[catKey]?.label ?? catKey) : '其他'
-      const Icon = catKey && SLASH_CATEGORY_CONFIG[catKey]?.icon ? SLASH_CATEGORY_CONFIG[catKey].icon : FileText
+      const Icon = catKey && SLASH_CATEGORY_CONFIG[catKey] ? SLASH_CATEGORY_CONFIG[catKey].icon : FileText
       const accent = 'var(--ant-color-text-secondary)'
       sections.push(
         <div key={`cat-${catKey ?? '_'}`} className="mention-overlay-group-header">

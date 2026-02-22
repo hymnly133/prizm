@@ -94,6 +94,7 @@ export const AgentDetailSidebar = memo(function AgentDetailSidebar({
                   isNewConversationReady={isNewConversationReady}
                   models={sidebarData.models}
                   defaultModel={sidebarData.defaultModel}
+                  systemDefaultLabel={sidebarData.systemDefaultLabel}
                   selectedModel={selectedModel}
                   onModelChange={onModelChange}
                   systemPrompt={sidebarData.systemPrompt}

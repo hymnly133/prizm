@@ -1,7 +1,9 @@
 import { ActionIcon } from '@lobehub/ui'
-import { Button, Empty, Popconfirm, Tag, Tooltip } from 'antd'
+import { Button, Popconfirm, Tag, Tooltip } from 'antd'
 import { Undo2 } from 'lucide-react'
 import type { DedupLogEntry } from '@prizm/client-core'
+import { EmptyState } from '../../ui/EmptyState'
+import { LoadingPlaceholder } from '../../ui/LoadingPlaceholder'
 import { useMemoryStyles } from './styles'
 
 interface DedupLogProps {
@@ -28,10 +30,10 @@ export function DedupLog({ entries, loading, undoingId, onRefresh, onUndo }: Ded
 
       <div className={styles.partition}>
         {loading ? (
-          <div className={styles.empty}>加载中...</div>
+          <LoadingPlaceholder className={styles.empty} />
         ) : entries.length === 0 ? (
           <div className={styles.empty}>
-            <Empty description="暂无去重记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            <EmptyState description="暂无去重记录" />
           </div>
         ) : (
           entries.map((entry) => (

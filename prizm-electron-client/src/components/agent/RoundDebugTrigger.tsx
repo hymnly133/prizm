@@ -4,8 +4,9 @@
  * 仅当存在 roundDebug 时渲染小按钮，点击后弹层展示请求参数与系统提示词。
  */
 import { memo, useState, useCallback, useEffect } from 'react'
-import { Button, Modal, Spin, Typography } from 'antd'
+import { Button, Modal, Typography } from 'antd'
 import { Bug } from 'lucide-react'
+import { LoadingPlaceholder } from '../ui/LoadingPlaceholder'
 import { useSessionChat } from '../../context/SessionChatContext'
 import { usePrizmContext } from '../../context/PrizmContext'
 import { useAgentSessionStore } from '../../store/agentSessionStore'
@@ -103,10 +104,7 @@ export const RoundDebugTrigger = memo(function RoundDebugTrigger({
             <Text strong>系统提示词</Text>
             <div className="round-debug-modal__prompt-wrap" style={{ marginTop: 8 }}>
               {systemPromptLoading ? (
-                <div className="round-debug-modal__loading">
-                  <Spin size="small" />
-                  <span>加载中…</span>
-                </div>
+                <LoadingPlaceholder />
               ) : (
                 <pre className="round-debug-modal__pre round-debug-modal__pre--scroll" aria-label="系统提示词">
                   {systemPrompt || '（无）'}

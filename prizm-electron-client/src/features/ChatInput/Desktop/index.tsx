@@ -9,6 +9,7 @@ import ActionBar from '../ActionBar'
 import BlockInput from '../BlockInput'
 import MentionSlashOverlay from '../MentionSlashOverlay'
 import RefChipsBar from '../RefChipsBar'
+import PendingImagesBar from '../PendingImagesBar'
 import SendArea from '../SendArea'
 
 const styles = createStaticStyles(({ css }) => ({
@@ -94,6 +95,7 @@ const DesktopChatInput = memo<DesktopChatInputProps>(
               <Flexbox gap={0}>
                 {extenHeaderContent}
                 <RefChipsBar />
+                <PendingImagesBar />
               </Flexbox>
             }
             {...inputContainerProps}

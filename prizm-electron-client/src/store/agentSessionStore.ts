@@ -11,6 +11,7 @@ import type {
   AgentSession,
   EnrichedSession,
   AgentMessage,
+  ChatImageAttachment,
   InteractRequestPayload,
   PrizmClient,
   RollbackResult
@@ -82,7 +83,8 @@ export interface AgentSessionStoreState {
     scope: string,
     fileRefs?: FilePathRef[],
     model?: string,
-    runRefIds?: string[]
+    runRefIds?: string[],
+    images?: ChatImageAttachment[]
   ): Promise<string | null>
   stopGeneration(sessionId: string, scope: string): Promise<void>
   respondToInteract(
@@ -122,6 +124,7 @@ export interface RoundDebugRequestPayload {
   model?: string
   fileRefs?: FilePathRef[]
   runRefIds?: string[]
+  images?: ChatImageAttachment[]
   thinking?: boolean
 }
 
@@ -722,7 +725,8 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
       scope: string,
       fileRefs?: FilePathRef[],
       model?: string,
-      runRefIds?: string[]
+      runRefIds?: string[],
+      images?: ChatImageAttachment[]
     ): Promise<string | null> {
       const http = _httpClient
       if (!http || !content.trim()) return null
@@ -754,10 +758,38 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
       internals.abortController = ac
 
       const now = Date.now()
+      const userParts: AgentMessage['parts'] = [{ type: 'text', content: content.trim() }]
+      if (images?.length) {
+        for (const im of images) {
+          if (im.url) {
+            ;(
+              userParts as Array<
+                | { type: 'text'; content: string }
+                | { type: 'image'; url?: string; base64?: string; mimeType?: string }
+              >
+            ).push({
+              type: 'image',
+              url: im.url,
+              mimeType: im.mimeType
+            })
+          } else if (im.base64) {
+            ;(
+              userParts as Array<
+                | { type: 'text'; content: string }
+                | { type: 'image'; url?: string; base64?: string; mimeType?: string }
+              >
+            ).push({
+              type: 'image',
+              base64: im.base64,
+              mimeType: im.mimeType ?? 'image/png'
+            })
+          }
+        }
+      }
       const userMsg: AgentMessage = {
         id: tmpId('user'),
         role: 'user',
-        parts: [{ type: 'text', content: content.trim() }],
+        parts: userParts,
         createdAt: now
       }
       const assistantMsg: AgentMessage = {
@@ -780,6 +812,7 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
         model: selectedModel,
         fileRefs,
         runRefIds,
+        images,
         thinking: thinkingEnabled || undefined
       }
       try {
@@ -789,6 +822,7 @@ export const useAgentSessionStore = create<AgentSessionStoreState>()((set, get) 
           model: selectedModel,
           fileRefs,
           runRefIds,
+          images,
           thinking: thinkingEnabled || undefined,
           onChunk: (chunk) => processStreamChunk(chunk, chunkCtx),
           onError: (msg) => set({ error: msg })

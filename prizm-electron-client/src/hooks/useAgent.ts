@@ -87,12 +87,13 @@ export function useAgent(scope: string) {
       content: string,
       sessionOverride?: EnrichedSession | null,
       fileRefs?: FilePathRef[],
-      runRefIds?: string[]
+      runRefIds?: string[],
+      images?: import('@prizm/client-core').ChatImageAttachment[]
     ) => {
       const state = useAgentSessionStore.getState()
       const sid = sessionOverride?.id ?? state.currentSessionId
       if (!sid) return Promise.resolve(null)
-      return state.sendMessage(sid, content, scope, fileRefs, undefined, runRefIds)
+      return state.sendMessage(sid, content, scope, fileRefs, undefined, runRefIds, images)
     },
     [scope]
   )

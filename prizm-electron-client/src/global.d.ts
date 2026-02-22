@@ -73,6 +73,15 @@ declare global {
       setNativeTheme(mode: 'auto' | 'light' | 'dark'): Promise<boolean>
       /** 在系统资源管理器中打开目录 */
       openInExplorer(dirPath: string): Promise<boolean>
+      browserNode: {
+        start(mode?: 'internal' | 'external'): Promise<{ success: boolean; message: string }>
+        stop(): Promise<boolean>
+        getStatus(): Promise<{
+          isRunning: boolean
+          mode: 'internal' | 'external' | null
+          wsEndpoint: string | null
+        }>
+      }
     }
     quickPanelApi?: {
       onShow(callback: (data: { clipboardText: string }) => void): () => void

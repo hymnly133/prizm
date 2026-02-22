@@ -1,5 +1,5 @@
 import { ActionIcon } from '@lobehub/ui'
-import { Empty, Popconfirm, Tag, Collapse, Tooltip, Spin } from 'antd'
+import { Popconfirm, Spin, Tag, Collapse, Tooltip } from 'antd'
 import { Trash2, ExternalLink } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { motion } from 'motion/react'
@@ -19,6 +19,8 @@ import {
   subdivideScope,
   subdivideSession
 } from './partitionUtils'
+import { EmptyState } from '../../ui/EmptyState'
+import { LoadingPlaceholder } from '../../ui/LoadingPlaceholder'
 import { useMemoryStyles } from './styles'
 
 interface MemoryListProps {
@@ -28,7 +30,7 @@ interface MemoryListProps {
   onDelete: (id: string) => void
 }
 
-export function MemoryList({ memories, loading, currentScope, onDelete }: MemoryListProps) {
+function MemoryList({ memories, loading, currentScope, onDelete }: MemoryListProps) {
   const { styles } = useMemoryStyles()
   const { navigateToAgentMessage } = useNavigation()
 
@@ -36,9 +38,9 @@ export function MemoryList({ memories, loading, currentScope, onDelete }: Memory
     return (
       <div className={styles.empty}>
         {loading ? (
-          <Spin tip="加载中..." />
+          <LoadingPlaceholder />
         ) : (
-          <Empty description="暂无记忆" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          <EmptyState description="暂无记忆" />
         )}
       </div>
     )
@@ -257,3 +259,5 @@ export function MemoryList({ memories, loading, currentScope, onDelete }: Memory
     </Spin>
   )
 }
+
+export { MemoryList }

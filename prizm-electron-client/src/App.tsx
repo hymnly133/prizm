@@ -1,7 +1,7 @@
 import { ActionIcon, Icon } from '@lobehub/ui'
 import { Segmented } from './components/ui/Segmented'
 import { App as AntdApp, Modal } from 'antd'
-import type { NotificationPayload } from '@prizm/client-core'
+import { buildServerUrl, type NotificationPayload } from '@prizm/client-core'
 import type { LucideIcon } from 'lucide-react'
 import {
   FileText,
@@ -43,6 +43,7 @@ import WorkPage from './views/WorkPage'
 import WorkflowPage from './views/WorkflowPage'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import './styles/schedule.css'
+import './styles/collab-hub.css'
 import './styles/workflow-page.css'
 import './styles/workflow.css'
 import './styles/workflow-editor.css'
@@ -153,7 +154,31 @@ function AppContent() {
           return
         }
         if (!cfg.api_key?.length) {
-          addLog('需要注册客户端获取 API Key', 'warning')
+          if (cfg.client?.auto_register === 'true' && cfg.server?.host && cfg.server?.port) {
+            try {
+              const serverUrl = buildServerUrl(cfg.server.host, cfg.server.port)
+              const apiKey = await window.prizm.registerClient(
+                serverUrl,
+                cfg.client.name || 'Prizm Electron Client',
+                cfg.client.requested_scopes ?? ['default', 'online']
+              )
+              if (apiKey) {
+                const newCfg = await loadConfig()
+                if (newCfg?.api_key) {
+                  addLog('已自动注册并连接', 'success')
+                  await initializePrizm(newCfg, {
+                    onLog: addLog,
+                    onNotify: (p: NotificationPayload) => addLog(`通知: ${p.title}`, 'info')
+                  })
+                  return
+                }
+              }
+            } catch {
+              addLog('自动注册失败，请到设置页手动注册', 'warning')
+            }
+          } else {
+            addLog('需要注册客户端获取 API Key', 'warning')
+          }
           setActivePage('settings')
           return
         }

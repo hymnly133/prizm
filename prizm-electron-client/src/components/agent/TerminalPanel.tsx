@@ -13,7 +13,7 @@ import { createClientLogger } from '@prizm/client-core'
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 
 const log = createClientLogger('TerminalUI')
-import { Button, Tabs, Tooltip, Badge, Dropdown, Empty } from 'antd'
+import { Button, Tabs, Tooltip, Badge, Dropdown } from 'antd'
 import {
   PlusOutlined,
   CloseOutlined,
@@ -27,6 +27,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
+import { EmptyState } from '../ui/EmptyState'
 import { usePrizmContext } from '../../context/PrizmContext'
 import { TerminalConnection } from '@prizm/client-core'
 import type { TerminalSessionInfo } from '@prizm/client-core'
@@ -404,14 +405,17 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            flex: 1,
-            gap: 12
+            flex: 1
           }}
         >
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无终端" />
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateTerminal}>
-            新建终端
-          </Button>
+          <EmptyState
+            description="暂无终端"
+            actions={
+              <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateTerminal}>
+                新建终端
+              </Button>
+            }
+          />
         </div>
       ) : (
         <Tabs

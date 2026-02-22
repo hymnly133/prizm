@@ -6,11 +6,12 @@
  */
 
 import { useState, useCallback, useMemo } from 'react'
-import { Button, Space, Empty, Statistic, Row, Col, Modal, Collapse } from 'antd'
+import { Button, Space, Statistic, Row, Col, Modal, Collapse } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import type { AgentSession } from '@prizm/client-core'
 import { useAgentSessionStore } from '../../store/agentSessionStore'
 import { useScopeDataStore } from '../../store/scopeDataStore'
+import { EmptyState } from '../ui/EmptyState'
 import { ExecutionCard, ExecutionResultView } from '../execution'
 
 export interface BackgroundTasksPanelProps {
@@ -126,28 +127,28 @@ export function BackgroundTasksPanel({ onLoadSession }: BackgroundTasksPanelProp
             <Statistic
               title="活跃"
               value={summary.active}
-              valueStyle={{ color: 'var(--ant-color-primary)' }}
+              styles={{ content: { color: 'var(--ant-color-primary)' } }}
             />
           </Col>
           <Col span={4}>
             <Statistic
               title="已完成"
               value={summary.completed}
-              valueStyle={{ color: 'var(--ant-color-success)' }}
+              styles={{ content: { color: 'var(--ant-color-success)' } }}
             />
           </Col>
           <Col span={4}>
             <Statistic
               title="失败"
               value={summary.failed}
-              valueStyle={{ color: 'var(--ant-color-error)' }}
+              styles={{ content: { color: 'var(--ant-color-error)' } }}
             />
           </Col>
           <Col span={4}>
             <Statistic
               title="超时"
               value={summary.timeout}
-              valueStyle={{ color: 'var(--ant-color-warning)' }}
+              styles={{ content: { color: 'var(--ant-color-warning)' } }}
             />
           </Col>
           <Col span={4}>
@@ -157,7 +158,7 @@ export function BackgroundTasksPanel({ onLoadSession }: BackgroundTasksPanelProp
             <Statistic
               title="已中断"
               value={summary.interrupted}
-              valueStyle={{ color: 'var(--ant-color-warning)' }}
+              styles={{ content: { color: 'var(--ant-color-warning)' } }}
             />
           </Col>
         </Row>
@@ -170,7 +171,7 @@ export function BackgroundTasksPanel({ onLoadSession }: BackgroundTasksPanelProp
       </Space>
 
       {bgSessions.length === 0 && (
-        <Empty description="暂无后台任务" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        <EmptyState description="暂无后台任务" />
       )}
 
       {activeSessions.length > 0 && (

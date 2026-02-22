@@ -5,9 +5,11 @@
  * 支持可选的"总览"标签页和可选的侧边栏 header。
  * 自动过滤：隐藏工具会话（Tool LLM、工作流管理等）；仅显示交互式和直接触发的 BG session。
  */
-import { ActionIcon, Empty } from '@lobehub/ui'
+import { ActionIcon } from '@lobehub/ui'
 import { Modal } from 'antd'
 import { AccentList } from '../ui/AccentList'
+import { EmptyState } from '../ui/EmptyState'
+import { LoadingPlaceholder } from '../ui/LoadingPlaceholder'
 import { LayoutDashboard, Plus, Trash2, Zap } from 'lucide-react'
 import { memo, useMemo, useCallback } from 'react'
 import type { EnrichedSession } from '@prizm/client-core'
@@ -201,9 +203,11 @@ export const AgentSessionList = memo(function AgentSessionList({
           </div>
         )}
         {loading && visibleSessions.length === 0 ? (
-          <div className="agent-sessions-loading">加载中...</div>
+          <LoadingPlaceholder />
         ) : visibleSessions.length === 0 ? (
-          <Empty title="暂无会话" description={showHeader ? '点击 + 新建会话' : '点击 + 新建'} />
+          <EmptyState
+            description={showHeader ? '暂无会话，点击 + 新建会话' : '暂无会话，点击 + 新建'}
+          />
         ) : (
           <AccentList activeKey={activeSessionId} items={sessionListItems} />
         )}

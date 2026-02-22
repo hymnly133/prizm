@@ -20,6 +20,8 @@ export interface AgentOverviewData {
   loadDocuments: () => Promise<void>
   models: AvailableModel[]
   defaultModel: string
+  /** 系统默认模型解析后的展示名 */
+  systemDefaultLabel: string
   memoryEnabled: boolean
   userMemoryCount: number
   scopeMemoryCount: number
@@ -51,6 +53,7 @@ export function useAgentOverviewData(): AgentOverviewData {
   const [scopeContextLoading, setScopeContextLoading] = useState(false)
   const [models, setModels] = useState<AvailableModel[]>([])
   const [defaultModel, setDefaultModel] = useState('')
+  const [systemDefaultLabel, setSystemDefaultLabel] = useState('')
 
   const loadScopeContext = useCallback(async () => {
     if (!http || !currentScope) return
@@ -73,18 +76,27 @@ export function useAgentOverviewData(): AgentOverviewData {
     if (!http) return
     try {
       const [modelsRes, tools] = await Promise.all([http.getAgentModels(), http.getAgentTools()])
-      const list = modelsRes.models ?? []
+      const res = modelsRes as {
+        entries?: Array<{ configId: string; configName: string; modelId: string; label: string }>
+        defaultModel?: string
+      }
+      const list = res.entries ?? []
+      const systemDefaultId = res.defaultModel ?? ''
       setModels(
-        list.map((m) => ({
-          id: `${m.configId}:${m.modelId}`,
-          label: m.label,
-          provider: modelsRes.configs?.find((c) => c.id === m.configId)?.name ?? m.configId
+        list.map((e) => ({
+          id: `${e.configId}:${e.modelId}`,
+          label: e.label,
+          provider: e.configName
         }))
       )
-      setDefaultModel(tools.agent?.defaultModel ?? '')
+      setDefaultModel(tools.agent?.defaultModel ?? systemDefaultId)
+      setSystemDefaultLabel(
+        list.find((e) => `${e.configId}:${e.modelId}` === systemDefaultId)?.label ?? ''
+      )
     } catch {
       setModels([])
       setDefaultModel('')
+      setSystemDefaultLabel('')
     }
   }, [http])
 
@@ -103,6 +115,7 @@ export function useAgentOverviewData(): AgentOverviewData {
     loadDocuments,
     models,
     defaultModel,
+    systemDefaultLabel,
     memoryEnabled: stats.memoryEnabled,
     userMemoryCount: stats.userMemoryCount,
     scopeMemoryCount: stats.scopeMemoryCount,

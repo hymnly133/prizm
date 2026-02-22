@@ -20,12 +20,14 @@ import type { SessionStats } from './agentSidebarTypes'
 import type { ActivityItem } from './agentSidebarTypes'
 import type { ToolCallRecord } from '@prizm/client-core'
 import { Select } from '../ui/Select'
+import { buildModelSelectOptionsFromAvailable } from '../../utils/modelSelectOptions'
 import { MEMORY_LAYER_DESCRIPTIONS } from './agentSidebarTypes'
 import { SessionActivityTimeline } from './SessionActivityTimeline'
 import { SessionStatsPanel } from './SessionStatsPanel'
 import { MemorySidebarPanel } from './MemorySidebarPanel'
 import { MemoryInspector } from './MemoryInspector'
 import { EmptyState } from '../ui/EmptyState'
+import { LoadingPlaceholder } from '../ui/LoadingPlaceholder'
 import { fadeUp, STAGGER_DELAY } from '../../theme/motionPresets'
 
 export interface AgentSessionSidebarProps {
@@ -35,6 +37,8 @@ export interface AgentSessionSidebarProps {
   isNewConversationReady: boolean
   models: AvailableModel[]
   defaultModel: string
+  /** 系统默认模型展示名，用于第一项「系统默认（当前: X）」 */
+  systemDefaultLabel?: string
   selectedModel: string | undefined
   onModelChange?: (model: string | undefined) => void
   systemPrompt: string
@@ -68,6 +72,7 @@ export const AgentSessionSidebar = memo(function AgentSessionSidebar({
   isNewConversationReady,
   models,
   defaultModel,
+  systemDefaultLabel,
   selectedModel,
   onModelChange,
   systemPrompt,
@@ -100,13 +105,19 @@ export const AgentSessionSidebar = memo(function AgentSessionSidebar({
         <motion.section className="agent-right-section" {...fadeUp(idx++ * STAGGER_DELAY)}>
           <h3 className="agent-right-section-title">模型</h3>
           {models.length === 0 ? (
-            <p className="text-sm text-amber-500/90">暂无可用模型，请先在设置中配置 LLM</p>
+            <p className="text-sm text-amber-500/90">
+              暂无可用模型。请先在 设置 → LLM 配置 中添加提供商并保存。
+            </p>
           ) : (
             <Select
-              options={[
-                { label: defaultModel ? `默认 (${defaultModel})` : '默认', value: '' },
-                ...models.map((m) => ({ label: m.label, value: m.id }))
-              ]}
+              options={buildModelSelectOptionsFromAvailable(models, {
+                label: systemDefaultLabel
+                  ? `系统默认（当前: ${systemDefaultLabel}）`
+                  : defaultModel
+                  ? models.find((m) => m.id === defaultModel)?.label ?? `系统默认 (${defaultModel})`
+                  : '系统默认',
+                value: ''
+              })}
               value={selectedModel ?? ''}
               onChange={(v) => onModelChange(v || undefined)}
               style={{ width: '100%' }}
@@ -163,10 +174,7 @@ export const AgentSessionSidebar = memo(function AgentSessionSidebar({
             aria-label="点击查看完整系统提示词"
           >
             {systemPromptLoading ? (
-              <div className="agent-right-loading">
-                <Loader2 size={14} className="spinning" />
-                <span>加载中</span>
-              </div>
+              <LoadingPlaceholder />
             ) : systemPrompt ? (
               <>
                 <pre className="agent-context-text agent-system-prompt-preview">

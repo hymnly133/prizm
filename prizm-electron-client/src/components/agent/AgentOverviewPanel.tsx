@@ -29,6 +29,7 @@ import { TokenDashboard } from './TokenDashboard'
 import { BackgroundTasksPanel } from './BackgroundTasksPanel'
 import { AnimatedCounter } from './AnimatedCounter'
 import { Select } from '../ui/Select'
+import { buildModelSelectOptionsFromAvailable } from '../../utils/modelSelectOptions'
 import { EmptyState } from '../ui/EmptyState'
 import { RefreshIconButton } from '../ui/RefreshIconButton'
 import { LoadingPlaceholder } from '../ui/LoadingPlaceholder'
@@ -53,6 +54,7 @@ export function AgentOverviewPanel({ selectedModel, onModelChange, onLoadSession
     loadDocuments,
     models,
     defaultModel,
+    systemDefaultLabel,
     memoryEnabled,
     userMemoryCount,
     scopeMemoryCount,
@@ -91,10 +93,15 @@ export function AgentOverviewPanel({ selectedModel, onModelChange, onLoadSession
               <Tag color="blue">{currentScope || 'default'}</Tag>
               {onModelChange && (
                 <Select
-                  options={[
-                    { label: defaultModel ? `默认 (${defaultModel})` : '默认', value: '' },
-                    ...models.map((m: AvailableModel) => ({ label: m.label, value: m.id }))
-                  ]}
+                  options={buildModelSelectOptionsFromAvailable(models, {
+                    label: systemDefaultLabel
+                      ? `系统默认（当前: ${systemDefaultLabel}）`
+                      : defaultModel
+                        ? (models.find((m: AvailableModel) => m.id === defaultModel)?.label ??
+                            `系统默认 (${defaultModel})`)
+                        : '系统默认',
+                    value: ''
+                  })}
                   value={selectedModel ?? ''}
                   onChange={(v) => onModelChange(v || undefined)}
                   style={{ width: 160 }}

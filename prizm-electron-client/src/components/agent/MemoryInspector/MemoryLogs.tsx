@@ -1,5 +1,7 @@
-import { Button, Empty, Input, Select, Tag, Tooltip } from 'antd'
+import { Button, Input, Select, Tag, Tooltip } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
+import { EmptyState } from '../../ui/EmptyState'
+import { LoadingPlaceholder } from '../../ui/LoadingPlaceholder'
 import { usePrizmContext } from '../../../context/PrizmContext'
 import type { MemoryLogEntry } from '@prizm/client-core'
 import { useMemoryStyles } from './styles'
@@ -156,12 +158,11 @@ export function MemoryLogs({ open }: MemoryLogsProps) {
 
       <div className={styles.partition}>
         {loading ? (
-          <div className={styles.empty}>加载中...</div>
+          <LoadingPlaceholder className={styles.empty} />
         ) : filtered.length === 0 ? (
           <div className={styles.empty}>
-            <Empty
+            <EmptyState
               description={logs.length === 0 ? '暂无记忆日志' : '没有匹配的日志'}
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
             />
           </div>
         ) : (

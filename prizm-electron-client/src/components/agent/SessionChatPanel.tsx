@@ -12,7 +12,7 @@ import type { ChatActionsBarProps } from '@lobehub/ui/chat'
 import { Button, Modal, message } from 'antd'
 import { motion, AnimatePresence } from 'motion/react'
 import { Copy, Edit, RotateCw, Undo2, Check, X } from 'lucide-react'
-import type { MessagePart, MessagePartTool, SessionCheckpoint, EnrichedSession } from '@prizm/client-core'
+import type { MessagePart, MessagePartImage, MessagePartTool, SessionCheckpoint, EnrichedSession } from '@prizm/client-core'
 import { ToolCallCard } from './ToolCallCard'
 import { ToolCallBadge } from './ToolCallBadge'
 import { ToolGroup } from './ToolGroup'
@@ -190,6 +190,7 @@ type MessagePartText = Extract<MessagePart, { type: 'text' }>
 
 type PartSegment =
   | { kind: 'text'; part: MessagePartText; index: number }
+  | { kind: 'image'; part: MessagePartImage; index: number }
   | { kind: 'tool'; part: MessagePartTool; index: number }
   | { kind: 'tool-group'; tools: MessagePartTool[]; startIndex: number }
 
@@ -218,6 +219,9 @@ function groupPartsForCompact(parts: MessagePart[]): PartSegment[] {
     if (p.type === 'text') {
       flushToolRun()
       segments.push({ kind: 'text', part: p as MessagePartText, index: i })
+    } else if (p.type === 'image') {
+      flushToolRun()
+      segments.push({ kind: 'image', part: p as MessagePartImage, index: i })
     } else {
       if (toolRun.length === 0) toolRunStart = i
       toolRun.push(p as MessagePartTool)
@@ -239,15 +243,20 @@ const AssistantPartsMessage = memo(function AssistantPartsMessage({
   if (!compact) {
     return (
       <div className="assistant-message-by-parts">
-        {parts.map((p, i) =>
-          p.type === 'text' ? (
-            <div key={`text-${i}`} className="assistant-part-text">
-              <Markdown>{p.content}</Markdown>
-            </div>
-          ) : (
-            <ToolCallCard key={p.id} tc={p as MessagePartTool} session={session} />
-          )
-        )}
+        {parts.map((p, i) => {
+          if (p.type === 'text') {
+            return (
+              <div key={`text-${i}`} className="assistant-part-text">
+                <Markdown>{p.content}</Markdown>
+              </div>
+            )
+          }
+          if (p.type === 'image') {
+            const src = p.url || (p.base64 ? `data:${p.mimeType ?? 'image/png'};base64,${p.base64}` : '')
+            return src ? <img key={`img-${i}`} src={src} style={{ maxWidth: '100%', maxHeight: 240, borderRadius: 8, objectFit: 'contain' }} /> : null
+          }
+          return <ToolCallCard key={p.id} tc={p as MessagePartTool} session={session} />
+        })}
       </div>
     )
   }
@@ -263,6 +272,10 @@ const AssistantPartsMessage = memo(function AssistantPartsMessage({
               <Markdown>{seg.part.content}</Markdown>
             </div>
           )
+        }
+        if (seg.kind === 'image') {
+          const src = seg.part.url || (seg.part.base64 ? `data:${seg.part.mimeType ?? 'image/png'};base64,${seg.part.base64}` : '')
+          return src ? <img key={`img-${seg.index}`} src={src} style={{ maxWidth: '100%', maxHeight: 240, borderRadius: 8, objectFit: 'contain' as const }} /> : null
         }
         if (seg.kind === 'tool-group') {
           return <ToolGroup key={`tg-${seg.startIndex}`} tools={seg.tools} />
@@ -370,6 +383,40 @@ export const SessionChatPanel = memo(function SessionChatPanel() {
               onConfirm={(newContent) => handleEditConfirm(props.id, newContent)}
               onCancel={handleEditCancel}
             />
+          )
+        }
+        const userExtra = props.extra as { parts?: Array<{ type: string; content?: string; url?: string; base64?: string; mimeType?: string }> } | undefined
+        const userParts = userExtra?.parts
+        const hasImagePart = Array.isArray(userParts) && userParts.some((p) => (p as { type: string }).type === 'image')
+        if (hasImagePart && Array.isArray(userParts)) {
+          return (
+            <div className="user-message-by-parts">
+              {userParts.map((p, i) => {
+                const part = p as { type: string; content?: string; url?: string; base64?: string; mimeType?: string }
+                if (part.type === 'text') {
+                  return (
+                    <div key={`t-${i}`} className="user-part-text">
+                      <Markdown>{part.content ?? ''}</Markdown>
+                    </div>
+                  )
+                }
+                if (part.type === 'image') {
+                  return (
+                    <div key={`img-${i}`} className="user-part-image">
+                      <img
+                        src={
+                          part.url ??
+                          (part.base64 ? `data:${part.mimeType ?? 'image/png'};base64,${part.base64}` : '')
+                        }
+                        alt=""
+                        style={{ maxWidth: '100%', maxHeight: 240, borderRadius: 8, objectFit: 'contain' }}
+                      />
+                    </div>
+                  )
+                }
+                return null
+              })}
+            </div>
           )
         }
         return props.editableContent ?? null

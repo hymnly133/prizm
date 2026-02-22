@@ -40,9 +40,12 @@ const SkillsToggle = memo(() => {
           onClose={() => setOpen(false)}
         />
       }
-      overlayInnerStyle={{ padding: 0, background: 'transparent', boxShadow: 'none' }}
+      styles={{ content: { padding: 0, background: 'transparent', boxShadow: 'none' } }}
     >
-      <Tooltip title={sessionId ? 'Skills 管理' : 'Skills（激活需在会话中）'}>
+      <Tooltip
+        title={sessionId ? 'Skills 管理' : 'Skills（激活需在会话中）'}
+        styles={{ container: {} }}
+      >
         <ActionIcon
           icon={Sparkles}
           size={{ blockSize: 36, size: 20 }}

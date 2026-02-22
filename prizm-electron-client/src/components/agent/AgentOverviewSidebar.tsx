@@ -18,15 +18,19 @@ import {
 import type { EnrichedDocument, AvailableModel, ResourceLockInfo } from '@prizm/client-core'
 import { useNavigation } from '../../context/NavigationContext'
 import { Select } from '../ui/Select'
+import { buildModelSelectOptionsFromAvailable } from '../../utils/modelSelectOptions'
 import { MemoryInspector } from './MemoryInspector'
 import { TokenUsagePanel } from './TokenUsagePanel'
 import { MEMORY_LAYER_DESCRIPTIONS } from './agentSidebarTypes'
 import { EmptyState } from '../ui/EmptyState'
+import { LoadingPlaceholder } from '../ui/LoadingPlaceholder'
 
 export interface AgentOverviewSidebarProps {
   currentScope: string
   models: AvailableModel[]
   defaultModel: string
+  /** 系统默认模型展示名，用于第一项「系统默认（当前: X）」 */
+  systemDefaultLabel?: string
   selectedModel: string | undefined
   onModelChange?: (model: string | undefined) => void
   scopeContext: string
@@ -55,6 +59,7 @@ export const AgentOverviewSidebar = memo(function AgentOverviewSidebar({
   currentScope,
   models,
   defaultModel,
+  systemDefaultLabel,
   selectedModel,
   onModelChange,
   scopeContext,
@@ -120,13 +125,19 @@ export const AgentOverviewSidebar = memo(function AgentOverviewSidebar({
         <section className="agent-right-section">
           <h3 className="agent-right-section-title">模型</h3>
           {models.length === 0 ? (
-            <p className="text-sm text-amber-500/90">暂无可用模型，请先在设置中配置 LLM</p>
+            <p className="text-sm text-amber-500/90">
+              暂无可用模型。请先在 设置 → LLM 配置 中添加提供商并保存。
+            </p>
           ) : (
             <Select
-              options={[
-                { label: defaultModel ? `默认 (${defaultModel})` : '默认', value: '' },
-                ...models.map((m) => ({ label: m.label, value: m.id }))
-              ]}
+              options={buildModelSelectOptionsFromAvailable(models, {
+                label: systemDefaultLabel
+                  ? `系统默认（当前: ${systemDefaultLabel}）`
+                  : defaultModel
+                  ? models.find((m) => m.id === defaultModel)?.label ?? `系统默认 (${defaultModel})`
+                  : '系统默认',
+                value: ''
+              })}
               value={selectedModel ?? ''}
               onChange={(v) => onModelChange(v || undefined)}
               style={{ width: '100%' }}
@@ -142,10 +153,7 @@ export const AgentOverviewSidebar = memo(function AgentOverviewSidebar({
           记忆状态
         </h3>
         {memoryCountsLoading ? (
-          <div className="agent-right-loading">
-            <Loader2 size={14} className="spinning" />
-            <span>加载中</span>
-          </div>
+          <LoadingPlaceholder />
         ) : memoryEnabled ? (
           <div className="agent-memory-state">
             <div className="agent-memory-tier" title={MEMORY_LAYER_DESCRIPTIONS.user}>
@@ -238,10 +246,7 @@ export const AgentOverviewSidebar = memo(function AgentOverviewSidebar({
           aria-label="点击查看完整上下文"
         >
           {scopeContextLoading ? (
-            <div className="agent-right-loading">
-              <Loader2 size={14} className="spinning" />
-              <span>加载中</span>
-            </div>
+            <LoadingPlaceholder />
           ) : scopeContext ? (
             <>
               <pre className="agent-context-text">{scopeContext}</pre>
@@ -312,10 +317,7 @@ export const AgentOverviewSidebar = memo(function AgentOverviewSidebar({
         <h3 className="agent-right-section-title">文档</h3>
         <div className="agent-documents-list">
           {documentsLoading ? (
-            <div className="agent-right-loading">
-              <Loader2 size={14} className="spinning" />
-              <span>加载中</span>
-            </div>
+            <LoadingPlaceholder />
           ) : documents.length === 0 ? (
             <EmptyState description="暂无文档" />
           ) : (

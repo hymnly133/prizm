@@ -18,7 +18,8 @@ export interface UseAgentChatActionsOptions {
     content: string,
     session?: EnrichedSession | null,
     fileRefs?: FilePathRef[],
-    runRefIds?: string[]
+    runRefIds?: string[],
+    images?: import('@prizm/client-core').ChatImageAttachment[]
   ) => Promise<unknown>
   stopGeneration: () => Promise<void>
   setCurrentSession: (session: EnrichedSession | null) => void
@@ -64,15 +65,18 @@ export function useAgentChatActions(options: UseAgentChatActionsOptions) {
     async ({
       clearContent,
       getMarkdownContent,
-      getInputRefs
+      getInputRefs,
+      getImageAttachments
     }: {
       clearContent: () => void
       getMarkdownContent: () => string
       getInputRefs: () => InputRef[]
+      getImageAttachments?: () => import('@prizm/client-core').ChatImageAttachment[]
     }) => {
       const rawText = getMarkdownContent().trim()
       const refs = getInputRefs()
-      if (!rawText && refs.length === 0) return
+      const images = getImageAttachments?.() ?? []
+      if (!rawText && refs.length === 0 && images.length === 0) return
       if (sendingRef.current) return
 
       let session = currentSessionRef.current
@@ -99,7 +103,8 @@ export function useAgentChatActions(options: UseAgentChatActionsOptions) {
         combined,
         session,
         fileRefs.length > 0 ? fileRefs : undefined,
-        runRefIds?.length ? runRefIds : undefined
+        runRefIds?.length ? runRefIds : undefined,
+        images.length > 0 ? images : undefined
       )
       onAfterSend?.()
     },

@@ -275,12 +275,34 @@ const BlockInput = memo(() => {
 
   const handlePaste = useCallback(
     (e: React.ClipboardEvent) => {
+      const items = e.clipboardData?.items
+      if (items) {
+        for (const item of items) {
+          if (item.type.startsWith('image/')) {
+            const file = item.getAsFile()
+            if (file) {
+              e.preventDefault()
+              const reader = new FileReader()
+              reader.onload = () => {
+                const dataUrl = reader.result as string
+                const comma = dataUrl.indexOf(',')
+                const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : ''
+                const mimeMatch = dataUrl.match(/^data:([^;]+)/)
+                const mimeType = mimeMatch?.[1] ?? 'image/png'
+                storeApi.getState().addPendingImage({ base64, mimeType })
+              }
+              reader.readAsDataURL(file)
+              return
+            }
+          }
+        }
+      }
       e.preventDefault()
       const text = e.clipboardData.getData('text/plain')
       document.execCommand('insertText', false, text)
       syncToStore()
     },
-    [syncToStore]
+    [syncToStore, storeApi]
   )
 
   const handleKeyDown = useCallback(

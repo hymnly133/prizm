@@ -39,6 +39,7 @@ import type {
   ExecRecordInfo,
   ExecWorkspaceType
 } from '@prizm/client-core'
+import { AccentList } from '../ui/AccentList'
 import { EmptyState } from '../ui/EmptyState'
 
 export interface TerminalSidebarTabProps {
@@ -119,7 +120,7 @@ function ExecWorkersSection({
                 ))}
             </div>
           ) : (
-            <div className="exec-history-empty">暂无执行记录</div>
+            <EmptyState description="暂无执行记录" />
           )}
         </div>
       )}
@@ -500,6 +501,56 @@ export const TerminalSidebarTab: React.FC<TerminalSidebarTabProps> = ({ sessionI
 
   const activeTerminal = terminals.find((t) => t.id === activeTerminalId)
 
+  const terminalListItems = useMemo(
+    () =>
+      terminals.map((t) => ({
+        key: t.id,
+        className: `term-sidebar-item${t.status === 'exited' ? ' exited' : ''}`,
+        title: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            <Badge
+              status={t.status === 'running' ? 'processing' : 'default'}
+              className="term-sidebar-item-badge"
+            />
+            <div className="term-sidebar-item-info" style={{ flex: 1, minWidth: 0 }}>
+              <span
+                className="term-sidebar-item-name"
+                style={{
+                  display: 'block',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {t.title || t.shell.split(/[\\/]/).pop() || 'Terminal'}
+              </span>
+              <span
+                className="term-sidebar-item-meta"
+                style={{ fontSize: 11, color: 'var(--ant-color-text-quaternary)' }}
+              >
+                PID {t.pid}
+                {t.status === 'exited' && ` · exit ${t.exitCode ?? '?'}`}
+              </span>
+            </div>
+          </span>
+        ),
+        onClick: () => setActiveTerminalId(t.id),
+        actions: (
+          <Tooltip title="关闭终端">
+            <button
+              className="term-sidebar-item-kill"
+              onClick={(e) => handleKill(t.id, e)}
+              aria-label="关闭终端"
+            >
+              <CloseOutlined style={{ fontSize: 10 }} />
+            </button>
+          </Tooltip>
+        ),
+        showAction: true
+      })),
+    [terminals, handleKill]
+  )
+
   return (
     <div className="term-sidebar">
       {/* 标题栏 */}
@@ -530,50 +581,20 @@ export const TerminalSidebarTab: React.FC<TerminalSidebarTabProps> = ({ sessionI
       />
 
       {/* Interactive 终端列表 */}
-      <div className="term-sidebar-list accent-list">
+      <div className="term-sidebar-list">
         {terminals.length === 0 ? (
           <div className="term-sidebar-list-empty">
-            <span>暂无终端</span>
-            <Button type="link" size="small" icon={<PlusOutlined />} onClick={handleCreate}>
-              新建
-            </Button>
+            <EmptyState
+              description="暂无终端"
+              actions={
+                <Button type="link" size="small" icon={<PlusOutlined />} onClick={handleCreate}>
+                  新建
+                </Button>
+              }
+            />
           </div>
         ) : (
-          terminals.map((t) => {
-            const isActive = t.id === activeTerminalId
-            return (
-              <div
-                key={t.id}
-                className={`term-sidebar-item${isActive ? ' active accent-list-active' : ''}${
-                  t.status === 'exited' ? ' exited' : ''
-                }`}
-                onClick={() => setActiveTerminalId(t.id)}
-              >
-                <Badge
-                  status={t.status === 'running' ? 'processing' : 'default'}
-                  className="term-sidebar-item-badge"
-                />
-                <div className="term-sidebar-item-info">
-                  <span className="term-sidebar-item-name">
-                    {t.title || t.shell.split(/[\\/]/).pop() || 'Terminal'}
-                  </span>
-                  <span className="term-sidebar-item-meta">
-                    PID {t.pid}
-                    {t.status === 'exited' && ` · exit ${t.exitCode ?? '?'}`}
-                  </span>
-                </div>
-                <Tooltip title="关闭终端">
-                  <button
-                    className="term-sidebar-item-kill"
-                    onClick={(e) => handleKill(t.id, e)}
-                    aria-label="关闭终端"
-                  >
-                    <CloseOutlined style={{ fontSize: 10 }} />
-                  </button>
-                </Tooltip>
-              </div>
-            )
-          })
+          <AccentList items={terminalListItems} activeKey={activeTerminalId ?? undefined} />
         )}
       </div>
 
