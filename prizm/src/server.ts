@@ -37,6 +37,7 @@ import { createSettingsRoutes } from './routes/settings'
 import { createMemoryRoutes } from './routes/memory'
 import { mountMcpRoutes } from './mcp'
 import { WebSocketServer } from './websocket/WebSocketServer'
+import { BrowserRelayServer } from './websocket/BrowserRelayServer'
 import { initEverMemService } from './llm/EverMemService'
 import { initTokenUsageDb, closeTokenUsageDb } from './core/tokenUsageDb'
 import { lockManager } from './core/resourceLockManager'
@@ -87,6 +88,7 @@ import { createScheduleRoutes } from './routes/schedule'
 import { createCronRoutes } from './routes/cron'
 import { createWorkflowRoutes } from './routes/workflow'
 import { createTaskRoutes } from './routes/task'
+import { createBrowserRoutes } from './routes/browser'
 import { localEmbedding } from './llm/localEmbedding'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -138,6 +140,11 @@ export interface PrizmServer {
    * WebSocket 服务器实例（如果启用）
    */
   websocket?: WebSocketServer
+
+  /**
+   * Browser Relay 服务器（用于前端 Agent 自动化）
+   */
+  browserRelay?: BrowserRelayServer
 }
 
 /**
@@ -162,6 +169,7 @@ export function createPrizmServer(
   let server: Server | null = null
   let wsServer: WebSocketServer | undefined = undefined
   let terminalWsServer: TerminalWebSocketServer | undefined = undefined
+  let browserRelayServer: BrowserRelayServer | undefined = undefined
   const terminalManager = getTerminalManager()
   let isRunning = false
   let taskPruneTimer: ReturnType<typeof setInterval> | null = null
@@ -236,6 +244,7 @@ export function createPrizmServer(
   createCronRoutes(router)
   createWorkflowRoutes(router, adapters.agent)
   createTaskRoutes(router)
+  createBrowserRoutes(router, () => browserRelayServer)
   app.use('/', router)
 
   // MCP 端点：供 Cursor、LobeChat 等 Agent 连接（wsServer 在 start 后注入）
@@ -334,16 +343,19 @@ export function createPrizmServer(
               startReminderService()
 
               // 每 24h 清理过期任务记录 + 恢复超龄僵尸记录
-              taskPruneTimer = setInterval(() => {
-                try {
-                  pruneTaskRuns(90)
-                  pruneRuns(90)
-                  recoverStaleTaskRunsByAge(7)
-                  recoverStaleWorkflowRunsByAge(7)
-                } catch (e) {
-                  log.warn('Task/workflow prune failed:', e)
-                }
-              }, 24 * 60 * 60_000)
+              taskPruneTimer = setInterval(
+                () => {
+                  try {
+                    pruneTaskRuns(90)
+                    pruneRuns(90)
+                    recoverStaleTaskRunsByAge(7)
+                    recoverStaleWorkflowRunsByAge(7)
+                  } catch (e) {
+                    log.warn('Task/workflow prune failed:', e)
+                  }
+                },
+                24 * 60 * 60_000
+              )
               if (taskPruneTimer.unref) taskPruneTimer.unref()
 
               // ── EventBus handler 注册（在所有服务初始化之后） ──
@@ -358,6 +370,7 @@ export function createPrizmServer(
 
               if (enableWebSocket && server) {
                 const terminalWsPath = '/ws/terminal'
+                const browserRelayPath = '/api/v1/browser/relay'
 
                 wsServer = new WebSocketServer(server, clientRegistry, {
                   path: websocketPath
@@ -372,16 +385,23 @@ export function createPrizmServer(
                 )
                 log.info('Terminal WebSocket:', `ws://${host}:${port}${terminalWsPath}`)
 
+                browserRelayServer = new BrowserRelayServer({
+                  clientRegistry,
+                  authEnabled
+                })
+                log.info('Browser Relay WebSocket:', `ws://${host}:${port}${browserRelayPath}`)
+
                 // WebSocket 桥接：注册 EventBus → WebSocket 广播 handler
                 setWebSocketServer(wsServer)
                 registerWSBridgeHandlers()
 
-                // 统一 upgrade 路由 — 两个 WSS 均为 noServer 模式，
-                // 需手动根据路径分发 upgrade 请求
+                // 统一 upgrade 路由 — 均为 noServer 模式，需手动根据路径分发 upgrade 请求
                 server.on('upgrade', (req, socket, head) => {
                   const pathname = new URL(req.url ?? '/', 'ws://localhost').pathname
                   if (pathname === terminalWsPath && terminalWsServer) {
                     terminalWsServer.handleUpgrade(req, socket, head)
+                  } else if (pathname === browserRelayPath && browserRelayServer) {
+                    browserRelayServer.handleUpgrade(req, socket, head)
                   } else if (pathname === websocketPath && wsServer) {
                     wsServer.handleUpgrade(req, socket, head)
                   } else {
@@ -415,6 +435,12 @@ export function createPrizmServer(
         terminalWsServer = undefined
       }
       await terminalManager.shutdown()
+
+      // 关闭 Browser Relay 服务器
+      if (browserRelayServer) {
+        browserRelayServer.destroy()
+        browserRelayServer = undefined
+      }
 
       // 关闭 WebSocket 服务器
       if (wsServer) {
@@ -468,6 +494,7 @@ export function createPrizmServer(
       return `http://${host}:${port}`
     },
 
-    websocket: wsServer
+    websocket: wsServer,
+    browserRelay: browserRelayServer
   }
 }
