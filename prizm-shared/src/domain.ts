@@ -222,8 +222,29 @@ export interface MessagePartTool {
   status?: ToolCallStatus
 }
 
-/** 消息段落：文本或工具调用，按流式顺序排列 */
-export type MessagePart = { type: 'text'; content: string } | MessagePartTool
+/** 图片段落（用于视觉模型多模态输入） */
+export interface MessagePartImage {
+  type: 'image'
+  /** 图片 URL（公网或 data URL） */
+  url?: string
+  /** Base64 编码的图片数据（与 url 二选一） */
+  base64?: string
+  /** MIME 类型，如 image/png、image/jpeg */
+  mimeType?: string
+}
+
+/** API 层图片附件 DTO（不含 type 字段），用于 HTTP/SSE 传输 */
+export interface ChatImageAttachment {
+  url?: string
+  base64?: string
+  mimeType?: string
+}
+
+/** 消息段落：文本、图片或工具调用，按流式顺序排列 */
+export type MessagePart =
+  | { type: 'text'; content: string }
+  | MessagePartImage
+  | MessagePartTool
 
 export interface AgentMessage {
   id: string
@@ -253,6 +274,11 @@ export function getTextContent(msg: Pick<AgentMessage, 'parts'>): string {
 /** 从 parts 中提取所有 tool 段落（替代旧 toolCalls 字段） */
 export function getToolCalls(msg: Pick<AgentMessage, 'parts'>): MessagePartTool[] {
   return msg.parts.filter((p): p is MessagePartTool => p.type === 'tool')
+}
+
+/** 从 parts 中提取所有 image 段落（用于多模态/视觉模型） */
+export function getImageParts(msg: Pick<AgentMessage, 'parts'>): MessagePartImage[] {
+  return msg.parts.filter((p): p is MessagePartImage => p.type === 'image')
 }
 
 export interface MessageContentOptions {
