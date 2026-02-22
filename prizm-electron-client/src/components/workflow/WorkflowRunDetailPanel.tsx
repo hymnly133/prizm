@@ -16,13 +16,7 @@ import {
   ArrowUpFromLine,
   ListOrdered
 } from 'lucide-react'
-import {
-  ArrowLeftOutlined,
-  CloseCircleOutlined,
-  PauseCircleOutlined,
-  ReloadOutlined,
-  CopyOutlined
-} from '@ant-design/icons'
+import { ArrowLeft, PauseCircle, RefreshCw, XCircle } from 'lucide-react'
 import type { WorkflowRun, WorkflowStepResult } from '@prizm/shared'
 import { WorkflowPipelineView } from './WorkflowPipelineView'
 import {
@@ -36,6 +30,7 @@ import { useAgentSessionStore } from '../../store/agentSessionStore'
 import { useScope } from '../../hooks/useScope'
 import { SessionChatProvider } from '../../context/SessionChatContext'
 import { SessionChatPanel } from '../agent/SessionChatPanel'
+import { EmptyState } from '../ui/EmptyState'
 import { LoadingPlaceholder } from '../ui/LoadingPlaceholder'
 import { SectionHeader } from '../ui/SectionHeader'
 import { ContentCard, ContentCardHeader, ContentCardBody } from '../ui/ContentCard'
@@ -59,6 +54,8 @@ export interface WorkflowRunDetailPanelProps {
   runId: string
   defName?: string
   onGoBack: () => void
+  /** 可选：点击「工作流中心」时跳转到总览（不清定义只返回到定义详情时用 onGoBack） */
+  onGoToOverview?: () => void
   onLoadSession?: (sessionId: string) => void
   onRerun?: (workflowName: string, args?: Record<string, unknown>) => void
   /** 在侧边栏打开步骤会话（与主内容区+侧边 tab 架构对齐）；不传则内联展示 */
@@ -71,6 +68,7 @@ function WorkflowRunDetailPanel({
   runId,
   defName,
   onGoBack,
+  onGoToOverview,
   onLoadSession,
   onRerun,
   onOpenStepSession,
@@ -135,9 +133,11 @@ function WorkflowRunDetailPanel({
   if (!run) {
     return (
       <div className="wfp-run-detail wfp-fade-appear">
-        <div className="wfp-breadcrumb" onClick={onGoBack}>
-          <ArrowLeftOutlined /> 返回
-        </div>
+        <nav className="wfp-breadcrumb" aria-label="面包屑">
+          <button type="button" className="wfp-breadcrumb__link" onClick={onGoBack}>
+            <Icon icon={ArrowLeft} size={14} /> 返回
+          </button>
+        </nav>
         <LoadingPlaceholder text="加载运行详情…" />
       </div>
     )
@@ -154,10 +154,25 @@ function WorkflowRunDetailPanel({
   return (
     <div className="wfp-run-detail wfp-fade-appear">
       {/* Breadcrumb */}
-      <div className="wfp-breadcrumb" onClick={onGoBack}>
-        <ArrowLeftOutlined />
-        <span>← {defName ?? run.workflowName} / 运行历史</span>
-      </div>
+      <nav className="wfp-breadcrumb" aria-label="面包屑">
+        {onGoToOverview && (
+          <>
+            <button type="button" className="wfp-breadcrumb__link" onClick={onGoToOverview}>
+              工作流中心
+            </button>
+            <span className="wfp-breadcrumb__sep" aria-hidden>
+              ›
+            </span>
+          </>
+        )}
+        <button type="button" className="wfp-breadcrumb__link" onClick={onGoBack}>
+          {defName ?? run.workflowName}
+        </button>
+        <span className="wfp-breadcrumb__sep" aria-hidden>
+          ›
+        </span>
+        <span className="wfp-breadcrumb__current">运行 #{run.id.slice(0, 8)}</span>
+      </nav>
 
       {/* Header */}
       <div className="wfp-run-header">
@@ -180,7 +195,10 @@ function WorkflowRunDetailPanel({
             </Button>
           )}
           {onRerun && run.status !== 'running' && (
-            <Button icon={<ReloadOutlined />} onClick={() => onRerun(run.workflowName, run.args)}>
+            <Button
+              icon={<Icon icon={RefreshCw} size={14} />}
+              onClick={() => onRerun(run.workflowName, run.args)}
+            >
               重新运行
             </Button>
           )}
@@ -206,7 +224,7 @@ function WorkflowRunDetailPanel({
         <Alert
           type="warning"
           showIcon
-          icon={<PauseCircleOutlined />}
+          icon={<Icon icon={PauseCircle} size={16} />}
           style={{ marginBottom: 16 }}
           message="工作流等待审批"
           description={
@@ -233,13 +251,11 @@ function WorkflowRunDetailPanel({
         <Alert
           type="error"
           showIcon
-          icon={<CloseCircleOutlined />}
+          icon={<Icon icon={XCircle} size={16} />}
           style={{ marginTop: 16 }}
           message={run.error}
           description={
-            run.errorDetail ? (
-              <WorkflowErrorDetailBlock content={run.errorDetail} />
-            ) : undefined
+            run.errorDetail ? <WorkflowErrorDetailBlock content={run.errorDetail} /> : undefined
           }
         />
       )}
@@ -252,9 +268,7 @@ function WorkflowRunDetailPanel({
         className="wfp-run-detail__section"
       />
       {steps.length === 0 ? (
-        <Text type="secondary" className="wfp-run-detail__empty-steps">
-          暂无步骤结果
-        </Text>
+        <EmptyState description="暂无步骤结果" />
       ) : (
         <div className="wfp-step-cards">
           {steps.map((step, index) => (
@@ -401,7 +415,7 @@ function RunSummaryCard({
           </ContentCardHeader>
           <ContentCardBody>
             {!hasAnyOutput ? (
-              <Text type="secondary">暂无输出</Text>
+              <EmptyState description="暂无输出" />
             ) : (
               <div className="wfp-run-summary__output">
                 {lastOutput && <PrizmMarkdown variant="chat">{lastOutput}</PrizmMarkdown>}
@@ -439,7 +453,7 @@ function RunSummaryCard({
                   />
                 )}
                 {!lastOutput && steps.length <= 1 && (
-                  <Text type="secondary">运行中或暂无最终输出</Text>
+                  <EmptyState description="运行中或暂无最终输出" />
                 )}
               </div>
             )}
@@ -514,7 +528,13 @@ function StepResultCollapse({
       size="small"
       defaultActiveKey={[]}
       className="wfp-step-card__output-collapse"
-      items={[{ key: 'result', label: <span className="wfp-step-card__output-collapse-label">结果</span>, children: content }]}
+      items={[
+        {
+          key: 'result',
+          label: <span className="wfp-step-card__output-collapse-label">结果</span>,
+          children: content
+        }
+      ]}
     />
   )
 }
@@ -548,10 +568,7 @@ function StepCard({
           <Text strong className="wfp-step-card__step-id">
             {step.stepId}
           </Text>
-          <Tag
-            color={getWorkflowRunStatusTagColor(step.status)}
-            className="wfp-step-card__tag"
-          >
+          <Tag color={getWorkflowRunStatusTagColor(step.status)} className="wfp-step-card__tag">
             {step.status}
           </Tag>
           {duration && (
@@ -586,9 +603,7 @@ function StepCard({
         {step.error && (
           <div className="wfp-step-card__error">
             <Text type="danger">{step.error}</Text>
-            {step.errorDetail && (
-            <WorkflowErrorDetailBlock content={step.errorDetail} compact />
-          )}
+            {step.errorDetail && <WorkflowErrorDetailBlock content={step.errorDetail} compact />}
           </div>
         )}
         {step.approved !== undefined && (
@@ -603,4 +618,3 @@ function StepCard({
     </ContentCard>
   )
 }
-

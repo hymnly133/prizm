@@ -8,8 +8,7 @@ import { useMemo, useState } from 'react'
 import { Button } from 'antd'
 import { Segmented } from '../ui/Segmented'
 import { EmptyState } from '../ui/EmptyState'
-import { ReloadOutlined } from '@ant-design/icons'
-import { Play } from 'lucide-react'
+import { Play, RefreshCw } from 'lucide-react'
 import type { WorkflowRun } from '@prizm/shared'
 import { WorkflowRunCard } from './WorkflowRunCard'
 
@@ -64,7 +63,7 @@ export function WorkflowDefRunsTab({
         />
         <Button
           size="small"
-          icon={<ReloadOutlined />}
+          icon={<RefreshCw size={14} />}
           loading={loading}
           onClick={onRefresh}
         >

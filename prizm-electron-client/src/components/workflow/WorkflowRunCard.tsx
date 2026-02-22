@@ -4,6 +4,7 @@
  * 展示运行状态 Tag、迷你 Pipeline、触发类型、创建时间和耗时。
  */
 
+import { useCallback } from 'react'
 import { Tag, Button, Space } from 'antd'
 import type { WorkflowRun } from '@prizm/shared'
 import { MiniPipelineView } from './WorkflowPipelineView'
@@ -41,8 +42,25 @@ export function WorkflowRunCard({ run, onClick, onCancel, showName = true }: Wor
   )
   const isActive = run.status === 'running' || run.status === 'pending' || run.status === 'paused'
 
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        onClick?.()
+      }
+    },
+    [onClick]
+  )
+
   return (
-    <div className="wfp-run-card" onClick={onClick} role="button" tabIndex={0}>
+    <div
+      className={`wfp-run-card wfp-run-card--${run.status}`}
+      onClick={onClick}
+      onKeyDown={handleKeyDown}
+      role="button"
+      tabIndex={0}
+      aria-label={`运行 ${run.workflowName}，${STATUS_LABELS[run.status] ?? run.status}`}
+    >
       <div className="wfp-run-card__top">
         <Space size={8}>
           {showName && <span className="wfp-run-card__name">{run.workflowName}</span>}
@@ -50,9 +68,9 @@ export function WorkflowRunCard({ run, onClick, onCancel, showName = true }: Wor
             {STATUS_LABELS[run.status] ?? run.status}
           </Tag>
         </Space>
-        <Space size={4}>
+        <div className="wfp-run-card__actions">
           {totalDuration > 0 && (
-            <span style={{ fontSize: 12, color: 'var(--ant-color-text-tertiary)' }}>
+            <span className="wfp-run-card__duration">
               {(totalDuration / 1000).toFixed(1)}s
             </span>
           )}
@@ -61,6 +79,7 @@ export function WorkflowRunCard({ run, onClick, onCancel, showName = true }: Wor
               size="small"
               type="link"
               danger
+              title="取消运行"
               onClick={(e) => {
                 e.stopPropagation()
                 onCancel()
@@ -69,7 +88,7 @@ export function WorkflowRunCard({ run, onClick, onCancel, showName = true }: Wor
               取消
             </Button>
           )}
-        </Space>
+        </div>
       </div>
       {stepIds.length > 0 && <MiniPipelineView stepResults={run.stepResults} stepIds={stepIds} />}
       <div className="wfp-run-card__meta">

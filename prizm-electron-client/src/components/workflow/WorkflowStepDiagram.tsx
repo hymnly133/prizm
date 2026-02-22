@@ -6,19 +6,15 @@
  */
 
 import { Fragment } from 'react'
-import {
-  RobotOutlined,
-  CheckSquareOutlined,
-  SwapOutlined
-} from '@ant-design/icons'
+import { ArrowLeftRight, Bot, CheckSquare } from 'lucide-react'
 import type { WorkflowStepDef } from '@prizm/shared'
 
 const MAX_HORIZONTAL = 8
 
 const STEP_TYPE_ICON: Record<string, React.ReactNode> = {
-  agent: <RobotOutlined />,
-  approve: <CheckSquareOutlined />,
-  transform: <SwapOutlined />
+  agent: <Bot size={20} />,
+  approve: <CheckSquare size={20} />,
+  transform: <ArrowLeftRight size={20} />
 }
 
 const STEP_TYPE_LABEL: Record<string, string> = {

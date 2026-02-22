@@ -5,7 +5,7 @@
  */
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
-import { Button, Empty, Flexbox, Icon, Skeleton, Tag, Text, toast } from '@lobehub/ui'
+import { Button, Flexbox, Icon, Skeleton, Tag, Text, toast } from '@lobehub/ui'
 import { Popconfirm } from 'antd'
 import type { ListItemProps } from '@lobehub/ui'
 import {
@@ -23,6 +23,7 @@ import type { WorkflowFileEntry, WorkflowRunWorkspaceEntry } from '@prizm/client
 import type { WorkflowRun } from '@prizm/shared'
 import { Segmented } from '../ui/Segmented'
 import { Select } from '../ui/Select'
+import { EmptyState } from '../ui/EmptyState'
 import { RefreshIconButton } from '../ui/RefreshIconButton'
 import { AccentList } from '../ui/AccentList'
 
@@ -441,7 +442,7 @@ export function WorkflowWorkspacePanel({
             gap={8}
             style={{ flex: 1, justifyContent: 'center' }}
           >
-            <Empty description={emptyLabel} />
+            <EmptyState description={emptyLabel} />
             <Text type="secondary" style={{ fontSize: 12 }}>
               拖拽文件到此处上传，或点击上方「上传文件」
             </Text>
@@ -481,7 +482,7 @@ export function WorkflowWorkspacePanel({
                     <FilePreview content={fileContent} path={selectedFile} />
                   </Flexbox>
                 ) : (
-                  <Empty description="无法读取文件" />
+                  <EmptyState description="无法读取文件" />
                 )
               ) : (
                 <Flexbox
@@ -612,7 +613,7 @@ export function WorkflowWorkspacePanel({
             <Tag>{runWorkspaces.length}</Tag>
           </Flexbox>
           {runWorkspaces.length === 0 ? (
-            <Empty description="该工作流暂无 Run 空间（无运行记录或运行尚未产生工作区）" />
+            <EmptyState description="该工作流暂无 Run 空间（无运行记录或运行尚未产生工作区）" />
           ) : (
             <>
               <Flexbox align="center" gap={8} horizontal wrap="wrap">

@@ -37,14 +37,17 @@ type Action =
 
 function reducer(state: WorkflowPageState, action: Action): WorkflowPageState {
   switch (action.type) {
-    case 'SELECT_DEF':
+    case 'SELECT_DEF': {
+      const wasInDefDetail = state.selectedDefId != null
       return {
         ...state,
         selectedDefId: action.defId,
         selectedRunId: null,
         selectedManagementSessionId: action.sessionId || null,
-        activeTab: 'overview'
+        // 从总览进入定义时切到 overview；侧栏切换不同工作流时保留当前 tab，避免重复播 tab 动画导致卡顿
+        activeTab: wasInDefDetail ? state.activeTab : 'overview'
       }
+    }
     case 'SELECT_RUN':
       return {
         ...state,

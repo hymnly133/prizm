@@ -5,7 +5,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { Modal, Tag, Typography, Descriptions, Timeline, Empty, Button, Space, Alert } from 'antd'
+import { Modal, Tag, Typography, Descriptions, Timeline, Button, Space, Alert } from 'antd'
 import { PauseCircleOutlined } from '@ant-design/icons'
 import { WorkflowPipelineView } from './WorkflowPipelineView'
 import {
@@ -14,6 +14,7 @@ import {
   getWorkflowRunTimelineColor,
   WorkflowErrorDetailBlock
 } from './workflowRunStatus'
+import { LoadingPlaceholder } from '../ui/LoadingPlaceholder'
 import { useWorkflowStore } from '../../store/workflowStore'
 import type { WorkflowRun, WorkflowStepResult } from '@prizm/shared'
 
@@ -57,7 +58,7 @@ export function WorkflowRunDetail({ runId, open, onClose, onLoadSession }: Workf
   if (!run) {
     return (
       <Modal title="工作流详情" open={open} onCancel={onClose} footer={null} width={680}>
-        <Empty description="加载中…" />
+        <LoadingPlaceholder />
       </Modal>
     )
   }

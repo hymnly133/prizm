@@ -6,6 +6,7 @@
  */
 
 import { useEffect, useCallback, useMemo, useState } from 'react'
+import { AnimatePresence, motion } from 'motion/react'
 import { Button, message, Modal } from 'antd'
 import { ArrowLeft, GripVertical } from 'lucide-react'
 import { Icon } from '@lobehub/ui'
@@ -32,6 +33,7 @@ import {
   type WorkflowCreateMode
 } from '../components/workflow/WorkflowCreateChoice'
 import { WorkflowEditor } from '../components/workflow/editor'
+import { fadeUp, getReducedMotionProps } from '../theme/motionPresets'
 import '../styles/collab-hub.css'
 import '../styles/workflow-page.css'
 
@@ -326,8 +328,6 @@ export default function WorkflowPage() {
         setCreateStep(null)
         const ctxId = `wfp:def:${created.id}`
         const tab = makeEntityTab('workflow-def', created.id, name)
-        if (import.meta.env.DEV)
-          console.log('[WFP] handleCreateSave open tab', { ctxId, tabId: tab.id })
         openTab(ctxId, tab)
         openRightPanel()
       }
@@ -337,23 +337,18 @@ export default function WorkflowPage() {
 
   /** 侧栏「编辑」：选中该定义并在主区直接打开编辑器 Modal（不再打开右侧 Tab） */
   const [openEditorForDefId, setOpenEditorForDefId] = useState<string | null>(null)
-  const handleOpenEditorModal = useCallback((defId: string, _label: string) => {
-    selectDef(defId)
-    setOpenEditorForDefId(defId)
-  }, [selectDef])
+  const handleOpenEditorModal = useCallback(
+    (defId: string, _label: string) => {
+      selectDef(defId)
+      setOpenEditorForDefId(defId)
+    },
+    [selectDef]
+  )
 
   /** 在右侧标签页打开管理会话（不切换主区选中） */
   const handleOpenSessionInTab = useCallback(
     (sessionId: string, label: string) => {
       const tab = makeEntityTab('session', sessionId, label)
-      if (import.meta.env.DEV) {
-        console.log('[WFP] handleOpenSessionInTab', {
-          tabContextId,
-          sessionId,
-          label,
-          tabId: tab.id
-        })
-      }
       openTab(tabContextId, tab)
       openRightPanel()
     },
@@ -386,13 +381,6 @@ export default function WorkflowPage() {
         const session = managementSessions.find((s) => s.id === sessionId)
         const label = session ? getWorkflowManagementSessionLabel(session) : '工作流会话'
         const tab = makeEntityTab('session', sessionId, label)
-        if (import.meta.env.DEV) {
-          console.log('[WFP] handleSelectDef open session tab', {
-            tabContextId: `wfp:def:${defId}`,
-            sessionId,
-            tabId: tab.id
-          })
-        }
         openTab(`wfp:def:${defId}`, tab)
         openRightPanel()
       }
@@ -429,17 +417,9 @@ export default function WorkflowPage() {
           openEditorForDefId={openEditorForDefId}
           onClearOpenEditorRequest={() => setOpenEditorForDefId(null)}
           onOpenManagementSession={async (sessionId) => {
-            if (import.meta.env.DEV)
-              console.log('[WFP] onOpenManagementSession', {
-                sessionId,
-                tabContextId,
-                currentScope
-              })
             if (currentScope) await loadSession(sessionId, currentScope)
             const session = managementSessions.find((s) => s.id === sessionId)
             const label = session ? getWorkflowManagementSessionLabel(session) : '工作流会话'
-            if (import.meta.env.DEV)
-              console.log('[WFP] onOpenManagementSession after loadSession', { label })
             handleOpenSessionInTab(sessionId, label)
           }}
           onRefreshManagementSession={handleRefreshManagementSession}
@@ -450,6 +430,7 @@ export default function WorkflowPage() {
           runId={selectedRunId}
           defName={selectedDef?.name}
           onGoBack={goBack}
+          onGoToOverview={clearSelection}
           onRerun={handleRerun}
           onOpenStepSession={handleOpenSessionInTab}
           onOpenRunInManagementSession={async (workflowName, runId, runLabel) => {
@@ -589,11 +570,11 @@ export default function WorkflowPage() {
           onNewSession={handleNewSession}
           onRunWorkflow={handleRunWorkflow}
           onDeleteDef={handleDeleteDef}
-            onDeleteManagementSession={handleDeleteManagementSession}
-            onOpenRightPanel={openRightPanel}
-            onOpenDefInTab={handleOpenEditorModal}
-            hideTabBarEntry={isPendingSessionOnly}
-          />
+          onDeleteManagementSession={handleDeleteManagementSession}
+          onOpenRightPanel={openRightPanel}
+          onOpenDefInTab={handleOpenEditorModal}
+          hideTabBarEntry={isPendingSessionOnly}
+        />
       </ResizableSidebar>
 
       {!isPendingSessionOnly && rightPanelOpen ? (
@@ -602,7 +583,20 @@ export default function WorkflowPage() {
             className="collab-split-pane wfp-split-pane"
             style={{ width: `calc(${splitPct}% - 4px)` }}
           >
-            <div className="wfp-detail-panel">{mainPaneContent}</div>
+            <div className="wfp-detail-panel">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={viewMode}
+                  className="wfp-detail-panel__animate"
+                  {...fadeUp()}
+                  {...getReducedMotionProps()}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={{ duration: 0.2, ease: [0.33, 1, 0.68, 1] }}
+                >
+                  {mainPaneContent}
+                </motion.div>
+              </AnimatePresence>
+            </div>
           </div>
 
           <div
@@ -627,11 +621,7 @@ export default function WorkflowPage() {
               onLoadSession={handleLoadSessionInMain}
               scope={currentScope}
               renderSessionTabContent={(sessionId, scope, session) => (
-                <WorkflowChatZone
-                  sessionId={sessionId}
-                  session={session}
-                  scope={scope}
-                />
+                <WorkflowChatZone sessionId={sessionId} session={session} scope={scope} />
               )}
               className="wfp-right-panel"
             />
@@ -639,7 +629,20 @@ export default function WorkflowPage() {
         </div>
       ) : (
         <div className="wfp-main wfp-main--single">
-          <div className="wfp-detail-panel">{mainPaneContent}</div>
+          <div className="wfp-detail-panel">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={viewMode}
+                className="wfp-detail-panel__animate"
+                {...fadeUp()}
+                {...getReducedMotionProps()}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.2, ease: [0.33, 1, 0.68, 1] }}
+              >
+                {mainPaneContent}
+              </motion.div>
+            </AnimatePresence>
+          </div>
         </div>
       )}
     </div>

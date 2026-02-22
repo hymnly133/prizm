@@ -2,9 +2,9 @@
  * WorkflowCreateChoice — 新建工作流时先选择一种创建方式（图 / YAML / 会话）
  * 不同时展示三种，避免双向不同步。
  */
-import { memo } from 'react'
+import { memo, useCallback } from 'react'
 import { Button } from 'antd'
-import { GitBranch, Code2, MessageSquare } from 'lucide-react'
+import { GitBranch, Code2, Loader2, MessageSquare } from 'lucide-react'
 import { Icon } from '@lobehub/ui'
 
 export type WorkflowCreateMode = 'graph' | 'yaml' | 'session'
@@ -26,6 +26,17 @@ export const WorkflowCreateChoice = memo(function WorkflowCreateChoice({
   onCancel,
   creatingSession = false
 }: WorkflowCreateChoiceProps) {
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent, mode: WorkflowCreateMode) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        if (mode === 'session' && creatingSession) return
+        onChoose(mode)
+      }
+    },
+    [onChoose, creatingSession]
+  )
+
   return (
     <div className="wfp-create-choice">
       <div className="wfp-create-choice__header">
@@ -33,19 +44,30 @@ export const WorkflowCreateChoice = memo(function WorkflowCreateChoice({
         <p className="wfp-create-choice__subtitle">请选择一种创建方式</p>
       </div>
       <div className="wfp-create-choice__options">
-        {OPTIONS.map((opt) => (
-          <button
-            key={opt.mode}
-            type="button"
-            className="wfp-create-choice__card"
-            onClick={() => onChoose(opt.mode)}
-            disabled={opt.mode === 'session' && creatingSession}
-          >
-            <span className="wfp-create-choice__card-icon">{opt.icon}</span>
-            <span className="wfp-create-choice__card-label">{opt.label}</span>
-            <span className="wfp-create-choice__card-desc">{opt.desc}</span>
-          </button>
-        ))}
+        {OPTIONS.map((opt) => {
+          const disabled = opt.mode === 'session' && creatingSession
+          return (
+            <button
+              key={opt.mode}
+              type="button"
+              className={`wfp-create-choice__card wfp-create-choice__card--${opt.mode}${disabled ? ' wfp-create-choice__card--disabled' : ''}`}
+              onClick={() => !disabled && onChoose(opt.mode)}
+              onKeyDown={(e) => handleKeyDown(e, opt.mode)}
+              disabled={disabled}
+              aria-label={`选择${opt.label}：${opt.desc}`}
+              aria-busy={disabled && creatingSession}
+            >
+              <span className="wfp-create-choice__card-icon">{opt.icon}</span>
+              <span className="wfp-create-choice__card-label">{opt.label}</span>
+              <span className="wfp-create-choice__card-desc">{opt.desc}</span>
+              {disabled && creatingSession && (
+                <span className="wfp-create-choice__card-loading" aria-hidden>
+                  <Icon icon={Loader2} size={20} className="wfp-create-choice__spinner" />
+                </span>
+              )}
+            </button>
+          )
+        })}
       </div>
       <div className="wfp-create-choice__footer">
         <Button type="text" onClick={onCancel}>

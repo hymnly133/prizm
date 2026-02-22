@@ -7,12 +7,22 @@
 import { memo, useMemo, useCallback } from 'react'
 import { Button, Dropdown, Tag } from 'antd'
 import type { MenuProps } from 'antd'
-import { Plus, Play, Pencil, Trash2, MessageSquare, PanelRightOpen } from 'lucide-react'
+import {
+  MoreHorizontal,
+  Plus,
+  Play,
+  Pencil,
+  Trash2,
+  MessageSquare,
+  PanelRightOpen
+} from 'lucide-react'
 import { ActionIcon, Icon } from '@lobehub/ui'
 import type { WorkflowDefRecord, WorkflowRun } from '@prizm/shared'
 import type { EnrichedSession } from '@prizm/shared'
 import { getWorkflowManagementSessionLabel } from '@prizm/shared'
 import SearchInput from '../ui/SearchInput'
+import { formatRelativeTime } from '../../utils/formatRelativeTime'
+import { AccentList } from '../ui/AccentList'
 import { EmptyState } from '../ui/EmptyState'
 
 type SidebarItem =
@@ -176,11 +186,145 @@ export const WorkflowSidebar = memo(function WorkflowSidebar({
     [onRunWorkflow, onOpenDefInTab, onSelectDef, onDeleteDef]
   )
 
+  const activeKey = useMemo(() => {
+    for (const item of filteredItems) {
+      if (item.type === 'session' && item.session.id === selectedManagementSessionId)
+        return `s-${item.session.id}`
+      if (
+        item.type === 'combined' &&
+        (item.def.id === selectedDefId || item.session.id === selectedManagementSessionId)
+      )
+        return `c-${item.def.id}`
+      if (item.type === 'def' && item.def.id === selectedDefId) return `d-${item.def.id}`
+    }
+    return undefined
+  }, [filteredItems, selectedDefId, selectedManagementSessionId])
+
+  const sidebarListItems = useMemo(() => {
+    return filteredItems.map((item) => {
+      if (item.type === 'session') {
+        const label = getWorkflowManagementSessionLabel(item.session)
+        return {
+          key: `s-${item.session.id}`,
+          title: (
+            <span className="wfp-sidebar-item">
+              <Tag color="blue" className="wfp-sidebar-item__tag">
+                会话
+              </Tag>
+              <span className="wfp-sidebar-item__name">{label}</span>
+              <span className="wfp-sidebar-item__time">
+                {formatRelativeTime(item.session.updatedAt)}
+              </span>
+            </span>
+          ),
+          onClick: () => {
+            const defId = item.session.toolMeta?.workflowDefId || item.session.bgMeta?.workflowDefId
+            onSelectManagementSession(item.session.id, defId || null)
+          },
+          ...(onDeleteManagementSession
+            ? {
+                actions: (
+                  <ActionIcon
+                    icon={Trash2}
+                    size="small"
+                    title="删除会话"
+                    onClick={(e: React.MouseEvent) => {
+                      e.stopPropagation()
+                      onDeleteManagementSession(item.session.id)
+                    }}
+                  />
+                ),
+                showAction: true
+              }
+            : {})
+        }
+      }
+      if (item.type === 'combined') {
+        const { def, session } = item
+        const isActive = activeDefNames.has(def.name)
+        return {
+          key: `c-${def.id}`,
+          title: (
+            <span className="wfp-sidebar-item">
+              <Tag color="cyan" className="wfp-sidebar-item__tag">
+                会话+定义
+              </Tag>
+              {isActive && (
+                <span
+                  className="wfp-sidebar-item__active-dot"
+                  title="有活跃运行"
+                  aria-label="有活跃运行"
+                />
+              )}
+              <span className="wfp-sidebar-item__names">
+                <span className="wfp-sidebar-item__name">{def.name}</span>
+                {def.description && (
+                  <span className="wfp-sidebar-item__desc">{def.description}</span>
+                )}
+              </span>
+              <span className="wfp-sidebar-item__time">
+                {formatRelativeTime(Math.max(def.updatedAt, session.updatedAt))}
+              </span>
+            </span>
+          ),
+          onClick: () => onSelectDef(def.id, session.id),
+          actions: (
+            <Dropdown menu={{ items: makeDefMenuItems(def) }} trigger={['click']}>
+              <span onClick={(e) => e.stopPropagation()}>
+                <ActionIcon icon={MoreHorizontal} size="small" title="更多" />
+              </span>
+            </Dropdown>
+          ),
+          showAction: true
+        }
+      }
+      const { def } = item
+      const isActive = activeDefNames.has(def.name)
+      return {
+        key: `d-${def.id}`,
+        title: (
+          <span className="wfp-sidebar-item">
+            <Tag className="wfp-sidebar-item__tag">定义</Tag>
+            {isActive && (
+              <span
+                className="wfp-sidebar-item__active-dot"
+                title="有活跃运行"
+                aria-label="有活跃运行"
+              />
+            )}
+            <span className="wfp-sidebar-item__names">
+              <span className="wfp-sidebar-item__name">{def.name}</span>
+              {def.description && <span className="wfp-sidebar-item__desc">{def.description}</span>}
+            </span>
+            <span className="wfp-sidebar-item__time">{formatRelativeTime(def.updatedAt)}</span>
+          </span>
+        ),
+        onClick: () => onSelectDef(def.id),
+        actions: (
+          <Dropdown menu={{ items: makeDefMenuItems(def) }} trigger={['click']}>
+            <span onClick={(e) => e.stopPropagation()}>
+              <ActionIcon icon={MoreHorizontal} size="small" title="更多" />
+            </span>
+          </Dropdown>
+        ),
+        showAction: true
+      }
+    })
+  }, [
+    filteredItems,
+    activeDefNames,
+    makeDefMenuItems,
+    onSelectDef,
+    onSelectManagementSession,
+    onDeleteManagementSession
+  ])
+
   return (
     <div className="wfp-sidebar">
       <div className="wfp-sidebar__search">
         <SearchInput
           placeholder="搜索工作流与会话…"
+          aria-label="搜索工作流与会话"
           value={searchQuery}
           onChange={onSearch}
           onSearch={onSearch}
@@ -191,157 +335,52 @@ export const WorkflowSidebar = memo(function WorkflowSidebar({
         <div className="wfp-sidebar__section-title">工作流与会话</div>
       </div>
       <div className="wfp-sidebar__list">
-        {filteredItems.length === 0 && (
+        {filteredItems.length === 0 ? (
           <EmptyState
             description={searchQuery ? '无匹配结果' : '暂无工作流或会话'}
             className="wfp-sidebar__empty"
           />
+        ) : (
+          <AccentList
+            items={sidebarListItems}
+            activeKey={activeKey}
+            className="wfp-sidebar__accent-list"
+          />
         )}
-        {filteredItems.map((item) => {
-          if (item.type === 'session') {
-            const label = getWorkflowManagementSessionLabel(item.session)
-            const isSelected = item.session.id === selectedManagementSessionId
-            return (
-              <div
-                key={`s-${item.session.id}`}
-                className={`wfp-def-item wfp-def-item--session${
-                  isSelected ? ' wfp-def-item--selected' : ''
-                }`}
-                onClick={() => {
-                  const defId =
-                    item.session.toolMeta?.workflowDefId || item.session.bgMeta?.workflowDefId
-                  onSelectManagementSession(item.session.id, defId || null)
-                }}
-                role="button"
-                tabIndex={0}
-              >
-                <Tag color="blue" style={{ flexShrink: 0, marginRight: 4 }}>
-                  会话
-                </Tag>
-                <div className="wfp-def-item__info">
-                  <span className="wfp-def-item__name">{label}</span>
-                </div>
-                <span className="wfp-def-item__time">
-                  {formatRelativeTime(item.session.updatedAt)}
-                </span>
-                {onDeleteManagementSession && (
-                  <ActionIcon
-                    icon={Trash2}
-                    size="small"
-                    title="删除会话"
-                    className="wfp-def-item__action"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onDeleteManagementSession(item.session.id)
-                    }}
-                  />
-                )}
-              </div>
-            )
-          }
-          if (item.type === 'combined') {
-            const { def, session } = item
-            const isActive = activeDefNames.has(def.name)
-            const isSelected =
-              def.id === selectedDefId || session.id === selectedManagementSessionId
-            return (
-              <Dropdown
-                key={`c-${def.id}`}
-                menu={{ items: makeDefMenuItems(def) }}
-                trigger={['contextMenu']}
-              >
-                <div
-                  className={`wfp-def-item${isSelected ? ' wfp-def-item--selected' : ''}`}
-                  onClick={() => onSelectDef(def.id, session.id)}
-                  role="button"
-                  tabIndex={0}
-                >
-                  <Tag color="cyan" style={{ flexShrink: 0, marginRight: 4 }}>
-                    会话+定义
-                  </Tag>
-                  {isActive && <div className="wfp-def-item__dot" title="有活跃运行" />}
-                  <div className="wfp-def-item__info">
-                    <span className="wfp-def-item__name">{def.name}</span>
-                    {def.description && (
-                      <span className="wfp-def-item__desc">{def.description}</span>
-                    )}
-                  </div>
-                  <span className="wfp-def-item__time">
-                    {formatRelativeTime(Math.max(def.updatedAt, session.updatedAt))}
-                  </span>
-                </div>
-              </Dropdown>
-            )
-          }
-          const { def } = item
-          const isActive = activeDefNames.has(def.name)
-          const isSelected = def.id === selectedDefId
-          return (
-            <Dropdown
-              key={`d-${def.id}`}
-              menu={{ items: makeDefMenuItems(def) }}
-              trigger={['contextMenu']}
-            >
-              <div
-                className={`wfp-def-item${isSelected ? ' wfp-def-item--selected' : ''}`}
-                onClick={() => onSelectDef(def.id)}
-                role="button"
-                tabIndex={0}
-              >
-                <Tag style={{ flexShrink: 0, marginRight: 4 }}>定义</Tag>
-                {isActive && <div className="wfp-def-item__dot" title="有活跃运行" />}
-                <div className="wfp-def-item__info">
-                  <span className="wfp-def-item__name">{def.name}</span>
-                  {def.description && <span className="wfp-def-item__desc">{def.description}</span>}
-                </div>
-                <span className="wfp-def-item__time">{formatRelativeTime(def.updatedAt)}</span>
-              </div>
-            </Dropdown>
-          )
-        })}
       </div>
       <div className="wfp-sidebar__footer">
+        <Button
+          type="primary"
+          block
+          icon={<Icon icon={Plus} size={14} />}
+          onClick={onOpenCreatePanel}
+          className="wfp-sidebar__footer-btn wfp-sidebar__footer-btn--primary"
+        >
+          新建工作流
+        </Button>
+        <Button
+          type="default"
+          block
+          icon={<Icon icon={MessageSquare} size={14} />}
+          onClick={onNewSession}
+          className="wfp-sidebar__footer-btn"
+        >
+          用对话创建
+        </Button>
         {onOpenRightPanel && !hideTabBarEntry && (
           <Button
             type="text"
             block
             icon={<Icon icon={PanelRightOpen} size={14} />}
             onClick={onOpenRightPanel}
-            style={{ marginBottom: 6 }}
+            className="wfp-sidebar__footer-btn wfp-sidebar__footer-btn--tertiary"
+            title="打开标签栏"
+            aria-label="打开标签栏"
           >
             打开标签栏
           </Button>
         )}
-        <Button
-          type="dashed"
-          block
-          icon={<Icon icon={Plus} size={14} />}
-          onClick={onOpenCreatePanel}
-          style={{ marginBottom: 6 }}
-        >
-          新建工作流（图 / YAML）
-        </Button>
-        <Button
-          type="text"
-          block
-          icon={<Icon icon={MessageSquare} size={14} />}
-          onClick={onNewSession}
-        >
-          用对话创建
-        </Button>
       </div>
     </div>
   )
 })
-
-function formatRelativeTime(ts: number): string {
-  const diff = Date.now() - ts
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return '刚刚'
-  if (mins < 60) return `${mins}分钟前`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}小时前`
-  const days = Math.floor(hours / 24)
-  if (days < 30) return `${days}天前`
-  return new Date(ts).toLocaleDateString()
-}

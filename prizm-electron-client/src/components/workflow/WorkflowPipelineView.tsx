@@ -8,35 +8,35 @@
 import { useMemo, Fragment } from 'react'
 import { Popover, Tag, Button, Space, Typography } from 'antd'
 import {
-  CheckCircleOutlined,
-  CloseCircleOutlined,
-  ClockCircleOutlined,
-  ThunderboltOutlined,
-  PauseCircleOutlined,
-  MinusCircleOutlined,
-  RobotOutlined,
-  CheckSquareOutlined,
-  SwapOutlined
-} from '@ant-design/icons'
+  ArrowLeftRight,
+  Bot,
+  CheckCircle,
+  CheckSquare,
+  Clock,
+  MinusCircle,
+  PauseCircle,
+  XCircle,
+  Zap
+} from 'lucide-react'
 import type { WorkflowRun, WorkflowStepResult } from '@prizm/shared'
 
-const { Text, Paragraph } = Typography
+const { Text } = Typography
 
 const MAX_HORIZONTAL_STEPS = 8
 
 const STATUS_ICON: Record<string, React.ReactNode> = {
-  pending: <ClockCircleOutlined />,
-  running: <ThunderboltOutlined />,
-  completed: <CheckCircleOutlined />,
-  failed: <CloseCircleOutlined />,
-  skipped: <MinusCircleOutlined />,
-  paused: <PauseCircleOutlined />
+  pending: <Clock size={20} />,
+  running: <Zap size={20} />,
+  completed: <CheckCircle size={20} />,
+  failed: <XCircle size={20} />,
+  skipped: <MinusCircle size={20} />,
+  paused: <PauseCircle size={20} />
 }
 
 const STEP_TYPE_ICON: Record<string, React.ReactNode> = {
-  agent: <RobotOutlined />,
-  approve: <CheckSquareOutlined />,
-  transform: <SwapOutlined />
+  agent: <Bot size={20} />,
+  approve: <CheckSquare size={20} />,
+  transform: <ArrowLeftRight size={20} />
 }
 
 /** 从 stepResult 派生单行概览（有输出/无输出 · N 个产物），不持久化 */
@@ -147,7 +147,18 @@ function StepNode({
   const showInlineApprove = step.status === 'paused' && step.type === 'approve' && run.resumeToken && onApprove && !compact
 
   const content = (
-    <div className="wf-step">
+    <div
+      className="wf-step"
+      role="button"
+      tabIndex={0}
+      aria-label={`${step.label}，${step.status}`}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          ;(e.currentTarget as HTMLElement).click()
+        }
+      }}
+    >
       <div className={`wf-step__node wf-step__node--${step.status}`}>
         {step.status === 'pending' || step.status === 'skipped' ? typeIcon : icon}
       </div>

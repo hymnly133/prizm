@@ -11,7 +11,6 @@ import {
   Statistic,
   Row,
   Col,
-  Empty,
   Button,
   Space,
   Modal,
@@ -36,6 +35,7 @@ import { useWorkflowStore, subscribeWorkflowEvents } from '../../store/workflowS
 import { usePrizmContext } from '../../context/PrizmContext'
 import { useScope } from '../../hooks/useScope'
 import { useAgentSessionStore } from '../../store/agentSessionStore'
+import { EmptyState } from '../ui/EmptyState'
 import { ExecutionCard, ExecutionStatusTag, ExecutionResultView } from '../execution'
 import { MiniPipelineView } from './WorkflowPipelineView'
 import { WorkflowRunDetail } from './WorkflowRunDetail'
@@ -112,7 +112,7 @@ export function WorkflowPlayground() {
           <Statistic
             title="任务运行中"
             value={stats.t.running}
-            valueStyle={{ color: 'var(--ant-color-primary)' }}
+            styles={{ content: { color: 'var(--ant-color-primary)' } }}
           />
         </Col>
         <Col span={4}>
@@ -122,21 +122,21 @@ export function WorkflowPlayground() {
           <Statistic
             title="工作流运行中"
             value={stats.w.running}
-            valueStyle={{ color: 'var(--ant-color-primary)' }}
+            styles={{ content: { color: 'var(--ant-color-primary)' } }}
           />
         </Col>
         <Col span={4}>
           <Statistic
             title="已完成"
             value={stats.t.completed + stats.w.completed}
-            valueStyle={{ color: 'var(--ant-color-success)' }}
+            styles={{ content: { color: 'var(--ant-color-success)' } }}
           />
         </Col>
         <Col span={4}>
           <Statistic
             title="失败"
             value={stats.t.failed + stats.w.failed}
-            valueStyle={{ color: 'var(--ant-color-error)' }}
+            styles={{ content: { color: 'var(--ant-color-error)' } }}
           />
         </Col>
       </Row>
@@ -252,7 +252,7 @@ function TasksPanel() {
       </Flexbox>
 
       {filtered.length === 0 ? (
-        <Empty description="暂无任务" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        <EmptyState description="暂无任务" />
       ) : (
         filtered.map((task) => (
           <ExecutionCard
@@ -366,7 +366,7 @@ function RunsPanel() {
       </Space>
 
       {filtered.length === 0 ? (
-        <Empty description="暂无工作流运行" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        <EmptyState description="暂无工作流运行" />
       ) : (
         filtered.map((run) => (
           <WorkflowRunCard
@@ -548,7 +548,7 @@ function DefsPanel() {
       </Space>
 
       {defs.length === 0 ? (
-        <Empty description="暂无工作流定义" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        <EmptyState description="暂无工作流定义" />
       ) : (
         defs.map((def) => (
           <DefCard
@@ -593,7 +593,7 @@ function DefsPanel() {
         footer={null}
         width="90vw"
         className="wfe-modal"
-        destroyOnClose
+        destroyOnHidden
       >
         {editorDef && (
           <WorkflowEditor
@@ -612,7 +612,7 @@ function DefsPanel() {
         footer={null}
         width="90vw"
         className="wfe-modal"
-        destroyOnClose
+        destroyOnHidden
       >
         <WorkflowEditor
           onSave={handleEditorSave}
@@ -628,7 +628,7 @@ function DefsPanel() {
         onCancel={handleAICancel}
         footer={null}
         width={600}
-        destroyOnClose
+        destroyOnHidden
       >
         <Flexbox gap={12}>
           {!aiSessionId && (
@@ -848,7 +848,7 @@ function ExecPanel() {
             onClear={() => setWfName('')}
             style={{ width: '100%' }}
             notFoundContent={
-              <Empty description="暂无已注册工作流" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              <EmptyState description="暂无已注册工作流" />
             }
             options={defs.map((d) => ({
               value: d.name,

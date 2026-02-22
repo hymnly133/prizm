@@ -6,6 +6,10 @@
  */
 
 import { useMemo, useCallback, useState, useEffect } from 'react'
+import { AnimatePresence, motion } from 'motion/react'
+import CodeMirror from '@uiw/react-codemirror'
+import { yaml as yamlLanguage } from '@codemirror/lang-yaml'
+import { EditorView } from '@codemirror/view'
 import {
   Button,
   Popconfirm,
@@ -17,21 +21,22 @@ import {
   Typography,
   Tag
 } from 'antd'
-import { MessageOutlined, UserAddOutlined, ReloadOutlined } from '@ant-design/icons'
-import { Flexbox, Input } from '@lobehub/ui'
-import { Icon } from '@lobehub/ui'
+import { ActionIcon, Flexbox, Icon } from '@lobehub/ui'
 import { Segmented } from '../ui/Segmented'
-import { Database, Workflow } from 'lucide-react'
+import {
+  Code,
+  Copy,
+  Download,
+  FileEdit,
+  MessageSquare,
+  PlayCircle,
+  RefreshCw,
+  Trash2,
+  UserPlus,
+  Workflow
+} from 'lucide-react'
 import { useCollabInteraction } from '../../hooks/useCollabInteraction'
 import { useWorkflowStore } from '../../store/workflowStore'
-import {
-  PlayCircleOutlined,
-  DeleteOutlined,
-  CopyOutlined,
-  ExportOutlined,
-  CodeOutlined,
-  FormOutlined
-} from '@ant-design/icons'
 import yaml from 'js-yaml'
 import type {
   WorkflowDefRecord,
@@ -44,7 +49,9 @@ import { WorkflowDefOverviewTab } from './WorkflowDefOverviewTab'
 import { WorkflowDefRunsTab } from './WorkflowDefRunsTab'
 import { WorkflowWorkspacePanel } from './WorkflowWorkspacePanel'
 import { WorkflowEditor } from './editor'
+import { fadeUp, getReducedMotionProps } from '../../theme/motionPresets'
 import { getWorkflowArgsSchema } from './workflowArgsSchema'
+import { useCodeMirrorTheme } from '../../hooks/useCodeMirrorTheme'
 
 const { Text } = Typography
 
@@ -126,6 +133,17 @@ export function WorkflowDefDetail({
   const defRuns = useMemo(
     () => runs.filter((r) => r.workflowName === defRecord.name),
     [runs, defRecord.name]
+  )
+
+  const cmTheme = useCodeMirrorTheme()
+  const yamlReadOnlyExtensions = useMemo(
+    () => [
+      cmTheme,
+      yamlLanguage(),
+      EditorView.lineWrapping,
+      EditorView.editable.of(false)
+    ],
+    [cmTheme]
   )
 
   /**
@@ -285,74 +303,70 @@ export function WorkflowDefDetail({
         </div>
         <div className="wfp-def-header__actions">
           <Button
-            icon={<CodeOutlined />}
+            icon={<Icon icon={Code} size={16} />}
             onClick={() => setEditorModalOpen(true)}
             title="打开图/YAML 编辑器"
           >
             编辑
           </Button>
-          <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleOpenRunModal}>
+          <Button type="primary" icon={<Icon icon={PlayCircle} size={16} />} onClick={handleOpenRunModal}>
             运行
           </Button>
-          <Button icon={<ExportOutlined />} onClick={handleExportYaml} title="导出 YAML" />
+          <Button icon={<Icon icon={Download} size={16} />} onClick={handleExportYaml} title="导出 YAML" />
           <Popconfirm
             title="确定删除此工作流定义？"
             description="关联的运行记录将保留。"
             onConfirm={() => onDeleteDef(defRecord.id)}
           >
-            <Button danger icon={<DeleteOutlined />} />
+            <Button danger icon={<Icon icon={Trash2} size={16} />} />
           </Popconfirm>
         </div>
-      </div>
-
-      {/* 工作流管理会话（双向引用） */}
-      <div className="wfp-def-mgmt-session">
-        <Text strong style={{ fontSize: 13, marginRight: 8 }}>
-          工作流管理会话
-        </Text>
-        {defRecord.workflowManagementSessionId ? (
-          <Space size={8} wrap>
-            <code style={{ fontSize: 11 }}>
-              {defRecord.workflowManagementSessionId.slice(0, 12)}…
-            </code>
-            <Button
-              size="small"
-              type="primary"
-              icon={<MessageOutlined />}
-              onClick={() => {
-                if (onOpenManagementSession) {
-                  onOpenManagementSession(defRecord.workflowManagementSessionId!)
-                } else {
-                  openSession(defRecord.workflowManagementSessionId!, `${defRecord.name} 管理会话`)
-                }
-              }}
-            >
-              在侧边栏打开管理会话
-            </Button>
-            {onRefreshManagementSession && (
+        <div className="wfp-def-header__mgmt">
+          <span className="wfp-def-header__mgmt-label">工作流管理会话</span>
+          {defRecord.workflowManagementSessionId ? (
+            <Space size={8} wrap className="wfp-def-header__mgmt-actions">
+              <code className="wfp-def-header__mgmt-id">
+                {defRecord.workflowManagementSessionId.slice(0, 12)}…
+              </code>
               <Button
                 size="small"
-                icon={<ReloadOutlined />}
-                onClick={() =>
-                  onRefreshManagementSession(defRecord.workflowManagementSessionId!, (result) =>
-                    openSession(result.newSessionId, result.label)
-                  )
-                }
+                type="primary"
+                icon={<Icon icon={MessageSquare} size={14} />}
+                onClick={() => {
+                  if (onOpenManagementSession) {
+                    onOpenManagementSession(defRecord.workflowManagementSessionId!)
+                  } else {
+                    openSession(defRecord.workflowManagementSessionId!, `${defRecord.name} 管理会话`)
+                  }
+                }}
               >
-                重建管理会话
+                在侧边栏打开管理会话
               </Button>
-            )}
-          </Space>
-        ) : (
-          <Button
-            size="small"
-            icon={<UserAddOutlined />}
-            loading={creatingMgmt}
-            onClick={handleCreateMgmtSession}
-          >
-            创建管理会话
-          </Button>
-        )}
+              {onRefreshManagementSession && (
+                <Button
+                  size="small"
+                  icon={<Icon icon={RefreshCw} size={14} />}
+                  onClick={() =>
+                    onRefreshManagementSession(defRecord.workflowManagementSessionId!, (result) =>
+                      openSession(result.newSessionId, result.label)
+                    )
+                  }
+                >
+                  重建管理会话
+                </Button>
+              )}
+            </Space>
+          ) : (
+            <Button
+              size="small"
+              icon={<Icon icon={UserPlus} size={14} />}
+              loading={creatingMgmt}
+              onClick={handleCreateMgmtSession}
+            >
+              创建管理会话
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Tabs */}
@@ -370,49 +384,94 @@ export function WorkflowDefDetail({
       </div>
 
       {/* Tab Content */}
-      {activeTab === 'overview' && parsedDef && (
-        <WorkflowDefOverviewTab
-          def={parsedDef}
-          runs={defRuns}
-          defId={defRecord.id}
-          onRollbackSuccess={refreshDefs}
-        />
-      )}
-      {activeTab === 'runs' && (
-        <WorkflowDefRunsTab
-          runs={defRuns}
-          loading={loading}
-          onSelectRun={onSelectRun}
-          onCancelRun={onCancelRun}
-          onRefresh={onRefreshRuns}
-        />
-      )}
-      {activeTab === 'workspace' && (
-        <div className="wfp-tab-content wfp-fade-appear">
-          <WorkflowWorkspacePanel
-            workflowName={defRecord.name}
-            mode="overview"
-            runsForWorkflow={defRuns}
-            onSelectRun={onSelectRun}
-            onCancelRun={onCancelRun}
-          />
-        </div>
-      )}
-      {activeTab === 'yaml' && (
-        <div className="wfp-tab-content wfp-fade-appear">
-          <div className="wfp-yaml-view">
-            <Button
-              className="wfp-yaml-view__copy"
-              size="small"
-              icon={<CopyOutlined />}
-              onClick={handleCopyYaml}
-            >
-              复制
-            </Button>
-            <pre>{defRecord.yamlContent ?? '(空)'}</pre>
-          </div>
-        </div>
-      )}
+      <AnimatePresence mode="wait">
+        {activeTab === 'overview' && parsedDef && (
+          <motion.div
+            key="overview"
+            className="wfp-tab-content"
+            {...fadeUp()}
+            {...getReducedMotionProps()}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2, ease: [0.33, 1, 0.68, 1] }}
+          >
+            <WorkflowDefOverviewTab
+              def={parsedDef}
+              runs={defRuns}
+              defId={defRecord.id}
+              onRollbackSuccess={refreshDefs}
+            />
+          </motion.div>
+        )}
+        {activeTab === 'runs' && (
+          <motion.div
+            key="runs"
+            className="wfp-tab-content"
+            {...fadeUp()}
+            {...getReducedMotionProps()}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2, ease: [0.33, 1, 0.68, 1] }}
+          >
+            <WorkflowDefRunsTab
+              runs={defRuns}
+              loading={loading}
+              onSelectRun={onSelectRun}
+              onCancelRun={onCancelRun}
+              onRefresh={onRefreshRuns}
+            />
+          </motion.div>
+        )}
+        {activeTab === 'workspace' && (
+          <motion.div
+            key="workspace"
+            className="wfp-tab-content"
+            {...fadeUp()}
+            {...getReducedMotionProps()}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2, ease: [0.33, 1, 0.68, 1] }}
+          >
+            <WorkflowWorkspacePanel
+              workflowName={defRecord.name}
+              mode="overview"
+              runsForWorkflow={defRuns}
+              onSelectRun={onSelectRun}
+              onCancelRun={onCancelRun}
+            />
+          </motion.div>
+        )}
+        {activeTab === 'yaml' && (
+          <motion.div
+            key="yaml"
+            className="wfp-tab-content"
+            {...fadeUp()}
+            {...getReducedMotionProps()}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2, ease: [0.33, 1, 0.68, 1] }}
+          >
+            <div className="wfp-yaml-view">
+              <ActionIcon
+                icon={Copy}
+                size="small"
+                title="复制 YAML"
+                onClick={handleCopyYaml}
+                className="wfp-yaml-view__copy"
+              />
+              <CodeMirror
+                value={defRecord.yamlContent ?? ''}
+                extensions={yamlReadOnlyExtensions}
+                theme="none"
+                basicSetup={{
+                  lineNumbers: true,
+                  foldGutter: false,
+                  highlightActiveLine: true
+                }}
+                editable={false}
+                className="wfp-yaml-view__editor"
+                style={{ minHeight: 320, maxHeight: 600 }}
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* 编辑器 Modal：主区「编辑」或侧栏「编辑」请求打开 */}
       <Modal
@@ -422,7 +481,7 @@ export function WorkflowDefDetail({
         footer={null}
         width="90vw"
         className="wfe-modal"
-        destroyOnClose
+        destroyOnHidden
       >
         <WorkflowEditor
           defRecord={defRecord}
@@ -445,7 +504,9 @@ export function WorkflowDefDetail({
           {/* Mode toggle: form vs JSON — only show when args are detected */}
           {argsInfo && argsInfo.length > 0 && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <FormOutlined
+              <Icon
+                icon={FileEdit}
+                size={14}
                 style={{
                   color: !useJsonMode
                     ? 'var(--ant-color-primary)'
@@ -453,7 +514,9 @@ export function WorkflowDefDetail({
                 }}
               />
               <Switch size="small" checked={useJsonMode} onChange={setUseJsonMode} />
-              <CodeOutlined
+              <Icon
+                icon={Code}
+                size={14}
                 style={{
                   color: useJsonMode
                     ? 'var(--ant-color-primary)'

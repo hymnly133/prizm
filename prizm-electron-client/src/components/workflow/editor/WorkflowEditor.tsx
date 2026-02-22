@@ -122,31 +122,6 @@ function WorkflowEditorInner({
   // Cleanup on unmount
   useEffect(() => () => { reset() }, [reset])
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        e.preventDefault()
-        void handleSave()
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
-        e.preventDefault()
-        undo()
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && e.shiftKey) {
-        e.preventDefault()
-        redo()
-      }
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        const tag = (e.target as HTMLElement)?.tagName
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
-        deleteSelected()
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [undo, redo, deleteSelected])
-
   // YAML sync
   const handleToggleYaml = useCallback(() => {
     if (!yamlMode) {
@@ -162,6 +137,7 @@ function WorkflowEditorInner({
     if (parsed) {
       loadFromDef(parsed)
     }
+    useWorkflowEditorStore.setState({ dirty: true })
   }, [loadFromDef])
 
   // Save: YAML 模式以编辑器内容为准；图模式以 store 为准
@@ -208,6 +184,31 @@ function WorkflowEditorInner({
       setSaving(false)
     }
   }, [yamlMode, yamlText, nodes, edges, exportToDef, onSave])
+
+  // Keyboard shortcuts (must be after handleSave definition)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault()
+        void handleSave()
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        undo()
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && e.shiftKey) {
+        e.preventDefault()
+        redo()
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const tag = (e.target as HTMLElement)?.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+        deleteSelected()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [handleSave, undo, redo, deleteSelected])
 
   // Run
   const handleRun = useMemo(

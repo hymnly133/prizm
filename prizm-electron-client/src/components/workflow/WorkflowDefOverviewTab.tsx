@@ -7,22 +7,20 @@
 import { useMemo, useState, useEffect, useCallback } from 'react'
 import { Tag, Button, Popconfirm, message } from 'antd'
 import {
-  RobotOutlined,
-  CheckSquareOutlined,
-  SwapOutlined,
-  ClockCircleOutlined,
-  FieldTimeOutlined,
-  FileOutlined,
-  CheckOutlined,
-  HistoryOutlined,
-  RollbackOutlined
-} from '@ant-design/icons'
+  CalendarClock,
+  Check,
+  Clock,
+  FileText,
+  GitBranch,
+  History,
+  RotateCcw
+} from 'lucide-react'
 import type { WorkflowDef, WorkflowRun, WorkflowDefVersionItem } from '@prizm/shared'
 import { StatCard } from '../ui/StatCard'
 import { EmptyState } from '../ui/EmptyState'
+import { LoadingPlaceholder } from '../ui/LoadingPlaceholder'
 import { getWorkflowArgsSchema } from './workflowArgsSchema'
 import { WorkflowStepDiagram } from './WorkflowStepDiagram'
-import { GitBranch } from 'lucide-react'
 import { usePrizmContext } from '../../context/PrizmContext'
 
 export interface WorkflowDefOverviewTabProps {
@@ -61,7 +59,7 @@ export function WorkflowDefOverviewTab({
   const [rollbackingId, setRollbackingId] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!defId) {
+    if (!defId || !manager) {
       setVersions([])
       return
     }
@@ -86,7 +84,7 @@ export function WorkflowDefOverviewTab({
 
   const handleRollback = useCallback(
     async (versionId: string) => {
-      if (!defId) return
+      if (!defId || !manager) return
       setRollbackingId(versionId)
       try {
         const http = manager.getHttpClient()
@@ -245,19 +243,19 @@ export function WorkflowDefOverviewTab({
       {defId && (
         <div className="wfp-overview-tab__section">
           <div className="wfp-overview-tab__section-title">
-            <HistoryOutlined style={{ marginRight: 6 }} />
+            <History size={14} style={{ marginRight: 6 }} />
             版本历史
           </div>
           {versionsLoading ? (
-            <div style={{ color: 'var(--ant-color-text-quaternary)', fontSize: 13 }}>加载中…</div>
+            <LoadingPlaceholder />
           ) : versions.length === 0 ? (
             <div style={{ color: 'var(--ant-color-text-quaternary)', fontSize: 13 }}>
               暂无历史版本（每次保存会生成快照）
             </div>
           ) : (
-            <ul className="wfp-version-list">
+            <ul className="list-simple wfp-version-list">
               {versions.map((v) => (
-                <li key={v.id} className="wfp-version-list__item">
+                <li key={v.id} className="list-simple__item wfp-version-list__item">
                   <span className="wfp-version-list__time">{formatVersionTime(v.createdAt)}</span>
                   <Popconfirm
                     title="确定回溯到此版本？"
@@ -268,7 +266,7 @@ export function WorkflowDefOverviewTab({
                     <Button
                       type="link"
                       size="small"
-                      icon={<RollbackOutlined />}
+                      icon={<RotateCcw size={14} />}
                       loading={rollbackingId === v.id}
                     >
                       回溯
@@ -286,11 +284,11 @@ export function WorkflowDefOverviewTab({
 
 function triggerIcon(type: string): React.ReactNode {
   switch (type) {
-    case 'cron': return <ClockCircleOutlined />
-    case 'schedule_remind': return <FieldTimeOutlined />
-    case 'document_saved': return <FileOutlined />
-    case 'todo_completed': return <CheckOutlined />
-    default: return <ClockCircleOutlined />
+    case 'cron': return <Clock size={14} />
+    case 'schedule_remind': return <CalendarClock size={14} />
+    case 'document_saved': return <FileText size={14} />
+    case 'todo_completed': return <Check size={14} />
+    default: return <Clock size={14} />
   }
 }
 

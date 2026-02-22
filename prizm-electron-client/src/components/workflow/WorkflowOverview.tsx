@@ -6,6 +6,7 @@
  */
 
 import { useMemo, useState, useCallback } from 'react'
+import { motion } from 'motion/react'
 import { Button, Space, Select } from 'antd'
 import {
   GitBranch,
@@ -27,6 +28,7 @@ import { SectionHeader } from '../ui/SectionHeader'
 import { ContentCard } from '../ui/ContentCard'
 import { WorkflowRunCard } from './WorkflowRunCard'
 import { WorkflowWorkspacePanel } from './WorkflowWorkspacePanel'
+import { fadeUpStagger, getReducedMotionProps } from '../../theme/motionPresets'
 
 export interface WorkflowOverviewProps {
   defs: WorkflowDefRecord[]
@@ -150,13 +152,15 @@ export function WorkflowOverview({
       <AccentSpotlightCard
         items={spotlightItems}
         renderItem={(item) => (
-          <StatCard
-            icon={item.icon}
-            iconColor={item.iconColor}
-            label={item.label}
-            value={item.value}
-            size="compact"
-          />
+          <motion.div {...fadeUpStagger(spotlightItems.indexOf(item))} {...getReducedMotionProps()}>
+            <StatCard
+              icon={item.icon}
+              iconColor={item.iconColor}
+              label={item.label}
+              value={item.value}
+              size="compact"
+            />
+          </motion.div>
         )}
         className="wfp-stats-spotlight"
       />
@@ -179,11 +183,7 @@ export function WorkflowOverview({
         ) : (
           <div className="wfp-runs-list">
             {recentRuns.map((run, i) => (
-              <div
-                key={run.id}
-                className="wfp-run-item-enter"
-                style={{ animationDelay: `${i * 40}ms` }}
-              >
+              <motion.div key={run.id} {...fadeUpStagger(i)} {...getReducedMotionProps()}>
                 <WorkflowRunCard
                   run={run}
                   onClick={() => {
@@ -193,7 +193,7 @@ export function WorkflowOverview({
                   }}
                   onCancel={() => onCancelRun(run.id)}
                 />
-              </div>
+              </motion.div>
             ))}
           </div>
         )}
