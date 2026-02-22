@@ -4,6 +4,7 @@
  */
 import { Button, toast } from '@lobehub/ui'
 import { Segmented } from './ui/Segmented'
+import { EmptyState } from './ui/EmptyState'
 import { createStaticStyles } from 'antd-style'
 import { Activity, BarChart3, Clock, Cpu, Database, Layers, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
@@ -333,7 +334,7 @@ function DistributionTable({
   const showCache = entries.some(([, stat]) => (stat.cached ?? 0) > 0)
 
   if (entries.length === 0) {
-    return <div className={styles.emptyHint}>暂无数据</div>
+    return <EmptyState description="暂无数据" />
   }
 
   return (
@@ -418,7 +419,7 @@ function RecentRecordsTable({
   const showCacheCol = records.some((r) => (r.cachedInputTokens ?? 0) > 0)
 
   if (records.length === 0 && !loading) {
-    return <div className={styles.emptyHint}>暂无记录</div>
+    return <EmptyState description="暂无记录" />
   }
 
   return (

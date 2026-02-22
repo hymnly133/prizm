@@ -10,9 +10,11 @@ import type {
   ShellInfo,
   TerminalSettings
 } from '@prizm/client-core'
+import { buildModelSelectOptionsFromAvailable } from '../utils/modelSelectOptions'
 import { createStaticStyles } from 'antd-style'
 import { Brain, Layers, MessageSquare, Terminal } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
+import { LoadingPlaceholder } from './ui/LoadingPlaceholder'
 import type { PrizmClient } from '@prizm/client-core'
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
@@ -45,6 +47,7 @@ export function AgentGeneralSettings({ http, onLog }: AgentGeneralSettingsProps)
   const [terminal, setTerminal] = useState<Partial<TerminalSettings>>({})
   const [scopeContextMaxChars, setScopeContextMaxChars] = useState<number | undefined>(undefined)
   const [models, setModels] = useState<AvailableModel[]>([])
+  const [systemDefaultModel, setSystemDefaultModel] = useState<string>('')
   const [shells, setShells] = useState<ShellInfo[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -62,14 +65,19 @@ export function AgentGeneralSettings({ http, onLog }: AgentGeneralSettingsProps)
       setAgent(tools.agent ?? {})
       setTerminal(tools.terminal ?? {})
       setScopeContextMaxChars(serverConfig.agent?.scopeContextMaxChars)
-      const list = modelsRes.models ?? []
+      const res = modelsRes as {
+        entries?: Array<{ configId: string; configName: string; modelId: string; label: string }>
+        defaultModel?: string
+      }
+      const list = res.entries ?? []
       setModels(
-        list.map((m) => ({
-          id: `${m.configId}:${m.modelId}`,
-          label: m.label,
-          provider: modelsRes.configs?.find((c) => c.id === m.configId)?.name ?? m.configId
+        list.map((e) => ({
+          id: `${e.configId}:${e.modelId}`,
+          label: e.label,
+          provider: e.configName
         }))
       )
+      setSystemDefaultModel(res.defaultModel ?? '')
       setShells(shellsRes.shells ?? [])
     } catch (e) {
       onLog?.(`加载 Agent 配置失败: ${e}`, 'error')
@@ -99,12 +107,16 @@ export function AgentGeneralSettings({ http, onLog }: AgentGeneralSettingsProps)
     }
   }
 
-  const modelOptions = [
-    { label: '默认（跟随 Provider）', value: '' },
-    ...models.map((m) => ({ label: m.label, value: m.id }))
-  ]
+  const systemDefaultLabel = systemDefaultModel
+    ? models.find((m) => m.id === systemDefaultModel)?.label
+    : undefined
 
-  if (loading) return <Text type="secondary">加载中...</Text>
+  const modelOptions = buildModelSelectOptionsFromAvailable(models, {
+    label: systemDefaultLabel ? `系统默认（当前: ${systemDefaultLabel}）` : '系统默认',
+    value: ''
+  })
+
+  if (loading) return <LoadingPlaceholder />
 
   return (
     <div className="settings-section">
@@ -149,8 +161,11 @@ export function AgentGeneralSettings({ http, onLog }: AgentGeneralSettingsProps)
         <p className="form-hint" style={{ marginTop: 6, marginBottom: 10 }}>
           文档摘要、对话摘要及默认模型，可在客户端选择覆盖
         </p>
+        <p className="form-hint" style={{ marginBottom: 8, fontWeight: 500 }}>
+          当前系统默认：{systemDefaultLabel ?? '未设置'}
+        </p>
         <Form className="compact-form" gap={8} layout="vertical">
-          <Form.Item label="默认对话模型" extra="客户端发消息时可覆盖">
+          <Form.Item label="默认对话模型" extra="留空表示使用上方系统默认；客户端发消息时可覆盖">
             <Select
               options={modelOptions}
               value={agent.defaultModel ?? ''}

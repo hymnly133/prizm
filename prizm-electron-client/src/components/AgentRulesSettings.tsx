@@ -16,6 +16,8 @@ import type {
   UpdateAgentRuleInput
 } from '@prizm/client-core'
 import { useScope } from '../hooks/useScope'
+import { EmptyState } from './ui/EmptyState'
+import { LoadingPlaceholder } from './ui/LoadingPlaceholder'
 
 interface AgentRulesSettingsProps {
   http: PrizmClient | null
@@ -191,23 +193,14 @@ export function AgentRulesSettings({ http, onLog }: AgentRulesSettingsProps) {
 
       {/* 规则列表 */}
       {loading ? (
-        <Text type="secondary">加载中...</Text>
+        <LoadingPlaceholder />
       ) : rules.length === 0 ? (
-        <div
-          style={{
-            padding: 32,
-            textAlign: 'center',
-            color: 'var(--ant-color-text-tertiary)',
-            border: '1px dashed var(--ant-color-border)',
-            borderRadius: 8
-          }}
-        >
-          <ScrollText size={36} style={{ marginBottom: 8, opacity: 0.4 }} />
-          <div style={{ marginBottom: 4 }}>暂无{level === 'user' ? '用户级' : 'Scope 级'}规则</div>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            点击「新建规则」添加自定义 Agent 行为指令
-          </Text>
-        </div>
+        <EmptyState
+          icon={ScrollText}
+          description={`暂无${
+            level === 'user' ? '用户级' : 'Scope 级'
+          }规则，点击「新建规则」添加自定义 Agent 行为指令`}
+        />
       ) : (
         <Flexbox gap={6}>
           {rules.map((rule) => (

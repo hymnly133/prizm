@@ -8,6 +8,7 @@ import { createStaticStyles } from 'antd-style'
 import { Globe } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { Select } from './ui/Select'
+import { LoadingPlaceholder } from './ui/LoadingPlaceholder'
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   sectionTitle: css`
@@ -90,7 +91,7 @@ export function BuiltinToolsSettings({ http, onLog }: BuiltinToolsSettingsProps)
     }
   }
 
-  if (loading) return <Text type="secondary">加载中...</Text>
+  if (loading) return <LoadingPlaceholder />
 
   return (
     <div className={styles.serverCard} style={{ marginTop: 12 }}>

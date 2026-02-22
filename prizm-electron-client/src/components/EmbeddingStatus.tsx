@@ -4,6 +4,7 @@
  */
 import { Button, Checkbox, Form, Input, Modal, TextArea, toast } from '@lobehub/ui'
 import { Select } from './ui/Select'
+import { LoadingPlaceholder } from './ui/LoadingPlaceholder'
 import { createStaticStyles } from 'antd-style'
 import {
   Activity,
@@ -814,8 +815,8 @@ export function EmbeddingStatus({ http, onLog }: Props) {
       <div className="settings-section">
         <div className="settings-section-header">
           <h2>向量模型</h2>
-          <p className="form-hint">加载中...</p>
         </div>
+        <LoadingPlaceholder />
       </div>
     )
   }
@@ -870,7 +871,7 @@ export function EmbeddingStatus({ http, onLog }: Props) {
           启用、模型、缓存目录与量化等；修改后保存，重载模型后生效。
         </p>
         {embeddingConfigLoading ? (
-          <p className="form-hint">加载中...</p>
+          <LoadingPlaceholder />
         ) : (
           <Form className="compact-form" gap={8} layout="vertical">
             <Form.Item label="启用本地 Embedding">

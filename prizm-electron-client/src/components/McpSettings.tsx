@@ -18,6 +18,7 @@ import { Segmented } from './ui/Segmented'
 import { Select } from './ui/Select'
 import { ContentCard, ContentCardHeader, ContentCardBody } from './ui/ContentCard'
 import { EmptyState } from './ui/EmptyState'
+import { LoadingPlaceholder } from './ui/LoadingPlaceholder'
 import type { McpServerConfig } from '@prizm/client-core'
 import { ClipboardPaste, Plus, Plug, Server } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
@@ -345,9 +346,8 @@ export function McpSettings({ http, onLog }: McpSettingsProps) {
               )}
 
               {loading ? (
-                <Flexbox horizontal align="center" gap={8} style={{ padding: 24 }}>
-                  <Spin size="small" />
-                  <Text type="secondary">加载中...</Text>
+                <Flexbox align="center" justify="center" style={{ padding: 24 }}>
+                  <LoadingPlaceholder />
                 </Flexbox>
               ) : servers.length === 0 ? (
                 <EmptyState
@@ -362,7 +362,7 @@ export function McpSettings({ http, onLog }: McpSettingsProps) {
                   }
                 />
               ) : (
-                <Flexbox gap={8} style={{ flexDirection: 'column' }} role="list" aria-label="MCP 服务器列表">
+                <Flexbox className="panel-list" gap={8} style={{ flexDirection: 'column' }} role="list" aria-label="MCP 服务器列表">
                   {servers.map((r) => (
                     <McpServerCard
                       key={r.id}

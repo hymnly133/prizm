@@ -28,6 +28,7 @@ import {
 } from 'lucide-react'
 import { Segmented } from './ui/Segmented'
 import { ContentCard, ContentCardHeader, ContentCardBody } from './ui/ContentCard'
+import { LoadingPlaceholder } from './ui/LoadingPlaceholder'
 import { ModalSidebar } from './ui/ModalSidebar'
 import { EmptyState } from './ui/EmptyState'
 import { RegistrySkillCard } from './skills/RegistrySkillCard'
@@ -447,9 +448,8 @@ export function SkillsSettings({ http, onLog }: SkillsSettingsProps) {
   function renderInstalled() {
     if (loading) {
       return (
-        <Flexbox horizontal align="center" gap={8} style={{ padding: 24 }}>
-          <Spin size="small" />
-          <Text type="secondary">加载中...</Text>
+        <Flexbox align="center" justify="center" style={{ padding: 24 }}>
+          <LoadingPlaceholder />
         </Flexbox>
       )
     }
@@ -947,9 +947,8 @@ export function SkillsSettings({ http, onLog }: SkillsSettingsProps) {
               </Button>
             </Flexbox>
             {loadingCollection && (
-              <Flexbox horizontal align="center" gap={8} style={{ padding: 8 }}>
-                <Spin size="small" />
-                <Text type="secondary">加载中...</Text>
+              <Flexbox align="center" justify="center" style={{ padding: 8 }}>
+                <LoadingPlaceholder />
               </Flexbox>
             )}
             {collectionSkills.length > 0 && (

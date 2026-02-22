@@ -8,6 +8,7 @@ import { Clock, User as UserIcon, Wifi, WifiOff } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { usePrizmContext } from '../context/PrizmContext'
 import { useScope } from '../hooks/useScope'
+import { useUserProfile } from '../hooks/useUserProfile'
 import { createStyles } from 'antd-style'
 
 const useStyles = createStyles(({ css, token }) => ({
@@ -114,6 +115,7 @@ export function UserOverviewCard() {
   const { styles, cx } = useStyles()
   const { manager, config } = usePrizmContext()
   const { currentScope, getScopeLabel } = useScope()
+  const { profile } = useUserProfile()
   const [connectedSince] = useState(() => Date.now())
   const [uptime, setUptime] = useState('0秒')
 
@@ -126,7 +128,7 @@ export function UserOverviewCard() {
   }, [connectedSince])
 
   const isConnected = !!manager
-  const clientName = config?.client?.name || 'Prizm Client'
+  const displayName = profile?.displayName?.trim() || config?.client?.name || 'Prizm Client'
 
   return (
     <div className={styles.hero}>
@@ -135,7 +137,7 @@ export function UserOverviewCard() {
           <UserIcon size={24} />
         </div>
         <div className={styles.info}>
-          <span className={styles.clientName}>{clientName}</span>
+          <span className={styles.clientName}>{displayName}</span>
           <span className={styles.scopeRow}>
             工作区 <Tag size="small">{getScopeLabel(currentScope)}</Tag>
           </span>

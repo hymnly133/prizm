@@ -12,6 +12,7 @@ import { createStaticStyles } from 'antd-style'
 import { Server, Shield } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import type { PrizmClient } from '@prizm/client-core'
+import { LoadingPlaceholder } from './ui/LoadingPlaceholder'
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   sectionTitle: css`
@@ -80,7 +81,7 @@ export function ServerConfigSettings({ http, onLog }: ServerConfigSettingsProps)
   const updateServer = (u: Partial<ServerConfigServer>) =>
     setPatch((p) => ({ ...p, server: { ...p.server, ...u } }))
 
-  if (loading) return <Text type="secondary">加载中...</Text>
+  if (loading) return <LoadingPlaceholder />
 
   const s = patch.server ?? {}
 

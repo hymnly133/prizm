@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react'
+import { memo, useCallback, useMemo, useState } from 'react'
 import {
   Button,
   Checkbox,
@@ -12,6 +12,8 @@ import {
   neutralColors,
   neutralColorsSwatches
 } from '@lobehub/ui'
+import { Select } from '../components/ui/Select'
+import { buildModelSelectOptionsFromEntries } from '../utils/modelSelectOptions'
 import { Segmented } from '../components/ui/Segmented'
 import { SkillsAndMcpSettings } from '../components/SkillsAndMcpSettings'
 import { AgentGeneralSettings } from '../components/AgentGeneralSettings'
@@ -23,7 +25,12 @@ import { ScopeManagement } from '../components/ScopeManagement'
 import { EmbeddingStatus } from '../components/EmbeddingStatus'
 import { useClientSettings } from '../context/ClientSettingsContext'
 import { EVENT_TYPES, buildServerUrl, getEventLabel } from '@prizm/client-core'
-import type { EventType, PrizmConfig } from '@prizm/client-core'
+import type {
+  EventType,
+  PrizmConfig,
+  LLMConfigItemSanitized,
+  ServerConfig
+} from '@prizm/client-core'
 import { useEffect } from 'react'
 import { useLogsContext } from '../context/LogsContext'
 import { usePrizmContext } from '../context/PrizmContext'
@@ -39,12 +46,17 @@ import {
   Sparkles,
   ScrollText,
   Zap,
-  Palette
+  Palette,
+  AppWindow,
+  User
 } from 'lucide-react'
 import { OnboardingWizard } from '../components/OnboardingWizard'
+import { BrowserPlayground } from '../components/BrowserPlayground'
+import { useUserProfile } from '../hooks/useUserProfile'
 type SettingsCategory =
   | 'connection'
   | 'appearance'
+  | 'profile'
   | 'input'
   | 'scope'
   | 'server'
@@ -55,6 +67,7 @@ type SettingsCategory =
   | 'commands'
   | 'rules'
   | 'actions'
+  | 'browser'
 
 interface CategoryItem {
   key: SettingsCategory
@@ -66,6 +79,7 @@ interface CategoryItem {
 const CATEGORIES: CategoryItem[] = [
   { key: 'connection', label: '连接', icon: <Globe size={16} /> },
   { key: 'appearance', label: '外观', icon: <Palette size={16} /> },
+  { key: 'profile', label: '用户画像', icon: <User size={16} />, requiresAuth: true },
   { key: 'input', label: '输入', icon: <Keyboard size={16} /> },
   { key: 'scope', label: '工作区', icon: <FolderOpen size={16} />, requiresAuth: true },
   { key: 'server', label: '服务端/运维', icon: <Server size={16} />, requiresAuth: true },
@@ -75,6 +89,7 @@ const CATEGORIES: CategoryItem[] = [
   { key: 'skillsAndMcp', label: '技能与 MCP', icon: <Sparkles size={16} />, requiresAuth: true },
   { key: 'commands', label: '命令', icon: <TerminalIcon size={16} />, requiresAuth: true },
   { key: 'rules', label: '规则', icon: <ScrollText size={16} />, requiresAuth: true },
+  { key: 'browser', label: '浏览器节点', icon: <AppWindow size={16} />, requiresAuth: true },
   { key: 'actions', label: '快捷操作', icon: <Zap size={16} /> }
 ]
 
@@ -90,6 +105,7 @@ function SettingsPage() {
     setConfig
   } = usePrizmContext()
   const { addLog } = useLogsContext()
+  const { profile, loading: profileLoading, updateProfile } = useUserProfile()
   const {
     sendWithEnter,
     setSendWithEnter,
@@ -102,6 +118,8 @@ function SettingsPage() {
   } = useClientSettings()
 
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>('connection')
+  const [profileSaving, setProfileSaving] = useState(false)
+  const [profileForm, setProfileForm] = useState({ displayName: '', preferredTone: '' })
   const [testing, setTesting] = useState(false)
   const [registering, setRegistering] = useState(false)
   const [reconnecting, setReconnecting] = useState(false)
@@ -112,6 +130,75 @@ function SettingsPage() {
     scopesText: 'default, online',
     notifyEvents: ['notification', 'todo_list:updated'] as string[]
   })
+
+  const [browserState, setBrowserState] = useState<{
+    isRunning: boolean
+    mode: 'internal' | 'external' | null
+    wsEndpoint: string | null
+  }>({ isRunning: false, mode: 'internal', wsEndpoint: null })
+
+  const [browserServerConfig, setBrowserServerConfig] = useState<{
+    configs: LLMConfigItemSanitized[]
+    defaultModel?: string
+    browserModel?: string
+  } | null>(null)
+  /** 用于「浏览器使用模型」下拉的 entries（提供商+模型分组） */
+  const [browserModelEntries, setBrowserModelEntries] = useState<
+    Array<{ configId: string; configName: string; modelId: string; label: string }>
+  >([])
+  const [browserConfigLoading, setBrowserConfigLoading] = useState(false)
+
+  useEffect(() => {
+    if (window.prizm.browserNode) {
+      window.prizm.browserNode
+        .getStatus()
+        .then(setBrowserState)
+        .catch(() => {})
+    }
+  }, [])
+
+  const loadBrowserServerConfig = useCallback(async () => {
+    const http = manager?.getHttpClient()
+    if (!http || activeCategory !== 'browser') return
+    setBrowserConfigLoading(true)
+    try {
+      const [configRes, modelsRes] = await Promise.all([
+        http.getServerConfig(),
+        http.getAgentModels()
+      ])
+      const llm = configRes.llm
+      const entries =
+        (
+          modelsRes as {
+            entries?: Array<{
+              configId: string
+              configName: string
+              modelId: string
+              label: string
+            }>
+          }
+        ).entries ?? []
+      setBrowserModelEntries(entries)
+      if (llm?.configs) {
+        setBrowserServerConfig({
+          configs: llm.configs,
+          defaultModel: (llm as { defaultModel?: string }).defaultModel,
+          browserModel: (llm as { browserModel?: string }).browserModel
+        })
+      } else {
+        setBrowserServerConfig(null)
+      }
+    } catch {
+      setBrowserServerConfig(null)
+      setBrowserModelEntries([])
+    } finally {
+      setBrowserConfigLoading(false)
+    }
+  }, [manager, activeCategory])
+
+  useEffect(() => {
+    if (activeCategory === 'browser') void loadBrowserServerConfig()
+  }, [activeCategory, loadBrowserServerConfig])
 
   useEffect(() => {
     if (config) {
@@ -124,6 +211,15 @@ function SettingsPage() {
       })
     }
   }, [config])
+
+  useEffect(() => {
+    if (profile && !profileLoading) {
+      setProfileForm({
+        displayName: profile.displayName ?? '',
+        preferredTone: profile.preferredTone ?? ''
+      })
+    }
+  }, [profile, profileLoading])
 
   async function saveConfig() {
     const scopes = form.scopesText
@@ -255,10 +351,14 @@ function SettingsPage() {
     }
   }, [])
 
-  const [showOnboarding, setShowOnboarding] = useState(!config?.api_key)
+  const [showOnboarding, setShowOnboarding] = useState(
+    () => !config?.api_key || localStorage.getItem('prizm.onboardingCompleted') !== 'true'
+  )
 
   useEffect(() => {
-    if (config?.api_key) setShowOnboarding(false)
+    if (config?.api_key && localStorage.getItem('prizm.onboardingCompleted') === 'true') {
+      setShowOnboarding(false)
+    }
   }, [config?.api_key])
 
   const inputVariant = 'filled' as const
@@ -277,16 +377,21 @@ function SettingsPage() {
 
   const visibleCategories = CATEGORIES.filter((c) => !c.requiresAuth || hasAuth)
 
-  if (showOnboarding && !hasAuth) {
+  if (showOnboarding) {
     return (
       <section className="page settings-page">
         <OnboardingWizard
-          onComplete={() => setShowOnboarding(false)}
+          onComplete={() => {
+            localStorage.setItem('prizm.onboardingCompleted', 'true')
+            setShowOnboarding(false)
+          }}
           testConnection={testConnectionApi}
           registerClient={registerClientApi}
           saveConfig={saveConfigApi}
           loadConfig={loadConfig}
           setConfig={setConfig}
+          updateUserProfile={updateProfile}
+          initialStep={hasAuth ? 2 : undefined}
         />
       </section>
     )
@@ -319,7 +424,10 @@ function SettingsPage() {
                     placeholder="4127"
                   />
                 </Form.Item>
-                <Form.Item label="客户端名称">
+                <Form.Item
+                  label="设备名称（可选）"
+                  extra="用于区分多设备，不影响助手对你的称呼；称呼与语气在「用户画像」中设置"
+                >
                   <Input
                     variant={inputVariant}
                     value={form.clientName}
@@ -424,6 +532,101 @@ function SettingsPage() {
           </div>
         )
 
+      case 'profile':
+        return (
+          <div className="settings-section">
+            <div className="settings-section-header">
+              <h2>用户画像</h2>
+              <p className="form-hint">
+                助手将用你设置的称呼和语气与你交流；首页展示名优先使用「显示名称」，未设置时使用设备名称
+              </p>
+            </div>
+            <div className="settings-card">
+              <Form className="compact-form" gap={8} layout="vertical">
+                <Form.Item
+                  label="显示名称"
+                  extra="你希望助手怎么称呼你（如：小明、Alex），将用于首页问候与对话"
+                >
+                  <Input
+                    variant={inputVariant}
+                    value={profileForm.displayName}
+                    onChange={(e) => setProfileForm((f) => ({ ...f, displayName: e.target.value }))}
+                    placeholder="输入你希望被称呼的名字"
+                    disabled={profileLoading}
+                  />
+                </Form.Item>
+                <Form.Item label="希望的语气" extra="助手的回复风格（可选预设或自由填写）">
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <Segmented
+                      value={
+                        ['简洁专业', '友好随意', '中性克制'].includes(profileForm.preferredTone)
+                          ? profileForm.preferredTone
+                          : '__custom'
+                      }
+                      onChange={(v) => {
+                        const val = v as string
+                        if (val !== '__custom')
+                          setProfileForm((f) => ({ ...f, preferredTone: val }))
+                      }}
+                      options={[
+                        { label: '简洁专业', value: '简洁专业' },
+                        { label: '友好随意', value: '友好随意' },
+                        { label: '中性克制', value: '中性克制' },
+                        { label: '其他（下方填写）', value: '__custom' }
+                      ]}
+                    />
+                    <Input
+                      variant={inputVariant}
+                      value={
+                        ['简洁专业', '友好随意', '中性克制'].includes(profileForm.preferredTone)
+                          ? ''
+                          : profileForm.preferredTone
+                      }
+                      onChange={(e) =>
+                        setProfileForm((f) => ({ ...f, preferredTone: e.target.value }))
+                      }
+                      placeholder="或输入自定义语气"
+                      disabled={profileLoading}
+                    />
+                  </div>
+                </Form.Item>
+                <Form.Item>
+                  <div
+                    className="config-actions"
+                    style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}
+                  >
+                    <Button
+                      type="primary"
+                      loading={profileSaving}
+                      disabled={profileLoading}
+                      onClick={() => {
+                        setProfileSaving(true)
+                        updateProfile({
+                          displayName: profileForm.displayName.trim() || undefined,
+                          preferredTone: profileForm.preferredTone.trim() || undefined
+                        })
+                          .then(() => toast.success('已保存'))
+                          .catch(() => toast.error('保存失败'))
+                          .finally(() => setProfileSaving(false))
+                      }}
+                    >
+                      保存
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        localStorage.removeItem('prizm.onboardingCompleted')
+                        setShowOnboarding(true)
+                      }}
+                    >
+                      重新进行引导
+                    </Button>
+                  </div>
+                </Form.Item>
+              </Form>
+            </div>
+          </div>
+        )
+
       case 'input':
         return (
           <div className="settings-section">
@@ -489,6 +692,126 @@ function SettingsPage() {
             </div>
           </div>
         )
+
+      case 'browser': {
+        const effectiveBrowserModel = browserServerConfig?.browserModel ?? ''
+        const browserModelOptions = buildModelSelectOptionsFromEntries(browserModelEntries, {
+          label: '跟随系统默认',
+          value: ''
+        })
+        const currentModelLabel = effectiveBrowserModel
+          ? browserModelEntries.find((e) => `${e.configId}:${e.modelId}` === effectiveBrowserModel)
+              ?.label
+          : null
+
+        return (
+          <div className="settings-section">
+            <div className="settings-section-header">
+              <h2>浏览器节点</h2>
+              <p className="form-hint">切换使用的浏览器实例（Prizm 内置 或 本机独立浏览器）</p>
+            </div>
+            <div className="settings-card">
+              <Form className="compact-form" layout="vertical">
+                <Form.Item
+                  label="浏览器使用模型"
+                  extra="observe / extract 会向 LLM 发送页面截图，需使用支持多模态（vision）的模型。Stagehand 需要具体模型，按提供商选择。"
+                >
+                  <Select
+                    value={effectiveBrowserModel}
+                    onChange={async (v: string) => {
+                      const http = manager?.getHttpClient()
+                      if (!http) return
+                      try {
+                        await http.updateServerConfig({
+                          llm: { browserModel: v || undefined }
+                        } as unknown as Partial<ServerConfig>)
+                        setBrowserServerConfig((prev) =>
+                          prev ? { ...prev, browserModel: v || undefined } : null
+                        )
+                        toast.success('已更新浏览器使用模型')
+                      } catch (e) {
+                        toast.error(String(e))
+                      }
+                    }}
+                    options={browserModelOptions}
+                    placeholder={browserConfigLoading ? '加载中...' : '选择模型'}
+                    disabled={browserConfigLoading}
+                    style={{ minWidth: 220 }}
+                  />
+                  {currentModelLabel && (
+                    <span
+                      style={{
+                        display: 'block',
+                        marginTop: 6,
+                        fontSize: 12,
+                        color: 'var(--colorTextSecondary)'
+                      }}
+                    >
+                      当前: {currentModelLabel}
+                    </span>
+                  )}
+                </Form.Item>
+                <Form.Item
+                  label="节点状态"
+                  extra="如果需要更改模式，会自动重启节点。外部浏览器模式将自动连接到默认浏览器或全新 Chrome（由 Playwright 驱动）。"
+                >
+                  <Segmented
+                    value={browserState.mode || 'internal'}
+                    onChange={async (v) => {
+                      const mode = v as 'internal' | 'external'
+                      if (browserState.mode === mode) return
+                      try {
+                        if (browserState.isRunning) await window.prizm.browserNode.stop()
+                        const res = await window.prizm.browserNode.start(mode)
+                        const state = await window.prizm.browserNode.getStatus()
+                        setBrowserState(state)
+                        if (res.success)
+                          toast.success(`切换为 ${mode === 'internal' ? '内置' : '外部'} 节点`)
+                        else toast.error(`切换失败: ${res.message}`)
+                      } catch (e) {
+                        toast.error(`切换失败: ${e}`)
+                      }
+                    }}
+                    options={[
+                      { label: '内置 Electron 节点', value: 'internal' },
+                      { label: '外部 Chrome 独立节点', value: 'external' }
+                    ]}
+                  />
+                  <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div
+                      style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: 4,
+                        background: browserState.isRunning ? '#52c41a' : '#ff4d4f'
+                      }}
+                    />
+                    <span>{browserState.isRunning ? '节点运行中' : '节点未启动'}</span>
+                    <Button
+                      size="small"
+                      onClick={async () => {
+                        if (browserState.isRunning) await window.prizm.browserNode.stop()
+                        else await window.prizm.browserNode.start(browserState.mode || 'internal')
+                        const state = await window.prizm.browserNode.getStatus()
+                        setBrowserState(state)
+                      }}
+                    >
+                      {browserState.isRunning ? '停止' : '启动'}
+                    </Button>
+                  </div>
+                </Form.Item>
+              </Form>
+              {config?.server && (
+                <BrowserPlayground
+                  baseUrl={buildServerUrl(config.server.host, config.server.port)}
+                  apiKey={config.api_key ?? ''}
+                  isNodeRunning={browserState.isRunning}
+                />
+              )}
+            </div>
+          </div>
+        )
+      }
 
       default:
         return null
