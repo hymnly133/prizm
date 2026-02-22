@@ -9,7 +9,8 @@
     <details class="rounded-lg border border-zinc-700 bg-zinc-800/50 p-6">
       <summary class="cursor-pointer text-lg font-medium">服务端配置</summary>
       <p class="mt-2 mb-4 text-sm text-zinc-400">
-        端口、鉴权、Embedding、Agent 上下文、LLM API Key 等；与环境变量等价。修改端口/主机后需重启服务端。
+        端口、鉴权、Embedding、Agent 上下文、LLM API Key
+        等；与环境变量等价。修改端口/主机后需重启服务端。
       </p>
       <div v-if="serverConfigLoading" class="text-zinc-400">加载中...</div>
       <form v-else class="space-y-4 max-w-2xl" @submit.prevent="saveServerConfig">
@@ -33,7 +34,11 @@
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <input v-model="serverConfigPatch.server.authDisabled" type="checkbox" class="rounded border-zinc-600" />
+          <input
+            v-model="serverConfigPatch.server.authDisabled"
+            type="checkbox"
+            class="rounded border-zinc-600"
+          />
           <label class="text-sm text-zinc-300">关闭鉴权（开发用）</label>
         </div>
         <div>
@@ -47,7 +52,11 @@
         <div class="border-t border-zinc-600 pt-4">
           <h3 class="mb-2 text-sm font-medium text-zinc-300">Embedding</h3>
           <div class="flex items-center gap-2">
-            <input v-model="serverConfigPatch.embedding.enabled" type="checkbox" class="rounded border-zinc-600" />
+            <input
+              v-model="serverConfigPatch.embedding.enabled"
+              type="checkbox"
+              class="rounded border-zinc-600"
+            />
             <label class="text-sm text-zinc-300">启用</label>
           </div>
           <input
@@ -68,29 +77,33 @@
           />
         </div>
         <div class="border-t border-zinc-600 pt-4">
-          <h3 class="mb-2 text-sm font-medium text-zinc-300">LLM 配置（多配置可切换）</h3>
-          <p class="mb-3 text-xs text-zinc-500">添加 OpenAI 兼容 / Anthropic / Google，至少配置一个 API Key。可设默认配置。</p>
+          <h3 class="mb-2 text-sm font-medium text-zinc-300">LLM 配置</h3>
+          <p class="mb-3 text-xs text-zinc-500">
+            填写类型、Base URL（仅 OpenAI 兼容）、API
+            Key；保存后自动刷新可用模型，并选择系统默认模型。
+          </p>
           <div class="space-y-3">
             <div
               v-for="(c, i) in serverConfigPatch.llm.configs"
               :key="c.id"
               class="rounded border border-zinc-600 bg-zinc-900/50 p-3"
             >
-              <div class="mb-2 flex items-center justify-between">
-                <label class="flex items-center gap-2 text-sm text-zinc-400">
-                  <input v-model="serverConfigPatch.llm.defaultConfigId" type="radio" :value="c.id" />
-                  默认
-                </label>
-                <button type="button" class="text-sm text-red-400 hover:text-red-300" @click="removeLlmConfig(i)">删除</button>
+              <div class="mb-2 flex items-center justify-end">
+                <button
+                  type="button"
+                  class="text-sm text-red-400 hover:text-red-300"
+                  @click="removeLlmConfig(i)"
+                >
+                  删除
+                </button>
               </div>
               <div class="grid gap-2">
                 <div>
-                  <label class="mb-0.5 block text-xs text-zinc-500">名称</label>
-                  <input v-model="c.name" class="w-full rounded border border-zinc-600 bg-zinc-900 px-2 py-1.5 text-zinc-100" placeholder="例如：OpenAI" />
-                </div>
-                <div>
                   <label class="mb-0.5 block text-xs text-zinc-500">类型</label>
-                  <select v-model="c.type" class="w-full rounded border border-zinc-600 bg-zinc-900 px-2 py-1.5 text-zinc-100">
+                  <select
+                    v-model="c.type"
+                    class="w-full rounded border border-zinc-600 bg-zinc-900 px-2 py-1.5 text-zinc-100"
+                  >
                     <option value="openai_compatible">OpenAI 兼容</option>
                     <option value="anthropic">Anthropic</option>
                     <option value="google">Google</option>
@@ -107,11 +120,11 @@
                 </div>
                 <div v-if="c.type === 'openai_compatible'">
                   <label class="mb-0.5 block text-xs text-zinc-500">Base URL</label>
-                  <input v-model="c.baseUrl" class="w-full rounded border border-zinc-600 bg-zinc-900 px-2 py-1.5 text-zinc-100" placeholder="https://api.openai.com/v1" />
-                </div>
-                <div>
-                  <label class="mb-0.5 block text-xs text-zinc-500">默认模型</label>
-                  <input v-model="c.defaultModel" class="w-full rounded border border-zinc-600 bg-zinc-900 px-2 py-1.5 text-zinc-100" placeholder="gpt-4o-mini" />
+                  <input
+                    v-model="c.baseUrl"
+                    class="w-full rounded border border-zinc-600 bg-zinc-900 px-2 py-1.5 text-zinc-100"
+                    placeholder="https://api.openai.com/v1"
+                  />
                 </div>
               </div>
             </div>
@@ -122,6 +135,25 @@
             >
               添加 LLM 配置
             </button>
+          </div>
+          <div v-if="llmModelEntries.length > 0" class="mt-4">
+            <label class="mb-1 block text-sm text-zinc-400">系统默认模型（按提供商分组）</label>
+            <select
+              :value="serverConfigPatch.llm.defaultModel ?? ''"
+              class="w-full max-w-md rounded border border-zinc-600 bg-zinc-900 px-3 py-2 text-zinc-100 focus:border-emerald-500 focus:outline-none"
+              @change="onLlmDefaultModelChange"
+            >
+              <option value="">未设置</option>
+              <optgroup v-for="g in llmModelEntriesGrouped" :key="g.name" :label="g.name">
+                <option
+                  v-for="e in g.entries"
+                  :key="e.configId + ':' + e.modelId"
+                  :value="e.configId + ':' + e.modelId"
+                >
+                  {{ e.label }}
+                </option>
+              </optgroup>
+            </select>
           </div>
         </div>
         <div>
@@ -219,13 +251,21 @@
       <div v-if="agentLoading" class="text-zinc-400">加载中...</div>
       <form v-else class="space-y-4 max-w-md" @submit.prevent="saveAgent">
         <div>
-          <label class="mb-1 block text-sm text-zinc-400">默认对话模型</label>
+          <label class="mb-1 block text-sm text-zinc-400">默认对话模型（按提供商分组）</label>
           <select
             v-model="agentDefaultModel"
             class="w-full rounded border border-zinc-600 bg-zinc-900 px-3 py-2 text-zinc-100 focus:border-emerald-500 focus:outline-none"
           >
-            <option value="">默认（跟随 Provider）</option>
-            <option v-for="m in agentModels" :key="m.id" :value="m.id">{{ m.label }}</option>
+            <option value="">系统默认</option>
+            <optgroup v-for="g in agentModelGroups" :key="g.name" :label="g.name">
+              <option
+                v-for="e in g.entries"
+                :key="e.configId + ':' + e.modelId"
+                :value="e.configId + ':' + e.modelId"
+              >
+                {{ e.label }}
+              </option>
+            </optgroup>
           </select>
         </div>
         <div class="flex items-center gap-2">
@@ -245,6 +285,24 @@
         <div class="flex items-center gap-2">
           <input v-model="convSummaryEnabled" type="checkbox" class="rounded border-zinc-600" />
           <label class="text-sm text-zinc-300">对话摘要（每 N 轮生成）</label>
+        </div>
+        <div v-if="convSummaryEnabled">
+          <label class="mb-1 block text-sm text-zinc-400">对话摘要模型（按提供商分组）</label>
+          <select
+            v-model="convSummaryModel"
+            class="w-full rounded border border-zinc-600 bg-zinc-900 px-3 py-2 text-zinc-100 focus:border-emerald-500 focus:outline-none"
+          >
+            <option value="">系统默认</option>
+            <optgroup v-for="g in agentModelGroups" :key="g.name" :label="g.name">
+              <option
+                v-for="e in g.entries"
+                :key="e.configId + ':' + e.modelId"
+                :value="e.configId + ':' + e.modelId"
+              >
+                {{ e.label }}
+              </option>
+            </optgroup>
+          </select>
         </div>
         <div v-if="convSummaryEnabled">
           <label class="mb-1 block text-sm text-zinc-400">对话摘要间隔</label>
@@ -339,8 +397,8 @@
               embeddingStatus.state === 'ready'
                 ? 'text-emerald-400'
                 : embeddingStatus.state === 'loading'
-                  ? 'text-amber-400'
-                  : 'text-zinc-500'
+                ? 'text-amber-400'
+                : 'text-zinc-500'
             "
           >
             {{ embeddingStatus.state }}
@@ -356,7 +414,10 @@
           <span class="text-zinc-200">{{ embeddingStatus.enabled ? '是' : '否' }}</span>
         </div>
         <div v-if="embeddingStatus.stats" class="text-xs text-zinc-500">
-          调用 {{ embeddingStatus.stats.totalCalls }} 次，错误 {{ embeddingStatus.stats.totalErrors }}，字符 {{ embeddingStatus.stats.totalCharsProcessed ?? 0 }}，P95 延迟 {{ embeddingStatus.stats.p95LatencyMs ?? 0 }}ms
+          调用 {{ embeddingStatus.stats.totalCalls }} 次，错误
+          {{ embeddingStatus.stats.totalErrors }}，字符
+          {{ embeddingStatus.stats.totalCharsProcessed ?? 0 }}，P95 延迟
+          {{ embeddingStatus.stats.p95LatencyMs ?? 0 }}ms
         </div>
         <button
           type="button"
@@ -372,7 +433,9 @@
     <!-- Skills -->
     <div class="rounded-lg border border-zinc-700 bg-zinc-800/50 p-6">
       <h2 class="mb-4 text-lg font-medium">Skills</h2>
-      <p class="mb-4 text-sm text-zinc-400">已安装的 Agent Skills；安装/发现建议使用 Electron 客户端。</p>
+      <p class="mb-4 text-sm text-zinc-400">
+        已安装的 Agent Skills；安装/发现建议使用 Electron 客户端。
+      </p>
       <div v-if="skillsLoading" class="text-zinc-400">加载中...</div>
       <div v-else-if="skillsError" class="text-red-400">{{ skillsError }}</div>
       <div v-else-if="skillsList.length === 0" class="text-zinc-500">暂无 Skill</div>
@@ -402,7 +465,9 @@
     <!-- Agent 规则 -->
     <div class="rounded-lg border border-zinc-700 bg-zinc-800/50 p-6">
       <h2 class="mb-4 text-lg font-medium">Agent 规则</h2>
-      <p class="mb-4 text-sm text-zinc-400">用户级与 Scope 级规则；新建/编辑建议使用 Electron 客户端。</p>
+      <p class="mb-4 text-sm text-zinc-400">
+        用户级与 Scope 级规则；新建/编辑建议使用 Electron 客户端。
+      </p>
       <div class="mb-3 flex items-center gap-2">
         <span class="text-sm text-zinc-500">Scope（仅影响 Scope 级规则列表）：</span>
         <select
@@ -574,13 +639,18 @@ import {
 const serverConfig = ref<ServerConfigResponse | null>(null)
 const serverConfigLoading = ref(true)
 const serverConfigSaving = ref(false)
-const serverConfigPatch = ref<Partial<ServerConfigResponse> & {
-  server: Record<string, unknown>
-  embedding: Record<string, unknown>
-  agent: Record<string, unknown>
-  llm: { defaultConfigId?: string; configs: Array<{ id: string; name: string; type: string; apiKey?: string; baseUrl?: string; defaultModel?: string }> }
-  skills: Record<string, unknown>
-}>({
+const serverConfigPatch = ref<
+  Partial<ServerConfigResponse> & {
+    server: Record<string, unknown>
+    embedding: Record<string, unknown>
+    agent: Record<string, unknown>
+    llm: {
+      defaultModel?: string
+      configs: Array<{ id: string; name?: string; type: string; apiKey?: string; baseUrl?: string }>
+    }
+    skills: Record<string, unknown>
+  }
+>({
   server: {},
   embedding: {},
   agent: {},
@@ -588,17 +658,44 @@ const serverConfigPatch = ref<Partial<ServerConfigResponse> & {
   skills: {}
 })
 
+const llmModelEntries = ref<
+  Array<{ configId: string; configName: string; modelId: string; label: string }>
+>([])
+
+/** 按提供商（configName）分组，用于统一模型选择 UI */
+const llmModelEntriesGrouped = computed(() => {
+  const map = new Map<string, typeof llmModelEntries.value>()
+  for (const e of llmModelEntries.value) {
+    const name = e.configName || e.configId
+    let list = map.get(name)
+    if (!list) {
+      list = []
+      map.set(name, list)
+    }
+    list.push(e)
+  }
+  return Array.from(map.entries()).map(([name, entries]) => ({ name, entries }))
+})
+
 async function loadServerConfigData() {
   serverConfigLoading.value = true
   try {
     serverConfig.value = await getServerConfig()
+    const llm = serverConfig.value.llm
     serverConfigPatch.value = {
       server: { ...serverConfig.value.server },
       embedding: { ...serverConfig.value.embedding },
       agent: { ...serverConfig.value.agent },
-      llm: serverConfig.value.llm ? { defaultConfigId: serverConfig.value.llm.defaultConfigId, configs: [...(serverConfig.value.llm.configs ?? [])] } : { configs: [] },
+      llm: llm
+        ? {
+            defaultModel: (llm as { defaultModel?: string }).defaultModel,
+            configs: [...(llm.configs ?? [])]
+          }
+        : { configs: [] },
       skills: { ...serverConfig.value.skills }
     }
+    const modelsRes = await getAgentModels()
+    llmModelEntries.value = modelsRes.entries ?? []
   } finally {
     serverConfigLoading.value = false
   }
@@ -609,6 +706,8 @@ async function saveServerConfig() {
   try {
     await updateServerConfig(serverConfigPatch.value)
     await loadServerConfigData()
+    const modelsRes = await getAgentModels()
+    llmModelEntries.value = modelsRes.entries ?? []
   } finally {
     serverConfigSaving.value = false
   }
@@ -655,6 +754,24 @@ const rulesError = ref('')
 const agentLoading = ref(true)
 const agentSaving = ref(false)
 const agentModels = ref<Array<{ id: string; label: string }>>([])
+/** 与 getAgentModels 的 entries 一致，用于按提供商分组下拉 */
+const agentModelEntries = ref<
+  Array<{ configId: string; configName: string; modelId: string; label: string }>
+>([])
+/** 按提供商（configName）分组，与 Electron 端统一 */
+const agentModelGroups = computed(() => {
+  const map = new Map<string, typeof agentModelEntries.value>()
+  for (const e of agentModelEntries.value) {
+    const name = e.configName || e.configId
+    let list = map.get(name)
+    if (!list) {
+      list = []
+      map.set(name, list)
+    }
+    list.push(e)
+  }
+  return Array.from(map.entries()).map(([name, entries]) => ({ name, entries }))
+})
 const agentDefaultModel = ref('')
 const docSummaryEnabled = ref(true)
 const docSummaryMinLen = ref(500)
@@ -676,25 +793,36 @@ function genLlmConfigId() {
 
 function addLlmConfig() {
   const configs = [...(serverConfigPatch.value.llm?.configs ?? [])]
-  configs.push({ id: genLlmConfigId(), name: '新配置', type: 'openai_compatible' })
+  configs.push({ id: genLlmConfigId(), type: 'openai_compatible' })
   if (!serverConfigPatch.value.llm) serverConfigPatch.value.llm = { configs: [] }
   serverConfigPatch.value.llm.configs = configs
-  if (!serverConfigPatch.value.llm.defaultConfigId) serverConfigPatch.value.llm.defaultConfigId = configs[configs.length - 1]!.id
 }
 
 function removeLlmConfig(index: number) {
   const configs = serverConfigPatch.value.llm?.configs ?? []
-  const next = configs.filter((_, i) => i !== index)
-  const removedId = configs[index]?.id
-  serverConfigPatch.value.llm = { ...serverConfigPatch.value.llm, configs: next, defaultConfigId: serverConfigPatch.value.llm?.defaultConfigId === removedId ? next[0]?.id : serverConfigPatch.value.llm?.defaultConfigId }
+  serverConfigPatch.value.llm = {
+    ...serverConfigPatch.value.llm,
+    configs: configs.filter((_, i) => i !== index)
+  }
+}
+
+function onLlmDefaultModelChange(e: Event) {
+  if (serverConfigPatch.value.llm) {
+    serverConfigPatch.value.llm.defaultModel = (e.target as HTMLSelectElement).value || undefined
+  }
 }
 
 async function loadAgent() {
   agentLoading.value = true
   try {
     const [tools, modelsRes] = await Promise.all([getAgentTools(), getAgentModels()])
-    agentModels.value = (modelsRes.models ?? []).map((m) => ({ id: `${m.configId}:${m.modelId}`, label: m.label }))
-    agentDefaultModel.value = tools.agent?.defaultModel ?? ''
+    const entries = modelsRes.entries ?? []
+    agentModelEntries.value = entries
+    agentModels.value = entries.map((e) => ({
+      id: `${e.configId}:${e.modelId}`,
+      label: e.label
+    }))
+    agentDefaultModel.value = tools.agent?.defaultModel ?? modelsRes.defaultModel ?? ''
     docSummaryEnabled.value = tools.agent?.documentSummary?.enabled !== false
     docSummaryMinLen.value = tools.agent?.documentSummary?.minLen ?? 500
     convSummaryEnabled.value = tools.agent?.conversationSummary?.enabled !== false
@@ -917,7 +1045,12 @@ async function loadAgentRules() {
 async function toggleRule(r: AgentRule, level: 'user' | 'scope') {
   const next = !r.enabled
   try {
-    await patchAgentRule(r.id, { enabled: next }, level, level === 'scope' ? rulesScope.value : undefined)
+    await patchAgentRule(
+      r.id,
+      { enabled: next },
+      level,
+      level === 'scope' ? rulesScope.value : undefined
+    )
     await loadAgentRules()
   } catch (e) {
     alert(e instanceof Error ? e.message : String(e))

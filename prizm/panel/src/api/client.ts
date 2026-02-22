@@ -347,10 +347,19 @@ export interface AgentToolsSettings {
 
 export const getAgentTools = () => request<AgentToolsSettings>('/settings/agent-tools')
 
-export interface AgentModelsResponse {
-  configs: Array<{ id: string; name: string; type: string; baseUrl?: string; defaultModel?: string; configured?: boolean }>
-  models: Array<{ configId: string; modelId: string; label: string }>
+export interface ModelEntry {
+  configId: string
+  configName: string
+  modelId: string
+  label: string
 }
+
+export interface AgentModelsResponse {
+  defaultModel?: string
+  configs: Array<{ id: string; name?: string; type: string; baseUrl?: string; configured?: boolean }>
+  entries: ModelEntry[]
+}
+
 export const getAgentModels = () =>
   request<AgentModelsResponse>('/settings/agent-models')
 
@@ -598,13 +607,13 @@ export interface ServerConfigResponse {
   }
   agent?: { scopeContextMaxChars?: number }
   llm?: {
-    defaultConfigId?: string
+    defaultModel?: string
+    browserModel?: string
     configs?: Array<{
       id: string
-      name: string
+      name?: string
       type: 'openai_compatible' | 'anthropic' | 'google'
       baseUrl?: string
-      defaultModel?: string
       configured?: boolean
     }>
   }
