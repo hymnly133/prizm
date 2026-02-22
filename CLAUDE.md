@@ -184,6 +184,7 @@ prizm/src/
 │   │   ├── types.ts             # DomainEventMap — all domain event types
 │   │   ├── handlers/            # Event handlers
 │   │   │   ├── auditHandlers.ts     # tool:executed → audit log
+│   │   │   ├── feedbackHandlers.ts  # feedback:submitted → audit + preference memory
 │   │   │   ├── lockHandlers.ts      # session.deleted → release locks
 │   │   │   ├── memoryHandlers.ts    # document:saved → memory extraction
 │   │   │   └── wsBridgeHandlers.ts  # domain events → WebSocket broadcast
@@ -217,6 +218,11 @@ prizm/src/
 │   ├── tokenUsageDb.ts          # Token usage database
 │   ├── backgroundSession/       # Background session manager
 │   ├── cronScheduler/          # Cron scheduler
+│   ├── feedback/               # Feedback system (SQLite, feedback.db)
+│   │   ├── types.ts            # FeedbackRecord / Filter / Stats types
+│   │   ├── feedbackStore.ts    # SQLite storage layer
+│   │   ├── feedbackManager.ts  # CRUD + aggregation + lifecycle
+│   │   └── index.ts
 │   ├── workflowEngine/         # Workflow definition and execution
 │   ├── scheduleReminder/       # Schedule reminder service
 │   └── toolPermission/          # Tool permission cleanup
@@ -288,6 +294,7 @@ prizm/src/
 │   ├── task.ts                  # Background task runs
 │   ├── schedule.ts              # Schedule/reminder
 │   ├── cron.ts                  # Cron configuration
+│   ├── feedback.ts              # Feedback CRUD + stats (auth + scope)
 │   └── mcpConfig.ts             # MCP server configuration
 ├── terminal/                    # Terminal session management
 │   ├── TerminalSessionManager.ts # Session lifecycle (create/resize/kill)
@@ -446,12 +453,14 @@ Type-safe domain event bus (`core/eventBus/`) using Emittery for decoupled inter
 | `document:deleted` | Document deletion | Cleanup |
 | `resource:lock.changed` | Lock acquire/release | WS notification |
 | `file:operation` | File create/move/delete | WS notification |
+| `feedback:submitted` | User feedback on output | Audit, preference memory, WS notification |
 
 **Event Handlers** (registered at server startup):
 
 - `auditHandlers` — `tool:executed` → write to audit log
 - `lockHandlers` — `agent:session.deleted` → release all locks held by session
 - `memoryHandlers` — `document:saved` → trigger memory extraction; `agent:session.deleted` → flush session buffer
+- `feedbackHandlers` — `feedback:submitted` → audit record + preference memory extraction (like/dislike)
 - `wsBridgeHandlers` — Bridge domain events → WebSocket broadcast to clients
 
 <!-- END:EVENT_BUS -->
@@ -618,9 +627,9 @@ Auth routes mounted separately at `/auth/*` to avoid path conflicts with the mai
 1. Express app + middleware setup
 2. Route mounting (all route modules)
 3. HTTP server listen
-4. Service init: `initEverMemService()`, `initTokenUsageDb()`, `lockManager.init()`, `auditManager.init()`
+4. Service init: `initEverMemService()`, `initTokenUsageDb()`, `lockManager.init()`, `auditManager.init()`, `feedbackManager.init()`
 5. Workflow/task engine init: `bgSessionManager.init`, `cronManager.init`, `migrateWorkflowDefsToFiles`, workflow/task recovery, `initWorkflowRunner`/`initTaskRunner`, `registerWorkflowTriggerHandlers`, `startReminderService`
-6. EventBus handler registration: audit / lock / memory / bgSession / schedule handlers, `registerPermissionCleanupHandler`, `setSearchIndex`, `registerSearchHandlers`
+6. EventBus handler registration: audit / lock / memory / bgSession / schedule / feedback handlers, `registerPermissionCleanupHandler`, `setSearchIndex`, `registerSearchHandlers`
 7. WebSocket servers: event WS at `/ws`, terminal WS at `/ws/terminal`
 8. WS bridge handler registration (domain events → WS broadcast)
 
@@ -630,7 +639,7 @@ Auth routes mounted separately at `/auth/*` to avoid path conflicts with the mai
 2. Event WS server destroy
 3. EventBus clear + WS bridge detach
 4. Token usage DB close
-5. Lock manager shutdown + Audit manager shutdown
+5. Lock manager shutdown + Audit manager shutdown + Feedback manager shutdown
 6. HTTP server close
 
 Server created via `createPrizmServer(adapters, options)` with options for `port`, `host`, `enableCors`, `authEnabled`, `enableWebSocket`, `websocketPath`.
@@ -647,6 +656,7 @@ Server created via `createPrizmServer(adapters, options)` with options for `port
 - Audit log: `.prizm-data/agent_audit.db` (SQLite)
 - Token usage: `.prizm-data/token_usage.db` (SQLite)
 - Search index: `.prizm-data/search_index.db` (SQLite)
+- Feedback: `.prizm-data/feedback.db` (SQLite)
 
 ### MCP Server
 
@@ -694,6 +704,7 @@ Connected via stdio bridge (`src/mcp/stdio-bridge.ts`).
 - `/task/*` - Background task runs (auth + scope)
 - `/schedule/*` - Schedule/reminder (auth)
 - `/cron/*` - Cron configuration (auth)
+- `/feedback/*` - User feedback CRUD + stats (auth + scope)
 - `/notify` - Send notifications (auth)
 - `/settings/*` - Settings management (auth)
 - `/embedding/*` - Embedding model status, test, reload (auth)

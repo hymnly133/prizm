@@ -83,11 +83,12 @@ Prizm 通过 MCP 向 Cursor、LobeChat 等暴露本机上下文（便签、任�
 
 ---
 
-## 7. Agent、工作流与记忆
+## 7. Agent、工作流、记忆与反馈
 
 - **Agent**：LLM 驱动的流式对话，支持智谱、小米 MiMo、OpenAI 兼容等。需至少配置一个 LLM API Key（见 [配置总览](configuration.md)）。未配置时，Agent 会提示需要配置。
 - **工作流**：多步骤自动化流水线，支持人工审批、超时、事件触发等。定义与运行见 [工作流系统](workflow-system.md)；Electron 客户端提供可视化编辑。
 - **记忆**：本地 Embedding 默认启用，用于记忆与检索；三层记忆架构见 [prizm/MEMORY_SYSTEM.md](../prizm/MEMORY_SYSTEM.md)。本地向量模型说明见 [本地 Embedding](local-embedding.md)。
+- **反馈**：在 Agent 回复、文档、工作流运行、后台任务等场景可对结果进行「喜欢 / 一般 / 不喜欢」评价并填写评语；反馈会写入审计并参与偏好记忆提取，用于改进后续回复。详见 [反馈系统](feedback-system.md)。
 
 ---
 

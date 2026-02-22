@@ -123,6 +123,11 @@ src/
 │   ├── tokenUsageDb.ts          # Token usage database
 │   ├── backgroundSession/       # Background session manager
 │   ├── cronScheduler/          # Cron scheduler
+│   ├── feedback/               # Feedback system (SQLite, feedback.db)
+│   │   ├── types.ts            # FeedbackRecord / Filter / Stats types
+│   │   ├── feedbackStore.ts    # SQLite storage layer
+│   │   ├── feedbackManager.ts  # CRUD + aggregation + lifecycle
+│   │   └── index.ts
 │   ├── workflowEngine/         # Workflow definition and execution
 │   ├── scheduleReminder/       # Schedule reminder service
 │   └── toolPermission/          # Tool permission cleanup
@@ -179,6 +184,7 @@ src/
 │   ├── task.ts                  # Background task runs
 │   ├── schedule.ts              # Schedule/reminder
 │   ├── cron.ts                  # Cron configuration
+│   ├── feedback.ts              # Feedback CRUD + stats (auth + scope)
 │   └── mcpConfig.ts             # MCP server configuration
 ├── terminal/                    # Terminal session management
 │   ├── TerminalSessionManager.ts # Session lifecycle
@@ -330,6 +336,7 @@ Server created via `createPrizmServer(adapters, options)` with options for `port
 - `/task/*` - Background task runs (auth + scope)
 - `/schedule/*` - Schedule/reminder (auth)
 - `/cron/*` - Cron configuration (auth)
+- `/feedback/*` - User feedback CRUD + stats (auth + scope)
 - `/notify` - Notifications (auth)
 - `/settings/*` - Settings (auth)
 - `/embedding/*` - Embedding model management (auth)
@@ -346,6 +353,7 @@ Server created via `createPrizmServer(adapters, options)` with options for `port
 - Audit log: `.prizm-data/agent_audit.db` (SQLite)
 - Token usage: `.prizm-data/token_usage.db` (SQLite)
 - Search index: `.prizm-data/search_index.db` (SQLite)
+- Feedback: `.prizm-data/feedback.db` (SQLite)
 
 ## Integration Notes
 

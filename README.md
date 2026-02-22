@@ -50,7 +50,7 @@ yarn dev:server
 
 - **快速上手**：本 README、[用户手册](docs/USER_GUIDE.md)
 - **使用与集成**：[服务端 README](prizm/README.md)、[使用说明](prizm/USAGE.md)、[MCP 配置](prizm/MCP-CONFIG.md)
-- **进阶**：[工作流系统](docs/workflow-system.md)、[本地 Embedding](docs/local-embedding.md)、[配置总览](docs/configuration.md)
+- **进阶**：[工作流系统](docs/workflow-system.md)、[本地 Embedding](docs/local-embedding.md)、[反馈系统](docs/feedback-system.md)、[配置总览](docs/configuration.md)
 - **开发与架构**：[CLAUDE.md](CLAUDE.md)、[开源发布 UX 审计](docs/OPEN_SOURCE_UX_AUDIT.md)
 - **术语表**：[glossary.md](docs/glossary.md)
 
