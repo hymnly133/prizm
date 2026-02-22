@@ -37,6 +37,7 @@ coverage/
 # Excluded from repo (kept locally only)
 reference/
 research/
+docs/reference/
 
 # Internal docs (do not publish to repo)
 docs/OPEN_SOURCE_UX_AUDIT.md
