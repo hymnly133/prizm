@@ -43,6 +43,7 @@ interface AgentGeneralSettingsProps {
 export function AgentGeneralSettings({ http, onLog }: AgentGeneralSettingsProps) {
   const [agent, setAgent] = useState<Partial<AgentLLMSettings>>({})
   const [terminal, setTerminal] = useState<Partial<TerminalSettings>>({})
+  const [scopeContextMaxChars, setScopeContextMaxChars] = useState<number | undefined>(undefined)
   const [models, setModels] = useState<AvailableModel[]>([])
   const [shells, setShells] = useState<ShellInfo[]>([])
   const [loading, setLoading] = useState(false)
@@ -52,14 +53,23 @@ export function AgentGeneralSettings({ http, onLog }: AgentGeneralSettingsProps)
     if (!http) return
     setLoading(true)
     try {
-      const [tools, modelsRes, shellsRes] = await Promise.all([
+      const [tools, modelsRes, shellsRes, serverConfig] = await Promise.all([
         http.getAgentTools(),
         http.getAgentModels(),
-        http.getAvailableShells()
+        http.getAvailableShells(),
+        http.getServerConfig()
       ])
       setAgent(tools.agent ?? {})
       setTerminal(tools.terminal ?? {})
-      setModels(modelsRes.models ?? [])
+      setScopeContextMaxChars(serverConfig.agent?.scopeContextMaxChars)
+      const list = modelsRes.models ?? []
+      setModels(
+        list.map((m) => ({
+          id: `${m.configId}:${m.modelId}`,
+          label: m.label,
+          provider: modelsRes.configs?.find((c) => c.id === m.configId)?.name ?? m.configId
+        }))
+      )
       setShells(shellsRes.shells ?? [])
     } catch (e) {
       onLog?.(`加载 Agent 配置失败: ${e}`, 'error')
@@ -77,6 +87,9 @@ export function AgentGeneralSettings({ http, onLog }: AgentGeneralSettingsProps)
     setSaving(true)
     try {
       await http.updateAgentTools({ agent, terminal })
+      if (scopeContextMaxChars !== undefined) {
+        await http.updateServerConfig({ agent: { scopeContextMaxChars } })
+      }
       toast.success('Agent 设置已保存')
       void load()
     } catch (e) {
@@ -96,8 +109,35 @@ export function AgentGeneralSettings({ http, onLog }: AgentGeneralSettingsProps)
   return (
     <div className="settings-section">
       <div className="settings-section-header">
-        <h2>Agent 服务端设置</h2>
-        <p className="form-hint">配置 Agent 的默认模型、摘要策略和记忆模块</p>
+        <h2>Agent</h2>
+        <p className="form-hint">配置 Agent 的默认模型、摘要策略、上下文上限和记忆模块</p>
+      </div>
+
+      {/* Scope 上下文 */}
+      <div className="settings-card">
+        <div className={styles.sectionTitle}>
+          <Layers size={16} />
+          Scope 上下文
+        </div>
+        <p className="form-hint" style={{ marginTop: 6, marginBottom: 10 }}>
+          单次注入的便签/待办/文档摘要字符数上限
+        </p>
+        <Form className="compact-form" gap={8} layout="vertical">
+          <Form.Item label="Scope 上下文最大字符数" extra="建议 500–12000">
+            <Input
+              type="number"
+              min={500}
+              max={12000}
+              value={scopeContextMaxChars ?? ''}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                setScopeContextMaxChars(
+                  e.target.value ? parseInt(e.target.value, 10) || undefined : undefined
+                )
+              }
+              placeholder="4000"
+            />
+          </Form.Item>
+        </Form>
       </div>
 
       {/* LLM 模型 & 摘要配置 */}

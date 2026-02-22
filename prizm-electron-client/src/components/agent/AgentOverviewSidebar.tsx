@@ -119,15 +119,19 @@ export const AgentOverviewSidebar = memo(function AgentOverviewSidebar({
       {onModelChange && (
         <section className="agent-right-section">
           <h3 className="agent-right-section-title">模型</h3>
-          <Select
-            options={[
-              { label: defaultModel ? `默认 (${defaultModel})` : '默认', value: '' },
-              ...models.map((m) => ({ label: m.label, value: m.id }))
-            ]}
-            value={selectedModel ?? ''}
-            onChange={(v) => onModelChange(v || undefined)}
-            style={{ width: '100%' }}
-          />
+          {models.length === 0 ? (
+            <p className="text-sm text-amber-500/90">暂无可用模型，请先在设置中配置 LLM</p>
+          ) : (
+            <Select
+              options={[
+                { label: defaultModel ? `默认 (${defaultModel})` : '默认', value: '' },
+                ...models.map((m) => ({ label: m.label, value: m.id }))
+              ]}
+              value={selectedModel ?? ''}
+              onChange={(v) => onModelChange(v || undefined)}
+              style={{ width: '100%' }}
+            />
+          )}
         </section>
       )}
 

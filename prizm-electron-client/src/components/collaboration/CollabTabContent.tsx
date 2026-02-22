@@ -19,7 +19,11 @@ export interface TabContentProps {
   entityId?: string
   onClose?: () => void
   /** Open a new tab from within this tab (e.g. list → entity). */
-  onOpenEntity?: (type: 'document' | 'task' | 'workflow' | 'workflow-def' | 'session', entityId: string, label: string) => void
+  onOpenEntity?: (
+    type: 'document' | 'task' | 'workflow' | 'workflow-def' | 'session',
+    entityId: string,
+    label: string
+  ) => void
   onLoadSession?: (sessionId: string) => void
 }
 
@@ -39,7 +43,11 @@ const TAB_CONTENT_MAP: Record<string, ContentComponent> = {
 export interface CollabTabContentProps {
   activeTab: CollabTab | null
   onClose?: () => void
-  onOpenEntity?: (type: 'document' | 'task' | 'workflow' | 'workflow-def' | 'session', entityId: string, label: string) => void
+  onOpenEntity?: (
+    type: 'document' | 'task' | 'workflow' | 'workflow-def' | 'session',
+    entityId: string,
+    label: string
+  ) => void
   onLoadSession?: (sessionId: string) => void
 }
 
@@ -53,6 +61,14 @@ export const CollabTabContent = memo(function CollabTabContent({
     return (
       <div className="collab-tab-content collab-tab-content--empty">
         <EmptyState description="打开标签页以查看内容" />
+      </div>
+    )
+  }
+
+  if (activeTab.type === 'session-detail') {
+    return (
+      <div className="collab-tab-content collab-tab-content--empty">
+        <EmptyState description="会话详情仅在协作页显示" />
       </div>
     )
   }

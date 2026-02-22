@@ -2,7 +2,7 @@
  * Embedding 模型状态、统计与调试面板
  * 展示本地向量模型的运行状态、推理统计、量化选择、相似度测试、基准评测和记忆库管理
  */
-import { Button, Form, Input, Modal, TextArea, toast } from '@lobehub/ui'
+import { Button, Checkbox, Form, Input, Modal, TextArea, toast } from '@lobehub/ui'
 import { Select } from './ui/Select'
 import { createStaticStyles } from 'antd-style'
 import {
@@ -25,7 +25,8 @@ import type {
   EmbeddingTestResult,
   EmbeddingBenchmarkResult,
   SimilarityLevel,
-  VectorStats
+  VectorStats,
+  ServerConfigEmbedding
 } from '@prizm/client-core'
 
 // ==================== 样式 ====================
@@ -656,6 +657,13 @@ function BenchmarkResultCard({ result }: { result: EmbeddingBenchmarkResult }) {
 
 // ==================== 主组件 ====================
 
+const EMBEDDING_DTYPE_OPTIONS = [
+  { label: 'q4', value: 'q4' },
+  { label: 'q8', value: 'q8' },
+  { label: 'fp16', value: 'fp16' },
+  { label: 'fp32', value: 'fp32' }
+]
+
 export function EmbeddingStatus({ http, onLog }: Props) {
   const [status, setStatus] = useState<EmbeddingStatusType | null>(null)
   const [loading, setLoading] = useState(false)
@@ -672,7 +680,28 @@ export function EmbeddingStatus({ http, onLog }: Props) {
   const [clearConfirmText, setClearConfirmText] = useState('')
   const [clearing, setClearing] = useState(false)
 
+  const [embeddingConfig, setEmbeddingConfig] = useState<Partial<ServerConfigEmbedding>>({})
+  const [embeddingConfigLoading, setEmbeddingConfigLoading] = useState(false)
+  const [embeddingConfigSaving, setEmbeddingConfigSaving] = useState(false)
+
   const initDtype = useRef(false)
+
+  const loadEmbeddingConfig = useCallback(async () => {
+    if (!http) return
+    setEmbeddingConfigLoading(true)
+    try {
+      const res = await http.getServerConfig()
+      setEmbeddingConfig(res.embedding ?? {})
+    } catch (e) {
+      onLog?.(`加载 Embedding 配置失败: ${e}`, 'error')
+    } finally {
+      setEmbeddingConfigLoading(false)
+    }
+  }, [http, onLog])
+
+  useEffect(() => {
+    void loadEmbeddingConfig()
+  }, [loadEmbeddingConfig])
 
   const loadStatus = useCallback(async () => {
     if (!http) return
@@ -807,11 +836,108 @@ export function EmbeddingStatus({ http, onLog }: Props) {
         : `${uptime}s`
       : '-'
 
+  async function handleSaveEmbeddingConfig() {
+    if (!http) return
+    setEmbeddingConfigSaving(true)
+    try {
+      await http.updateServerConfig({ embedding: embeddingConfig })
+      toast.success('Embedding 配置已保存')
+      onLog?.('Embedding 配置已保存', 'success')
+      void loadEmbeddingConfig()
+      void loadStatus()
+    } catch (e) {
+      toast.error(String(e))
+      onLog?.(`保存 Embedding 配置失败: ${e}`, 'error')
+    } finally {
+      setEmbeddingConfigSaving(false)
+    }
+  }
+
   return (
     <div className="settings-section">
       <div className="settings-section-header">
         <h2>向量模型</h2>
-        <p className="form-hint">本地 Embedding 模型状态与推理统计（{st?.modelName ?? '-'}）</p>
+        <p className="form-hint">本地 Embedding 配置、状态与推理统计（{st?.modelName ?? '-'}）</p>
+      </div>
+
+      {/* Embedding 配置 */}
+      <div className="settings-card">
+        <div className={styles.sectionTitle}>
+          <Cpu size={16} />
+          Embedding 配置
+        </div>
+        <p className="form-hint" style={{ marginTop: 6, marginBottom: 10 }}>
+          启用、模型、缓存目录与量化等；修改后保存，重载模型后生效。
+        </p>
+        {embeddingConfigLoading ? (
+          <p className="form-hint">加载中...</p>
+        ) : (
+          <Form className="compact-form" gap={8} layout="vertical">
+            <Form.Item label="启用本地 Embedding">
+              <Checkbox
+                checked={embeddingConfig.enabled !== false}
+                onChange={(c) => setEmbeddingConfig((prev) => ({ ...prev, enabled: c as boolean }))}
+              />
+              <span style={{ marginLeft: 8 }}>启用</span>
+            </Form.Item>
+            <Form.Item label="模型" extra="HuggingFace 模型 ID">
+              <Input
+                value={embeddingConfig.model ?? ''}
+                onChange={(e) =>
+                  setEmbeddingConfig((c) => ({ ...c, model: e.target.value.trim() || undefined }))
+                }
+                placeholder="TaylorAI/bge-micro-v2"
+              />
+            </Form.Item>
+            <Form.Item label="缓存目录">
+              <Input
+                value={embeddingConfig.cacheDir ?? ''}
+                onChange={(e) =>
+                  setEmbeddingConfig((c) => ({
+                    ...c,
+                    cacheDir: e.target.value.trim() || undefined
+                  }))
+                }
+                placeholder="{dataDir}/models"
+              />
+            </Form.Item>
+            <Form.Item label="量化类型">
+              <Select
+                options={EMBEDDING_DTYPE_OPTIONS}
+                value={embeddingConfig.dtype ?? 'q8'}
+                onChange={(v) =>
+                  setEmbeddingConfig((c) => ({
+                    ...c,
+                    dtype: (v as 'q4' | 'q8' | 'fp16' | 'fp32') || undefined
+                  }))
+                }
+              />
+            </Form.Item>
+            <Form.Item label="最大并发数">
+              <Input
+                type="number"
+                min={1}
+                value={embeddingConfig.maxConcurrency ?? ''}
+                onChange={(e) =>
+                  setEmbeddingConfig((c) => ({
+                    ...c,
+                    maxConcurrency: parseInt(e.target.value, 10) || undefined
+                  }))
+                }
+                placeholder="1"
+              />
+            </Form.Item>
+            <div style={{ marginTop: 8 }}>
+              <Button
+                type="primary"
+                onClick={() => void handleSaveEmbeddingConfig()}
+                loading={embeddingConfigSaving}
+              >
+                保存 Embedding 配置
+              </Button>
+            </div>
+          </Form>
+        )}
       </div>
 
       {/* 状态概览 */}

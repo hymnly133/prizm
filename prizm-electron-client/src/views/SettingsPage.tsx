@@ -15,6 +15,8 @@ import {
 import { Segmented } from '../components/ui/Segmented'
 import { SkillsAndMcpSettings } from '../components/SkillsAndMcpSettings'
 import { AgentGeneralSettings } from '../components/AgentGeneralSettings'
+import { ServerConfigSettings } from '../components/ServerConfigSettings'
+import { LLMConfigSettings } from '../components/LLMConfigSettings'
 import { CommandsSettings } from '../components/CommandsSettings'
 import { AgentRulesSettings } from '../components/AgentRulesSettings'
 import { ScopeManagement } from '../components/ScopeManagement'
@@ -31,6 +33,8 @@ import {
   FolderOpen,
   Bot,
   Cpu,
+  Server,
+  Key,
   Terminal as TerminalIcon,
   Sparkles,
   ScrollText,
@@ -43,6 +47,8 @@ type SettingsCategory =
   | 'appearance'
   | 'input'
   | 'scope'
+  | 'server'
+  | 'llm'
   | 'agent'
   | 'embedding'
   | 'skillsAndMcp'
@@ -62,6 +68,8 @@ const CATEGORIES: CategoryItem[] = [
   { key: 'appearance', label: '外观', icon: <Palette size={16} /> },
   { key: 'input', label: '输入', icon: <Keyboard size={16} /> },
   { key: 'scope', label: '工作区', icon: <FolderOpen size={16} />, requiresAuth: true },
+  { key: 'server', label: '服务端/运维', icon: <Server size={16} />, requiresAuth: true },
+  { key: 'llm', label: 'LLM 配置', icon: <Key size={16} />, requiresAuth: true },
   { key: 'agent', label: 'Agent', icon: <Bot size={16} />, requiresAuth: true },
   { key: 'embedding', label: '模型', icon: <Cpu size={16} />, requiresAuth: true },
   { key: 'skillsAndMcp', label: '技能与 MCP', icon: <Sparkles size={16} />, requiresAuth: true },
@@ -169,6 +177,7 @@ function SettingsPage() {
       toast.success('服务器连接成功')
     } else {
       toast.error('无法连接到服务器')
+      toast.info('请确认 Prizm 服务端已启动（如 yarn dev:server 或 yarn start）')
     }
     addLog(success ? '服务器连接成功' : '无法连接到服务器', success ? 'success' : 'error')
   }
@@ -441,6 +450,12 @@ function SettingsPage() {
 
       case 'scope':
         return <ScopeManagement http={manager?.getHttpClient() ?? null} onLog={addLog} />
+
+      case 'server':
+        return <ServerConfigSettings http={manager?.getHttpClient() ?? null} onLog={addLog} />
+
+      case 'llm':
+        return <LLMConfigSettings http={manager?.getHttpClient() ?? null} onLog={addLog} />
 
       case 'agent':
         return <AgentGeneralSettings http={manager?.getHttpClient() ?? null} onLog={addLog} />

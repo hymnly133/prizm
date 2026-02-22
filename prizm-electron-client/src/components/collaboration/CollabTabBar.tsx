@@ -30,6 +30,7 @@ import {
   Clock,
   FileText,
   GitBranch,
+  Info,
   MessageSquare,
   Plus,
   X,
@@ -45,6 +46,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   FileText,
   Zap,
   GitBranch,
+  Info,
   MessageSquare
 }
 
@@ -55,6 +57,7 @@ const TYPE_ICON: Record<CollabTabType, LucideIcon> = {
   'workflow-def': Blocks,
   run: GitBranch,
   session: MessageSquare,
+  'session-detail': Info,
   schedule: Calendar,
   cron: Clock,
   'document-list': FileText,

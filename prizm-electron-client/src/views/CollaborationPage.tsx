@@ -6,16 +6,7 @@
  * Session is the primary citizen. Document / Task / Workflow live in an expandable
  * right-side panel with per-session tabs managed by collabTabStore.
  */
-import {
-  GripVertical,
-  PanelLeftClose,
-  PanelLeftOpen,
-  PanelRightClose,
-  PanelRightOpen,
-  FileText,
-  Zap,
-  GitBranch
-} from 'lucide-react'
+import { GripVertical, PanelLeftClose, PanelLeftOpen, Zap, GitBranch, Info } from 'lucide-react'
 import { ActionIcon } from '@lobehub/ui'
 import { Drawer } from 'antd'
 import { motion, AnimatePresence } from 'motion/react'
@@ -62,7 +53,11 @@ import { CollabNav } from '../components/collaboration/CollabNav'
 import { CollabHub } from '../components/collaboration/CollabHub'
 import { UnifiedRightPanel } from '../components/collaboration/UnifiedRightPanel'
 import { CollabInteractionContext, useCollabInteractionValue } from '../hooks/useCollabInteraction'
-import { makeEntityTab, makeListTab } from '../components/collaboration/collabTabTypes'
+import {
+  makeEntityTab,
+  makeListTab,
+  makeSessionDetailTab
+} from '../components/collaboration/collabTabTypes'
 import '../styles/collab-hub.css'
 
 const LEFT_ACTIONS: ActionKeys[] = ['fileUpload', 'thinking', 'toolCompact', 'skills', 'clear']
@@ -156,7 +151,6 @@ function CollaborationPage() {
   const [previewFile, setPreviewFile] = useState<{ kind: FileKind; id: string } | null>(null)
 
   const [leftCollapsed, setLeftCollapsed] = useState(false)
-  const [rightDetailCollapsed, setRightDetailCollapsed] = useState(false)
   const [hubDrawerOpen, setHubDrawerOpen] = useState(false)
 
   /* Tab store: ensure tabs are loaded when session switches */
@@ -320,6 +314,12 @@ function CollaborationPage() {
     [openTabAction, openRightPanel, layout.rightPanelOpen]
   )
 
+  const handleOpenSessionDetailTab = useCallback(() => {
+    const sessionId = currentSessionRef.current?.id ?? null
+    openTabAction(sessionId, makeSessionDetailTab())
+    if (!layout.rightPanelOpen) openRightPanel()
+  }, [openTabAction, openRightPanel, layout.rightPanelOpen])
+
   const handleToggleListTab = useCallback(
     (type: 'document-list' | 'task-list' | 'workflow-list') => {
       if (layout.rightPanelOpen && tabsForSession.length > 0) {
@@ -356,20 +356,11 @@ function CollaborationPage() {
       ),
       right: !overviewMode ? (
         <>
-          {!rightPanelOpen && (
-            <ActionIcon
-              icon={rightDetailCollapsed ? PanelRightOpen : PanelRightClose}
-              size="small"
-              title={rightDetailCollapsed ? '展开详情' : '收起详情'}
-              onClick={() => setRightDetailCollapsed((c) => !c)}
-              style={{ marginRight: 4 }}
-            />
-          )}
           <ActionIcon
-            icon={FileText}
+            icon={Info}
             size="small"
-            title="文档"
-            onClick={() => handleToggleListTab('document-list')}
+            title="会话详情"
+            onClick={handleOpenSessionDetailTab}
           />
           <ActionIcon
             icon={Zap}
@@ -386,7 +377,7 @@ function CollaborationPage() {
         </>
       ) : undefined
     }),
-    [leftCollapsed, rightDetailCollapsed, rightPanelOpen, overviewMode, handleToggleListTab]
+    [leftCollapsed, overviewMode, handleToggleListTab, handleOpenSessionDetailTab]
   )
   useRegisterHeaderSlots('agent', headerSlots)
 
@@ -455,14 +446,14 @@ function CollaborationPage() {
               bgSessions={bgSessions}
               bgLoading={loading}
               rightPanelOpen={rightPanelOpen}
-              rightPanelTab="document"
               onOpenRightPanel={() => openRightPanel()}
-              onToggleRightPanel={() => toggleRightPanel()}
+              onOpenTaskList={() => handleOpenListTab('task-list')}
+              onOpenWorkflowList={() => handleOpenListTab('workflow-list')}
+              onOpenSessionDetail={handleOpenSessionDetailTab}
               onOpenHub={() => setHubDrawerOpen(true)}
               showOverviewTab
               overviewActive={overviewMode}
               onOverviewClick={() => setOverviewMode(true)}
-              documentCount={documents.length}
               activeTaskCount={activeTaskCount}
               activeWorkflowCount={activeWorkflowCount}
             />
@@ -575,6 +566,21 @@ function CollaborationPage() {
                       contextId={currentSession?.id ?? null}
                       onClose={closeRightPanel}
                       onLoadSession={handleLoadSession}
+                      scope={currentScope}
+                      renderSessionDetailContent={() => (
+                        <AgentDetailSidebar
+                          sending={sending}
+                          error={error}
+                          currentSession={currentSession}
+                          optimisticMessages={optimisticMessages}
+                          selectedModel={selectedModel}
+                          onModelChange={setSelectedModel}
+                          scope={currentScope}
+                          onPreviewFile={(relativePath) =>
+                            setPreviewFile({ kind: 'document', id: relativePath })
+                          }
+                        />
+                      )}
                     />
                   </div>
                 </div>
@@ -648,30 +654,6 @@ function CollaborationPage() {
                       </div>
                     </div>
                   </div>
-
-                  {/* Agent detail sidebar (only when right panel is closed) */}
-                  {!overviewMode && (
-                    <ResizableSidebar
-                      side="right"
-                      storageKey="collab-agent-right"
-                      defaultWidth={280}
-                      collapsed={rightDetailCollapsed}
-                      onCollapsedChange={setRightDetailCollapsed}
-                    >
-                      <AgentDetailSidebar
-                        sending={sending}
-                        error={error}
-                        currentSession={currentSession}
-                        optimisticMessages={optimisticMessages}
-                        selectedModel={selectedModel}
-                        onModelChange={setSelectedModel}
-                        scope={currentScope}
-                        onPreviewFile={(relativePath) =>
-                          setPreviewFile({ kind: 'document', id: relativePath })
-                        }
-                      />
-                    </ResizableSidebar>
-                  )}
                 </div>
               )}
             </ChatInputProvider>

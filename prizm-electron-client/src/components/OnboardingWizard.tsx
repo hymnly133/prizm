@@ -1,7 +1,7 @@
 import { Button, Form, Input, toast } from '@lobehub/ui'
 import { Steps } from 'antd'
-import { useState } from 'react'
-import { CheckCircle, Globe, Key, FolderOpen, Rocket } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { CheckCircle, Globe, Key, Rocket, Zap } from 'lucide-react'
 import { buildServerUrl } from '@prizm/client-core'
 import type { PrizmConfig } from '@prizm/client-core'
 
@@ -31,6 +31,23 @@ export function OnboardingWizard({
   const [connectionOk, setConnectionOk] = useState(false)
   const [registering, setRegistering] = useState(false)
   const [registered, setRegistered] = useState(false)
+  const [autoDetecting, setAutoDetecting] = useState(true)
+
+  // 第一步挂载时自动检测当前地址是否已有服务端
+  useEffect(() => {
+    if (step !== 0 || !host?.trim() || !port?.trim()) {
+      setAutoDetecting(false)
+      return
+    }
+    const url = buildServerUrl(host.trim(), port.trim())
+    testConnection(url).then((ok) => {
+      setAutoDetecting(false)
+      if (ok) {
+        setConnectionOk(true)
+        toast.success('已检测到本机服务端，可点击「下一步」或使用一键连接')
+      }
+    })
+  }, [step, host, port, testConnection])
 
   async function handleTestConnection() {
     if (!host.trim() || !port.trim()) {
@@ -47,13 +64,14 @@ export function OnboardingWizard({
       setStep(1)
     } else {
       toast.error('无法连接到服务器，请检查地址和端口')
+      toast.info('请确认 Prizm 服务端已启动（在本机可运行 yarn dev:server 或 yarn start）')
     }
   }
 
-  async function handleRegister() {
+  async function handleRegister(): Promise<boolean> {
     if (!clientName.trim()) {
       toast.error('请填写客户端名称')
-      return
+      return false
     }
     const scopeList = scopes
       .split(',')
@@ -61,7 +79,7 @@ export function OnboardingWizard({
       .filter(Boolean)
     if (scopeList.length === 0) {
       toast.error('请至少填写一个 Scope')
-      return
+      return false
     }
     setRegistering(true)
     const serverUrl = buildServerUrl(host.trim(), port.trim())
@@ -89,8 +107,32 @@ export function OnboardingWizard({
       setRegistered(true)
       toast.success('注册成功')
       setStep(2)
-    } else {
-      toast.error('注册失败，请检查服务器是否正常')
+      return true
+    }
+    toast.error('注册失败，请检查服务器是否正常')
+    return false
+  }
+
+  /** 一键：测试连接 → 注册 → 完成（检测到服务端时可用） */
+  async function handleOneClick() {
+    const serverUrl = buildServerUrl(host.trim(), port.trim())
+    if (!host.trim() || !port.trim()) {
+      toast.error('请填写服务器地址和端口')
+      return
+    }
+    setTesting(true)
+    const ok = await testConnection(serverUrl)
+    setTesting(false)
+    if (!ok) {
+      setConnectionOk(false)
+      toast.error('无法连接到服务器，请检查地址和端口')
+      toast.info('请确认 Prizm 服务端已启动（在本机可运行 yarn dev:server 或 yarn start）')
+      return
+    }
+    setConnectionOk(true)
+    const registered = await handleRegister()
+    if (registered) {
+      await handleFinish()
     }
   }
 
@@ -128,7 +170,10 @@ export function OnboardingWizard({
         {step === 0 && (
           <div className="onboarding-wizard__step">
             <h3>连接到 Prizm 服务器</h3>
-            <p className="form-hint">请填写 Prizm 服务端的地址和端口（默认 127.0.0.1:4127）</p>
+            <p className="form-hint">
+              请填写 Prizm 服务端的地址和端口（默认 127.0.0.1:4127）
+              {autoDetecting && ' · 正在检测本机服务端…'}
+            </p>
             <Form className="compact-form" gap={8} layout="vertical">
               <Form.Item label="服务器地址">
                 <Input
@@ -147,16 +192,34 @@ export function OnboardingWizard({
                 />
               </Form.Item>
             </Form>
+            {connectionOk && (
+              <p className="form-hint" style={{ marginBottom: 8 }}>
+                已检测到服务端，可使用「一键连接并注册」跳过后续步骤。
+              </p>
+            )}
             <div className="onboarding-wizard__actions">
               <Button
                 type="primary"
                 onClick={handleTestConnection}
-                disabled={testing}
+                disabled={testing || registering}
                 loading={testing}
               >
                 {testing ? '测试中...' : '测试连接'}
               </Button>
-              {connectionOk && <Button onClick={() => setStep(1)}>下一步</Button>}
+              {connectionOk && (
+                <>
+                  <Button onClick={() => setStep(1)}>下一步</Button>
+                  <Button
+                    type="primary"
+                    icon={<Zap size={14} />}
+                    onClick={handleOneClick}
+                    disabled={registering}
+                    loading={registering}
+                  >
+                    {registering ? '注册中...' : '一键连接并注册'}
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         )}

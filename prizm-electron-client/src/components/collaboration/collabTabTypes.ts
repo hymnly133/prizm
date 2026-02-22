@@ -17,6 +17,7 @@ export type CollabTabType =
   | 'workflow-def'
   | 'run'
   | 'session'
+  | 'session-detail'
   | 'schedule'
   | 'cron'
   | 'document-list'
@@ -95,6 +96,19 @@ export function makeListTab(type: ListTabType): CollabTab {
   }
 }
 
+/** Tab ID for the special "current session detail" tab (single per context). */
+export const SESSION_DETAIL_TAB_ID = 'session-detail'
+
+/** Create the special tab that shows current session's detail panel (context/文件/终端). */
+export function makeSessionDetailTab(): CollabTab {
+  return {
+    id: SESSION_DETAIL_TAB_ID,
+    type: 'session-detail',
+    label: '会话详情',
+    closeable: true
+  }
+}
+
 export const TAB_TYPE_ICONS: Record<CollabTabType, string> = {
   document: 'FileText',
   task: 'Zap',
@@ -102,6 +116,7 @@ export const TAB_TYPE_ICONS: Record<CollabTabType, string> = {
   'workflow-def': 'Blocks',
   run: 'GitBranch',
   session: 'MessageSquare',
+  'session-detail': 'Info',
   schedule: 'Calendar',
   cron: 'Clock',
   'document-list': 'FileText',
@@ -126,6 +141,7 @@ export const TAB_TYPE_LABELS: Record<CollabTabType, string> = {
   'workflow-def': '工作流定义',
   run: '运行',
   session: '会话',
+  'session-detail': '会话详情',
   schedule: '日程',
   cron: '定时任务',
   'document-list': '文档列表',

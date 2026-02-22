@@ -26,6 +26,8 @@ export interface UnifiedRightPanelProps {
     scope: string,
     session: EnrichedSession | null
   ) => React.ReactNode
+  /** When active tab is session-detail, render current session detail panel (e.g. AgentDetailSidebar). */
+  renderSessionDetailContent?: () => React.ReactNode
   /** Extra class name (e.g. wfp-right-panel). */
   className?: string
 }
@@ -36,6 +38,7 @@ export const UnifiedRightPanel = memo(function UnifiedRightPanel({
   onLoadSession,
   scope,
   renderSessionTabContent,
+  renderSessionDetailContent,
   className
 }: UnifiedRightPanelProps) {
   const tabs = useCollabTabStore((s) =>
@@ -121,6 +124,9 @@ export const UnifiedRightPanel = memo(function UnifiedRightPanel({
   )
   const showSessionSlot =
     isSessionTab && scope && typeof renderSessionTabContent === 'function'
+  const showSessionDetailSlot =
+    activeTab?.type === 'session-detail' &&
+    typeof renderSessionDetailContent === 'function'
 
   return (
     <div
@@ -154,6 +160,19 @@ export const UnifiedRightPanel = memo(function UnifiedRightPanel({
               scope!,
               sessionForTab
             )}
+          </div>
+        ) : showSessionDetailSlot ? (
+          <div
+            className="unified-right-panel__session-detail-slot"
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              flex: 1,
+              minHeight: 0,
+              overflow: 'hidden'
+            }}
+          >
+            {renderSessionDetailContent!()}
           </div>
         ) : (
           <CollabTabContent

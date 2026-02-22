@@ -6,14 +6,7 @@
  */
 import { memo, useMemo, useCallback } from 'react'
 import { ActionIcon, Icon } from '@lobehub/ui'
-import {
-  Bot,
-  FileText,
-  GitBranch,
-  LayoutDashboard,
-  Plus,
-  Zap
-} from 'lucide-react'
+import { GitBranch, Info, LayoutDashboard, Plus, Zap } from 'lucide-react'
 import type { EnrichedSession } from '@prizm/client-core'
 import { isChatListSession } from '@prizm/shared'
 import { AccentList } from '../ui/AccentList'
@@ -32,10 +25,13 @@ export interface CollabNavProps {
   bgLoading: boolean
 
   rightPanelOpen: boolean
-  /** @deprecated kept for compat — use onToggleRightPanel() without args */
-  rightPanelTab?: string
   onOpenRightPanel: () => void
-  onToggleRightPanel: () => void
+  /** Open right panel and activate task list tab */
+  onOpenTaskList?: () => void
+  /** Open right panel and activate workflow list tab */
+  onOpenWorkflowList?: () => void
+  /** Open right panel and activate session detail tab */
+  onOpenSessionDetail?: () => void
 
   onOpenHub?: () => void
 
@@ -44,7 +40,6 @@ export interface CollabNavProps {
   overviewActive?: boolean
   onOverviewClick?: () => void
 
-  documentCount?: number
   activeTaskCount?: number
   activeWorkflowCount?: number
 }
@@ -60,12 +55,13 @@ export const CollabNav = memo(function CollabNav({
   bgLoading,
   rightPanelOpen,
   onOpenRightPanel,
-  onToggleRightPanel,
+  onOpenTaskList,
+  onOpenWorkflowList,
+  onOpenSessionDetail,
   onOpenHub,
   showOverviewTab,
   overviewActive,
   onOverviewClick,
-  documentCount,
   activeTaskCount,
   activeWorkflowCount
 }: CollabNavProps) {
@@ -81,7 +77,14 @@ export const CollabNav = memo(function CollabNav({
         title: (
           <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
             <Zap size={11} style={{ flexShrink: 0, opacity: 0.5 }} />
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+            <span
+              style={{
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                flex: 1
+              }}
+            >
               {s.bgMeta?.label ?? s.llmSummary?.trim() ?? s.id.slice(0, 8)}
             </span>
             <span
@@ -113,7 +116,14 @@ export const CollabNav = memo(function CollabNav({
           title: (
             <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
               {needsInteract && <span className="agent-session-interact-badge" title="需要确认" />}
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+              <span
+                style={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  flex: 1
+                }}
+              >
                 {s.llmSummary?.trim() || '新会话'}
               </span>
             </span>
@@ -132,7 +142,9 @@ export const CollabNav = memo(function CollabNav({
         {showOverviewTab && onOverviewClick && (
           <button
             type="button"
-            className={`collab-nav__overview-btn${overviewActive ? ' collab-nav__overview-btn--active' : ''}`}
+            className={`collab-nav__overview-btn${
+              overviewActive ? ' collab-nav__overview-btn--active' : ''
+            }`}
             onClick={onOverviewClick}
             title="总览"
           >
@@ -149,7 +161,10 @@ export const CollabNav = memo(function CollabNav({
         ) : interactiveSessions.length === 0 ? (
           <EmptyState description="暂无会话" />
         ) : (
-          <AccentList activeKey={overviewActive ? undefined : activeSessionId} items={sessionItems} />
+          <AccentList
+            activeKey={overviewActive ? undefined : activeSessionId}
+            items={sessionItems}
+          />
         )}
 
         {/* Background tasks section */}
@@ -163,28 +178,26 @@ export const CollabNav = memo(function CollabNav({
         )}
       </div>
 
-      {/* Quick-access bottom buttons */}
+      {/* Quick-access bottom buttons — each opens the corresponding right-panel tab */}
       <div className="collab-nav__quick-access">
         <QuickAccessButton
-          icon={FileText}
-          label="文档"
-          count={documentCount}
-          active={false}
-          onClick={onToggleRightPanel}
+          icon={Info}
+          label="会话详情"
+          onClick={onOpenSessionDetail ?? onOpenRightPanel}
         />
         <QuickAccessButton
           icon={Zap}
           label="任务"
           count={activeTaskCount}
           active={false}
-          onClick={onToggleRightPanel}
+          onClick={onOpenTaskList ?? onOpenRightPanel}
         />
         <QuickAccessButton
           icon={GitBranch}
           label="工作流"
           count={activeWorkflowCount}
           active={false}
-          onClick={onToggleRightPanel}
+          onClick={onOpenWorkflowList ?? onOpenRightPanel}
         />
         {onOpenHub && (
           <button
@@ -225,9 +238,7 @@ function QuickAccessButton({
     >
       <IconComp size={14} />
       <span className="collab-nav__quick-btn-label">{label}</span>
-      {count != null && count > 0 && (
-        <span className="collab-nav__quick-btn-badge">{count}</span>
-      )}
+      {count != null && count > 0 && <span className="collab-nav__quick-btn-badge">{count}</span>}
     </button>
   )
 }
@@ -236,34 +247,57 @@ function QuickAccessButton({
 
 function statusColor(status: string): string {
   switch (status) {
-    case 'running': return 'var(--ant-color-primary)'
-    case 'completed': return 'var(--ant-color-success)'
-    case 'failed': return 'var(--ant-color-error)'
-    case 'paused': case 'timeout': case 'interrupted': return 'var(--ant-color-warning)'
-    default: return 'var(--ant-color-text-tertiary)'
+    case 'running':
+      return 'var(--ant-color-primary)'
+    case 'completed':
+      return 'var(--ant-color-success)'
+    case 'failed':
+      return 'var(--ant-color-error)'
+    case 'paused':
+    case 'timeout':
+    case 'interrupted':
+      return 'var(--ant-color-warning)'
+    default:
+      return 'var(--ant-color-text-tertiary)'
   }
 }
 
 function statusBg(status: string): string {
   switch (status) {
-    case 'running': return 'var(--ant-color-primary-bg)'
-    case 'completed': return 'var(--ant-color-success-bg)'
-    case 'failed': return 'var(--ant-color-error-bg)'
-    case 'paused': case 'timeout': case 'interrupted': return 'var(--ant-color-warning-bg)'
-    default: return 'var(--ant-color-fill-tertiary)'
+    case 'running':
+      return 'var(--ant-color-primary-bg)'
+    case 'completed':
+      return 'var(--ant-color-success-bg)'
+    case 'failed':
+      return 'var(--ant-color-error-bg)'
+    case 'paused':
+    case 'timeout':
+    case 'interrupted':
+      return 'var(--ant-color-warning-bg)'
+    default:
+      return 'var(--ant-color-fill-tertiary)'
   }
 }
 
 function statusLabel(status: string): string {
   switch (status) {
-    case 'running': return '运行中'
-    case 'completed': return '完成'
-    case 'failed': return '失败'
-    case 'paused': return '暂停'
-    case 'pending': return '等待'
-    case 'timeout': return '超时'
-    case 'cancelled': return '已取消'
-    case 'interrupted': return '已中断'
-    default: return status
+    case 'running':
+      return '运行中'
+    case 'completed':
+      return '完成'
+    case 'failed':
+      return '失败'
+    case 'paused':
+      return '暂停'
+    case 'pending':
+      return '等待'
+    case 'timeout':
+      return '超时'
+    case 'cancelled':
+      return '已取消'
+    case 'interrupted':
+      return '已中断'
+    default:
+      return status
   }
 }

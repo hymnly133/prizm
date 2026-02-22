@@ -72,6 +72,8 @@ function AppContent() {
   const { status, loadConfig, initializePrizm, disconnect } = usePrizmContext()
   const { addLog } = useLogsContext()
   const [activePage, setActivePage] = useState<PageKey>('home')
+  /** 未完成 init 前不展示主导航与首页，避免新用户先闪首页再跳设置 */
+  const [initialized, setInitialized] = useState(false)
   /** 文档编辑页 dirty 状态引用（由 DocumentEditorPage 中的 DocumentEditorView 设置） */
   const docsDirtyRef = useRef(false)
 
@@ -143,21 +145,25 @@ function AppContent() {
     })
 
     async function init() {
-      const cfg = await loadConfig()
-      if (!cfg) {
-        addLog('请先配置服务器并注册客户端', 'warning')
-        setActivePage('settings')
-        return
+      try {
+        const cfg = await loadConfig()
+        if (!cfg) {
+          addLog('请先配置服务器并注册客户端', 'warning')
+          setActivePage('settings')
+          return
+        }
+        if (!cfg.api_key?.length) {
+          addLog('需要注册客户端获取 API Key', 'warning')
+          setActivePage('settings')
+          return
+        }
+        await initializePrizm(cfg, {
+          onLog: addLog,
+          onNotify: (p: NotificationPayload) => addLog(`通知: ${p.title}`, 'info')
+        })
+      } finally {
+        setInitialized(true)
       }
-      if (!cfg.api_key?.length) {
-        addLog('需要注册客户端获取 API Key', 'warning')
-        setActivePage('settings')
-        return
-      }
-      await initializePrizm(cfg, {
-        onLog: addLog,
-        onNotify: (p: NotificationPayload) => addLog(`通知: ${p.title}`, 'info')
-      })
     }
 
     void init()
@@ -198,6 +204,22 @@ function AppContent() {
     (v: string | number) => setActivePageSafe(v as PageKey),
     [setActivePageSafe]
   )
+
+  if (!initialized) {
+    return (
+      <div
+        className="app-layout-wrap"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '100vh'
+        }}
+      >
+        <span style={{ color: 'var(--ant-color-text-tertiary)', fontSize: 14 }}>正在检查连接…</span>
+      </div>
+    )
+  }
 
   return (
     <HeaderSlotsProvider activePage={activePage}>

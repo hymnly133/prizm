@@ -117,7 +117,14 @@ export function useAgentSidebarData(
     if (!http) return
     try {
       const [modelsRes, tools] = await Promise.all([http.getAgentModels(), http.getAgentTools()])
-      setModels(modelsRes.models ?? [])
+      const list = modelsRes.models ?? []
+      setModels(
+        list.map((m) => ({
+          id: `${m.configId}:${m.modelId}`,
+          label: m.label,
+          provider: modelsRes.configs?.find((c) => c.id === m.configId)?.name ?? m.configId
+        }))
+      )
       setDefaultModel(tools.agent?.defaultModel ?? '')
     } catch {
       setModels([])
