@@ -15,6 +15,9 @@ import {
 } from './shortcuts'
 import { stopClipboardSync } from './clipboardSync'
 
+// 启用 Electron 自身的远程调试能力，使其可以作为 Internal Browser Node 参与 Agent 执行
+app.commandLine.appendSwitch('remote-debugging-port', '9222')
+
 log.initialize()
 
 process.on('uncaughtException', (err) => {

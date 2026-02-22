@@ -131,5 +131,11 @@ contextBridge.exposeInMainWorld('prizm', {
   /** 在系统资源管理器中打开目录 */
   openInExplorer(dirPath: string) {
     return ipcRenderer.invoke('open_in_explorer', { dirPath })
+  },
+
+  browserNode: {
+    start: (mode?: 'internal' | 'external') => ipcRenderer.invoke('browser_node:start', mode),
+    stop: () => ipcRenderer.invoke('browser_node:stop'),
+    getStatus: () => ipcRenderer.invoke('browser_node:status')
   }
 })

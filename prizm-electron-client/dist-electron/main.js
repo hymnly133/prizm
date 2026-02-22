@@ -47,6 +47,8 @@ const windowManager_1 = require("./windowManager");
 const trayManager_1 = require("./trayManager");
 const shortcuts_1 = require("./shortcuts");
 const clipboardSync_1 = require("./clipboardSync");
+// 启用 Electron 自身的远程调试能力，使其可以作为 Internal Browser Node 参与 Agent 执行
+electron_1.app.commandLine.appendSwitch('remote-debugging-port', '9222');
 main_1.default.initialize();
 process.on('uncaughtException', (err) => {
     main_1.default.error('[UncaughtException]', err);

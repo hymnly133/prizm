@@ -7,6 +7,7 @@ import type { PrizmConfig, ThemeMode } from './config'
 import { loadConfigFromDisk, saveConfigToDisk, saveThemeMode } from './config'
 import { startClipboardSync, stopClipboardSync } from './clipboardSync'
 import { showNotificationInWindow } from './windowManager'
+import { browserNodeService } from './browserNodeService'
 
 const DEBUG_NOTIFY = true
 function logNotify(...args: unknown[]) {
@@ -59,12 +60,10 @@ async function registerClientOnServer(
     requestedScopes: requestedScopes && requestedScopes.length > 0 ? requestedScopes : undefined
   }
 
+  // POST /auth/register is exempt from auth (no API key required)
   const registerResp = await fetch(registerUrl, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Prizm-Panel': 'true'
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
   })
 
@@ -458,6 +457,22 @@ export function registerIpcHandlers(): void {
       log.error('[IPC] open_in_explorer error:', err)
       return false
     }
+  })
+
+  // ==========================================
+  // Browser Node Service
+  // ==========================================
+  ipcMain.handle('browser_node:start', async (_event, mode?: 'internal' | 'external') => {
+    return await browserNodeService.startNode(mode)
+  })
+
+  ipcMain.handle('browser_node:stop', async () => {
+    await browserNodeService.stopNode()
+    return true
+  })
+
+  ipcMain.handle('browser_node:status', async () => {
+    return browserNodeService.getStatus()
   })
 
   ipcMain.on('quick-panel-action', (_event, payload: { action: string; selectedText: string }) => {

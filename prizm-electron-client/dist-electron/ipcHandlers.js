@@ -45,6 +45,7 @@ const config_1 = require("./config");
 const config_2 = require("./config");
 const clipboardSync_1 = require("./clipboardSync");
 const windowManager_1 = require("./windowManager");
+const browserNodeService_1 = require("./browserNodeService");
 const DEBUG_NOTIFY = true;
 function logNotify(...args) {
     if (DEBUG_NOTIFY)
@@ -89,12 +90,10 @@ async function registerClientOnServer(serverUrl, name, requestedScopes) {
         name,
         requestedScopes: requestedScopes && requestedScopes.length > 0 ? requestedScopes : undefined
     };
+    // POST /auth/register is exempt from auth (no API key required)
     const registerResp = await fetch(registerUrl, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-Prizm-Panel': 'true'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
     });
     if (!registerResp.ok) {
@@ -429,6 +428,19 @@ function registerIpcHandlers() {
             main_1.default.error('[IPC] open_in_explorer error:', err);
             return false;
         }
+    });
+    // ==========================================
+    // Browser Node Service
+    // ==========================================
+    electron_1.ipcMain.handle('browser_node:start', async (_event, mode) => {
+        return await browserNodeService_1.browserNodeService.startNode(mode);
+    });
+    electron_1.ipcMain.handle('browser_node:stop', async () => {
+        await browserNodeService_1.browserNodeService.stopNode();
+        return true;
+    });
+    electron_1.ipcMain.handle('browser_node:status', async () => {
+        return browserNodeService_1.browserNodeService.getStatus();
     });
     electron_1.ipcMain.on('quick-panel-action', (_event, payload) => {
         if (config_1.sharedState.quickPanelWindow && !config_1.sharedState.quickPanelWindow.isDestroyed()) {

@@ -100,6 +100,11 @@ electron_1.contextBridge.exposeInMainWorld('prizm', {
     /** 在系统资源管理器中打开目录 */
     openInExplorer(dirPath) {
         return electron_1.ipcRenderer.invoke('open_in_explorer', { dirPath });
+    },
+    browserNode: {
+        start: (mode) => electron_1.ipcRenderer.invoke('browser_node:start', mode),
+        stop: () => electron_1.ipcRenderer.invoke('browser_node:stop'),
+        getStatus: () => electron_1.ipcRenderer.invoke('browser_node:status')
     }
 });
 //# sourceMappingURL=preload.js.map
