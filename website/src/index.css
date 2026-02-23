@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body {
+    @apply bg-white text-slate-900 antialiased selection:bg-blue-200 selection:text-blue-900;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-500;
+  }
+
+  .card-shadow-soft {
+    box-shadow:
+      0 4px 20px -2px rgba(0, 0, 0, 0.05),
+      0 0 3px rgba(0, 0, 0, 0.02);
+  }
+
+  .card-shadow-hover {
+    box-shadow:
+      0 12px 30px -5px rgba(0, 0, 0, 0.08),
+      0 0 4px rgba(0, 0, 0, 0.03);
+  }
+
+  .bg-mesh-light {
+    background-image:
+      radial-gradient(at 0% 0%, hsla(220, 100%, 96%, 1) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, hsla(250, 100%, 97%, 1) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, hsla(280, 100%, 96%, 1) 0px, transparent 50%),
+      radial-gradient(at 0% 100%, hsla(200, 100%, 94%, 1) 0px, transparent 50%);
+  }
+}

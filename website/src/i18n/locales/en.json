@@ -1,0 +1,174 @@
+{
+  "hero": {
+    "title": "Prizm",
+    "subtitle": "Finally, Agents WORK WITH you.",
+    "description": "Agent Collaborative Environment: A desktop productivity platform where Agents are elevated to peer status. Co-manage your knowledge base, tasks, and workflows seamlessly — truly an intelligence that works with you."
+  },
+  "features": {
+    "title": "Core Features Overview",
+    "userTab": "User Experience",
+    "techTab": "Technical Details",
+
+    "user1": "Absolute Data Sovereignty",
+    "userDesc1": "Data strictly lands in your local .prizm-data hidden directory. All digital assets are offline-first with local vector search models.",
+    "userList1": [
+      "No Cloud Dependency: Local storage ensures absolute privacy.",
+      "Offline-First: Manage knowledge and tasks without internet.",
+      "Portable Workspace: Easily backup configuration and state."
+    ],
+
+    "user2": "Agentic Knowledge Base",
+    "userDesc2": "A full-fledged markdown notes system that your Agents can read, write, and reference automatically.",
+    "userList2": [
+      "Document Interactions: Full document CRUD handled natively by the agent.",
+      "Frontmatter Support: Organize metadata and tags seamlessly.",
+      "Context Injection: Let Agents attach relevant docs automatically via the @ syntax."
+    ],
+
+    "user3": "Tri-Layer Intelligent Memory",
+    "userDesc3": "Eliminate rigid context-loss. Intelligent dynamic partitioning into short/mid/long term semantic memory.",
+    "userList3": [
+      "Short-Term Context: Session boundaries and direct tool executions.",
+      "Mid-Term Dynamics: Scoped project vectors matching semantic flows.",
+      "Long-Term Core: Persistent SQLite + LanceDB attributes mapping your identity."
+    ],
+
+    "user4": "Stagehand Web Automation",
+    "userDesc4": "Let Agents browse the web for you. Fully integrated Chrome Remote Debugging Protocol.",
+    "userList4": [
+      "Act & Extract: Agents can click, type, and extract structured data automatically.",
+      "Live Research: Search the live web and synthesize real-time results.",
+      "Visual Feedback: Live headless browser preview on your desktop client."
+    ],
+
+    "user5": "No-Code Workflow Engine",
+    "userDesc5": "Build automated 24/7 digital employees to sort, draft, and remind you using an intuitive drag-and-drop builder.",
+    "userList5": [
+      "DAG Workflow Engine: Multi-step pipeline node execution supporting parallel paths.",
+      "Cron Jobs: Seamless scheduling with visual schedule manager.",
+      "Human-In-The-Loop: Built-in notification interrupts for approval routing."
+    ],
+
+    "user6": "Task & Todo Management",
+    "userDesc6": "Built-in actionable Todo lists. Let your Agent decompose complex objectives into atomic steps.",
+    "userList6": [
+      "Agent Decomposition: Ask the LLM to break down a big idea into 10 smaller todos.",
+      "Status Tracking: Seamlessly mark steps as in-progress or blocked.",
+      "Integrated Deadlines: Link action items into your calendar schedules."
+    ],
+
+    "user7": "Radar-Like Global Search",
+    "userDesc7": "Sub-second cross-workspace fetching powered by deeply optimized local-first vector retrieving, bridging endless notes.",
+    "userList7": [
+      "Multi-Engine Unified Search: Merging Keyword, MiniSearch, and RipGrep engines.",
+      "Cross-Scope Indexing: Find anything across workspaces intelligently.",
+      "Vector Match: Powered directly through EverMemOS abstractions."
+    ],
+
+    "user8": "Desktop OS Integration",
+    "userDesc8": "Electron-powered heavy native integrations giving your Agents unprecedented capabilities over your system.",
+    "userList8": [
+      "Clipboard Monitoring: Agents can directly read or write to your OS clipboard.",
+      "Native Notifications: Agents can push deep OS notification alerts.",
+      "Terminal Access: Directly run scripts on your local system via Agent intent."
+    ],
+
+    "tech1": "Scope Isolation Sandboxing",
+    "techDesc1": "Multi-tenant logic mapping. Separate Personal, Work, and Sandbox data entirely natively.",
+    "techList1": [
+      "Tenant Sandbox: Full separation across different 'Scope' directives.",
+      "Context Purging: Zero bleeding of session data or vector results across scopes.",
+      "Storage Separation: Files are strictly saved in distinct scope directories."
+    ],
+
+    "tech2": "Zero-Cost MCP Gateway",
+    "techDesc2": "Enterprise-ready Model Context Protocol bridges, providing standardized endpoints to expose Prizm data.",
+    "techList2": [
+      "Standard Stdio Streams: Native process bridging out-of-the-box for Cursor.",
+      "HTTP/SSE Exposure: Built-in protocol layer on port 4127 mapping directly to workspace contexts.",
+      "Two-Way Synergy: Become an MCP Client and host external MCP servers too."
+    ],
+
+    "tech3": "Optimistic Resource Locks",
+    "techDesc3": "A robust fencing mechanism ensuring parallel Agent executions do not destructively collide over the same documents.",
+    "techList3": [
+      "Fencing Tokens: Uses incrementing fencing tokens with TTL heartbeats.",
+      "Optimistic Locking: Collisions avoided in real-time through SQLite 'resource_locks.db'.",
+      "Deadlock Recovery: Automatic garbage collection of orphaned Session locks."
+    ],
+
+    "tech4": "Duplex WebSocket Terminal",
+    "techDesc4": "High-speed WebSocket penetration for server-side terminal control. Allows real-time I/O echo updates bypassing HTTP poll lags.",
+    "techList4": [
+      "Dual WS Ports: Distinguishing standard event messaging (/ws) from strict TTY streams (/ws/terminal).",
+      "Worker Pool: Terminal Executor Pool isolating multiple interactive task containers safely.",
+      "Reactive Render: Pushing raw buffer arrays directly to xterm wrappers in React."
+    ],
+
+    "tech5": "Emittery EventBus Topology",
+    "techDesc5": "Decoupled domain actions routed via scalable localized EventBus topologies avoiding spaghetti architectures.",
+    "techList5": [
+      "Strict Typings: DomainEventMap parsing multi-level events strictly typed in TS.",
+      "Lifecycle Hooks: Event triggering guarantees side-effects like Memory Extracts trigger atomically.",
+      "Background Workers: Safely shifting heavy LLM extractions to non-blocking bus events."
+    ],
+
+    "tech6": "Polymorphic Adapters Focus",
+    "techDesc6": "Every core logic system is defined as an `IAdapter`, allowing frictionless future upgrades to new storage engines.",
+    "techList6": [
+      "Dependency Injection: Overload Notification, TodoList, Document logic with generic Adapters.",
+      "Easily Mocked: Super simple testing suites by dropping in Memory-based mock adapters.",
+      "Storage Freedom: Swap out markdown flat-files for Postgres simply by writing a new DocumentAdapter."
+    ],
+
+    "tech7": "Granular Audit & Rollbacks",
+    "techDesc7": "Deep tracing of toolkit executions. Precision-level rollbacks utilizing unified checkpoints for complete undo operations.",
+    "techList7": [
+      "Audit Stores: Aggregating 90-day retention trails for tool actions in 'agent_audit.db'.",
+      "Session Checkpoints: Automatic snapshotting before destructive actions for secure rollbacks.",
+      "Approval Halts: Strict 'interactManager' halting processing logic until human feedback completes."
+    ],
+
+    "tech8": "Unified Token Baselines",
+    "techDesc8": "Granular accounting parsing LLM streams natively across providers yielding maximum transparency.",
+    "techList8": [
+      "Stream Interceptors: Accurate token calculating directly attached to AI SDK stream bridges.",
+      "Global Dashboard: Unified visualization across OpenAI, Google, Anthropic, and local models.",
+      "Cost Limits: Implement budget constraints stopping runaway infinite loops."
+    ]
+  },
+  "mcp": {
+    "title": "Ecosystem Integration (MCP)",
+    "description": "Prizm acts as an open personal hub. It allows direct exposure of local data and built-in instruction contexts as MCP sources to empower leading AI tool clients.",
+    "cursor": "Cursor Integration",
+    "cursorDesc": "Relies on standard pipeline communication mounting. Navigate to Cursor's remote options and specify the mounting command to securely access your Prizm workspace directly in your IDE.",
+    "lobechat": "LobeChat / UI Integration",
+    "lobechatDesc": "Directly input the server address to expose the protocol interface. Supports passing isolation domain identity via URL Query parameters to differentiate independent workflows and contexts."
+  },
+  "quickStart": {
+    "title": "Quick Start",
+    "step1": "Clone & Install dependencies",
+    "step2": "Start Local Server",
+    "step3": "Run Desktop Client (Recommended)",
+    "step3Desc": "For the full experience (Agent Chat, Workflows, Memory):",
+    "url": "http://127.0.0.1:4127/dashboard/",
+    "note": "No .env required for the quick dashboard start. Configure LLM settings in Server Settings before using Agent Chat."
+  },
+  "screenshots": {
+    "title": "The Agent OS Interface",
+    "dashboard": "Dashboard Overview",
+    "dashboardDesc": "Unified Management Panel (Knowledge Base, To-Dos, Scope Settings)",
+    "electron": "Desktop Client",
+    "electronDesc": "Integrated Electron Agent Workspace & Workflows",
+    "placeholder": "Representing the future of human-agent collaboration."
+  },
+  "cta": {
+    "github": "Star on GitHub",
+    "docs": "Documentation",
+    "license": "License"
+  },
+  "nav": {
+    "langZh": "中文",
+    "langEn": "English"
+  }
+}
