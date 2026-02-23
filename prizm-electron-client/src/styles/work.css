@@ -922,10 +922,11 @@
   text-align: center;
 }
 
-/* Search section */
+/* Search section — 现代下拉 */
 .search-section {
   position: relative;
   flex-shrink: 0;
+  min-width: 280px;
 }
 .search-input-wrap {
   display: flex;
@@ -937,42 +938,146 @@
   top: 100%;
   left: 0;
   right: 0;
-  margin-top: 6px;
-  max-height: 280px;
+  min-width: 320px;
+  max-width: min(420px, 100vw);
+  margin-top: 8px;
+  max-height: 400px;
   overflow-y: auto;
+  overflow-x: hidden;
   background: var(--ant-color-bg-elevated);
-  border: 1px solid var(--ant-color-border);
-  border-radius: var(--ant-border-radius-lg);
-  box-shadow: var(--ant-box-shadow-secondary);
-  z-index: 100;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
+  z-index: 1000;
 }
 .search-results.hidden {
   display: none;
 }
+
+.search-results-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px 16px;
+  font-size: 13px;
+  color: var(--ant-color-text-secondary);
+}
+.search-results-loading__icon {
+  flex-shrink: 0;
+  animation: search-spin 0.8s linear infinite;
+}
+@keyframes search-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.search-results-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ant-color-text-tertiary);
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+  background: var(--ant-color-fill-quaternary);
+}
+
+.search-result-empty {
+  padding: 24px 16px;
+  font-size: 13px;
+  color: var(--ant-color-text-tertiary);
+  text-align: center;
+}
+
+.search-result-group {
+  padding: 0 0 8px;
+}
+.search-result-group:first-of-type {
+  padding-top: 4px;
+}
+.search-result-group__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ant-color-text-tertiary);
+}
+.search-result-group__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ant-color-text-secondary);
+  background: var(--ant-color-fill-tertiary);
+  border-radius: 10px;
+}
+.search-result-group-empty {
+  padding: 10px 14px 12px;
+  font-size: 12px;
+  color: var(--ant-color-text-quaternary);
+}
+
+/* 列表行：图标 + 标题（AccentList 内部） */
+.search-result-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.search-result-row__icon {
+  flex-shrink: 0;
+  color: var(--ant-color-text-tertiary);
+}
+.search-result-row__text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--ant-color-text);
+}
+
+/* AccentList 在 search-results 内的行高与悬停 */
+.search-results .accent-list {
+  padding: 0;
+}
+.search-results .accent-list [class*='Item'] {
+  padding: 10px 14px;
+  border-radius: 6px;
+  margin: 0 6px;
+  transition: background 0.15s ease;
+}
+.search-results .accent-list .accent-list-active {
+  background: var(--ant-color-primary-bg);
+}
+
 .search-result-item {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
   cursor: pointer;
-  border-bottom: 1px solid var(--ant-color-border-secondary);
   font-size: 13px;
   transition: background 0.1s;
-}
-.search-result-item:last-child {
-  border-bottom: none;
 }
 .search-result-item:hover,
 .search-result-item.focused {
   background: var(--ant-color-fill-tertiary);
 }
-.search-result-empty {
-  cursor: default;
-  color: var(--ant-color-text-secondary);
-}
 .search-result-badge {
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 11px;
   font-weight: 600;
   flex-shrink: 0;

@@ -47,6 +47,7 @@ import { DocumentToolCardsConnector } from '../components/agent/DocumentToolCard
 import '../components/agent/WorkflowToolCards'
 import { WorkflowToolCardsConnector } from '../components/agent/WorkflowToolCards'
 import '../components/agent/WorkflowBuilderCard'
+import '../components/agent/BrowserToolCards'
 import '../components/agent/ScheduleCronToolCards'
 
 import { CollabNav } from '../components/collaboration/CollabNav'

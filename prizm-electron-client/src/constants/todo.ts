@@ -36,3 +36,11 @@ export function getSearchResultKindLabel(kind: SearchResultKind): string {
   if (kind === 'file') return '文件'
   return getKindLabel(kind as FileKind)
 }
+
+/** 搜索匹配方式：索引（算法）匹配 vs 全文扫描匹配 */
+export type SearchMatchSource = 'index' | 'fulltext'
+
+export function getSearchMatchSourceLabel(source: SearchMatchSource | undefined): string {
+  if (source === 'fulltext') return '全文匹配'
+  return '索引匹配'
+}

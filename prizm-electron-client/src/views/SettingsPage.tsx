@@ -12,7 +12,6 @@ import {
   neutralColors,
   neutralColorsSwatches
 } from '@lobehub/ui'
-import { Switch } from 'antd'
 import { Select } from '../components/ui/Select'
 import { buildModelSelectOptionsFromEntries } from '../utils/modelSelectOptions'
 import { Segmented } from '../components/ui/Segmented'
@@ -142,7 +141,6 @@ function SettingsPage() {
     configs: LLMConfigItemSanitized[]
     defaultModel?: string
     browserModel?: string
-    browserUseStagehand?: boolean
   } | null>(null)
   /** 用于「浏览器使用模型」下拉的 entries（提供商+模型分组） */
   const [browserModelEntries, setBrowserModelEntries] = useState<
@@ -185,8 +183,7 @@ function SettingsPage() {
         setBrowserServerConfig({
           configs: llm.configs,
           defaultModel: (llm as { defaultModel?: string }).defaultModel,
-          browserModel: (llm as { browserModel?: string }).browserModel,
-          browserUseStagehand: (llm as { browserUseStagehand?: boolean }).browserUseStagehand
+          browserModel: (llm as { browserModel?: string }).browserModel
         })
       } else {
         setBrowserServerConfig(null)
@@ -716,33 +713,8 @@ function SettingsPage() {
             <div className="settings-card">
               <Form className="compact-form" layout="vertical">
                 <Form.Item
-                  label="使用 Stagehand"
-                  extra="开启后 perform/ai/extract 使用 Stagehand 的 act/observe/extract（需配置下方浏览器模型）。关闭则使用自建 snapshot+ref。"
-                  valuePropName="checked"
-                >
-                  <Switch
-                    checked={!!browserServerConfig?.browserUseStagehand}
-                    onChange={async (checked: boolean) => {
-                      const http = manager?.getHttpClient()
-                      if (!http) return
-                      try {
-                        await http.updateServerConfig({
-                          llm: { browserUseStagehand: checked }
-                        } as unknown as Partial<ServerConfig>)
-                        setBrowserServerConfig((prev) =>
-                          prev ? { ...prev, browserUseStagehand: checked } : null
-                        )
-                        toast.success(checked ? '已启用 Stagehand' : '已改用自建 snapshot+ref')
-                      } catch (e) {
-                        toast.error(String(e))
-                      }
-                    }}
-                    disabled={browserConfigLoading}
-                  />
-                </Form.Item>
-                <Form.Item
                   label="浏览器使用模型"
-                  extra="observe / extract 会向 LLM 发送页面截图，需使用支持多模态（vision）的模型。Stagehand 需要具体模型，按提供商选择。"
+                  extra="Playwright 直接代理（goto / snapshot / click / fill / select_option / get_text / close），无自定义语义，经 relay 连接浏览器。"
                 >
                   <Select
                     value={effectiveBrowserModel}

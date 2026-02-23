@@ -51,6 +51,7 @@ import { TaskToolCardsConnector } from '../components/agent/TaskToolCards'
 import '../components/agent/DocumentToolCards'
 import '../components/agent/WorkflowToolCards'
 import '../components/agent/WorkflowBuilderCard'
+import '../components/agent/BrowserToolCards'
 
 const LEFT_ACTIONS: ActionKeys[] = ['fileUpload', 'thinking', 'toolCompact', 'skills', 'clear']
 const RIGHT_ACTIONS: ActionKeys[] = []
