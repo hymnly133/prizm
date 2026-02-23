@@ -30,11 +30,15 @@ jobs:
       - name: Enable Corepack (Yarn 4)
         run: corepack enable
 
-      # 部署仅构建并发布 website；禁用生命周期脚本，不运行 postinstall(patch-package)
-      - name: Install dependencies
-        env:
-          YARN_ENABLE_SCRIPTS: "false"
-        run: yarn install --immutable
+      # 仅部署 website：临时移走 patches，避免 postinstall 应用与 website 无关的 patch 失败
+      - name: Backup patches (website 不需要任何 patch)
+        run: |
+          mkdir -p patches.bak.ci
+          mv patches/*.patch patches.bak.ci/ 2>/dev/null || true
+
+      # 只安装 website 工作区及其依赖，不装 electron/server 等
+      - name: Install dependencies (website only)
+        run: yarn workspaces focus prizm-website
 
       - name: Build website
         run: yarn build:website
