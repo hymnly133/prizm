@@ -44,7 +44,7 @@ export interface LLMConfigItem {
 export interface ServerConfigLLM {
   /** 系统默认模型，格式 "configId:modelId" */
   defaultModel?: string
-  /** 浏览器节点使用的模型，格式 "configId:modelId"。Stagehand 需要具体模型；未设置时使用系统默认。 */
+  /** 浏览器节点使用的模型，格式 "configId:modelId"。未设置时使用系统默认。 */
   browserModel?: string
   configs?: LLMConfigItem[]
   /** PATCH 时可选：仅更新单条配置，不传 configs 则只合并此条并保留其他配置的 apiKey */

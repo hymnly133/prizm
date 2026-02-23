@@ -322,7 +322,7 @@ export function getEffectiveServerConfig(dataDir: string): ServerConfig {
  * 脱敏：API Key、Token 不返回原文，仅标记 configured
  */
 export function sanitizeServerConfig(config: ServerConfig): ServerConfigSanitized {
-  const out: ServerConfigSanitized = { ...config }
+  const out: ServerConfigSanitized = { ...config, llm: undefined }
   if (config.llm?.configs) {
     out.llm = {
       defaultModel: config.llm.defaultModel,
