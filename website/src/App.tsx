@@ -864,21 +864,28 @@ function CTA() {
 export default function App() {
   return (
     <div className="min-h-screen bg-white font-sans text-slate-900 selection:bg-blue-200 selection:text-blue-900">
-      {/* Fixed Header */}
+      {/* Floating Logo */}
       <motion.div
-        initial={{ y: -100 }}
-        animate={{ y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between p-4 sm:px-8 border-b border-white/20 bg-white/70 backdrop-blur-xl shadow-sm"
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.1 }}
+        className="fixed top-6 left-6 sm:left-10 z-50 flex items-center gap-3 pointer-events-auto"
       >
-        <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 shadow-md shadow-blue-500/20">
-            <Layers className="w-5 h-5 text-white" />
-          </div>
-          <span className="text-xl font-extrabold tracking-tight text-slate-900 hidden sm:block">
-            Prizm
-          </span>
+        <div className="flex items-center justify-center w-11 h-11 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 shadow-lg shadow-blue-500/30 ring-1 ring-white/20">
+          <Layers className="w-5 h-5 text-white" />
         </div>
+        <div className="hidden sm:flex items-center justify-center bg-white/70 backdrop-blur-xl border border-slate-200/50 shadow-sm px-4 py-2 rounded-2xl">
+          <span className="text-lg font-extrabold tracking-tight text-slate-900">Prizm</span>
+        </div>
+      </motion.div>
+
+      {/* Floating Language Switcher */}
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.2 }}
+        className="fixed top-6 right-6 sm:right-10 z-50 pointer-events-auto shadow-lg shadow-slate-200/20 rounded-full"
+      >
         <LangSwitcher />
       </motion.div>
 
