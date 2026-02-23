@@ -542,19 +542,27 @@ export function getBuiltinTools(): LLMTool[] {
         required: []
       }
     ),
-    // ── Browser Automation（独立） ──
+    // ── Browser Automation（Playwright 直接代理） ──
     tool(
       'prizm_browser',
-      'Browser control using Stagehand. action: navigate(跳转)/act(执行操作)/extract(提取信息)/observe(观察页面)/close(关闭会话)',
+      'Playwright 代理：需客户端开启浏览器节点经 relay 连接。先 snapshot 取可操作元素列表(ref/role/name)，再按 ref 调用 click/fill/select_option。',
       {
         properties: {
           action: {
             type: 'string',
-            description: '操作类型',
-            enum: ['navigate', 'act', 'extract', 'observe', 'close']
+            description:
+              'Playwright 操作：goto | snapshot | click | fill | select_option | get_text | close',
+            enum: ['goto', 'snapshot', 'click', 'fill', 'select_option', 'get_text', 'close']
           },
-          url: { type: 'string', description: '目标网址 (navigate 时必填)' },
-          instruction: { type: 'string', description: '自然语言指令 (act/extract/observe 时必填)' }
+          url: { type: 'string', description: '目标网址 (goto 时必填)' },
+          ref: {
+            type: 'number',
+            description: 'snapshot 返回的元素下标，0-based (click / fill / select_option 时必填)'
+          },
+          value: {
+            type: 'string',
+            description: '填写或选中的值 (fill / select_option 时必填)'
+          }
         },
         required: ['action']
       }

@@ -49,7 +49,7 @@ import { executeBuiltinTool } from '../executor'
 describe('executeBuiltinTool prizm_browser', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockExecute.mockResolvedValue('No active browser session to close.')
+    mockExecute.mockResolvedValue('ok: no active session')
   })
 
   it('should call BrowserExecutor with action and sessionId in context', async () => {
@@ -64,52 +64,52 @@ describe('executeBuiltinTool prizm_browser', () => {
       { action: 'close' },
       { clientId: 'unknown', sessionId: 'session-123' }
     )
-    expect(result.text).toBe('No active browser session to close.')
+    expect(result.text).toBe('ok: no active session')
     expect(result.isError).toBeFalsy()
   })
 
-  it('should return isError true when executor returns failure message', async () => {
-    mockExecute.mockResolvedValue('Failed to execute navigate: url is required')
+  it('should return isError true when executor returns error', async () => {
+    mockExecute.mockResolvedValue('error: url is required for goto')
 
     const result = await executeBuiltinTool(
       'default',
       'prizm_browser',
-      { action: 'navigate' },
+      { action: 'goto' },
       'sess-1'
     )
 
-    expect(result.text).toContain('Failed to execute navigate')
+    expect(result.text).toContain('error:')
     expect(result.isError).toBe(true)
   })
 
-  it('should pass through navigate args', async () => {
-    mockExecute.mockResolvedValue('Navigated to https://example.com')
+  it('should pass through goto args', async () => {
+    mockExecute.mockResolvedValue('ok: navigated to https://example.com')
 
     await executeBuiltinTool(
       'default',
       'prizm_browser',
-      { action: 'navigate', url: 'https://example.com' },
+      { action: 'goto', url: 'https://example.com' },
       'sess-1'
     )
 
     expect(mockExecute).toHaveBeenCalledWith(
-      { action: 'navigate', url: 'https://example.com' },
+      { action: 'goto', url: 'https://example.com' },
       { clientId: 'unknown', sessionId: 'sess-1' }
     )
   })
 
-  it('should pass through act args', async () => {
-    mockExecute.mockResolvedValue('Action completed: click submit. Success: true')
+  it('should pass through click args', async () => {
+    mockExecute.mockResolvedValue('ok: clicked ref 0')
 
     await executeBuiltinTool(
       'default',
       'prizm_browser',
-      { action: 'act', instruction: 'click submit' },
+      { action: 'click', ref: 0 },
       'sess-1'
     )
 
     expect(mockExecute).toHaveBeenCalledWith(
-      { action: 'act', instruction: 'click submit' },
+      { action: 'click', ref: 0 },
       { clientId: 'unknown', sessionId: 'sess-1' }
     )
   })

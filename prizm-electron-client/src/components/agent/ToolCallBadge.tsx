@@ -82,9 +82,17 @@ function parseActionBadge(tc: ToolCallRecord): string | null {
   }
 }
 
-function parseArgsSummary(argsStr: string): string {
+function parseArgsSummary(argsStr: string, toolName?: string): string {
   try {
     const obj = JSON.parse(argsStr || '{}') as Record<string, unknown>
+    if (toolName === 'prizm_browser') {
+      const action = String(obj.action ?? '')
+      const url = obj.url != null ? String(obj.url).slice(0, 48) : ''
+      const instruction = obj.instruction != null ? String(obj.instruction).slice(0, 40) : ''
+      if (url) return url
+      if (instruction) return instruction
+      return action || ''
+    }
     if (obj.query) return String(obj.query).slice(0, 40)
     if (obj.command) return `$ ${String(obj.command).slice(0, 50)}`
     if (obj.path) return String(obj.path).slice(0, 50)
@@ -158,7 +166,7 @@ export const ToolCallBadge = memo(
     const CategoryIcon = getCategoryIcon(tc.name)
     const accentColor = getCategoryColor(tc.name)
     const actionBadge = parseActionBadge(tc)
-    const argsSummary = parseArgsSummary(tc.arguments)
+    const argsSummary = parseArgsSummary(tc.arguments, tc.name)
     const isError = !!tc.isError
 
     return (

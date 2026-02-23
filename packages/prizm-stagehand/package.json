@@ -1,0 +1,22 @@
+{
+  "name": "@prizm/prizm-stagehand",
+  "version": "0.1.0",
+  "description": "Stagehand 集成层：接 Prizm relay（CDP URL）+ 服务端 LLM 配置，复用 act/observe/extract",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "dev": "tsup --watch"
+  },
+  "dependencies": {
+    "@browserbasehq/stagehand": "^3.0.8",
+    "deepmerge": "^4.3.1",
+    "dotenv": "^16.4.5",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.6",
+    "typescript": "^5.9.3"
+  }
+}

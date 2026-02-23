@@ -16,7 +16,14 @@ export interface BrowserPlaygroundProps {
   isNodeRunning?: boolean
 }
 
-type TestAction = 'navigate' | 'act' | 'extract' | 'observe' | 'close'
+type TestAction =
+  | 'goto'
+  | 'snapshot'
+  | 'click'
+  | 'fill'
+  | 'select_option'
+  | 'get_text'
+  | 'close'
 
 interface TestResult {
   action: TestAction
@@ -33,10 +40,12 @@ export function BrowserPlayground({ baseUrl, apiKey, isNodeRunning }: BrowserPla
   const [runningAction, setRunningAction] = useState<TestAction | null>(null)
   const [results, setResults] = useState<TestResult[]>([])
 
-  const [navigateUrl, setNavigateUrl] = useState('https://example.com')
-  const [actInstruction, setActInstruction] = useState('')
-  const [extractInstruction, setExtractInstruction] = useState('')
-  const [observeInstruction, setObserveInstruction] = useState('')
+  const [gotoUrl, setGotoUrl] = useState('https://example.com')
+  const [clickRef, setClickRef] = useState(0)
+  const [fillRef, setFillRef] = useState(0)
+  const [fillValue, setFillValue] = useState('')
+  const [selectRef, setSelectRef] = useState(0)
+  const [selectValue, setSelectValue] = useState('')
 
   const headers: Record<string, string> = {}
   if (apiKey) {
@@ -68,7 +77,7 @@ export function BrowserPlayground({ baseUrl, apiKey, isNodeRunning }: BrowserPla
   }
 
   const runTest = useCallback(
-    async (action: TestAction, payload: Record<string, string | undefined>) => {
+    async (action: TestAction, payload: Record<string, string | number | undefined>) => {
       setRunningAction(action)
       const start = Date.now()
       try {
@@ -109,31 +118,31 @@ export function BrowserPlayground({ baseUrl, apiKey, isNodeRunning }: BrowserPla
 
   const testItems = [
     {
-      key: 'navigate',
+      key: 'goto',
       label: (
         <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Globe size={14} /> Navigate 导航
+          <Globe size={14} /> Goto 导航
         </span>
       ),
       children: (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            导航到指定 URL。Agent 通过此操作打开目标网页。
+            导航到指定 URL。
           </Text>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <Input
               size="small"
               placeholder="https://example.com"
-              value={navigateUrl}
-              onChange={(e) => setNavigateUrl(e.target.value)}
+              value={gotoUrl}
+              onChange={(e) => setGotoUrl(e.target.value)}
               style={{ flex: 1 }}
             />
             <Button
               size="small"
               type="primary"
-              loading={runningAction === 'navigate'}
-              disabled={disabled || !navigateUrl.trim()}
-              onClick={() => runTest('navigate', { url: navigateUrl })}
+              loading={runningAction === 'goto'}
+              disabled={disabled || !gotoUrl.trim()}
+              onClick={() => runTest('goto', { url: gotoUrl })}
             >
               执行
             </Button>
@@ -142,32 +151,57 @@ export function BrowserPlayground({ baseUrl, apiKey, isNodeRunning }: BrowserPla
       )
     },
     {
-      key: 'extract',
+      key: 'snapshot',
       label: (
         <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <FileSearch size={14} /> Extract 提取信息
+          <Eye size={14} /> Snapshot 快照
         </span>
       ),
       children: (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            从当前页面提取结构化信息（需先 navigate 到目标页面）。Agent
-            用此操作获取页面内容、价格、列表等。
+            返回当前页可操作元素列表（ref, role, name），供 click/fill/select_option 使用 ref。
+          </Text>
+          <Button
+            size="small"
+            type="primary"
+            loading={runningAction === 'snapshot'}
+            disabled={disabled}
+            onClick={() => runTest('snapshot', {})}
+          >
+            执行
+          </Button>
+        </div>
+      )
+    },
+    {
+      key: 'click',
+      label: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <MousePointerClick size={14} /> Click 点击
+        </span>
+      ),
+      children: (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            按 snapshot 返回的 ref（下标）点击元素。
           </Text>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <Input
               size="small"
-              placeholder="例：提取页面标题和主要内容"
-              value={extractInstruction}
-              onChange={(e) => setExtractInstruction(e.target.value)}
-              style={{ flex: 1 }}
+              type="number"
+              min={0}
+              placeholder="ref"
+              value={clickRef}
+              onChange={(e) => setClickRef(Number(e.target.value) || 0)}
+              style={{ width: 80 }}
             />
             <Button
               size="small"
               type="primary"
-              loading={runningAction === 'extract'}
-              disabled={disabled || !extractInstruction.trim()}
-              onClick={() => runTest('extract', { instruction: extractInstruction })}
+              loading={runningAction === 'click'}
+              disabled={disabled}
+              onClick={() => runTest('click', { ref: clickRef })}
             >
               执行
             </Button>
@@ -176,32 +210,40 @@ export function BrowserPlayground({ baseUrl, apiKey, isNodeRunning }: BrowserPla
       )
     },
     {
-      key: 'observe',
+      key: 'fill',
       label: (
         <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Eye size={14} /> Observe 观察元素
+          <FileSearch size={14} /> Fill 填写
         </span>
       ),
       children: (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            观察当前页面上的可交互元素（按钮、链接、输入框等）。Agent
-            用此操作了解页面结构后再执行操作。
+            按 ref 填写输入框。
           </Text>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <Input
               size="small"
-              placeholder="例：找到页面上的搜索框和提交按钮"
-              value={observeInstruction}
-              onChange={(e) => setObserveInstruction(e.target.value)}
-              style={{ flex: 1 }}
+              type="number"
+              min={0}
+              placeholder="ref"
+              value={fillRef}
+              onChange={(e) => setFillRef(Number(e.target.value) || 0)}
+              style={{ width: 80 }}
+            />
+            <Input
+              size="small"
+              placeholder="value"
+              value={fillValue}
+              onChange={(e) => setFillValue(e.target.value)}
+              style={{ width: 120 }}
             />
             <Button
               size="small"
               type="primary"
-              loading={runningAction === 'observe'}
-              disabled={disabled || !observeInstruction.trim()}
-              onClick={() => runTest('observe', { instruction: observeInstruction })}
+              loading={runningAction === 'fill'}
+              disabled={disabled}
+              onClick={() => runTest('fill', { ref: fillRef, value: fillValue })}
             >
               执行
             </Button>
@@ -210,36 +252,68 @@ export function BrowserPlayground({ baseUrl, apiKey, isNodeRunning }: BrowserPla
       )
     },
     {
-      key: 'act',
+      key: 'select_option',
       label: (
         <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <MousePointerClick size={14} /> Act 执行操作
+          <FileSearch size={14} /> Select 选择
         </span>
       ),
       children: (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            在当前页面执行交互操作（点击、输入、滚动等）。Agent
-            用此操作与页面元素交互，如填写表单、点击按钮。
+            按 ref 选择下拉项（value 为选项 value 或 label）。
           </Text>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <Input
               size="small"
-              placeholder='例：在搜索框中输入 "hello" 并点击搜索按钮'
-              value={actInstruction}
-              onChange={(e) => setActInstruction(e.target.value)}
-              style={{ flex: 1 }}
+              type="number"
+              min={0}
+              placeholder="ref"
+              value={selectRef}
+              onChange={(e) => setSelectRef(Number(e.target.value) || 0)}
+              style={{ width: 80 }}
+            />
+            <Input
+              size="small"
+              placeholder="value"
+              value={selectValue}
+              onChange={(e) => setSelectValue(e.target.value)}
+              style={{ width: 120 }}
             />
             <Button
               size="small"
               type="primary"
-              loading={runningAction === 'act'}
-              disabled={disabled || !actInstruction.trim()}
-              onClick={() => runTest('act', { instruction: actInstruction })}
+              loading={runningAction === 'select_option'}
+              disabled={disabled}
+              onClick={() => runTest('select_option', { ref: selectRef, value: selectValue })}
             >
               执行
             </Button>
           </div>
+        </div>
+      )
+    },
+    {
+      key: 'get_text',
+      label: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <FileSearch size={14} /> Get text 取文本
+        </span>
+      ),
+      children: (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            返回当前页可见文本。
+          </Text>
+          <Button
+            size="small"
+            type="primary"
+            loading={runningAction === 'get_text'}
+            disabled={disabled}
+            onClick={() => runTest('get_text', {})}
+          >
+            执行
+          </Button>
         </div>
       )
     },
@@ -253,7 +327,7 @@ export function BrowserPlayground({ baseUrl, apiKey, isNodeRunning }: BrowserPla
       children: (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            关闭 Playground 的 Stagehand 会话（释放服务端资源）。不会关闭浏览器进程本身。
+            关闭 Playground 的浏览器会话（释放服务端资源）。不会关闭浏览器进程本身。
           </Text>
           <Button
             size="small"
@@ -273,8 +347,7 @@ export function BrowserPlayground({ baseUrl, apiKey, isNodeRunning }: BrowserPla
     <div className="browser-playground" style={{ marginTop: 16 }}>
       <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Playground</h3>
       <p style={{ color: 'var(--colorTextSecondary)', fontSize: 12, marginBottom: 12 }}>
-        启动浏览器节点后，可在此测试 Agent 的全部浏览器操作能力。建议按 Navigate → Extract/Observe →
-        Act 的顺序测试。
+        Playwright 直接代理：goto / snapshot / click / fill / select_option / get_text / close。先 snapshot 取元素列表，再按 ref 操作。
       </p>
 
       {/* Relay status */}
@@ -299,7 +372,7 @@ export function BrowserPlayground({ baseUrl, apiKey, isNodeRunning }: BrowserPla
       <Collapse
         size="small"
         items={testItems}
-        defaultActiveKey={['navigate']}
+        defaultActiveKey={['goto']}
         style={{ marginBottom: 12 }}
       />
 

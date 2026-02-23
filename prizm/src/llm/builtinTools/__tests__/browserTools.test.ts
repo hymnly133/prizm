@@ -1,177 +1,142 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { BrowserExecutor } from '../browserTools'
 
-// Use vi.hoisted to prevent vitest from hoisting the mock above the variables
-const mocks = vi.hoisted(() => {
-  return {
-    mockGoto: vi.fn().mockResolvedValue(true),
-    mockAct: vi.fn().mockResolvedValue({ success: true }),
-    mockExtract: vi.fn().mockResolvedValue({ result: 'mocked data' }),
-    mockObserve: vi.fn().mockResolvedValue([{ action: 'click button' }]),
-    mockClose: vi.fn().mockResolvedValue(true),
-    mockInit: vi.fn().mockResolvedValue(true)
-  }
-})
+const fakePage = {
+  goto: vi.fn().mockResolvedValue(undefined),
+  locator: vi.fn(() => ({
+    nth: () => ({
+      click: vi.fn().mockResolvedValue(undefined),
+      fill: vi.fn().mockResolvedValue(undefined),
+      selectOption: vi.fn().mockResolvedValue(undefined)
+    })
+  }))
+}
+const fakeSession = {
+  page: fakePage,
+  close: vi.fn().mockResolvedValue(undefined)
+}
 
-vi.mock('@browserbasehq/stagehand', () => {
-  return {
-    Stagehand: class {
-      context = {
-        pages: () => [{ goto: mocks.mockGoto }],
-        newPage: () => Promise.resolve({ goto: mocks.mockGoto })
-      }
-      init() {
-        return mocks.mockInit()
-      }
-      close() {
-        return mocks.mockClose()
-      }
-      act(inst: string) {
-        return mocks.mockAct(inst)
-      }
-      extract(inst: string) {
-        return mocks.mockExtract(inst)
-      }
-      observe(inst: string) {
-        return mocks.mockObserve(inst)
-      }
-    }
-  }
-})
+vi.mock('../../config', () => ({ getConfig: () => ({ port: 4127, dataDir: '/tmp' }) }))
+vi.mock('../../playwrightBrowserSession', () => ({
+  connectPlaywrightBrowser: vi.fn(() => Promise.resolve(fakeSession)),
+  getAccessibilitySnapshot: vi.fn(() =>
+    Promise.resolve([{ ref: 0, role: 'button', name: 'Submit' }])
+  ),
+  executeResolvedAct: vi.fn(() => Promise.resolve()),
+  getPageText: vi.fn((_page: unknown, _max?: number) => Promise.resolve('Page text content'))
+}))
 
 describe('BrowserExecutor', () => {
   let executor: BrowserExecutor
-  let mockContext: any
+  const mockContext = { clientId: 'test-client', sessionId: 'test-session-1' }
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks()
+    fakePage.goto.mockResolvedValue(undefined)
+    fakeSession.close.mockResolvedValue(undefined)
+    const mod = await import('../../playwrightBrowserSession')
+    ;(mod.getAccessibilitySnapshot as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { ref: 0, role: 'button', name: 'Submit' }
+    ])
+    ;(mod.getPageText as ReturnType<typeof vi.fn>).mockResolvedValue('Page text content')
     executor = new BrowserExecutor()
-    mockContext = {
-      clientId: 'test-client',
-      sessionId: 'test-session-1'
-    }
   })
 
-  // To prevent bleeding state across tests since BrowserExecutor holds an activeMap,
-  // we issue a 'close' at the end of every test.
   afterEach(async () => {
     await executor.execute({ action: 'close' }, mockContext)
   })
 
-  it('should initialize stagehand and navigate to a URL', async () => {
+  it('should proxy goto', async () => {
     const result = await executor.execute(
-      { action: 'navigate', url: 'https://example.com' },
+      { action: 'goto', url: 'https://example.com' },
       mockContext
     )
-
-    expect(mocks.mockInit).toHaveBeenCalledOnce()
-    expect(mocks.mockGoto).toHaveBeenCalledWith('https://example.com')
-    expect(result).toBe('Navigated to https://example.com')
+    expect(fakePage.goto).toHaveBeenCalledWith('https://example.com', expect.any(Object))
+    expect(result).toBe('ok: navigated to https://example.com')
   })
 
-  it('should reuse the same stagehand instance for the same session ID', async () => {
-    // First call initializes
-    await executor.execute({ action: 'navigate', url: 'https://example.com' }, mockContext)
-    expect(mocks.mockInit).toHaveBeenCalledOnce()
-
-    // Second call should reuse, init shouldn't increment
-    await executor.execute({ action: 'navigate', url: 'https://example.org' }, mockContext)
-    expect(mocks.mockInit).toHaveBeenCalledOnce() // still 1
-    expect(mocks.mockGoto).toHaveBeenCalledWith('https://example.org')
-  })
-
-  it('should route act action correctly', async () => {
+  it('should proxy snapshot and return JSON', async () => {
     const result = await executor.execute(
-      { action: 'act', instruction: 'click the login button' },
+      { action: 'snapshot' },
+      { ...mockContext, sessionId: 'snap-session' }
+    )
+    const { getAccessibilitySnapshot } = await import('../../playwrightBrowserSession')
+    expect(getAccessibilitySnapshot).toHaveBeenCalled()
+    expect(JSON.parse(result)).toEqual([{ ref: 0, role: 'button', name: 'Submit' }])
+  })
+
+  it('should proxy click with ref', async () => {
+    await executor.execute({ action: 'snapshot' }, mockContext)
+    const result = await executor.execute({ action: 'click', ref: 0 }, mockContext)
+    const { executeResolvedAct } = await import('../../playwrightBrowserSession')
+    expect(executeResolvedAct).toHaveBeenCalledWith(
+      fakePage,
+      [{ ref: 0, role: 'button', name: 'Submit' }],
+      { ref: 0, actionType: 'click' }
+    )
+    expect(result).toBe('ok: clicked ref 0')
+  })
+
+  it('should proxy fill with ref and value', async () => {
+    await executor.execute({ action: 'snapshot' }, mockContext)
+    const result = await executor.execute({ action: 'fill', ref: 0, value: 'hello' }, mockContext)
+    expect(result).toBe('ok: filled ref 0')
+  })
+
+  it('should proxy select_option with ref and value', async () => {
+    await executor.execute({ action: 'snapshot' }, mockContext)
+    const result = await executor.execute(
+      { action: 'select_option', ref: 0, value: 'opt1' },
       mockContext
     )
-
-    expect(mocks.mockAct).toHaveBeenCalledWith('click the login button')
-    expect(result).toBe('Action completed: click the login button. Success: true')
+    expect(result).toBe('ok: selected ref 0 = opt1')
   })
 
-  it('should route extract action correctly', async () => {
-    const result = await executor.execute(
-      { action: 'extract', instruction: 'get title' },
-      mockContext
-    )
-
-    expect(mocks.mockExtract).toHaveBeenCalledWith('get title')
-    expect(result).toBe('Extracted data: {"result":"mocked data"}')
+  it('should proxy get_text', async () => {
+    const result = await executor.execute({ action: 'get_text' }, mockContext)
+    const { getPageText } = await import('../../playwrightBrowserSession')
+    expect(getPageText).toHaveBeenCalled()
+    expect(result).toBe('Page text content')
   })
 
-  it('should route observe action correctly', async () => {
-    const result = await executor.execute(
-      { action: 'observe', instruction: 'list all links' },
-      mockContext
-    )
-
-    expect(mocks.mockObserve).toHaveBeenCalledWith('list all links')
-    expect(result).toBe('Observations: [{"action":"click button"}]')
+  it('should reuse session for same session ID', async () => {
+    const { connectPlaywrightBrowser } = await import('../../playwrightBrowserSession')
+    await executor.execute({ action: 'goto', url: 'https://example.com' }, mockContext)
+    await executor.execute({ action: 'goto', url: 'https://example.org' }, mockContext)
+    expect(connectPlaywrightBrowser).toHaveBeenCalledTimes(1)
+    expect(fakePage.goto).toHaveBeenCalledTimes(2)
   })
 
-  it('should close the session', async () => {
-    // initialize first
-    await executor.execute({ action: 'navigate', url: 'https://example.com' }, mockContext)
-
+  it('should close session', async () => {
+    await executor.execute({ action: 'goto', url: 'https://example.com' }, mockContext)
     const result = await executor.execute({ action: 'close' }, mockContext)
-    expect(mocks.mockClose).toHaveBeenCalledOnce()
-    expect(result).toBe('Browser session closed.')
-
-    // executing after close should result in re-init since the map was cleared
-    await executor.execute({ action: 'navigate', url: 'https://example.com' }, mockContext)
-    expect(mocks.mockInit).toHaveBeenCalledTimes(2)
+    expect(fakeSession.close).toHaveBeenCalled()
+    expect(result).toBe('ok: browser session closed')
   })
 
-  it('should handle missing arguments gracefully', async () => {
-    const resNav = await executor.execute({ action: 'navigate' }, mockContext)
-    expect(resNav).toContain('Failed to execute navigate')
-
-    const resAct = await executor.execute({ action: 'act' }, mockContext)
-    expect(resAct).toContain('Failed to execute act')
+  it('should require url for goto', async () => {
+    const result = await executor.execute({ action: 'goto' }, mockContext)
+    expect(result).toContain('error:')
+    expect(result).toContain('url is required')
   })
 
-  it('should return message when close is called with no active session', async () => {
+  it('should require ref for click', async () => {
+    await executor.execute({ action: 'snapshot' }, mockContext)
+    const result = await executor.execute({ action: 'click' }, mockContext)
+    expect(result).toContain('error:')
+    expect(result).toContain('ref is required')
+  })
+
+  it('should return ok when close with no active session', async () => {
     const result = await executor.execute({ action: 'close' }, mockContext)
-    expect(result).toBe('No active browser session to close.')
+    expect(result).toBe('ok: no active session')
   })
 
   it('should reject unknown action', async () => {
-    await executor.execute({ action: 'navigate', url: 'https://example.com' }, mockContext)
-
-    const result = await executor.execute({ action: 'invalid_action' as any }, mockContext)
-    expect(result).toContain('Failed to execute invalid_action')
+    await executor.execute({ action: 'goto', url: 'https://example.com' }, mockContext)
+    const result = await executor.execute({ action: 'invalid_action' as 'goto' }, mockContext)
+    expect(result).toContain('error:')
     expect(result).toContain('Unknown browser action')
-  })
-
-  it('should use default clientId and sessionId when context omits them', async () => {
-    const emptyContext = {}
-    const result = await executor.execute({ action: 'close' }, emptyContext)
-    expect(result).toBe('No active browser session to close.')
-  })
-
-  it('should require instruction for extract action', async () => {
-    await executor.execute({ action: 'navigate', url: 'https://example.com' }, mockContext)
-    const result = await executor.execute({ action: 'extract' }, mockContext)
-    expect(result).toContain('Failed to execute extract')
-  })
-
-  it('should require instruction for observe action', async () => {
-    await executor.execute({ action: 'navigate', url: 'https://example.com' }, mockContext)
-    const result = await executor.execute({ action: 'observe' }, mockContext)
-    expect(result).toContain('Failed to execute observe')
-  })
-
-  it('should handle Stagehand init failure and return error message', async () => {
-    mocks.mockInit.mockRejectedValueOnce(new Error('CDP connection refused'))
-
-    const result = await executor.execute(
-      { action: 'navigate', url: 'https://example.com' },
-      mockContext
-    )
-
-    expect(result).toContain('Failed to execute navigate')
-    expect(result).toContain('CDP connection refused')
   })
 
   it('should expose toolName as prizm_browser', () => {

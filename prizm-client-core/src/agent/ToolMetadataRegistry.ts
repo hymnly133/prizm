@@ -235,6 +235,22 @@ const FALLBACK_METADATA: Record<string, ToolMetadata> = {
     category: 'other'
   },
   prizm_workflow: { name: 'prizm_workflow', displayName: '工作流', category: 'other' },
+  prizm_browser: {
+    name: 'prizm_browser',
+    displayName: '浏览器控制',
+    description:
+      'Playwright 代理：goto / snapshot / click / fill / select_option / get_text / close',
+    category: 'external',
+    actionLabels: {
+      goto: '导航',
+      snapshot: '快照',
+      click: '点击',
+      fill: '填写',
+      select_option: '选择',
+      get_text: '取文本',
+      close: '关闭会话'
+    }
+  },
   prizm_web_search: {
     name: 'prizm_web_search',
     displayName: '联网搜索',

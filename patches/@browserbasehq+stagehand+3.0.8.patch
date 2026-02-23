@@ -1,8 +1,25 @@
 diff --git a/node_modules/@browserbasehq/stagehand/dist/index.js b/node_modules/@browserbasehq/stagehand/dist/index.js
-index a0120e7..9a74278 100644
+index a0120e7..c1debf9 100644
 --- a/node_modules/@browserbasehq/stagehand/dist/index.js
 +++ b/node_modules/@browserbasehq/stagehand/dist/index.js
-@@ -37781,10 +37781,7 @@ var AgentProvider = class _AgentProvider {
+@@ -25660,7 +25660,15 @@ Do not include any other text, formatting or markdown in your output. Do not inc
+             }
+             let parsedData;
+             try {
+-              parsedData = JSON.parse(extractedData);
++              try {
++                parsedData = JSON.parse(extractedData);
++              } catch (parseErr) {
++                if (parseErr instanceof SyntaxError && typeof extractedData === "string") {
++                  parsedData = JSON.parse(require("jsonrepair").jsonrepair(extractedData));
++                } else {
++                  throw parseErr;
++                }
++              }
+               validateZodSchema(options.response_model.schema, parsedData);
+             } catch (e2) {
+               const isParseError = e2 instanceof SyntaxError;
+@@ -37781,10 +37789,7 @@ var AgentProvider = class _AgentProvider {
      if (normalized in modelToAgentProviderMap) {
        return modelToAgentProviderMap[normalized];
      }
@@ -14,7 +31,25 @@ index a0120e7..9a74278 100644
    }
  };
  
-@@ -66105,10 +66102,7 @@ var LLMProvider = class {
+@@ -41124,7 +41129,16 @@ ${parsedSchema}
+       });
+       if (options.response_model) {
+         const extractedData = response.choices[0].message.content;
+-        const parsedData = JSON.parse(extractedData);
++        let parsedData;
++        try {
++          parsedData = JSON.parse(extractedData);
++        } catch (parseErr) {
++          if (parseErr instanceof SyntaxError && typeof extractedData === "string") {
++            parsedData = JSON.parse(require("jsonrepair").jsonrepair(extractedData));
++          } else {
++            throw parseErr;
++          }
++        }
+         try {
+           validateZodSchema(options.response_model.schema, parsedData);
+         } catch (e2) {
+@@ -66105,10 +66119,7 @@ var LLMProvider = class {
          logger: this.logger
        });
      }

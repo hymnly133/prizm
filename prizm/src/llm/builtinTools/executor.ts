@@ -357,5 +357,5 @@ async function dispatchBrowser(ctx: BuiltinToolContext): Promise<BuiltinToolResu
     sessionId: ctx.sessionId
   })
 
-  return { text: resultText, isError: resultText.startsWith('Failed') }
+  return { text: resultText, isError: resultText.startsWith('Failed') || resultText.startsWith('error:') }
 }

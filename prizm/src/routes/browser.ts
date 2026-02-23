@@ -37,8 +37,8 @@ export function createBrowserRoutes(
 
   /**
    * POST /api/v1/browser/test
-   * Body: { action: 'navigate'|'act'|'extract'|'observe'|'close', url?: string, instruction?: string }
-   * 使用 __playground__ 会话执行浏览器操作，供 Playground 测试全部 agent 可用的浏览器功能。
+   * Body: { action: 'goto'|'snapshot'|'click'|'fill'|'select_option'|'get_text'|'close', url?, ref?, value? }
+   * 使用 __playground__ 会话执行 Playwright 代理操作。
    */
   router.post('/api/v1/browser/test', async (req: Request, res: Response) => {
     const clientId = req.prizmClient?.clientId
@@ -52,9 +52,8 @@ export function createBrowserRoutes(
       })
     }
 
-    const action = (req.body?.action as string) || 'navigate'
+    const action = (req.body?.action as string) || 'goto'
 
-    // close 不需要 provider 连接
     if (action !== 'close' && !relay.hasProvider(clientId)) {
       return res.status(400).json({
         error: 'No browser provider connected. Start the browser node in the client first.'
@@ -62,15 +61,18 @@ export function createBrowserRoutes(
     }
 
     const url = typeof req.body?.url === 'string' ? req.body.url : undefined
-    const instruction = typeof req.body?.instruction === 'string' ? req.body.instruction : undefined
+    const ref = typeof req.body?.ref === 'number' ? req.body.ref : undefined
+    const value = typeof req.body?.value === 'string' ? req.body.value : undefined
 
     try {
       const executor = new BrowserExecutor()
       const resultText = await executor.execute(
-        { action, url, instruction },
+        { action, url, ref, value },
         { clientId, sessionId: PLAYGROUND_SESSION_ID }
       )
-      const isError = typeof resultText === 'string' && resultText.startsWith('Failed')
+      const isError =
+        typeof resultText === 'string' &&
+        (resultText.startsWith('Failed') || resultText.startsWith('error:'))
       res.json({ success: !isError, message: resultText })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
