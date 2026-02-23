@@ -30,9 +30,9 @@ jobs:
       - name: Enable Corepack (Yarn 4)
         run: corepack enable
 
-      # 部署仅构建并发布 website；lockfile 已修复 workspace 解析后可使用 --immutable
+      # 部署仅构建并发布 website；跳过 postinstall(patch-package)，website 不依赖任何 patch
       - name: Install dependencies
-        run: yarn install --immutable
+        run: yarn install --immutable --ignore-scripts
 
       - name: Build website
         run: yarn build:website
