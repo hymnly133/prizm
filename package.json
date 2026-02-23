@@ -9,7 +9,8 @@
     "prizm-shared",
     "prizm-client-core",
     "prizm-electron-client",
-    "packages/*"
+    "packages/*",
+    "website"
   ],
   "scripts": {
     "install:all": "yarn install",
@@ -18,6 +19,7 @@
     "build": "yarn build:evermemos && yarn workspace @prizm/server build && yarn workspace @prizm/electron-client build",
     "build:server": "yarn build:evermemos && yarn workspace @prizm/server build",
     "build:electron": "yarn workspace @prizm/electron-client build",
+    "build:website": "yarn workspace prizm-website build",
     "dev:server": "yarn build:evermemos && yarn workspace @prizm/server dev",
     "dev:electron": "yarn build:evermemos && yarn workspace @prizm/electron-client dev",
     "clean": "yarn workspace @prizm/server clean",
