@@ -317,6 +317,9 @@ export interface SessionStats {
 
 export type SearchResultKind = 'document' | 'clipboard' | 'todoList' | 'file'
 
+/** 匹配方式：index=索引/算法匹配（MiniSearch），fulltext=全文扫描匹配（ripgrep） */
+export type SearchResultSource = 'index' | 'fulltext'
+
 export interface SearchResult {
   kind: SearchResultKind
   id: string
@@ -324,4 +327,6 @@ export interface SearchResult {
   matchedKeywords: string[]
   preview: string
   raw: unknown
+  /** 结果匹配方式：索引匹配（算法）或全文匹配；缺省时视为索引 */
+  source?: SearchResultSource
 }

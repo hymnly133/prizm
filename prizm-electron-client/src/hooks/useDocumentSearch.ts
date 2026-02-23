@@ -12,6 +12,8 @@ interface SearchResultItem {
   title: string
   text?: string
   score: number
+  /** 匹配方式：index=索引匹配，fulltext=全文匹配 */
+  source?: 'index' | 'fulltext'
 }
 
 interface UseDocumentSearchReturn {
@@ -60,7 +62,8 @@ export function useDocumentSearch(scope?: string): UseDocumentSearchReturn {
               kind: r.kind,
               title: r.preview ?? r.id,
               text: r.preview,
-              score: r.score
+              score: r.score,
+              source: r.source
             }))
           )
           setError(null)

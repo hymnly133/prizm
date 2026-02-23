@@ -10,6 +10,8 @@ declare module '../client' {
       limit?: number
       mode?: 'any' | 'all'
       fuzzy?: number
+      /** 为 true 时同时执行全文扫描，返回中会包含 source: 'fulltext' 的结果 */
+      complete?: boolean
     }): Promise<SearchResult[]>
     searchQuery(q: string, scope?: string, limit?: number): Promise<SearchResult[]>
   }
@@ -24,6 +26,7 @@ PrizmClient.prototype.search = async function (
     limit?: number
     mode?: 'any' | 'all'
     fuzzy?: number
+    complete?: boolean
   }
 ) {
   const scope = options.scope ?? this.defaultScope
@@ -37,7 +40,8 @@ PrizmClient.prototype.search = async function (
       types: options.types,
       limit: options.limit ?? 50,
       mode: options.mode ?? 'any',
-      fuzzy: options.fuzzy
+      fuzzy: options.fuzzy,
+      complete: options.complete
     })
   })
   if (!response.ok) {
