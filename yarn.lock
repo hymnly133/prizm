@@ -3502,7 +3502,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@prizm/prizm-stagehand@workspace:*, @prizm/prizm-stagehand@workspace:packages/prizm-stagehand":
+"@prizm/prizm-stagehand@workspace:packages/prizm-stagehand":
   version: 0.0.0-use.local
   resolution: "@prizm/prizm-stagehand@workspace:packages/prizm-stagehand"
   dependencies:
@@ -3543,7 +3543,6 @@ __metadata:
     "@modelcontextprotocol/sdk": "npm:^1.26.0"
     "@node-rs/jieba": "npm:^2.0.1"
     "@prizm/evermemos": "workspace:*"
-    "@prizm/prizm-stagehand": "workspace:*"
     "@prizm/shared": "workspace:*"
     "@types/compression": "npm:^1"
     "@types/cors": "npm:^2.8.19"
