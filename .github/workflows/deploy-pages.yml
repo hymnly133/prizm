@@ -30,9 +30,11 @@ jobs:
       - name: Enable Corepack (Yarn 4)
         run: corepack enable
 
-      # 部署仅构建并发布 website；跳过 postinstall(patch-package)，website 不依赖任何 patch
+      # 部署仅构建并发布 website；禁用生命周期脚本，不运行 postinstall(patch-package)
       - name: Install dependencies
-        run: yarn install --immutable --ignore-scripts
+        env:
+          YARN_ENABLE_SCRIPTS: "false"
+        run: yarn install --immutable
 
       - name: Build website
         run: yarn build:website
