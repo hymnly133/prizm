@@ -30,6 +30,9 @@ npm-debug.log*
 
 # Test coverage
 coverage/
+**/test_results.json
+**/tsc_errors.txt
+README_tmp.md
 
 # Workspace data
 .prizm-data/
@@ -38,6 +41,8 @@ coverage/
 reference/
 research/
 docs/reference/
+竞品
+EverMemOS/
 
 # Internal docs (do not publish to repo)
 docs/OPEN_SOURCE_UX_AUDIT.md

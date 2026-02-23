@@ -13,7 +13,6 @@ This is a Yarn workspace monorepo containing the following packages:
 3. **`prizm-client-core/`** - Shared client SDK (`@prizm/client-core`), HTTP/WebSocket client and agent tooling
 4. **`prizm-shared/`** - Shared types and constants (`@prizm/shared`), domain models, events, auth types
 5. **`packages/evermemos/`** - TypeScript memory system (`@prizm/evermemos`), LanceDB + SQLite storage
-6. **`EverMemOS/`** - Python FastAPI long-term memory system (standalone, not in TS workspace)
 
 The server provides an API layer for desktop efficiency tools including sticky notes, todo lists, documents, clipboard history, memory management, terminal sessions, and AI agent chat. It can run standalone with default adapters or integrate into larger applications.
 

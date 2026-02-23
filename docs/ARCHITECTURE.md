@@ -18,7 +18,6 @@
 | **@prizm/prizm-stagehand** | `packages/prizm-stagehand/` | Stagehand 集成层：通过 CDP relay 连接浏览器，供 Agent 浏览器工具使用 |
 | **Panel** | `prizm/panel/` | Vue 3 内置管理面板，挂载于 `/dashboard/` |
 | **Website** | `website/` | 对外官网/落地页（独立 Vite 应用） |
-| **EverMemOS** | `EverMemOS/` | Python FastAPI 长期记忆系统（独立，非 TS workspace） |
 
 ### 1.2 产品定位：Panel vs Electron 客户端
 
@@ -383,7 +382,7 @@ WebSocket：`ws://.../ws`（事件）、`ws://.../ws/terminal`（终端）。
 - **CLAUDE.md**（根目录与 `prizm/`）：开发命令、环境变量、架构树、API 端点、生命周期等速查。
 - **docs/skill-module-architecture.md**：Skill 模块全链路与接口。
 - **docs/workflow-system.md**、**docs/bg-session-task-system.md** 等：工作流与后台任务细节。
-- **EverMemOS/docs/ARCHITECTURE.md**：EverMemOS（Python）架构，与 Prizm 服务端通过 @prizm/evermemos 集成。
+- 记忆系统：Prizm 服务端通过 **@prizm/evermemos**（TypeScript 实现）提供长期记忆；上游 Python 项目见 [EverMemOS](https://github.com/EverMind-AI/EverMemOS)。
 
 ---
 
